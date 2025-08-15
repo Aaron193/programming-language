@@ -1,14 +1,10 @@
 #include "VirtualMachine.hpp"
 
+#include <sys/types.h>
+
 #include <iostream>
 
 #define DEBUG
-
-uint8_t VirtualMachine::readByte() { return *this->ip++; }
-
-Value VirtualMachine::readConstant() {
-    return this->chunk->getConstants()[this->readByte()];
-}
 
 Status VirtualMachine::run() {
     while (true) {

@@ -52,6 +52,7 @@ class Chunk {
     int addConstant(Value value);
     int disassembleInstruction(int offset);
 
-    uint8_t* getBytes();
-    Value* getConstants();
+    // inlined methods
+    uint8_t* getBytes() { return this->bytes->data(); }
+    Value* getConstants() { return this->constants->data(); }
 };

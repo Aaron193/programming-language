@@ -73,7 +73,3 @@ int Chunk::disassembleInstruction(int offset) {
             return offset + 1;
     }
 }
-
-uint8_t* Chunk::getBytes() { return this->bytes->data(); }
-
-Value* Chunk::getConstants() { return this->constants->data(); }

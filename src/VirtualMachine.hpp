@@ -23,8 +23,13 @@ class VirtualMachine {
     // compiler
     Compiler compiler;
 
-    inline uint8_t readByte();
-    inline Value readConstant();
+    // inlined methods
+    uint8_t readByte() { return *this->ip++; }
+    uint8_t writeByte(uint8_t byte) { return *this->ip++ = byte; }
+    Value readConstant() {
+        return this->chunk->getConstants()[this->readByte()];
+    }
+
     Status run();
 
    public:
