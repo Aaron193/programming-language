@@ -8,8 +8,15 @@ class Scanner {
    private:
     bool isWhitespace(char c);
     char advance();
+    char peek();
+    char peekNext();
+    bool match(char c);
+    bool isDigit(char c);
+    bool isAlpha(char c);
     bool isEOF();
     void skipWhitespace();
+    TokenType getIdentifier();
+    bool matchKeyword(const char* keyword, size_t length);
     Token createToken(TokenType type);
     Token createErrorToken(std::string message);
 

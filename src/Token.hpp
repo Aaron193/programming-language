@@ -2,13 +2,17 @@
 #include <cstddef>
 #include <string>
 
+// Some tokens start with "_" because they are namespace conflicts
 enum TokenType {
     BANG,
+    BANG_EQUAL,
     PLUS,
     MINUS,
     STAR,
     GREATER,
+    GREATER_EQUAL,
     LESS,
+    LESS_EQUAL,
     SLASH,
     OPEN_PAREN,
     CLOSE_PAREN,
@@ -17,6 +21,32 @@ enum TokenType {
     SEMI_COLON,
     COMMA,
     DOT,
+    EQUAL,
+    EQUAL_EQUAL,
+
+    // identifier
+    IDENTIFIER,
+    STRING,
+    NUMBER,
+
+    // reserved
+    PRINT,
+    FUNCTION,
+    AND,
+    OR,
+    CLASS,
+    SUPER,
+    FOR,
+    WHILE,
+    IF,
+    ELSE,
+    TRUE,
+    FALSE,
+    _NULL,
+    THIS,
+    VAR,
+    _RETURN,
+
     _EOF,
     ERROR,
 };
