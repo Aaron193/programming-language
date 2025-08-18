@@ -5,11 +5,6 @@
 Scanner::Scanner(std::string_view source)
     : source(source.data()), start(source.data()), current(source.data()) {}
 
-bool Scanner::isWhitespace(char c) {
-    return c == ' ' || c == '\t' || c == '\n' || c == '\v' || c == '\f' ||
-           c == '\r';
-}
-
 char Scanner::advance() { return *this->current++; }
 char Scanner::peek() { return *this->current; }
 char Scanner::peekNext() {
@@ -17,14 +12,34 @@ char Scanner::peekNext() {
     return *(this->current + 1);
 }
 
-bool Scanner::isEOF() { return *current == '\0'; }
+bool Scanner::isEOF() { return *this->current == '\0'; }
 
 void Scanner::skipWhitespace() {
-    while (this->isWhitespace(*current)) {
-        if (*current == '\n') {
-            line++;
+    while (true) {
+        switch (this->peek()) {
+            case ' ':
+            case '\t':
+            case '\v':
+            case '\f':
+            case '\r':
+                this->advance();
+                break;
+            case '\n':
+                this->line++;
+                this->advance();
+                break;
+            case '/':
+                if (this->peekNext() == '/') {
+                    while (this->peek() != '\n' && !this->isEOF()) {
+                        this->advance();
+                    }
+                } else {
+                    return;
+                }
+                break;
+            default:
+                return;
         }
-        this->advance();
     }
 }
 
@@ -87,13 +102,6 @@ Token Scanner::nextToken() {
             return this->createToken(TokenType::STAR);
 
         case '/':
-            if (this->match('/')) {
-                while (!this->isEOF() && this->peek() != '\n') {
-                    this->advance();
-                }
-                return this->nextToken();
-            }
-            return this->nextToken();
             return this->createToken(TokenType::SLASH);
 
         case '>':

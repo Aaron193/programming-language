@@ -6,7 +6,6 @@
 
 class Scanner {
    private:
-    bool isWhitespace(char c);
     char advance();
     char peek();
     char peekNext();
