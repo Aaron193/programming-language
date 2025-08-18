@@ -26,7 +26,18 @@ int main(int argc, char** argv) {
     file.close();
 
     VirtualMachine vm;
-    vm.interpret(*source);
+    Status status = vm.interpret(*source);
+
+    if (status == Status::COMPILATION_ERROR) {
+        std::cerr << "Compilation error in source file: " << source_file
+                  << std::endl;
+        exit(1);
+    }
+    if (status == Status::RUNTIME_ERROR) {
+        std::cerr << "Runtime error in source file: " << source_file
+                  << std::endl;
+        exit(1);
+    }
 
     return 0;
 }
