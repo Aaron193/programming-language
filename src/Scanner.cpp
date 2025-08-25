@@ -16,29 +16,18 @@ bool Scanner::isEOF() { return *this->current == '\0'; }
 
 void Scanner::skipWhitespace() {
     while (true) {
-        switch (this->peek()) {
-            case ' ':
-            case '\t':
-            case '\v':
-            case '\f':
-            case '\r':
+        char c = this->peek();
+        if (c == ' ' || c == '\t' || c == '\v' || c == '\f' || c == '\r') {
+            this->advance();
+        } else if (c == '\n') {
+            this->line++;
+            this->advance();
+        } else if (c == '/' && this->peekNext() == '/') {
+            while (this->peek() != '\n' && !this->isEOF()) {
                 this->advance();
-                break;
-            case '\n':
-                this->line++;
-                this->advance();
-                break;
-            case '/':
-                if (this->peekNext() == '/') {
-                    while (this->peek() != '\n' && !this->isEOF()) {
-                        this->advance();
-                    }
-                } else {
-                    return;
-                }
-                break;
-            default:
-                return;
+            }
+        } else {
+            break;
         }
     }
 }
@@ -66,12 +55,16 @@ Token Scanner::nextToken() {
     const char c = this->advance();
 
     if (this->isDigit(c)) {
-        while (isdigit(this->peek())) this->advance();
+        while (isdigit(this->peek())) {
+            this->advance();
+        }
 
         if (this->peek() == '.' && isdigit(this->peekNext())) {
             this->advance();
 
-            while (isdigit(this->peek())) this->advance();
+            while (isdigit(this->peek())) {
+                this->advance();
+            }
         }
 
         return this->createToken(TokenType::NUMBER);
@@ -142,9 +135,11 @@ Token Scanner::nextToken() {
 
                 this->advance();
             }
+
             if (this->isEOF()) {
                 return this->createErrorToken("Unterminated string.");
             }
+
             this->advance();
             return this->createToken(TokenType::STRING);
         }
