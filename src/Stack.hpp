@@ -9,37 +9,37 @@
 template <typename T>
 class Stack {
    private:
-    T data[STACK_SIZE];
-    size_t capacity = STACK_SIZE;
-    int top = -1;
+    T m_data[STACK_SIZE];
+    size_t m_capacity = STACK_SIZE;
+    int m_top = -1;
 
    public:
     Stack() = default;
     ~Stack() = default;
 
     void push(const T& value) {
-        if (top < (int)capacity - 1) {
-            data[++top] = value;
+        if (m_top < (int)m_capacity - 1) {
+            m_data[++m_top] = value;
         }
     }
 
     T pop() {
-        if (top >= 0) {
-            return data[top--];
+        if (m_top >= 0) {
+            return m_data[m_top--];
         }
         // underflow
         return T();
     }
 
-    void reset() { top = -1; }
+    void reset() { m_top = -1; }
 
-    bool isEmpty() { return top == -1; }
+    bool isEmpty() { return m_top == -1; }
 
-    size_t size() { return top + 1; }
+    size_t size() { return m_top + 1; }
 
     void print() {
-        for (int i = 0; i <= top; ++i) {
-            std::cout << data[i] << " ";
+        for (int i = 0; i <= m_top; ++i) {
+            std::cout << m_data[i] << " ";
         }
         std::cout << std::endl;
     }

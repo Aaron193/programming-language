@@ -9,75 +9,74 @@
 Status VirtualMachine::run() {
     while (true) {
 #ifdef DEBUG
-        this->stack.print();
-        this->chunk->disassembleInstruction(
-            (int)(this->ip - this->chunk->getBytes()));
+        m_stack.print();
+        m_chunk->disassembleInstruction((int)(m_ip - m_chunk->getBytes()));
 #endif
 
         uint8_t instruction;
-        switch (instruction = this->readByte()) {
+        switch (instruction = readByte()) {
             case OpCode::RETURN: {
-                Value val = this->stack.pop();
+                Value val = m_stack.pop();
                 std::cout << "Return constant: " << val << std::endl;
                 return Status::OK;
             }
             case OpCode::CONSTANT: {
-                Value val = this->readConstant();
-                this->stack.push(val);
+                Value val = readConstant();
+                m_stack.push(val);
                 break;
             }
             case OpCode::NEGATE: {
-                this->stack.push(-this->stack.pop());
+                m_stack.push(-m_stack.pop());
                 break;
             }
             case OpCode::ADD: {
-                Value b = this->stack.pop();
-                Value a = this->stack.pop();
-                this->stack.push(a + b);
+                Value b = m_stack.pop();
+                Value a = m_stack.pop();
+                m_stack.push(a + b);
                 break;
             }
             case OpCode::SUB: {
-                Value b = this->stack.pop();
-                Value a = this->stack.pop();
-                this->stack.push(a - b);
+                Value b = m_stack.pop();
+                Value a = m_stack.pop();
+                m_stack.push(a - b);
                 break;
             }
             case OpCode::MULT: {
-                Value b = this->stack.pop();
-                Value a = this->stack.pop();
-                this->stack.push(a * b);
+                Value b = m_stack.pop();
+                Value a = m_stack.pop();
+                m_stack.push(a * b);
                 break;
             }
             case OpCode::DIV: {
-                Value b = this->stack.pop();
-                Value a = this->stack.pop();
-                this->stack.push(a / b);
+                Value b = m_stack.pop();
+                Value a = m_stack.pop();
+                m_stack.push(a / b);
                 break;
             }
             case OpCode::GREATER_THAN: {
-                Value b = this->stack.pop();
-                Value a = this->stack.pop();
-                this->stack.push(a > b);
+                Value b = m_stack.pop();
+                Value a = m_stack.pop();
+                m_stack.push(a > b);
                 break;
             }
             case OpCode::LESS_THAN: {
-                Value b = this->stack.pop();
-                Value a = this->stack.pop();
-                this->stack.push(a < b);
+                Value b = m_stack.pop();
+                Value a = m_stack.pop();
+                m_stack.push(a < b);
                 break;
             }
             case OpCode::SHIFT_LEFT: {
-                Value b = this->stack.pop();
-                Value a = this->stack.pop();
-                this->stack.push(static_cast<Value>(static_cast<int>(a)
-                                                    << static_cast<int>(b)));
+                Value b = m_stack.pop();
+                Value a = m_stack.pop();
+                m_stack.push(static_cast<Value>(static_cast<int>(a)
+                                                << static_cast<int>(b)));
                 break;
             }
             case OpCode::SHIFT_RIGHT: {
-                Value b = this->stack.pop();
-                Value a = this->stack.pop();
-                this->stack.push(static_cast<Value>(static_cast<int>(a) >>
-                                                    static_cast<int>(b)));
+                Value b = m_stack.pop();
+                Value a = m_stack.pop();
+                m_stack.push(static_cast<Value>(static_cast<int>(a) >>
+                                                static_cast<int>(b)));
                 break;
             }
         }
@@ -85,6 +84,6 @@ Status VirtualMachine::run() {
 }
 
 Status VirtualMachine::interpret(std::string_view source) {
-    this->compiler.compile(source);
-    return this->run();
+    m_compiler.compile(source);
+    return run();
 }

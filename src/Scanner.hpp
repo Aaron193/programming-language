@@ -23,13 +23,13 @@ class Scanner {
     Scanner(std::string_view source);
 
     // pointer to the start of the source code
-    const char* source;
+    const char* m_source;
     // pointer to current lexeme start
-    const char* start;
+    const char* m_start;
     // pointer to current character
-    const char* current;
+    const char* m_current;
     // line number
-    size_t line = 1;
+    size_t m_line = 1;
 
     Token nextToken();
 };

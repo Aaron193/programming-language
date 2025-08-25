@@ -29,15 +29,15 @@ typedef double Value;
 class Chunk {
    private:
     // Dynamic array to hold our bytecode
-    std::unique_ptr<std::vector<uint8_t>> bytes =
+    std::unique_ptr<std::vector<uint8_t>> m_bytes =
         std::make_unique<std::vector<uint8_t>>();
 
     // dynamic array to hold a lists of per-chunk constants
-    std::unique_ptr<std::vector<Value>> constants =
+    std::unique_ptr<std::vector<Value>> m_constants =
         std::make_unique<std::vector<Value>>();
 
     // dynamic array to hold line numbers
-    std::unique_ptr<std::vector<int>> lines =
+    std::unique_ptr<std::vector<int>> m_lines =
         std::make_unique<std::vector<int>>();
 
     void disassemble(std::string label);
@@ -53,6 +53,6 @@ class Chunk {
     int disassembleInstruction(int offset);
 
     // inlined methods
-    uint8_t* getBytes() { return this->bytes->data(); }
-    Value* getConstants() { return this->constants->data(); }
+    uint8_t* getBytes() { return this->m_bytes->data(); }
+    Value* getConstants() { return this->m_constants->data(); }
 };

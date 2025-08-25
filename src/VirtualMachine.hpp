@@ -15,18 +15,18 @@ enum Status {
 class VirtualMachine {
    private:
     // current chunk being interpreted
-    Chunk* chunk;
+    Chunk* m_chunk;
     // instruction byte pointer
-    uint8_t* ip;
+    uint8_t* m_ip;
     // expression evaluation stack
-    Stack<Value> stack;
+    Stack<Value> m_stack;
     // compiler
-    Compiler compiler;
+    Compiler m_compiler;
 
     // inlined methods
-    uint8_t readByte() { return *this->ip++; }
+    uint8_t readByte() { return *this->m_ip++; }
     Value readConstant() {
-        return this->chunk->getConstants()[this->readByte()];
+        return this->m_chunk->getConstants()[this->readByte()];
     }
 
     Status run();

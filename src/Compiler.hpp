@@ -6,7 +6,7 @@
 
 class Compiler {
    private:
-    std::unique_ptr<Scanner> scanner;
+    std::unique_ptr<Scanner> m_scanner;
 
    public:
     Compiler() = default;

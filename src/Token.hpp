@@ -58,9 +58,9 @@ class Token {
     Token(Scanner* scanner, TokenType type);
     Token(Scanner* scanner, std::string message);
 
-    Scanner* scanner;
-    TokenType type;
-    const char* start;
-    size_t length;
-    size_t line;
+    Scanner* m_scanner;
+    TokenType m_type;
+    const char* m_start;
+    size_t m_length;
+    size_t m_line;
 };

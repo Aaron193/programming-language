@@ -3,28 +3,30 @@
 #include <cstring>
 
 Scanner::Scanner(std::string_view source)
-    : source(source.data()), start(source.data()), current(source.data()) {}
+    : m_source(source.data()),
+      m_start(source.data()),
+      m_current(source.data()) {}
 
-char Scanner::advance() { return *this->current++; }
-char Scanner::peek() { return *this->current; }
+char Scanner::advance() { return *m_current++; }
+char Scanner::peek() { return *m_current; }
 char Scanner::peekNext() {
-    if (this->isEOF()) return '\0';
-    return *(this->current + 1);
+    if (isEOF()) return '\0';
+    return *(m_current + 1);
 }
 
-bool Scanner::isEOF() { return *this->current == '\0'; }
+bool Scanner::isEOF() { return *m_current == '\0'; }
 
 void Scanner::skipWhitespace() {
     while (true) {
-        char c = this->peek();
+        char c = peek();
         if (c == ' ' || c == '\t' || c == '\v' || c == '\f' || c == '\r') {
-            this->advance();
+            advance();
         } else if (c == '\n') {
-            this->line++;
-            this->advance();
-        } else if (c == '/' && this->peekNext() == '/') {
-            while (this->peek() != '\n' && !this->isEOF()) {
-                this->advance();
+            m_line++;
+            advance();
+        } else if (c == '/' && peekNext() == '/') {
+            while (peek() != '\n' && !isEOF()) {
+                advance();
             }
         } else {
             break;
@@ -33,9 +35,9 @@ void Scanner::skipWhitespace() {
 }
 
 bool Scanner::match(char c) {
-    if (this->isEOF()) return false;
-    if (this->peek() != c) return false;
-    this->current++;
+    if (isEOF()) return false;
+    if (peek() != c) return false;
+    m_current++;
     return true;
 }
 
@@ -45,107 +47,106 @@ bool Scanner::isAlpha(char c) {
 }
 
 Token Scanner::nextToken() {
-    this->skipWhitespace();
-    this->start = this->current;
+    skipWhitespace();
+    m_start = m_current;
 
-    if (this->isEOF()) {
-        return this->createToken(TokenType::_EOF);
+    if (isEOF()) {
+        return createToken(TokenType::_EOF);
     }
 
-    const char c = this->advance();
+    const char c = advance();
 
-    if (this->isDigit(c)) {
-        while (isdigit(this->peek())) {
-            this->advance();
+    if (isDigit(c)) {
+        while (isdigit(peek())) {
+            advance();
         }
 
-        if (this->peek() == '.' && isdigit(this->peekNext())) {
-            this->advance();
+        if (peek() == '.' && isdigit(peekNext())) {
+            advance();
 
-            while (isdigit(this->peek())) {
-                this->advance();
+            while (isdigit(peek())) {
+                advance();
             }
         }
 
-        return this->createToken(TokenType::NUMBER);
+        return createToken(TokenType::NUMBER);
     }
 
-    if (this->isAlpha(c)) {
-        while (this->isAlpha(this->peek()) || this->isDigit(this->peek())) {
-            this->advance();
+    if (isAlpha(c)) {
+        while (isAlpha(peek()) || isDigit(peek())) {
+            advance();
         }
 
-        return this->createToken(this->getIdentifier());
+        return createToken(getIdentifier());
     }
 
     switch (c) {
         case '=':
-            return this->match('=') ? this->createToken(TokenType::EQUAL_EQUAL)
-                                    : this->createToken(TokenType::EQUAL);
+            return match('=') ? createToken(TokenType::EQUAL_EQUAL)
+                              : createToken(TokenType::EQUAL);
         case '!':
-            return this->match('=') ? this->createToken(TokenType::BANG_EQUAL)
-                                    : this->createToken(TokenType::BANG);
+            return match('=') ? createToken(TokenType::BANG_EQUAL)
+                              : createToken(TokenType::BANG);
         case '+':
-            return this->createToken(TokenType::PLUS);
+            return createToken(TokenType::PLUS);
 
         case '-':
-            return this->createToken(TokenType::MINUS);
+            return createToken(TokenType::MINUS);
 
         case '*':
-            return this->createToken(TokenType::STAR);
+            return createToken(TokenType::STAR);
 
         case '/':
-            return this->createToken(TokenType::SLASH);
+            return createToken(TokenType::SLASH);
 
         case '>':
-            return this->match('=')
-                       ? this->createToken(TokenType::GREATER_EQUAL)
-                       : this->createToken(TokenType::GREATER);
+            return match('=') ? createToken(TokenType::GREATER_EQUAL)
+                              : createToken(TokenType::GREATER);
 
         case '<':
-            return this->match('=') ? this->createToken(TokenType::LESS_EQUAL)
-                                    : this->createToken(TokenType::LESS);
+            return match('=') ? createToken(TokenType::LESS_EQUAL)
+                              : createToken(TokenType::LESS);
 
         case '(':
-            return this->createToken(TokenType::OPEN_PAREN);
+            return createToken(TokenType::OPEN_PAREN);
 
         case ')':
-            return this->createToken(TokenType::CLOSE_PAREN);
+            return createToken(TokenType::CLOSE_PAREN);
 
         case '{':
-            return this->createToken(TokenType::OPEN_CURLY);
+            return createToken(TokenType::OPEN_CURLY);
 
         case '}':
-            return this->createToken(TokenType::CLOSE_CURLY);
+            return createToken(TokenType::CLOSE_CURLY);
 
         case ';':
-            return this->createToken(TokenType::SEMI_COLON);
+            return createToken(TokenType::SEMI_COLON);
 
         case ',':
-            return this->createToken(TokenType::COMMA);
+            return createToken(TokenType::COMMA);
 
         case '.':
-            return this->createToken(TokenType::DOT);
+            return createToken(TokenType::DOT);
 
         case '"': {
-            while (this->peek() != '"' && !this->isEOF()) {
-                if (this->peek() == '\n') {
-                    this->line++;
+            while (peek() != '"' && !isEOF()) {
+                if (peek() == '\n') {
+                    m_line++;
                 }
 
-                this->advance();
+                advance();
             }
 
-            if (this->isEOF()) {
-                return this->createErrorToken("Unterminated string.");
+            if (isEOF()) {
+                return createErrorToken("Unterminated string.");
             }
 
-            this->advance();
-            return this->createToken(TokenType::STRING);
+            advance();
+            return createToken(TokenType::STRING);
         }
     }
 
-    return this->createErrorToken("Unexpected Token.");
+    return createErrorToken("Unexpected Token.");
 }
 
 Token Scanner::createToken(TokenType type) { return Token(this, type); }
@@ -155,63 +156,63 @@ Token Scanner::createErrorToken(std::string message) {
 }
 
 bool Scanner::matchKeyword(const char* keyword, size_t length) {
-    if ((this->current - this->start) != length) return false;
-    return std::strncmp(this->start, keyword, length) == 0;
+    if ((m_current - m_start) != length) return false;
+    return std::strncmp(m_start, keyword, length) == 0;
 }
 
 TokenType Scanner::getIdentifier() {
-    const size_t length = this->current - this->start;
+    const size_t length = m_current - m_start;
 
-    switch (this->start[0]) {
+    switch (m_start[0]) {
         case 'a':
-            if (this->matchKeyword("and", 3)) return TokenType::AND;
+            if (matchKeyword("and", 3)) return TokenType::AND;
             break;
 
         case 'c':
-            if (this->matchKeyword("class", 5)) return TokenType::CLASS;
+            if (matchKeyword("class", 5)) return TokenType::CLASS;
             break;
 
         case 'e':
-            if (this->matchKeyword("else", 4)) return TokenType::ELSE;
+            if (matchKeyword("else", 4)) return TokenType::ELSE;
             break;
 
         case 'f':
-            if (this->matchKeyword("false", 5)) return TokenType::FALSE;
-            if (this->matchKeyword("for", 3)) return TokenType::FOR;
-            if (this->matchKeyword("function", 8)) return TokenType::FUNCTION;
+            if (matchKeyword("false", 5)) return TokenType::FALSE;
+            if (matchKeyword("for", 3)) return TokenType::FOR;
+            if (matchKeyword("function", 8)) return TokenType::FUNCTION;
             break;
 
         case 'i':
-            if (this->matchKeyword("if", 2)) return TokenType::IF;
+            if (matchKeyword("if", 2)) return TokenType::IF;
             break;
 
         case 'n':
-            if (this->matchKeyword("null", 4)) return TokenType::_NULL;
+            if (matchKeyword("null", 4)) return TokenType::_NULL;
             break;
 
         case 'o':
-            if (this->matchKeyword("or", 2)) return TokenType::OR;
+            if (matchKeyword("or", 2)) return TokenType::OR;
             break;
 
         case 'r':
-            if (this->matchKeyword("return", 6)) return TokenType::_RETURN;
+            if (matchKeyword("return", 6)) return TokenType::_RETURN;
             break;
 
         case 's':
-            if (this->matchKeyword("super", 5)) return TokenType::SUPER;
+            if (matchKeyword("super", 5)) return TokenType::SUPER;
             break;
 
         case 't':
-            if (this->matchKeyword("true", 4)) return TokenType::TRUE;
-            if (this->matchKeyword("this", 4)) return TokenType::THIS;
+            if (matchKeyword("true", 4)) return TokenType::TRUE;
+            if (matchKeyword("this", 4)) return TokenType::THIS;
             break;
 
         case 'v':
-            if (this->matchKeyword("var", 3)) return TokenType::VAR;
+            if (matchKeyword("var", 3)) return TokenType::VAR;
             break;
 
         case 'w':
-            if (this->matchKeyword("while", 5)) return TokenType::WHILE;
+            if (matchKeyword("while", 5)) return TokenType::WHILE;
             break;
     }
 

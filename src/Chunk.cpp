@@ -4,8 +4,8 @@
 
 void Chunk::disassemble(std::string label) {
     int offset = 0;
-    while (offset < this->bytes->size()) {
-        offset += this->disassembleInstruction(offset);
+    while (offset < m_bytes->size()) {
+        offset += disassembleInstruction(offset);
     }
 }
 
@@ -17,8 +17,8 @@ int Chunk::simpleInstruction(const std::string& label, int offset) {
 int Chunk::constantInstruction(const std::string& label, int offset) {
     std::cout << label << " ";
 
-    uint8_t index = this->bytes->at(offset + 1);
-    Value val = this->constants->at(index);
+    uint8_t index = m_bytes->at(offset + 1);
+    Value val = m_constants->at(index);
 
     std::cout << val << std::endl;
 
@@ -26,46 +26,46 @@ int Chunk::constantInstruction(const std::string& label, int offset) {
 }
 
 void Chunk::write(uint8_t byte, int line) {
-    this->bytes->push_back(byte);
-    this->lines->push_back(line);
+    m_bytes->push_back(byte);
+    m_lines->push_back(line);
 }
 
 int Chunk::addConstant(Value value) {
-    this->constants->push_back(value);
-    return this->constants->size() - 1;
+    m_constants->push_back(value);
+    return m_constants->size() - 1;
 }
 
 int Chunk::disassembleInstruction(int offset) {
-    std::cout << "LINE: " << this->lines->at(offset) << std::endl;
+    std::cout << "LINE: " << m_lines->at(offset) << std::endl;
 
-    uint8_t instruction = this->bytes->at(offset);
+    uint8_t instruction = m_bytes->at(offset);
     switch (instruction) {
         case OpCode::RETURN:
-            return this->simpleInstruction("RETURN", offset);
+            return simpleInstruction("RETURN", offset);
         case OpCode::CONSTANT:
-            return this->constantInstruction("CONSTANT", offset);
+            return constantInstruction("CONSTANT", offset);
         case OpCode::NEGATE:
-            return this->simpleInstruction("NEGATE", offset);
+            return simpleInstruction("NEGATE", offset);
         case OpCode::ADD:
-            return this->simpleInstruction("ADD", offset);
+            return simpleInstruction("ADD", offset);
         case OpCode::SUB:
-            return this->simpleInstruction("SUB", offset);
+            return simpleInstruction("SUB", offset);
         case OpCode::MULT:
-            return this->simpleInstruction("MULT", offset);
+            return simpleInstruction("MULT", offset);
         case OpCode::DIV:
-            return this->simpleInstruction("DIV", offset);
+            return simpleInstruction("DIV", offset);
         case OpCode::GREATER_THAN:
-            return this->simpleInstruction("GREATER_THAN", offset);
+            return simpleInstruction("GREATER_THAN", offset);
         case OpCode::LESS_THAN:
-            return this->simpleInstruction("LESS_THAN", offset);
+            return simpleInstruction("LESS_THAN", offset);
         case OpCode::GREATER_EQUAL_THAN:
-            return this->simpleInstruction("GREATER_EQUAL_THAN", offset);
+            return simpleInstruction("GREATER_EQUAL_THAN", offset);
         case OpCode::LESS_EQUAL_THAN:
-            return this->simpleInstruction("LESS_EQUAL_THAN", offset);
+            return simpleInstruction("LESS_EQUAL_THAN", offset);
         case OpCode::SHIFT_LEFT:
-            return this->simpleInstruction("SHIFT_LEFT", offset);
+            return simpleInstruction("SHIFT_LEFT", offset);
         case OpCode::SHIFT_RIGHT:
-            return this->simpleInstruction("SHIFT_RIGHT", offset);
+            return simpleInstruction("SHIFT_RIGHT", offset);
 
         default:
             std::cout << "Invalid instruction opcode: " << instruction
