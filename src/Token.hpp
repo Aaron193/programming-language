@@ -47,14 +47,14 @@ enum TokenType {
     VAR,
     _RETURN,
 
-    _EOF,
+    END_OF_FILE,
     ERROR,
 };
 
 class Scanner;
 
 class Token {
-   public:
+   private:
     Token(Scanner* scanner, TokenType type);
     Token(Scanner* scanner, std::string message);
 
@@ -63,4 +63,10 @@ class Token {
     const char* m_start;
     size_t m_length;
     size_t m_line;
+
+   public:
+    TokenType type() const { return m_type; }
+    const char* start() const { return m_start; }
+    size_t length() const { return m_length; }
+    size_t line() const { return m_line; }
 };

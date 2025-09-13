@@ -6,7 +6,6 @@
 
 class Scanner {
    private:
-    char advance();
     char peek();
     char peekNext();
     bool match(char c);
@@ -32,4 +31,5 @@ class Scanner {
     size_t m_line = 1;
 
     Token nextToken();
+    char advance();
 };

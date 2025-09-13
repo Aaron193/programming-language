@@ -51,7 +51,7 @@ Token Scanner::nextToken() {
     m_start = m_current;
 
     if (isEOF()) {
-        return createToken(TokenType::_EOF);
+        return createToken(TokenType::END_OF_FILE);
     }
 
     const char c = advance();

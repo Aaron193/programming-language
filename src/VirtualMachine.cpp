@@ -84,6 +84,14 @@ Status VirtualMachine::run() {
 }
 
 Status VirtualMachine::interpret(std::string_view source) {
-    m_compiler.compile(source);
+    Chunk chunk;
+
+    if (!m_compiler.compile(source, chunk)) {
+        return Status::COMPILATION_ERROR;
+    }
+
+    m_chunk = &chunk;
+    m_ip = m_chunk->getBytes();
+
     return run();
 }
