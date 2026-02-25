@@ -11,13 +11,21 @@ bool Compiler::compile(std::string_view source, Chunk& chunk,
                        const std::string& sourcePath) {
     m_chunk = &chunk;
     m_sourcePath = sourcePath;
+    m_classNames.clear();
+    m_functionSignatures.clear();
+    m_classFieldTypes.clear();
+    m_classMethodSignatures.clear();
+    collectClassNames(source);
+    collectFunctionSignatures(source);
     m_scanner = std::make_unique<Scanner>(source);
     m_parser = std::make_unique<Parser>();
     m_currentClass = nullptr;
     m_contexts.clear();
     m_globalSlots.clear();
+    m_globalTypes.clear();
     m_globalNames.clear();
     m_exportedNames.clear();
+    m_hasBufferedToken = false;
     m_contexts.push_back(FunctionContext{{}, {}, 0, false, false});
 
     advance();
@@ -30,6 +38,190 @@ bool Compiler::compile(std::string_view source, Chunk& chunk,
     emitReturn();
 
     return !m_parser->hadError;
+}
+
+TypeRef Compiler::tokenToType(const Token& token) const {
+    switch (token.type()) {
+        case TokenType::TYPE_I8:
+            return TypeInfo::makeI8();
+        case TokenType::TYPE_I16:
+            return TypeInfo::makeI16();
+        case TokenType::TYPE_I32:
+            return TypeInfo::makeI32();
+        case TokenType::TYPE_I64:
+            return TypeInfo::makeI64();
+        case TokenType::TYPE_U8:
+            return TypeInfo::makeU8();
+        case TokenType::TYPE_U16:
+            return TypeInfo::makeU16();
+        case TokenType::TYPE_U32:
+            return TypeInfo::makeU32();
+        case TokenType::TYPE_U64:
+            return TypeInfo::makeU64();
+        case TokenType::TYPE_USIZE:
+            return TypeInfo::makeUSize();
+        case TokenType::TYPE_F32:
+            return TypeInfo::makeF32();
+        case TokenType::TYPE_F64:
+            return TypeInfo::makeF64();
+        case TokenType::TYPE_BOOL:
+            return TypeInfo::makeBool();
+        case TokenType::TYPE_STR:
+            return TypeInfo::makeStr();
+        case TokenType::TYPE_NULL_KW:
+            return TypeInfo::makeNull();
+        case TokenType::IDENTIFIER: {
+            std::string className(token.start(), token.length());
+            if (m_classNames.find(className) != m_classNames.end()) {
+                return TypeInfo::makeClass(className);
+            }
+            return nullptr;
+        }
+        default:
+            return nullptr;
+    }
+}
+
+void Compiler::collectClassNames(std::string_view source) {
+    Scanner scanner(source);
+    while (true) {
+        Token token = scanner.nextToken();
+        if (token.type() == TokenType::END_OF_FILE) {
+            return;
+        }
+
+        if (token.type() != TokenType::CLASS) {
+            continue;
+        }
+
+        Token name = scanner.nextToken();
+        while (name.type() == TokenType::ERROR) {
+            name = scanner.nextToken();
+        }
+
+        if (name.type() == TokenType::IDENTIFIER) {
+            m_classNames.emplace(name.start(), name.length());
+        }
+    }
+}
+
+void Compiler::collectFunctionSignatures(std::string_view source) {
+    Scanner scanner(source);
+    int classDepth = 0;
+
+    while (true) {
+        Token token = scanner.nextToken();
+        if (token.type() == TokenType::END_OF_FILE) {
+            return;
+        }
+
+        if (token.type() == TokenType::OPEN_CURLY) {
+            classDepth++;
+            continue;
+        }
+        if (token.type() == TokenType::CLOSE_CURLY) {
+            if (classDepth > 0) classDepth--;
+            continue;
+        }
+
+        if (classDepth != 0 || token.type() != TokenType::FUNCTION) {
+            continue;
+        }
+
+        Token functionName = scanner.nextToken();
+        if (functionName.type() != TokenType::IDENTIFIER) {
+            continue;
+        }
+
+        Token openParen = scanner.nextToken();
+        if (openParen.type() != TokenType::OPEN_PAREN) {
+            continue;
+        }
+
+        std::vector<TypeRef> params;
+        Token current = scanner.nextToken();
+        if (current.type() != TokenType::CLOSE_PAREN) {
+            while (true) {
+                Token maybeType = current;
+                Token maybeName;
+                TypeRef parameterType = TypeInfo::makeAny();
+
+                if (isTypeToken(maybeType.type())) {
+                    parameterType = tokenToType(maybeType);
+                    maybeName = scanner.nextToken();
+                } else if (maybeType.type() == TokenType::IDENTIFIER) {
+                    Token lookahead = scanner.nextToken();
+                    if (lookahead.type() == TokenType::IDENTIFIER) {
+                        TypeRef identifierType = tokenToType(maybeType);
+                        if (identifierType) {
+                            parameterType = identifierType;
+                            maybeName = lookahead;
+                        } else {
+                            maybeName = maybeType;
+                            current = lookahead;
+                            params.push_back(parameterType);
+
+                            if (current.type() == TokenType::COMMA) {
+                                current = scanner.nextToken();
+                                continue;
+                            }
+                            if (current.type() == TokenType::CLOSE_PAREN) {
+                                break;
+                            }
+                            break;
+                        }
+                    } else {
+                        maybeName = maybeType;
+                        current = lookahead;
+                        params.push_back(parameterType);
+
+                        if (current.type() == TokenType::COMMA) {
+                            current = scanner.nextToken();
+                            continue;
+                        }
+                        if (current.type() == TokenType::CLOSE_PAREN) {
+                            break;
+                        }
+                        break;
+                    }
+                } else {
+                    break;
+                }
+
+                if (maybeName.type() != TokenType::IDENTIFIER) {
+                    break;
+                }
+
+                params.push_back(parameterType ? parameterType
+                                               : TypeInfo::makeAny());
+                current = scanner.nextToken();
+
+                if (current.type() == TokenType::COMMA) {
+                    current = scanner.nextToken();
+                    continue;
+                }
+                if (current.type() == TokenType::CLOSE_PAREN) {
+                    break;
+                }
+                break;
+            }
+        }
+
+        TypeRef returnType = TypeInfo::makeAny();
+        Token maybeArrow = scanner.nextToken();
+        if (maybeArrow.type() == TokenType::ARROW) {
+            Token returnToken = scanner.nextToken();
+            TypeRef typedReturn = tokenToType(returnToken);
+            if (typedReturn) {
+                returnType = typedReturn;
+            }
+        }
+
+        std::string functionNameText(functionName.start(),
+                                     functionName.length());
+        m_functionSignatures[functionNameText] =
+            TypeInfo::makeFunction(params, returnType);
+    }
 }
 
 void Compiler::emitByte(uint8_t byte) {
@@ -149,6 +341,7 @@ uint8_t Compiler::globalSlot(const Token& name) {
     uint8_t slot = static_cast<uint8_t>(m_globalNames.size());
     m_globalSlots.emplace(globalName, slot);
     m_globalNames.push_back(std::move(globalName));
+    m_globalTypes.push_back(nullptr);
     return slot;
 }
 
@@ -213,7 +406,8 @@ void Compiler::namedVariable(const Token& name, bool canAssign) {
     emitBytes(getOp, arg);
 }
 
-uint8_t Compiler::parseVariable(const std::string& message) {
+uint8_t Compiler::parseVariable(const std::string& message,
+                                const TypeRef& declaredType) {
     consume(TokenType::IDENTIFIER, message);
 
     if (currentContext().scopeDepth > 0) {
@@ -221,7 +415,12 @@ uint8_t Compiler::parseVariable(const std::string& message) {
         return 0;
     }
 
-    return globalSlot(m_parser->previous);
+    uint8_t slot = globalSlot(m_parser->previous);
+    if (slot < m_globalTypes.size()) {
+        m_globalTypes[slot] = declaredType ? declaredType : TypeInfo::makeAny();
+    }
+
+    return slot;
 }
 
 void Compiler::defineVariable(uint8_t global) {
@@ -249,7 +448,7 @@ void Compiler::endScope() {
     }
 }
 
-void Compiler::addLocal(const Token& name) {
+void Compiler::addLocal(const Token& name, const TypeRef& declaredType) {
     if (currentContext().locals.size() > UINT8_MAX) {
         errorAt(name, "Too many local variables in function.");
         return;
@@ -268,7 +467,8 @@ void Compiler::addLocal(const Token& name) {
         }
     }
 
-    currentContext().locals.push_back(Local{name, -1, false});
+    currentContext().locals.push_back(Local{
+        name, -1, false, declaredType ? declaredType : TypeInfo::makeAny()});
 }
 
 int Compiler::resolveLocal(const Token& name) {
@@ -345,16 +545,88 @@ bool Compiler::identifiersEqual(const Token& lhs, const Token& rhs) const {
     return lhsView == rhsView;
 }
 
+bool Compiler::isTypeToken(TokenType type) const {
+    switch (type) {
+        case TokenType::TYPE_I8:
+        case TokenType::TYPE_I16:
+        case TokenType::TYPE_I32:
+        case TokenType::TYPE_I64:
+        case TokenType::TYPE_U8:
+        case TokenType::TYPE_U16:
+        case TokenType::TYPE_U32:
+        case TokenType::TYPE_U64:
+        case TokenType::TYPE_USIZE:
+        case TokenType::TYPE_F32:
+        case TokenType::TYPE_F64:
+        case TokenType::TYPE_BOOL:
+        case TokenType::TYPE_STR:
+        case TokenType::TYPE_NULL_KW:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool Compiler::parseTypeExpr() { return parseTypeExprType() != nullptr; }
+
+TypeRef Compiler::parseTypeExprType() {
+    if (isTypeToken(m_parser->current.type())) {
+        TypeRef type = tokenToType(m_parser->current);
+        advance();
+        return type;
+    }
+
+    if (m_parser->current.type() == TokenType::IDENTIFIER) {
+        TypeRef type = tokenToType(m_parser->current);
+        if (!type) return nullptr;
+        advance();
+        return type;
+    }
+
+    return nullptr;
+}
+
+bool Compiler::isTypedVarDeclarationStart() {
+    if (!isTypeToken(m_parser->current.type()) &&
+        m_parser->current.type() != TokenType::IDENTIFIER) {
+        return false;
+    }
+
+    const Token& next = peekNextToken();
+    return next.type() == TokenType::IDENTIFIER;
+}
+
 void Compiler::advance() {
     m_parser->previous = m_parser->current;
 
     while (true) {
-        m_parser->current = m_scanner->nextToken();
+        if (m_hasBufferedToken) {
+            m_parser->current = m_bufferedToken;
+            m_hasBufferedToken = false;
+        } else {
+            m_parser->current = m_scanner->nextToken();
+        }
 
         if (m_parser->current.type() != TokenType::ERROR) break;
 
         errorAtCurrent(m_parser->current.start());
     }
+}
+
+const Token& Compiler::peekNextToken() {
+    if (!m_hasBufferedToken) {
+        while (true) {
+            m_bufferedToken = m_scanner->nextToken();
+            if (m_bufferedToken.type() != TokenType::ERROR) {
+                m_hasBufferedToken = true;
+                break;
+            }
+
+            errorAt(m_bufferedToken, m_bufferedToken.start());
+        }
+    }
+
+    return m_bufferedToken;
 }
 
 void Compiler::synchronize() {
@@ -369,6 +641,20 @@ void Compiler::synchronize() {
             case TokenType::CLASS:
             case TokenType::FUNCTION:
             case TokenType::VAR:
+            case TokenType::TYPE_I8:
+            case TokenType::TYPE_I16:
+            case TokenType::TYPE_I32:
+            case TokenType::TYPE_I64:
+            case TokenType::TYPE_U8:
+            case TokenType::TYPE_U16:
+            case TokenType::TYPE_U32:
+            case TokenType::TYPE_U64:
+            case TokenType::TYPE_USIZE:
+            case TokenType::TYPE_F32:
+            case TokenType::TYPE_F64:
+            case TokenType::TYPE_BOOL:
+            case TokenType::TYPE_STR:
+            case TokenType::TYPE_NULL_KW:
             case TokenType::IMPORT:
             case TokenType::EXPORT:
             case TokenType::FOR:
@@ -436,6 +722,8 @@ void Compiler::declaration() {
     } else if (m_parser->current.type() == TokenType::VAR) {
         advance();
         varDeclaration();
+    } else if (isTypedVarDeclarationStart()) {
+        typedVarDeclaration();
     } else {
         statement();
     }
@@ -620,10 +908,12 @@ void Compiler::classDeclaration() {
     ClassContext classContext;
     classContext.hasSuperclass = false;
     classContext.enclosing = m_currentClass;
+    classContext.className.clear();
     m_currentClass = &classContext;
 
     consume(TokenType::IDENTIFIER, "Expected class name.");
     Token nameToken = m_parser->previous;
+    classContext.className = std::string(nameToken.start(), nameToken.length());
     uint8_t nameConstant = identifierConstant(nameToken);
 
     uint8_t variable = 0;
@@ -655,7 +945,7 @@ void Compiler::classDeclaration() {
     consume(TokenType::OPEN_CURLY, "Expected '{' before class body.");
     while (m_parser->current.type() != TokenType::CLOSE_CURLY &&
            m_parser->current.type() != TokenType::END_OF_FILE) {
-        methodDeclaration();
+        classMemberDeclaration();
     }
     consume(TokenType::CLOSE_CURLY, "Expected '}' after class body.");
     emitByte(OpCode::POP);
@@ -663,13 +953,79 @@ void Compiler::classDeclaration() {
     m_currentClass = m_currentClass->enclosing;
 }
 
+void Compiler::classMemberDeclaration() {
+    if (isTypeToken(m_parser->current.type()) ||
+        (m_parser->current.type() == TokenType::IDENTIFIER &&
+         peekNextToken().type() == TokenType::IDENTIFIER)) {
+        typedClassMemberDeclaration();
+        return;
+    }
+
+    methodDeclaration();
+}
+
+void Compiler::typedClassMemberDeclaration() {
+    TypeRef declaredType = parseTypeExprType();
+    if (!declaredType) {
+        errorAtCurrent("Expected class member type.");
+        return;
+    }
+
+    consume(TokenType::IDENTIFIER, "Expected class member name.");
+    Token memberName = m_parser->previous;
+    std::string memberNameText(memberName.start(), memberName.length());
+    std::string className = m_currentClass ? m_currentClass->className : "";
+
+    if (m_parser->current.type() == TokenType::SEMI_COLON) {
+        if (!className.empty()) {
+            m_classFieldTypes[className][memberNameText] = declaredType;
+        }
+        advance();
+        return;
+    }
+
+    if (m_parser->current.type() != TokenType::OPEN_PAREN) {
+        errorAtCurrent("Expected ';' after typed field or '(' for method.");
+        return;
+    }
+
+    uint8_t nameConstant = identifierConstant(memberName);
+    CompiledFunction compiled = compileFunction(
+        std::string(memberName.start(), memberName.length()), true);
+
+    if (!className.empty()) {
+        std::vector<TypeRef> paramTypes(
+            compiled.function ? compiled.function->parameters.size() : 0,
+            TypeInfo::makeAny());
+        m_classMethodSignatures[className][memberNameText] =
+            TypeInfo::makeFunction(paramTypes, declaredType);
+    }
+
+    emitBytes(OpCode::CLOSURE, makeConstant(Value(compiled.function)));
+    for (const auto& upvalue : compiled.upvalues) {
+        emitByte(static_cast<uint8_t>(upvalue.isLocal ? 1 : 0));
+        emitByte(upvalue.index);
+    }
+    emitBytes(OpCode::METHOD, nameConstant);
+}
+
 void Compiler::methodDeclaration() {
     consume(TokenType::IDENTIFIER, "Expected method name.");
     Token nameToken = m_parser->previous;
+    std::string methodName(nameToken.start(), nameToken.length());
     uint8_t nameConstant = identifierConstant(nameToken);
 
     CompiledFunction compiled = compileFunction(
         std::string(nameToken.start(), nameToken.length()), true);
+
+    if (m_currentClass && !m_currentClass->className.empty()) {
+        std::vector<TypeRef> paramTypes(
+            compiled.function ? compiled.function->parameters.size() : 0,
+            TypeInfo::makeAny());
+        m_classMethodSignatures[m_currentClass->className][methodName] =
+            TypeInfo::makeFunction(paramTypes, TypeInfo::makeAny());
+    }
+
     emitBytes(OpCode::CLOSURE, makeConstant(Value(compiled.function)));
     for (const auto& upvalue : compiled.upvalues) {
         emitByte(static_cast<uint8_t>(upvalue.isLocal ? 1 : 0));
@@ -722,11 +1078,20 @@ void Compiler::functionDeclaration() {
     consume(TokenType::IDENTIFIER, "Expected function name.");
     Token nameToken = m_parser->previous;
     uint8_t variable = 0;
+    std::string functionName(nameToken.start(), nameToken.length());
+    TypeRef functionType = TypeInfo::makeAny();
+    auto functionTypeIt = m_functionSignatures.find(functionName);
+    if (functionTypeIt != m_functionSignatures.end()) {
+        functionType = functionTypeIt->second;
+    }
 
     if (currentContext().scopeDepth > 0) {
-        addLocal(nameToken);
+        addLocal(nameToken, functionType);
     } else {
         variable = globalSlot(nameToken);
+        if (variable < m_globalTypes.size()) {
+            m_globalTypes[variable] = functionType;
+        }
     }
 
     CompiledFunction compiled =
@@ -935,7 +1300,8 @@ void Compiler::expressionStatement() {
 }
 
 void Compiler::varDeclaration() {
-    uint8_t global = parseVariable("Expected variable name.");
+    uint8_t global =
+        parseVariable("Expected variable name.", TypeInfo::makeAny());
 
     if (m_parser->current.type() == TokenType::EQUAL) {
         advance();
@@ -945,6 +1311,25 @@ void Compiler::varDeclaration() {
     }
 
     consume(TokenType::SEMI_COLON, "Expected ';' after variable declaration.");
+    defineVariable(global);
+}
+
+void Compiler::typedVarDeclaration() {
+    TypeRef declaredType = parseTypeExprType();
+    if (!declaredType) {
+        errorAtCurrent("Expected type in typed variable declaration.");
+        return;
+    }
+
+    uint8_t global =
+        parseVariable("Expected variable name after type.", declaredType);
+    consume(TokenType::EQUAL,
+            "Expected '=' in typed variable declaration (initializer is "
+            "required).");
+    expression();
+
+    consume(TokenType::SEMI_COLON,
+            "Expected ';' after typed variable declaration.");
     defineVariable(global);
 }
 
@@ -998,6 +1383,19 @@ Compiler::ParseRule Compiler::getRule(TokenType type) {
             return ParseRule{[this](bool canAssign) { number(canAssign); },
                              nullptr, PREC_NONE};
         case TokenType::IDENTIFIER:
+        case TokenType::TYPE_I8:
+        case TokenType::TYPE_I16:
+        case TokenType::TYPE_I32:
+        case TokenType::TYPE_I64:
+        case TokenType::TYPE_U8:
+        case TokenType::TYPE_U16:
+        case TokenType::TYPE_U32:
+        case TokenType::TYPE_U64:
+        case TokenType::TYPE_USIZE:
+        case TokenType::TYPE_F32:
+        case TokenType::TYPE_F64:
+        case TokenType::TYPE_BOOL:
+        case TokenType::TYPE_STR:
             return ParseRule{[this](bool canAssign) { variable(canAssign); },
                              nullptr, PREC_NONE};
         case TokenType::THIS:
@@ -1506,6 +1904,14 @@ Compiler::CompiledFunction Compiler::compileFunction(const std::string& name,
     std::vector<std::string> parameters;
     if (m_parser->current.type() != TokenType::CLOSE_PAREN) {
         do {
+            if (isTypeToken(m_parser->current.type()) ||
+                (m_parser->current.type() == TokenType::IDENTIFIER &&
+                 peekNextToken().type() == TokenType::IDENTIFIER)) {
+                if (!parseTypeExpr()) {
+                    errorAtCurrent("Expected parameter type annotation.");
+                }
+            }
+
             consume(TokenType::IDENTIFIER, "Expected parameter name.");
             parameters.emplace_back(m_parser->previous.start(),
                                     m_parser->previous.length());
@@ -1520,6 +1926,14 @@ Compiler::CompiledFunction Compiler::compileFunction(const std::string& name,
     }
 
     consume(TokenType::CLOSE_PAREN, "Expected ')' after parameters.");
+
+    if (m_parser->current.type() == TokenType::ARROW) {
+        advance();
+        if (!parseTypeExpr()) {
+            errorAtCurrent("Expected return type after '->'.");
+        }
+    }
+
     consume(TokenType::OPEN_CURLY, "Expected '{' before function body.");
 
     while (m_parser->current.type() != TokenType::CLOSE_CURLY &&

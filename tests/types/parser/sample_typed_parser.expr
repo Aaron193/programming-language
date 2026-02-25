@@ -1,0 +1,11 @@
+i32 count = 41;
+
+function inc(i32 value) -> i32 {
+    return value + 1;
+}
+
+class Dog {}
+Dog dog = Dog();
+
+print inc(count);
+print dog != null;

@@ -5,11 +5,13 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "Chunk.hpp"
 #include "GC.hpp"
 #include "Scanner.hpp"
+#include "TypeInfo.hpp"
 
 struct Parser {
     Token current;
@@ -42,6 +44,7 @@ class Compiler {
         Token name;
         int depth;
         bool isCaptured;
+        TypeRef type;
     };
 
     struct Upvalue {
@@ -71,6 +74,7 @@ class Compiler {
     struct ClassContext {
         bool hasSuperclass;
         ClassContext* enclosing;
+        std::string className;
     };
 
     Chunk* m_chunk = nullptr;
@@ -80,11 +84,21 @@ class Compiler {
     std::vector<FunctionContext> m_contexts;
     GC* m_gc = nullptr;
     std::unordered_map<std::string, uint8_t> m_globalSlots;
+    std::unordered_set<std::string> m_classNames;
+    std::unordered_map<std::string, TypeRef> m_functionSignatures;
+    std::unordered_map<std::string, std::unordered_map<std::string, TypeRef>>
+        m_classFieldTypes;
+    std::unordered_map<std::string, std::unordered_map<std::string, TypeRef>>
+        m_classMethodSignatures;
+    std::vector<TypeRef> m_globalTypes;
     std::vector<std::string> m_globalNames;
     std::vector<std::string> m_exportedNames;
     std::string m_sourcePath;
+    bool m_hasBufferedToken = false;
+    Token m_bufferedToken;
 
     void advance();
+    const Token& peekNextToken();
     void synchronize();
     void errorAtCurrent(const std::string& message);
     void errorAt(const Token& token, const std::string& message);
@@ -99,11 +113,13 @@ class Compiler {
     uint8_t identifierConstant(const Token& name);
     uint8_t globalSlot(const Token& name);
     void namedVariable(const Token& name, bool canAssign);
-    uint8_t parseVariable(const std::string& message);
+    uint8_t parseVariable(const std::string& message,
+                          const TypeRef& declaredType = TypeInfo::makeAny());
     void defineVariable(uint8_t global);
     void beginScope();
     void endScope();
-    void addLocal(const Token& name);
+    void addLocal(const Token& name,
+                  const TypeRef& declaredType = TypeInfo::makeAny());
     int resolveLocal(const Token& name);
     int resolveLocalInContext(const Token& name, int contextIndex);
     int addUpvalue(int contextIndex, uint8_t index, bool isLocal);
@@ -120,7 +136,12 @@ class Compiler {
 
     void expression();
     void declaration();
+    void collectClassNames(std::string_view source);
+    void collectFunctionSignatures(std::string_view source);
+    TypeRef tokenToType(const Token& token) const;
     void classDeclaration();
+    void classMemberDeclaration();
+    void typedClassMemberDeclaration();
     void methodDeclaration();
     void functionDeclaration();
     void importDeclaration();
@@ -135,6 +156,11 @@ class Compiler {
     void returnStatement();
     void expressionStatement();
     void varDeclaration();
+    void typedVarDeclaration();
+    bool isTypeToken(TokenType type) const;
+    bool isTypedVarDeclarationStart();
+    bool parseTypeExpr();
+    TypeRef parseTypeExprType();
     void parsePrecedence(Precedence precedence);
     ParseRule getRule(TokenType type);
 
@@ -168,8 +194,22 @@ class Compiler {
     const std::vector<std::string>& globalNames() const {
         return m_globalNames;
     }
+    const std::vector<TypeRef>& globalTypes() const { return m_globalTypes; }
     const std::vector<std::string>& exportedNames() const {
         return m_exportedNames;
+    }
+    const std::unordered_map<std::string, TypeRef>& functionSignatures() const {
+        return m_functionSignatures;
+    }
+    const std::unordered_map<std::string,
+                             std::unordered_map<std::string, TypeRef>>&
+    classFieldTypes() const {
+        return m_classFieldTypes;
+    }
+    const std::unordered_map<std::string,
+                             std::unordered_map<std::string, TypeRef>>&
+    classMethodSignatures() const {
+        return m_classMethodSignatures;
     }
 
     bool compile(std::string_view source, Chunk& chunk,
