@@ -26,7 +26,7 @@ static std::string valueToString(const Value& value) {
 }
 
 static std::string valueTypeName(const Value& value) {
-    if (value.isNumber()) return "number";
+    if (value.isAnyNumeric()) return "number";
     if (value.isBool()) return "bool";
     if (value.isNil()) return "null";
     if (value.isString()) return "string";
@@ -51,9 +51,15 @@ static bool toDictKey(const Value& value, std::string& key) {
         return true;
     }
 
-    if (value.isNumber()) {
+    if (value.isAnyNumeric()) {
         std::ostringstream stream;
-        stream << value.asNumber();
+        if (value.isNumber()) {
+            stream << value.asNumber();
+        } else if (value.isSignedInt()) {
+            stream << value.asSignedInt();
+        } else {
+            stream << value.asUnsignedInt();
+        }
         key = stream.str();
         return true;
     }
@@ -62,8 +68,23 @@ static bool toDictKey(const Value& value, std::string& key) {
 }
 
 static bool toArrayIndex(const Value& value, size_t& index) {
-    if (!value.isNumber()) {
+    if (!value.isAnyNumeric()) {
         return false;
+    }
+
+    if (value.isSignedInt()) {
+        int64_t signedIndex = value.asSignedInt();
+        if (signedIndex < 0) {
+            return false;
+        }
+
+        index = static_cast<size_t>(signedIndex);
+        return true;
+    }
+
+    if (value.isUnsignedInt()) {
+        index = static_cast<size_t>(value.asUnsignedInt());
+        return true;
     }
 
     double number = value.asNumber();
