@@ -64,6 +64,24 @@ enum TokenType {
     FROM,
     AS,
 
+    // type-system keywords/operators (phase 1)
+    TYPE_I8,
+    TYPE_I16,
+    TYPE_I32,
+    TYPE_I64,
+    TYPE_U8,
+    TYPE_U16,
+    TYPE_U32,
+    TYPE_U64,
+    TYPE_USIZE,
+    TYPE_F32,
+    TYPE_F64,
+    TYPE_BOOL,
+    TYPE_STR,
+    TYPE_NULL_KW,
+    AS_KW,
+    ARROW,
+
     END_OF_FILE,
     ERROR,
 };
