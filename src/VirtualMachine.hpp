@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <optional>
 #include <string_view>
 #include <unordered_map>
 
@@ -40,7 +41,9 @@ class VirtualMachine {
         return constant.asString();
     }
 
-    Status run();
+    Status run(bool printReturnValue, Value& returnValue);
+    Status callFunction(std::shared_ptr<FunctionObject> function,
+                        uint8_t argumentCount);
 
    public:
     VirtualMachine() = default;

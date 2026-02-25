@@ -39,6 +39,13 @@ class Stack {
         return m_data[m_top - static_cast<int>(distance)];
     }
 
+    void popN(size_t count) {
+        while (count > 0 && m_top >= 0) {
+            m_top--;
+            count--;
+        }
+    }
+
     void reset() { m_top = -1; }
 
     bool isEmpty() { return m_top == -1; }

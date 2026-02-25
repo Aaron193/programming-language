@@ -139,6 +139,12 @@ void Compiler::consume(TokenType type, const std::string& message) {
 void Compiler::expression() { parsePrecedence(PREC_ASSIGNMENT); }
 
 void Compiler::declaration() {
+    if (m_parser->current.type() == TokenType::FUNCTION) {
+        advance();
+        functionDeclaration();
+        return;
+    }
+
     if (m_parser->current.type() == TokenType::VAR) {
         advance();
         varDeclaration();
@@ -173,6 +179,12 @@ void Compiler::statement() {
         return;
     }
 
+    if (m_parser->current.type() == TokenType::_RETURN) {
+        advance();
+        returnStatement();
+        return;
+    }
+
     if (m_parser->current.type() == TokenType::OPEN_CURLY) {
         advance();
         block();
@@ -180,6 +192,17 @@ void Compiler::statement() {
     }
 
     expressionStatement();
+}
+
+void Compiler::functionDeclaration() {
+    consume(TokenType::IDENTIFIER, "Expected function name.");
+    Token nameToken = m_parser->previous;
+    uint8_t global = identifierConstant(nameToken);
+
+    std::shared_ptr<FunctionObject> function =
+        compileFunction(std::string(nameToken.start(), nameToken.length()));
+    emitConstant(Value(function));
+    defineVariable(global);
 }
 
 void Compiler::block() {
@@ -286,6 +309,25 @@ void Compiler::printStatement() {
     emitByte(OpCode::PRINT_OP);
 }
 
+void Compiler::returnStatement() {
+    if (!m_inFunction) {
+        errorAtCurrent("Cannot return from top-level code.");
+    }
+
+    if (m_parser->current.type() == TokenType::SEMI_COLON) {
+        advance();
+        emitByte(OpCode::NIL);
+        emitByte(OpCode::RETURN);
+        return;
+    }
+
+    expression();
+    if (m_parser->current.type() == TokenType::SEMI_COLON) {
+        advance();
+    }
+    emitByte(OpCode::RETURN);
+}
+
 void Compiler::expressionStatement() {
     expression();
     if (m_parser->current.type() == TokenType::SEMI_COLON) {
@@ -337,7 +379,8 @@ Compiler::ParseRule Compiler::getRule(TokenType type) {
     switch (type) {
         case TokenType::OPEN_PAREN:
             return ParseRule{[this](bool canAssign) { grouping(canAssign); },
-                             nullptr, PREC_NONE};
+                             [this](bool canAssign) { call(canAssign); },
+                             PREC_CALL};
         case TokenType::NUMBER:
             return ParseRule{[this](bool canAssign) { number(canAssign); },
                              nullptr, PREC_NONE};
@@ -517,6 +560,30 @@ void Compiler::binary(bool canAssign) {
     }
 }
 
+void Compiler::call(bool canAssign) {
+    (void)canAssign;
+
+    uint8_t argCount = 0;
+    if (m_parser->current.type() != TokenType::CLOSE_PAREN) {
+        do {
+            expression();
+            if (argCount == UINT8_MAX) {
+                errorAtCurrent("Cannot have more than 255 arguments.");
+                break;
+            }
+            argCount++;
+
+            if (m_parser->current.type() != TokenType::COMMA) {
+                break;
+            }
+            advance();
+        } while (true);
+    }
+
+    consume(TokenType::CLOSE_PAREN, "Expected ')' after arguments.");
+    emitBytes(OpCode::CALL, argCount);
+}
+
 void Compiler::andOperator(bool canAssign) {
     (void)canAssign;
     int endJump = emitJump(OpCode::JUMP_IF_FALSE);
@@ -536,4 +603,50 @@ void Compiler::orOperator(bool canAssign) {
 
     parsePrecedence(PREC_OR);
     patchJump(endJump);
+}
+
+std::shared_ptr<FunctionObject> Compiler::compileFunction(
+    const std::string& name) {
+    consume(TokenType::OPEN_PAREN, "Expected '(' after function name.");
+
+    std::vector<std::string> parameters;
+    if (m_parser->current.type() != TokenType::CLOSE_PAREN) {
+        do {
+            consume(TokenType::IDENTIFIER, "Expected parameter name.");
+            parameters.emplace_back(m_parser->previous.start(),
+                                    m_parser->previous.length());
+
+            if (m_parser->current.type() != TokenType::COMMA) {
+                break;
+            }
+            advance();
+        } while (true);
+    }
+
+    consume(TokenType::CLOSE_PAREN, "Expected ')' after parameters.");
+    consume(TokenType::OPEN_CURLY, "Expected '{' before function body.");
+
+    Chunk* enclosingChunk = m_chunk;
+    bool enclosingInFunction = m_inFunction;
+    auto functionChunk = std::make_shared<Chunk>();
+    m_chunk = functionChunk.get();
+    m_inFunction = true;
+
+    while (m_parser->current.type() != TokenType::CLOSE_CURLY &&
+           m_parser->current.type() != TokenType::END_OF_FILE) {
+        declaration();
+    }
+    consume(TokenType::CLOSE_CURLY, "Expected '}' after function body.");
+
+    emitByte(OpCode::NIL);
+    emitByte(OpCode::RETURN);
+
+    m_chunk = enclosingChunk;
+    m_inFunction = enclosingInFunction;
+
+    auto function = std::make_shared<FunctionObject>();
+    function->name = name;
+    function->parameters = parameters;
+    function->chunk = functionChunk;
+    return function;
 }

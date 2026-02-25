@@ -17,7 +17,69 @@ static bool isNumberPair(const Value& lhs, const Value& rhs) {
     return lhs.isNumber() && rhs.isNumber();
 }
 
-Status VirtualMachine::run() {
+Status VirtualMachine::callFunction(std::shared_ptr<FunctionObject> function,
+                                    uint8_t argumentCount) {
+    if (function->parameters.size() != argumentCount) {
+        std::cerr << "Runtime error: Function '" << function->name
+                  << "' expected " << function->parameters.size()
+                  << " arguments but got " << static_cast<int>(argumentCount)
+                  << "." << std::endl;
+        return Status::RUNTIME_ERROR;
+    }
+
+    struct BindingBackup {
+        bool hadValue;
+        Value value;
+    };
+
+    std::unordered_map<std::string, BindingBackup> backups;
+
+    for (size_t i = 0; i < function->parameters.size(); ++i) {
+        const std::string& parameter = function->parameters[i];
+        Value argument = m_stack.peek(argumentCount - 1 - i);
+
+        auto globalIt = m_globals.find(parameter);
+        if (globalIt == m_globals.end()) {
+            backups[parameter] = BindingBackup{false, Value()};
+        } else {
+            backups[parameter] = BindingBackup{true, globalIt->second};
+        }
+
+        m_globals[parameter] = argument;
+    }
+
+    Chunk* previousChunk = m_chunk;
+    uint8_t* previousIp = m_ip;
+
+    m_chunk = function->chunk.get();
+    m_ip = m_chunk->getBytes();
+
+    Value functionReturn;
+    Status status = run(false, functionReturn);
+
+    m_chunk = previousChunk;
+    m_ip = previousIp;
+
+    for (const auto& pair : backups) {
+        const std::string& parameter = pair.first;
+        const BindingBackup& backup = pair.second;
+        if (backup.hadValue) {
+            m_globals[parameter] = backup.value;
+        } else {
+            m_globals.erase(parameter);
+        }
+    }
+
+    if (status != Status::OK) {
+        return status;
+    }
+
+    m_stack.popN(static_cast<size_t>(argumentCount) + 1);
+    m_stack.push(functionReturn);
+    return Status::OK;
+}
+
+Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
     while (true) {
 #ifdef DEBUG
         m_stack.print();
@@ -28,7 +90,10 @@ Status VirtualMachine::run() {
         switch (instruction = readByte()) {
             case OpCode::RETURN: {
                 Value val = m_stack.pop();
-                std::cout << "Return constant: " << val << std::endl;
+                returnValue = val;
+                if (printReturnValue) {
+                    std::cout << "Return constant: " << val << std::endl;
+                }
                 return Status::OK;
             }
             case OpCode::CONSTANT: {
@@ -226,6 +291,22 @@ Status VirtualMachine::run() {
                 it->second = m_stack.peek(0);
                 break;
             }
+            case OpCode::CALL: {
+                uint8_t argumentCount = readByte();
+                Value callee = m_stack.peek(argumentCount);
+                if (!callee.isFunction()) {
+                    std::cerr << "Runtime error: Can only call functions."
+                              << std::endl;
+                    return Status::RUNTIME_ERROR;
+                }
+
+                Status status =
+                    callFunction(callee.asFunction(), argumentCount);
+                if (status != Status::OK) {
+                    return status;
+                }
+                break;
+            }
             case OpCode::JUMP: {
                 uint16_t offset = readShort();
                 m_ip += offset;
@@ -288,5 +369,6 @@ Status VirtualMachine::interpret(std::string_view source) {
     m_chunk = &chunk;
     m_ip = m_chunk->getBytes();
 
-    return run();
+    Value returnValue;
+    return run(true, returnValue);
 }

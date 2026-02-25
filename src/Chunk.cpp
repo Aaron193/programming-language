@@ -33,6 +33,12 @@ static int jumpInstruction(const std::string& label, int sign, int offset,
     return offset + 3;
 }
 
+static int byteInstruction(const std::string& label, int offset,
+                           uint8_t value) {
+    std::cout << label << " " << static_cast<int>(value) << std::endl;
+    return offset + 2;
+}
+
 void Chunk::write(uint8_t byte, int line) {
     m_bytes->push_back(byte);
     m_lines->push_back(line);
@@ -92,6 +98,8 @@ int Chunk::disassembleInstruction(int offset) {
             return constantInstruction("GET_GLOBAL", offset);
         case OpCode::SET_GLOBAL:
             return constantInstruction("SET_GLOBAL", offset);
+        case OpCode::CALL:
+            return byteInstruction("CALL", offset, m_bytes->at(offset + 1));
         case OpCode::JUMP:
             return jumpInstruction("JUMP", 1, offset, m_bytes->at(offset + 1),
                                    m_bytes->at(offset + 2));

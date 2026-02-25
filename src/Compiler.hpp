@@ -42,6 +42,7 @@ class Compiler {
     Chunk* m_chunk = nullptr;
     std::unique_ptr<Scanner> m_scanner;
     std::unique_ptr<Parser> m_parser;
+    bool m_inFunction = false;
 
     void advance();
     void errorAtCurrent(const std::string& message);
@@ -63,12 +64,14 @@ class Compiler {
 
     void expression();
     void declaration();
+    void functionDeclaration();
     void statement();
     void block();
     void ifStatement();
     void whileStatement();
     void forStatement();
     void printStatement();
+    void returnStatement();
     void expressionStatement();
     void varDeclaration();
     void parsePrecedence(Precedence precedence);
@@ -81,8 +84,11 @@ class Compiler {
     void grouping(bool canAssign);
     void unary(bool canAssign);
     void binary(bool canAssign);
+    void call(bool canAssign);
     void andOperator(bool canAssign);
     void orOperator(bool canAssign);
+
+    std::shared_ptr<FunctionObject> compileFunction(const std::string& name);
 
    public:
     Compiler() = default;

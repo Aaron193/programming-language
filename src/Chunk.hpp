@@ -2,9 +2,18 @@
 #include <cstdint>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <string>
 #include <variant>
 #include <vector>
+
+class Chunk;
+
+struct FunctionObject {
+    std::string name;
+    std::vector<std::string> parameters;
+    std::shared_ptr<Chunk> chunk;
+};
 
 /*
  OpCode is a bytecode *instruction*
@@ -33,6 +42,7 @@ enum OpCode {
     DEFINE_GLOBAL,
     GET_GLOBAL,
     SET_GLOBAL,
+    CALL,
     JUMP,
     JUMP_IF_FALSE,
     LOOP,
@@ -48,22 +58,31 @@ enum ValueType {
 };
 
 struct Value {
-    std::variant<double, bool, std::monostate, std::string> data;
+    std::variant<double, bool, std::monostate, std::string,
+                 std::shared_ptr<FunctionObject>>
+        data;
 
     Value() : data(std::monostate{}) {}
     Value(double value) : data(value) {}
     Value(bool value) : data(value) {}
     Value(const std::string& value) : data(value) {}
     Value(const char* value) : data(std::string(value)) {}
+    Value(std::shared_ptr<FunctionObject> value) : data(std::move(value)) {}
 
     bool isNumber() const { return std::holds_alternative<double>(data); }
     bool isBool() const { return std::holds_alternative<bool>(data); }
     bool isNil() const { return std::holds_alternative<std::monostate>(data); }
     bool isString() const { return std::holds_alternative<std::string>(data); }
+    bool isFunction() const {
+        return std::holds_alternative<std::shared_ptr<FunctionObject>>(data);
+    }
 
     double asNumber() const { return std::get<double>(data); }
     bool asBool() const { return std::get<bool>(data); }
     const std::string& asString() const { return std::get<std::string>(data); }
+    std::shared_ptr<FunctionObject> asFunction() const {
+        return std::get<std::shared_ptr<FunctionObject>>(data);
+    }
 };
 
 inline bool operator==(const Value& lhs, const Value& rhs) {
@@ -81,6 +100,9 @@ inline std::ostream& operator<<(std::ostream& stream, const Value& value) {
         stream << (value.asBool() ? "true" : "false");
     } else if (value.isNil()) {
         stream << "null";
+    } else if (value.isFunction()) {
+        auto function = value.asFunction();
+        stream << "<function " << function->name << ">";
     } else {
         stream << value.asString();
     }
