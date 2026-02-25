@@ -44,6 +44,7 @@ class VirtualMachine {
     size_t m_gcThreshold = 1024 * 1024;
     // globals
     std::vector<std::string> m_globalNames;
+    std::vector<TypeRef> m_globalTypes;
     std::vector<Value> m_globalValues;
     std::vector<bool> m_globalDefined;
     std::unordered_map<std::string, Value> m_nativeGlobals;

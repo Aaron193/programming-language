@@ -607,6 +607,20 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 const std::string& name = readNameConstant();
                 auto klass = gcAlloc<ClassObject>();
                 klass->name = name;
+
+                const auto& compilerFieldTypes = m_compiler.classFieldTypes();
+                auto fieldIt = compilerFieldTypes.find(name);
+                if (fieldIt != compilerFieldTypes.end()) {
+                    klass->fieldTypes = fieldIt->second;
+                }
+
+                const auto& compilerMethodTypes =
+                    m_compiler.classMethodSignatures();
+                auto methodIt = compilerMethodTypes.find(name);
+                if (methodIt != compilerMethodTypes.end()) {
+                    klass->methodTypes = methodIt->second;
+                }
+
                 m_stack.push(Value(klass));
                 break;
             }
@@ -621,6 +635,23 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 auto superclass = superclassValue.asClass();
                 auto subclass = subclassValue.asClass();
                 subclass->superclass = superclass;
+
+                for (const auto& fieldType : superclass->fieldTypes) {
+                    if (subclass->fieldTypes.find(fieldType.first) ==
+                        subclass->fieldTypes.end()) {
+                        subclass->fieldTypes[fieldType.first] =
+                            fieldType.second;
+                    }
+                }
+
+                for (const auto& methodType : superclass->methodTypes) {
+                    if (subclass->methodTypes.find(methodType.first) ==
+                        subclass->methodTypes.end()) {
+                        subclass->methodTypes[methodType.first] =
+                            methodType.second;
+                    }
+                }
+
                 for (const auto& method : superclass->methods) {
                     if (subclass->methods.find(method.first) ==
                         subclass->methods.end()) {
@@ -1643,11 +1674,17 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 module->path = path;
 
                 auto savedGlobalNames = m_globalNames;
+                auto savedGlobalTypes = m_globalTypes;
                 auto savedGlobalValues = m_globalValues;
                 auto savedGlobalDefined = m_globalDefined;
                 ModuleObject* outerModule = m_currentModule;
 
                 m_globalNames = m_compiler.globalNames();
+                m_globalTypes = m_compiler.globalTypes();
+                if (m_globalTypes.size() < m_globalNames.size()) {
+                    m_globalTypes.resize(m_globalNames.size(),
+                                         TypeInfo::makeAny());
+                }
                 m_globalValues.assign(m_globalNames.size(), Value());
                 m_globalDefined.assign(m_globalNames.size(), false);
                 for (size_t i = 0; i < m_globalNames.size(); ++i) {
@@ -1678,6 +1715,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                     m_stack.pop();
                     m_currentModule = outerModule;
                     m_globalNames = std::move(savedGlobalNames);
+                    m_globalTypes = std::move(savedGlobalTypes);
                     m_globalValues = std::move(savedGlobalValues);
                     m_globalDefined = std::move(savedGlobalDefined);
                     m_importStack.erase(path);
@@ -1689,6 +1727,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 if (moduleStatus != Status::OK) {
                     m_currentModule = outerModule;
                     m_globalNames = std::move(savedGlobalNames);
+                    m_globalTypes = std::move(savedGlobalTypes);
                     m_globalValues = std::move(savedGlobalValues);
                     m_globalDefined = std::move(savedGlobalDefined);
                     m_importStack.erase(path);
@@ -1699,6 +1738,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
                 m_currentModule = outerModule;
                 m_globalNames = std::move(savedGlobalNames);
+                m_globalTypes = std::move(savedGlobalTypes);
                 m_globalValues = std::move(savedGlobalValues);
                 m_globalDefined = std::move(savedGlobalDefined);
 
@@ -1790,6 +1830,10 @@ Status VirtualMachine::interpret(std::string_view source, bool printReturnValue,
     }
 
     m_globalNames = m_compiler.globalNames();
+    m_globalTypes = m_compiler.globalTypes();
+    if (m_globalTypes.size() < m_globalNames.size()) {
+        m_globalTypes.resize(m_globalNames.size(), TypeInfo::makeAny());
+    }
     m_globalValues.assign(m_globalNames.size(), Value());
     m_globalDefined.assign(m_globalNames.size(), false);
 
