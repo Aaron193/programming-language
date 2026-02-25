@@ -7,6 +7,7 @@
 
 #include "Chunk.hpp"
 #include "ModuleResolver.hpp"
+#include "StdLib.hpp"
 #include "TypeChecker.hpp"
 
 bool Compiler::compile(std::string_view source, Chunk& chunk,
@@ -17,6 +18,7 @@ bool Compiler::compile(std::string_view source, Chunk& chunk,
     m_functionSignatures.clear();
     m_classFieldTypes.clear();
     m_classMethodSignatures.clear();
+    registerStandardLibraryTypeSignatures(m_functionSignatures);
     collectClassNames(source);
     collectFunctionSignatures(source);
 
