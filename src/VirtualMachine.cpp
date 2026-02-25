@@ -16,7 +16,70 @@ static bool isFalsey(const Value& value) {
 }
 
 static bool isNumberPair(const Value& lhs, const Value& rhs) {
-    return lhs.isNumber() && rhs.isNumber();
+    return lhs.isAnyNumeric() && rhs.isAnyNumeric();
+}
+
+static bool valueToSignedInt(const Value& value, int64_t& out) {
+    if (value.isSignedInt()) {
+        out = value.asSignedInt();
+        return true;
+    }
+    if (value.isUnsignedInt()) {
+        out = static_cast<int64_t>(value.asUnsignedInt());
+        return true;
+    }
+    if (value.isNumber()) {
+        out = static_cast<int64_t>(value.asNumber());
+        return true;
+    }
+    return false;
+}
+
+static bool valueToUnsignedInt(const Value& value, uint64_t& out) {
+    if (value.isUnsignedInt()) {
+        out = value.asUnsignedInt();
+        return true;
+    }
+    if (value.isSignedInt()) {
+        out = static_cast<uint64_t>(value.asSignedInt());
+        return true;
+    }
+    if (value.isNumber()) {
+        out = static_cast<uint64_t>(value.asNumber());
+        return true;
+    }
+    return false;
+}
+
+static bool valueToDouble(const Value& value, double& out) {
+    if (value.isNumber()) {
+        out = value.asNumber();
+        return true;
+    }
+    if (value.isSignedInt()) {
+        out = static_cast<double>(value.asSignedInt());
+        return true;
+    }
+    if (value.isUnsignedInt()) {
+        out = static_cast<double>(value.asUnsignedInt());
+        return true;
+    }
+    return false;
+}
+
+static int64_t wrapSignedAdd(int64_t lhs, int64_t rhs) {
+    return static_cast<int64_t>(static_cast<uint64_t>(lhs) +
+                                static_cast<uint64_t>(rhs));
+}
+
+static int64_t wrapSignedSub(int64_t lhs, int64_t rhs) {
+    return static_cast<int64_t>(static_cast<uint64_t>(lhs) -
+                                static_cast<uint64_t>(rhs));
+}
+
+static int64_t wrapSignedMul(int64_t lhs, int64_t rhs) {
+    return static_cast<int64_t>(static_cast<uint64_t>(lhs) *
+                                static_cast<uint64_t>(rhs));
 }
 
 static std::string valueToString(const Value& value) {
@@ -308,8 +371,23 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
 
-                if (a.isNumber() && b.isNumber()) {
-                    m_stack.push(Value(a.asNumber() + b.asNumber()));
+                if (a.isSignedInt() && b.isSignedInt()) {
+                    m_stack.push(
+                        Value(wrapSignedAdd(a.asSignedInt(), b.asSignedInt())));
+                    continue;
+                }
+
+                if (a.isUnsignedInt() && b.isUnsignedInt()) {
+                    m_stack.push(Value(a.asUnsignedInt() + b.asUnsignedInt()));
+                    continue;
+                }
+
+                if (a.isAnyNumeric() && b.isAnyNumeric()) {
+                    double lhs = 0.0;
+                    double rhs = 0.0;
+                    valueToDouble(a, lhs);
+                    valueToDouble(b, rhs);
+                    m_stack.push(Value(lhs + rhs));
                     continue;
                 }
 
@@ -328,7 +406,21 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                     return runtimeError("Operands must be numbers for '<'.");
                 }
 
-                m_stack.push(Value(a.asNumber() < b.asNumber()));
+                if (a.isSignedInt() && b.isSignedInt()) {
+                    m_stack.push(Value(a.asSignedInt() < b.asSignedInt()));
+                    continue;
+                }
+
+                if (a.isUnsignedInt() && b.isUnsignedInt()) {
+                    m_stack.push(Value(a.asUnsignedInt() < b.asUnsignedInt()));
+                    continue;
+                }
+
+                double lhs = 0.0;
+                double rhs = 0.0;
+                valueToDouble(a, lhs);
+                valueToDouble(b, rhs);
+                m_stack.push(Value(lhs < rhs));
                 continue;
             }
             if (instruction == OpCode::JUMP_IF_FALSE) {
@@ -393,12 +485,19 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
             }
             case OpCode::NEGATE: {
                 Value value = m_stack.pop();
-                if (!value.isNumber()) {
+                if (!value.isAnyNumeric()) {
                     return runtimeError(
                         "Operand must be a number for unary '-'.");
                 }
 
-                m_stack.push(Value(-value.asNumber()));
+                if (value.isSignedInt()) {
+                    m_stack.push(Value(wrapSignedSub(0, value.asSignedInt())));
+                } else if (value.isUnsignedInt()) {
+                    uint64_t asUnsigned = value.asUnsignedInt();
+                    m_stack.push(Value(static_cast<int64_t>(0u - asUnsigned)));
+                } else {
+                    m_stack.push(Value(-value.asNumber()));
+                }
                 break;
             }
             case OpCode::NOT: {
@@ -422,8 +521,23 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
 
-                if (a.isNumber() && b.isNumber()) {
-                    m_stack.push(Value(a.asNumber() + b.asNumber()));
+                if (a.isSignedInt() && b.isSignedInt()) {
+                    m_stack.push(
+                        Value(wrapSignedAdd(a.asSignedInt(), b.asSignedInt())));
+                    break;
+                }
+
+                if (a.isUnsignedInt() && b.isUnsignedInt()) {
+                    m_stack.push(Value(a.asUnsignedInt() + b.asUnsignedInt()));
+                    break;
+                }
+
+                if (a.isAnyNumeric() && b.isAnyNumeric()) {
+                    double lhs = 0.0;
+                    double rhs = 0.0;
+                    valueToDouble(a, lhs);
+                    valueToDouble(b, rhs);
+                    m_stack.push(Value(lhs + rhs));
                     break;
                 }
 
@@ -442,7 +556,22 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                     return runtimeError("Operands must be numbers for '-'.");
                 }
 
-                m_stack.push(Value(a.asNumber() - b.asNumber()));
+                if (a.isSignedInt() && b.isSignedInt()) {
+                    m_stack.push(
+                        Value(wrapSignedSub(a.asSignedInt(), b.asSignedInt())));
+                    break;
+                }
+
+                if (a.isUnsignedInt() && b.isUnsignedInt()) {
+                    m_stack.push(Value(a.asUnsignedInt() - b.asUnsignedInt()));
+                    break;
+                }
+
+                double lhs = 0.0;
+                double rhs = 0.0;
+                valueToDouble(a, lhs);
+                valueToDouble(b, rhs);
+                m_stack.push(Value(lhs - rhs));
                 break;
             }
             case OpCode::MULT: {
@@ -452,7 +581,22 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                     return runtimeError("Operands must be numbers for '*'.");
                 }
 
-                m_stack.push(Value(a.asNumber() * b.asNumber()));
+                if (a.isSignedInt() && b.isSignedInt()) {
+                    m_stack.push(
+                        Value(wrapSignedMul(a.asSignedInt(), b.asSignedInt())));
+                    break;
+                }
+
+                if (a.isUnsignedInt() && b.isUnsignedInt()) {
+                    m_stack.push(Value(a.asUnsignedInt() * b.asUnsignedInt()));
+                    break;
+                }
+
+                double lhs = 0.0;
+                double rhs = 0.0;
+                valueToDouble(a, lhs);
+                valueToDouble(b, rhs);
+                m_stack.push(Value(lhs * rhs));
                 break;
             }
             case OpCode::DIV: {
@@ -462,7 +606,99 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                     return runtimeError("Operands must be numbers for '/'.");
                 }
 
-                m_stack.push(Value(a.asNumber() / b.asNumber()));
+                if (a.isSignedInt() && b.isSignedInt()) {
+                    if (b.asSignedInt() == 0) {
+                        return runtimeError("Division by zero.");
+                    }
+                    m_stack.push(Value(a.asSignedInt() / b.asSignedInt()));
+                    break;
+                }
+
+                if (a.isUnsignedInt() && b.isUnsignedInt()) {
+                    if (b.asUnsignedInt() == 0) {
+                        return runtimeError("Division by zero.");
+                    }
+                    m_stack.push(Value(a.asUnsignedInt() / b.asUnsignedInt()));
+                    break;
+                }
+
+                double lhs = 0.0;
+                double rhs = 0.0;
+                valueToDouble(a, lhs);
+                valueToDouble(b, rhs);
+                m_stack.push(Value(lhs / rhs));
+                break;
+            }
+            case OpCode::IADD: {
+                int64_t rhs = m_stack.pop().asSignedInt();
+                int64_t lhs = m_stack.pop().asSignedInt();
+                m_stack.push(Value(wrapSignedAdd(lhs, rhs)));
+                break;
+            }
+            case OpCode::ISUB: {
+                int64_t rhs = m_stack.pop().asSignedInt();
+                int64_t lhs = m_stack.pop().asSignedInt();
+                m_stack.push(Value(wrapSignedSub(lhs, rhs)));
+                break;
+            }
+            case OpCode::IMULT: {
+                int64_t rhs = m_stack.pop().asSignedInt();
+                int64_t lhs = m_stack.pop().asSignedInt();
+                m_stack.push(Value(wrapSignedMul(lhs, rhs)));
+                break;
+            }
+            case OpCode::IDIV: {
+                int64_t rhs = m_stack.pop().asSignedInt();
+                int64_t lhs = m_stack.pop().asSignedInt();
+                if (rhs == 0) {
+                    return runtimeError("Division by zero.");
+                }
+                m_stack.push(Value(lhs / rhs));
+                break;
+            }
+            case OpCode::IMOD: {
+                int64_t rhs = m_stack.pop().asSignedInt();
+                int64_t lhs = m_stack.pop().asSignedInt();
+                if (rhs == 0) {
+                    return runtimeError("Division by zero.");
+                }
+                m_stack.push(Value(lhs % rhs));
+                break;
+            }
+            case OpCode::UADD: {
+                uint64_t rhs = m_stack.pop().asUnsignedInt();
+                uint64_t lhs = m_stack.pop().asUnsignedInt();
+                m_stack.push(Value(lhs + rhs));
+                break;
+            }
+            case OpCode::USUB: {
+                uint64_t rhs = m_stack.pop().asUnsignedInt();
+                uint64_t lhs = m_stack.pop().asUnsignedInt();
+                m_stack.push(Value(lhs - rhs));
+                break;
+            }
+            case OpCode::UMULT: {
+                uint64_t rhs = m_stack.pop().asUnsignedInt();
+                uint64_t lhs = m_stack.pop().asUnsignedInt();
+                m_stack.push(Value(lhs * rhs));
+                break;
+            }
+            case OpCode::UDIV: {
+                uint64_t rhs = m_stack.pop().asUnsignedInt();
+                uint64_t lhs = m_stack.pop().asUnsignedInt();
+                if (rhs == 0) {
+                    return runtimeError("Division by zero.");
+                }
+                m_stack.push(Value(lhs / rhs));
+                break;
+            }
+            case OpCode::UMOD: {
+                uint64_t rhs = m_stack.pop().asUnsignedInt();
+                uint64_t lhs = m_stack.pop().asUnsignedInt();
+                if (rhs == 0) {
+                    return runtimeError("Division by zero.");
+                }
+                m_stack.push(Value(lhs % rhs));
                 break;
             }
             case OpCode::GREATER_THAN: {
@@ -472,7 +708,21 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                     return runtimeError("Operands must be numbers for '>'.");
                 }
 
-                m_stack.push(Value(a.asNumber() > b.asNumber()));
+                if (a.isSignedInt() && b.isSignedInt()) {
+                    m_stack.push(Value(a.asSignedInt() > b.asSignedInt()));
+                    break;
+                }
+
+                if (a.isUnsignedInt() && b.isUnsignedInt()) {
+                    m_stack.push(Value(a.asUnsignedInt() > b.asUnsignedInt()));
+                    break;
+                }
+
+                double lhs = 0.0;
+                double rhs = 0.0;
+                valueToDouble(a, lhs);
+                valueToDouble(b, rhs);
+                m_stack.push(Value(lhs > rhs));
                 break;
             }
             case OpCode::LESS_THAN: {
@@ -482,7 +732,21 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                     return runtimeError("Operands must be numbers for '<'.");
                 }
 
-                m_stack.push(Value(a.asNumber() < b.asNumber()));
+                if (a.isSignedInt() && b.isSignedInt()) {
+                    m_stack.push(Value(a.asSignedInt() < b.asSignedInt()));
+                    break;
+                }
+
+                if (a.isUnsignedInt() && b.isUnsignedInt()) {
+                    m_stack.push(Value(a.asUnsignedInt() < b.asUnsignedInt()));
+                    break;
+                }
+
+                double lhs = 0.0;
+                double rhs = 0.0;
+                valueToDouble(a, lhs);
+                valueToDouble(b, rhs);
+                m_stack.push(Value(lhs < rhs));
                 break;
             }
             case OpCode::GREATER_EQUAL_THAN: {
@@ -492,7 +756,21 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                     return runtimeError("Operands must be numbers for '>='.");
                 }
 
-                m_stack.push(Value(a.asNumber() >= b.asNumber()));
+                if (a.isSignedInt() && b.isSignedInt()) {
+                    m_stack.push(Value(a.asSignedInt() >= b.asSignedInt()));
+                    break;
+                }
+
+                if (a.isUnsignedInt() && b.isUnsignedInt()) {
+                    m_stack.push(Value(a.asUnsignedInt() >= b.asUnsignedInt()));
+                    break;
+                }
+
+                double lhs = 0.0;
+                double rhs = 0.0;
+                valueToDouble(a, lhs);
+                valueToDouble(b, rhs);
+                m_stack.push(Value(lhs >= rhs));
                 break;
             }
             case OpCode::LESS_EQUAL_THAN: {
@@ -502,7 +780,45 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                     return runtimeError("Operands must be numbers for '<='.");
                 }
 
-                m_stack.push(Value(a.asNumber() <= b.asNumber()));
+                if (a.isSignedInt() && b.isSignedInt()) {
+                    m_stack.push(Value(a.asSignedInt() <= b.asSignedInt()));
+                    break;
+                }
+
+                if (a.isUnsignedInt() && b.isUnsignedInt()) {
+                    m_stack.push(Value(a.asUnsignedInt() <= b.asUnsignedInt()));
+                    break;
+                }
+
+                double lhs = 0.0;
+                double rhs = 0.0;
+                valueToDouble(a, lhs);
+                valueToDouble(b, rhs);
+                m_stack.push(Value(lhs <= rhs));
+                break;
+            }
+            case OpCode::IGREATER: {
+                int64_t rhs = m_stack.pop().asSignedInt();
+                int64_t lhs = m_stack.pop().asSignedInt();
+                m_stack.push(Value(lhs > rhs));
+                break;
+            }
+            case OpCode::ILESS: {
+                int64_t rhs = m_stack.pop().asSignedInt();
+                int64_t lhs = m_stack.pop().asSignedInt();
+                m_stack.push(Value(lhs < rhs));
+                break;
+            }
+            case OpCode::IGREATER_EQ: {
+                int64_t rhs = m_stack.pop().asSignedInt();
+                int64_t lhs = m_stack.pop().asSignedInt();
+                m_stack.push(Value(lhs >= rhs));
+                break;
+            }
+            case OpCode::ILESS_EQ: {
+                int64_t rhs = m_stack.pop().asSignedInt();
+                int64_t lhs = m_stack.pop().asSignedInt();
+                m_stack.push(Value(lhs <= rhs));
                 break;
             }
             case OpCode::POP: {
@@ -1775,25 +2091,195 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
             case OpCode::SHIFT_LEFT: {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
-                if (!isNumberPair(a, b)) {
+                int64_t shift = 0;
+                if (!valueToSignedInt(b, shift)) {
                     return runtimeError("Operands must be numbers for '<<'.");
                 }
 
-                m_stack.push(Value(
-                    static_cast<double>(static_cast<int>(a.asNumber())
-                                        << static_cast<int>(b.asNumber()))));
+                uint32_t amount = static_cast<uint32_t>(shift) & 63u;
+                if (a.isUnsignedInt()) {
+                    m_stack.push(Value(a.asUnsignedInt() << amount));
+                } else {
+                    int64_t lhs = 0;
+                    if (!valueToSignedInt(a, lhs)) {
+                        return runtimeError(
+                            "Operands must be numbers for '<<'.");
+                    }
+                    m_stack.push(Value(static_cast<int64_t>(
+                        static_cast<uint64_t>(lhs) << amount)));
+                }
                 break;
             }
             case OpCode::SHIFT_RIGHT: {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
-                if (!isNumberPair(a, b)) {
+                int64_t shift = 0;
+                if (!valueToSignedInt(b, shift)) {
                     return runtimeError("Operands must be numbers for '>>'.");
                 }
 
-                m_stack.push(
-                    Value(static_cast<double>(static_cast<int>(a.asNumber()) >>
-                                              static_cast<int>(b.asNumber()))));
+                uint32_t amount = static_cast<uint32_t>(shift) & 63u;
+                if (a.isUnsignedInt()) {
+                    m_stack.push(Value(a.asUnsignedInt() >> amount));
+                } else {
+                    int64_t lhs = 0;
+                    if (!valueToSignedInt(a, lhs)) {
+                        return runtimeError(
+                            "Operands must be numbers for '>>'.");
+                    }
+                    m_stack.push(Value(lhs >> amount));
+                }
+                break;
+            }
+            case OpCode::BITWISE_AND: {
+                uint64_t rhs = 0;
+                uint64_t lhs = 0;
+                if (!valueToUnsignedInt(m_stack.pop(), rhs) ||
+                    !valueToUnsignedInt(m_stack.pop(), lhs)) {
+                    return runtimeError("Operands must be integers for '&'.");
+                }
+                m_stack.push(Value(lhs & rhs));
+                break;
+            }
+            case OpCode::BITWISE_OR: {
+                uint64_t rhs = 0;
+                uint64_t lhs = 0;
+                if (!valueToUnsignedInt(m_stack.pop(), rhs) ||
+                    !valueToUnsignedInt(m_stack.pop(), lhs)) {
+                    return runtimeError("Operands must be integers for '|'.");
+                }
+                m_stack.push(Value(lhs | rhs));
+                break;
+            }
+            case OpCode::BITWISE_XOR: {
+                uint64_t rhs = 0;
+                uint64_t lhs = 0;
+                if (!valueToUnsignedInt(m_stack.pop(), rhs) ||
+                    !valueToUnsignedInt(m_stack.pop(), lhs)) {
+                    return runtimeError("Operands must be integers for '^'.");
+                }
+                m_stack.push(Value(lhs ^ rhs));
+                break;
+            }
+            case OpCode::BITWISE_NOT: {
+                uint64_t value = 0;
+                if (!valueToUnsignedInt(m_stack.pop(), value)) {
+                    return runtimeError("Operand must be an integer for '~'.");
+                }
+                m_stack.push(Value(~value));
+                break;
+            }
+            case OpCode::WIDEN_INT: {
+                readByte();
+                break;
+            }
+            case OpCode::NARROW_INT: {
+                uint8_t kind = readByte();
+                Value value = m_stack.pop();
+
+                switch (static_cast<TypeKind>(kind)) {
+                    case TypeKind::I8: {
+                        int64_t converted = 0;
+                        if (!valueToSignedInt(value, converted)) {
+                            return runtimeError("Cannot cast value to i8.");
+                        }
+                        m_stack.push(Value(static_cast<int64_t>(
+                            static_cast<int8_t>(converted))));
+                        break;
+                    }
+                    case TypeKind::I16: {
+                        int64_t converted = 0;
+                        if (!valueToSignedInt(value, converted)) {
+                            return runtimeError("Cannot cast value to i16.");
+                        }
+                        m_stack.push(Value(static_cast<int64_t>(
+                            static_cast<int16_t>(converted))));
+                        break;
+                    }
+                    case TypeKind::I32: {
+                        int64_t converted = 0;
+                        if (!valueToSignedInt(value, converted)) {
+                            return runtimeError("Cannot cast value to i32.");
+                        }
+                        m_stack.push(Value(static_cast<int64_t>(
+                            static_cast<int32_t>(converted))));
+                        break;
+                    }
+                    case TypeKind::I64: {
+                        int64_t converted = 0;
+                        if (!valueToSignedInt(value, converted)) {
+                            return runtimeError("Cannot cast value to i64.");
+                        }
+                        m_stack.push(Value(converted));
+                        break;
+                    }
+                    case TypeKind::U8: {
+                        uint64_t converted = 0;
+                        if (!valueToUnsignedInt(value, converted)) {
+                            return runtimeError("Cannot cast value to u8.");
+                        }
+                        m_stack.push(Value(static_cast<uint64_t>(
+                            static_cast<uint8_t>(converted))));
+                        break;
+                    }
+                    case TypeKind::U16: {
+                        uint64_t converted = 0;
+                        if (!valueToUnsignedInt(value, converted)) {
+                            return runtimeError("Cannot cast value to u16.");
+                        }
+                        m_stack.push(Value(static_cast<uint64_t>(
+                            static_cast<uint16_t>(converted))));
+                        break;
+                    }
+                    case TypeKind::U32: {
+                        uint64_t converted = 0;
+                        if (!valueToUnsignedInt(value, converted)) {
+                            return runtimeError("Cannot cast value to u32.");
+                        }
+                        m_stack.push(Value(static_cast<uint64_t>(
+                            static_cast<uint32_t>(converted))));
+                        break;
+                    }
+                    case TypeKind::U64:
+                    case TypeKind::USIZE: {
+                        uint64_t converted = 0;
+                        if (!valueToUnsignedInt(value, converted)) {
+                            return runtimeError("Cannot cast value to u64.");
+                        }
+                        m_stack.push(Value(converted));
+                        break;
+                    }
+                    default:
+                        m_stack.push(value);
+                        break;
+                }
+                break;
+            }
+            case OpCode::INT_TO_FLOAT: {
+                Value value = m_stack.pop();
+                double converted = 0.0;
+                if (!valueToDouble(value, converted)) {
+                    return runtimeError("Cannot cast value to floating-point.");
+                }
+                m_stack.push(Value(converted));
+                break;
+            }
+            case OpCode::FLOAT_TO_INT: {
+                Value value = m_stack.pop();
+                int64_t converted = 0;
+                if (!valueToSignedInt(value, converted)) {
+                    return runtimeError("Cannot cast value to integer.");
+                }
+                m_stack.push(Value(converted));
+                break;
+            }
+            case OpCode::INT_NEGATE: {
+                Value value = m_stack.pop();
+                int64_t converted = 0;
+                if (!valueToSignedInt(value, converted)) {
+                    return runtimeError("Operand must be an integer.");
+                }
+                m_stack.push(Value(wrapSignedSub(0, converted)));
                 break;
             }
         }

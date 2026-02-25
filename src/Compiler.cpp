@@ -312,19 +312,92 @@ bool Compiler::isAssignmentOperator(TokenType type) const {
     }
 }
 
-bool Compiler::emitCompoundBinary(TokenType assignmentType) {
+uint8_t Compiler::arithmeticOpcode(TokenType operatorType,
+                                   const TypeRef& leftType) const {
+    if (leftType && leftType->isInteger()) {
+        const bool isSigned = leftType->isSigned();
+        switch (operatorType) {
+            case TokenType::PLUS:
+            case TokenType::PLUS_EQUAL:
+                return isSigned ? OpCode::IADD : OpCode::UADD;
+            case TokenType::MINUS:
+            case TokenType::MINUS_EQUAL:
+                return isSigned ? OpCode::ISUB : OpCode::USUB;
+            case TokenType::STAR:
+            case TokenType::STAR_EQUAL:
+                return isSigned ? OpCode::IMULT : OpCode::UMULT;
+            case TokenType::SLASH:
+            case TokenType::SLASH_EQUAL:
+                return isSigned ? OpCode::IDIV : OpCode::UDIV;
+            default:
+                break;
+        }
+    }
+
+    switch (operatorType) {
+        case TokenType::PLUS:
+        case TokenType::PLUS_EQUAL:
+            return OpCode::ADD;
+        case TokenType::MINUS:
+        case TokenType::MINUS_EQUAL:
+            return OpCode::SUB;
+        case TokenType::STAR:
+        case TokenType::STAR_EQUAL:
+            return OpCode::MULT;
+        case TokenType::SLASH:
+        case TokenType::SLASH_EQUAL:
+            return OpCode::DIV;
+        default:
+            return OpCode::ADD;
+    }
+}
+
+TypeRef Compiler::inferVariableType(const Token& name) const {
+    const auto& locals = currentContext().locals;
+    for (int index = static_cast<int>(locals.size()) - 1; index >= 0; --index) {
+        if (identifiersEqual(name, locals[index].name)) {
+            return locals[index].type ? locals[index].type
+                                      : TypeInfo::makeAny();
+        }
+    }
+
+    std::string variableName(name.start(), name.length());
+    auto slotIt = m_globalSlots.find(variableName);
+    if (slotIt != m_globalSlots.end()) {
+        size_t slot = slotIt->second;
+        if (slot < m_globalTypes.size() && m_globalTypes[slot]) {
+            return m_globalTypes[slot];
+        }
+    }
+
+    return TypeInfo::makeAny();
+}
+
+void Compiler::emitCoerceToType(const TypeRef& targetType) {
+    if (!targetType || targetType->isAny()) {
+        return;
+    }
+
+    if (targetType->isInteger()) {
+        emitByte(OpCode::NARROW_INT);
+        emitByte(static_cast<uint8_t>(targetType->kind));
+        return;
+    }
+
+    if (targetType->isFloat()) {
+        emitByte(OpCode::INT_TO_FLOAT);
+        return;
+    }
+}
+
+bool Compiler::emitCompoundBinary(TokenType assignmentType,
+                                  const TypeRef& leftType) {
     switch (assignmentType) {
         case TokenType::PLUS_EQUAL:
-            emitByte(OpCode::ADD);
-            return true;
         case TokenType::MINUS_EQUAL:
-            emitByte(OpCode::SUB);
-            return true;
         case TokenType::STAR_EQUAL:
-            emitByte(OpCode::MULT);
-            return true;
         case TokenType::SLASH_EQUAL:
-            emitByte(OpCode::DIV);
+            emitByte(arithmeticOpcode(assignmentType, leftType));
             return true;
         case TokenType::SHIFT_LEFT_EQUAL:
             emitByte(OpCode::SHIFT_LEFT);
@@ -364,12 +437,14 @@ void Compiler::namedVariable(const Token& name, bool canAssign) {
     uint8_t arg = 0;
     uint8_t getOp = OpCode::GET_GLOBAL_SLOT;
     uint8_t setOp = OpCode::SET_GLOBAL_SLOT;
+    TypeRef declaredType = TypeInfo::makeAny();
 
     int local = resolveLocal(name);
     if (local != -1) {
         getOp = OpCode::GET_LOCAL;
         setOp = OpCode::SET_LOCAL;
         arg = static_cast<uint8_t>(local);
+        declaredType = currentContext().locals[local].type;
     } else {
         int upvalue =
             resolveUpvalue(name, static_cast<int>(m_contexts.size()) - 1);
@@ -379,6 +454,10 @@ void Compiler::namedVariable(const Token& name, bool canAssign) {
             arg = static_cast<uint8_t>(upvalue);
         } else {
             arg = globalSlot(name);
+            if (arg < m_globalTypes.size()) {
+                declaredType = m_globalTypes[arg] ? m_globalTypes[arg]
+                                                  : TypeInfo::makeAny();
+            }
         }
     }
 
@@ -388,6 +467,7 @@ void Compiler::namedVariable(const Token& name, bool canAssign) {
         if (assignmentType == TokenType::EQUAL) {
             advance();
             expression();
+            emitCoerceToType(declaredType);
             emitBytes(setOp, arg);
             return;
         }
@@ -397,8 +477,11 @@ void Compiler::namedVariable(const Token& name, bool canAssign) {
             advance();
             emitBytes(getOp, arg);
             emitConstant(Value(1.0));
-            emitByte(assignmentType == TokenType::PLUS_PLUS ? OpCode::ADD
-                                                            : OpCode::SUB);
+            emitByte(arithmeticOpcode(assignmentType == TokenType::PLUS_PLUS
+                                          ? TokenType::PLUS
+                                          : TokenType::MINUS,
+                                      declaredType));
+            emitCoerceToType(declaredType);
             emitBytes(setOp, arg);
             return;
         }
@@ -412,7 +495,8 @@ void Compiler::namedVariable(const Token& name, bool canAssign) {
             advance();
             emitBytes(getOp, arg);
             expression();
-            emitCompoundBinary(assignmentType);
+            emitCompoundBinary(assignmentType, declaredType);
+            emitCoerceToType(declaredType);
             emitBytes(setOp, arg);
             return;
         }
@@ -1342,6 +1426,7 @@ void Compiler::typedVarDeclaration() {
             "Expected '=' in typed variable declaration (initializer is "
             "required).");
     expression();
+    emitCoerceToType(declaredType);
 
     consume(TokenType::SEMI_COLON,
             "Expected ';' after typed variable declaration.");
@@ -1483,6 +1568,10 @@ Compiler::ParseRule Compiler::getRule(TokenType type) {
             return ParseRule{nullptr,
                              [this](bool canAssign) { orOperator(canAssign); },
                              PREC_OR};
+        case TokenType::AS_KW:
+            return ParseRule{
+                nullptr, [this](bool canAssign) { castOperator(canAssign); },
+                PREC_CALL};
 
         default:
             return ParseRule{nullptr, nullptr, PREC_NONE};
@@ -1648,12 +1737,14 @@ void Compiler::prefixUpdate(bool canAssign) {
         uint8_t arg = 0;
         uint8_t getOp = OpCode::GET_GLOBAL_SLOT;
         uint8_t setOp = OpCode::SET_GLOBAL_SLOT;
+        TypeRef declaredType = TypeInfo::makeAny();
 
         int local = resolveLocal(nameToken);
         if (local != -1) {
             getOp = OpCode::GET_LOCAL;
             setOp = OpCode::SET_LOCAL;
             arg = static_cast<uint8_t>(local);
+            declaredType = currentContext().locals[local].type;
         } else {
             int upvalue = resolveUpvalue(
                 nameToken, static_cast<int>(m_contexts.size()) - 1);
@@ -1663,12 +1754,18 @@ void Compiler::prefixUpdate(bool canAssign) {
                 arg = static_cast<uint8_t>(upvalue);
             } else {
                 arg = globalSlot(nameToken);
+                if (arg < m_globalTypes.size()) {
+                    declaredType = m_globalTypes[arg] ? m_globalTypes[arg]
+                                                      : TypeInfo::makeAny();
+                }
             }
         }
 
         emitBytes(getOp, arg);
         emitConstant(Value(1.0));
-        emitByte(isIncrement ? OpCode::ADD : OpCode::SUB);
+        emitByte(arithmeticOpcode(
+            isIncrement ? TokenType::PLUS : TokenType::MINUS, declaredType));
+        emitCoerceToType(declaredType);
         emitBytes(setOp, arg);
     };
 
@@ -1766,6 +1863,25 @@ void Compiler::binary(bool canAssign) {
             break;
         default:
             return;
+    }
+}
+
+void Compiler::castOperator(bool canAssign) {
+    (void)canAssign;
+
+    TypeRef targetType = parseTypeExprType();
+    if (!targetType) {
+        errorAtCurrent("Expected type after 'as'.");
+        return;
+    }
+
+    if (targetType->isInteger()) {
+        emitBytes(OpCode::NARROW_INT, static_cast<uint8_t>(targetType->kind));
+        return;
+    }
+
+    if (targetType->isFloat()) {
+        emitByte(OpCode::INT_TO_FLOAT);
     }
 }
 
