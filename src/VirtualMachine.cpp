@@ -187,6 +187,33 @@ Status VirtualMachine::run() {
                 m_stack.push(Value(a.asNumber() <= b.asNumber()));
                 break;
             }
+            case OpCode::POP: {
+                m_stack.pop();
+                break;
+            }
+            case OpCode::PRINT_OP: {
+                Value value = m_stack.pop();
+                std::cout << value << std::endl;
+                break;
+            }
+            case OpCode::DEFINE_GLOBAL: {
+                std::string name = readNameConstant();
+                Value value = m_stack.pop();
+                m_globals[name] = value;
+                break;
+            }
+            case OpCode::GET_GLOBAL: {
+                std::string name = readNameConstant();
+                auto it = m_globals.find(name);
+                if (it == m_globals.end()) {
+                    std::cerr << "Runtime error: Undefined variable '" << name
+                              << "'." << std::endl;
+                    return Status::RUNTIME_ERROR;
+                }
+
+                m_stack.push(it->second);
+                break;
+            }
             case OpCode::SHIFT_LEFT: {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();

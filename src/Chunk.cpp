@@ -74,6 +74,14 @@ int Chunk::disassembleInstruction(int offset) {
             return simpleInstruction("GREATER_EQUAL_THAN", offset);
         case OpCode::LESS_EQUAL_THAN:
             return simpleInstruction("LESS_EQUAL_THAN", offset);
+        case OpCode::POP:
+            return simpleInstruction("POP", offset);
+        case OpCode::PRINT_OP:
+            return simpleInstruction("PRINT", offset);
+        case OpCode::DEFINE_GLOBAL:
+            return constantInstruction("DEFINE_GLOBAL", offset);
+        case OpCode::GET_GLOBAL:
+            return constantInstruction("GET_GLOBAL", offset);
         case OpCode::SHIFT_LEFT:
             return simpleInstruction("SHIFT_LEFT", offset);
         case OpCode::SHIFT_RIGHT:

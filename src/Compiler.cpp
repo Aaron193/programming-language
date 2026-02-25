@@ -12,11 +12,11 @@ bool Compiler::compile(std::string_view source, Chunk& chunk) {
 
     advance();
 
-    expression();
-    if (m_parser->current.type() == TokenType::SEMI_COLON) {
-        advance();
+    while (m_parser->current.type() != TokenType::END_OF_FILE) {
+        declaration();
     }
-    consume(TokenType::END_OF_FILE, "Expected end of expression.");
+
+    consume(TokenType::END_OF_FILE, "Expected end of source.");
     emitReturn();
 
     return !m_parser->hadError;
@@ -45,6 +45,19 @@ uint8_t Compiler::makeConstant(Value value) {
 
 void Compiler::emitConstant(Value value) {
     emitBytes(OpCode::CONSTANT, makeConstant(value));
+}
+
+uint8_t Compiler::identifierConstant(const Token& name) {
+    return makeConstant(Value(std::string(name.start(), name.length())));
+}
+
+uint8_t Compiler::parseVariable(const std::string& message) {
+    consume(TokenType::IDENTIFIER, message);
+    return identifierConstant(m_parser->previous);
+}
+
+void Compiler::defineVariable(uint8_t global) {
+    emitBytes(OpCode::DEFINE_GLOBAL, global);
 }
 
 void Compiler::advance() {
@@ -94,6 +107,56 @@ void Compiler::consume(TokenType type, const std::string& message) {
 
 void Compiler::expression() { parsePrecedence(PREC_ASSIGNMENT); }
 
+void Compiler::declaration() {
+    if (m_parser->current.type() == TokenType::VAR) {
+        advance();
+        varDeclaration();
+        return;
+    }
+
+    statement();
+}
+
+void Compiler::statement() {
+    if (m_parser->current.type() == TokenType::PRINT) {
+        advance();
+        printStatement();
+        return;
+    }
+
+    expressionStatement();
+}
+
+void Compiler::printStatement() {
+    expression();
+    if (m_parser->current.type() == TokenType::SEMI_COLON) {
+        advance();
+    }
+    emitByte(OpCode::PRINT_OP);
+}
+
+void Compiler::expressionStatement() {
+    expression();
+    if (m_parser->current.type() == TokenType::SEMI_COLON) {
+        advance();
+    }
+    emitByte(OpCode::POP);
+}
+
+void Compiler::varDeclaration() {
+    uint8_t global = parseVariable("Expected variable name.");
+
+    if (m_parser->current.type() == TokenType::EQUAL) {
+        advance();
+        expression();
+    } else {
+        emitByte(OpCode::NIL);
+    }
+
+    consume(TokenType::SEMI_COLON, "Expected ';' after variable declaration.");
+    defineVariable(global);
+}
+
 void Compiler::parsePrecedence(Precedence precedence) {
     advance();
 
@@ -118,6 +181,8 @@ Compiler::ParseRule Compiler::getRule(TokenType type) {
             return ParseRule{[this]() { grouping(); }, nullptr, PREC_NONE};
         case TokenType::NUMBER:
             return ParseRule{[this]() { number(); }, nullptr, PREC_NONE};
+        case TokenType::IDENTIFIER:
+            return ParseRule{[this]() { variable(); }, nullptr, PREC_NONE};
         case TokenType::STRING:
             return ParseRule{[this]() { stringLiteral(); }, nullptr, PREC_NONE};
         case TokenType::TRUE:
@@ -156,6 +221,11 @@ void Compiler::number() {
     std::string literal(m_parser->previous.start(),
                         m_parser->previous.length());
     emitConstant(std::stod(literal));
+}
+
+void Compiler::variable() {
+    uint8_t arg = identifierConstant(m_parser->previous);
+    emitBytes(OpCode::GET_GLOBAL, arg);
 }
 
 void Compiler::literal() {

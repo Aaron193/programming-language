@@ -194,6 +194,10 @@ TokenType Scanner::getIdentifier() {
             if (matchKeyword("or", 2)) return TokenType::OR;
             break;
 
+        case 'p':
+            if (matchKeyword("print", 5)) return TokenType::PRINT;
+            break;
+
         case 'r':
             if (matchKeyword("return", 6)) return TokenType::_RETURN;
             break;

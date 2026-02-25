@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <string_view>
+#include <unordered_map>
 
 #include "Chunk.hpp"
 #include "Compiler.hpp"
@@ -22,11 +23,17 @@ class VirtualMachine {
     Stack<Value> m_stack;
     // compiler
     Compiler m_compiler;
+    // globals
+    std::unordered_map<std::string, Value> m_globals;
 
     // inlined methods
     uint8_t readByte() { return *this->m_ip++; }
     Value readConstant() {
         return this->m_chunk->getConstants()[this->readByte()];
+    }
+    std::string readNameConstant() {
+        Value constant = readConstant();
+        return constant.asString();
     }
 
     Status run();

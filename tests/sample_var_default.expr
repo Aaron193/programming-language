@@ -1,0 +1,2 @@
+var y;
+print y == null;

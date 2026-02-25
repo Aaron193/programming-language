@@ -54,12 +54,21 @@ class Compiler {
     void emitReturn();
     uint8_t makeConstant(Value value);
     void emitConstant(Value value);
+    uint8_t identifierConstant(const Token& name);
+    uint8_t parseVariable(const std::string& message);
+    void defineVariable(uint8_t global);
 
     void expression();
+    void declaration();
+    void statement();
+    void printStatement();
+    void expressionStatement();
+    void varDeclaration();
     void parsePrecedence(Precedence precedence);
     ParseRule getRule(TokenType type);
 
     void number();
+    void variable();
     void literal();
     void stringLiteral();
     void grouping();

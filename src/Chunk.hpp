@@ -28,6 +28,10 @@ enum OpCode {
     LESS_THAN,
     GREATER_EQUAL_THAN,
     LESS_EQUAL_THAN,
+    POP,
+    PRINT_OP,
+    DEFINE_GLOBAL,
+    GET_GLOBAL,
     SHIFT_LEFT,
     SHIFT_RIGHT,
 };
