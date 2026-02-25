@@ -156,6 +156,8 @@ int Chunk::disassembleInstruction(int offset) {
                                       *m_constants);
         case OpCode::CLOSE_UPVALUE:
             return simpleInstruction("CLOSE_UPVALUE", offset);
+        case OpCode::DUP:
+            return simpleInstruction("DUP", offset);
         case OpCode::JUMP:
             return jumpInstruction("JUMP", 1, offset, m_bytes->at(offset + 1),
                                    m_bytes->at(offset + 2));

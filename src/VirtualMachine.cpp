@@ -652,6 +652,10 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 m_stack.pop();
                 break;
             }
+            case OpCode::DUP: {
+                m_stack.push(m_stack.peek(0));
+                break;
+            }
             case OpCode::JUMP: {
                 uint16_t offset = readShort();
                 currentFrame().ip += offset;

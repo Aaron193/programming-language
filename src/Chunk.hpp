@@ -79,6 +79,7 @@ enum OpCode {
     CALL,
     CLOSURE,
     CLOSE_UPVALUE,
+    DUP,
     JUMP,
     JUMP_IF_FALSE,
     LOOP,

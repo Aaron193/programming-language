@@ -82,6 +82,48 @@ void Compiler::emitLoop(int loopStart) {
     emitByte(static_cast<uint8_t>(offset & 0xff));
 }
 
+bool Compiler::isAssignmentOperator(TokenType type) const {
+    switch (type) {
+        case TokenType::EQUAL:
+        case TokenType::PLUS_EQUAL:
+        case TokenType::MINUS_EQUAL:
+        case TokenType::STAR_EQUAL:
+        case TokenType::SLASH_EQUAL:
+        case TokenType::SHIFT_LEFT_EQUAL:
+        case TokenType::SHIFT_RIGHT_EQUAL:
+        case TokenType::PLUS_PLUS:
+        case TokenType::MINUS_MINUS:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool Compiler::emitCompoundBinary(TokenType assignmentType) {
+    switch (assignmentType) {
+        case TokenType::PLUS_EQUAL:
+            emitByte(OpCode::ADD);
+            return true;
+        case TokenType::MINUS_EQUAL:
+            emitByte(OpCode::SUB);
+            return true;
+        case TokenType::STAR_EQUAL:
+            emitByte(OpCode::MULT);
+            return true;
+        case TokenType::SLASH_EQUAL:
+            emitByte(OpCode::DIV);
+            return true;
+        case TokenType::SHIFT_LEFT_EQUAL:
+            emitByte(OpCode::SHIFT_LEFT);
+            return true;
+        case TokenType::SHIFT_RIGHT_EQUAL:
+            emitByte(OpCode::SHIFT_RIGHT);
+            return true;
+        default:
+            return false;
+    }
+}
+
 uint8_t Compiler::identifierConstant(const Token& name) {
     return makeConstant(Value(std::string(name.start(), name.length())));
 }
@@ -108,11 +150,40 @@ void Compiler::namedVariable(const Token& name, bool canAssign) {
         }
     }
 
-    if (canAssign && m_parser->current.type() == TokenType::EQUAL) {
-        advance();
-        expression();
-        emitBytes(setOp, arg);
-        return;
+    if (canAssign) {
+        TokenType assignmentType = m_parser->current.type();
+
+        if (assignmentType == TokenType::EQUAL) {
+            advance();
+            expression();
+            emitBytes(setOp, arg);
+            return;
+        }
+
+        if (assignmentType == TokenType::PLUS_PLUS ||
+            assignmentType == TokenType::MINUS_MINUS) {
+            advance();
+            emitBytes(getOp, arg);
+            emitConstant(Value(1.0));
+            emitByte(assignmentType == TokenType::PLUS_PLUS ? OpCode::ADD
+                                                            : OpCode::SUB);
+            emitBytes(setOp, arg);
+            return;
+        }
+
+        if (assignmentType == TokenType::PLUS_EQUAL ||
+            assignmentType == TokenType::MINUS_EQUAL ||
+            assignmentType == TokenType::STAR_EQUAL ||
+            assignmentType == TokenType::SLASH_EQUAL ||
+            assignmentType == TokenType::SHIFT_LEFT_EQUAL ||
+            assignmentType == TokenType::SHIFT_RIGHT_EQUAL) {
+            advance();
+            emitBytes(getOp, arg);
+            expression();
+            emitCompoundBinary(assignmentType);
+            emitBytes(setOp, arg);
+            return;
+        }
     }
 
     emitBytes(getOp, arg);
@@ -635,10 +706,15 @@ void Compiler::parsePrecedence(Precedence precedence) {
         infixRule(canAssign);
     }
 
-    if (canAssign && m_parser->current.type() == TokenType::EQUAL) {
+    if (canAssign && isAssignmentOperator(m_parser->current.type())) {
+        TokenType assignmentType = m_parser->current.type();
         errorAtCurrent("Invalid assignment target.");
         advance();
-        expression();
+
+        if (assignmentType != TokenType::PLUS_PLUS &&
+            assignmentType != TokenType::MINUS_MINUS) {
+            expression();
+        }
     }
 }
 
@@ -678,6 +754,11 @@ Compiler::ParseRule Compiler::getRule(TokenType type) {
         case TokenType::BANG:
             return ParseRule{[this](bool canAssign) { unary(canAssign); },
                              nullptr, PREC_NONE};
+        case TokenType::PLUS_PLUS:
+        case TokenType::MINUS_MINUS:
+            return ParseRule{
+                [this](bool canAssign) { prefixUpdate(canAssign); }, nullptr,
+                PREC_NONE};
         case TokenType::MINUS:
             return ParseRule{[this](bool canAssign) { unary(canAssign); },
                              [this](bool canAssign) { binary(canAssign); },
@@ -821,6 +902,89 @@ void Compiler::unary(bool canAssign) {
     }
 }
 
+void Compiler::prefixUpdate(bool canAssign) {
+    (void)canAssign;
+
+    TokenType updateToken = m_parser->previous.type();
+    bool isIncrement = updateToken == TokenType::PLUS_PLUS;
+
+    auto emitNamedUpdate = [&](const Token& nameToken) {
+        uint8_t arg = 0;
+        uint8_t getOp = OpCode::GET_GLOBAL;
+        uint8_t setOp = OpCode::SET_GLOBAL;
+
+        int local = resolveLocal(nameToken);
+        if (local != -1) {
+            getOp = OpCode::GET_LOCAL;
+            setOp = OpCode::SET_LOCAL;
+            arg = static_cast<uint8_t>(local);
+        } else {
+            int upvalue = resolveUpvalue(
+                nameToken, static_cast<int>(m_contexts.size()) - 1);
+            if (upvalue != -1) {
+                getOp = OpCode::GET_UPVALUE;
+                setOp = OpCode::SET_UPVALUE;
+                arg = static_cast<uint8_t>(upvalue);
+            } else {
+                arg = identifierConstant(nameToken);
+            }
+        }
+
+        emitBytes(getOp, arg);
+        emitConstant(Value(1.0));
+        emitByte(isIncrement ? OpCode::ADD : OpCode::SUB);
+        emitBytes(setOp, arg);
+    };
+
+    if (m_parser->current.type() == TokenType::IDENTIFIER) {
+        advance();
+        Token nameToken = m_parser->previous;
+
+        if (m_parser->current.type() != TokenType::DOT) {
+            emitNamedUpdate(nameToken);
+            return;
+        }
+
+        namedVariable(nameToken, false);
+    } else if (m_parser->current.type() == TokenType::THIS) {
+        advance();
+        thisExpression(false);
+
+        if (m_parser->current.type() != TokenType::DOT) {
+            errorAtCurrent("Expected property target after update operator.");
+            return;
+        }
+    } else {
+        errorAtCurrent("Expected variable or property after update operator.");
+        return;
+    }
+
+    uint8_t propertyName = 0;
+    bool hasProperty = false;
+
+    while (m_parser->current.type() == TokenType::DOT) {
+        advance();
+        consume(TokenType::IDENTIFIER, "Expected property name after '.'.");
+        propertyName = identifierConstant(m_parser->previous);
+        hasProperty = true;
+
+        if (m_parser->current.type() == TokenType::DOT) {
+            emitBytes(OpCode::GET_PROPERTY, propertyName);
+        }
+    }
+
+    if (!hasProperty) {
+        errorAtCurrent("Expected property target after update operator.");
+        return;
+    }
+
+    emitByte(OpCode::DUP);
+    emitBytes(OpCode::GET_PROPERTY, propertyName);
+    emitConstant(Value(1.0));
+    emitByte(isIncrement ? OpCode::ADD : OpCode::SUB);
+    emitBytes(OpCode::SET_PROPERTY, propertyName);
+}
+
 void Compiler::binary(bool canAssign) {
     (void)canAssign;
     TokenType operatorType = m_parser->previous.type();
@@ -897,11 +1061,42 @@ void Compiler::dot(bool canAssign) {
     consume(TokenType::IDENTIFIER, "Expected property name after '.'.");
     uint8_t name = identifierConstant(m_parser->previous);
 
-    if (canAssign && m_parser->current.type() == TokenType::EQUAL) {
-        advance();
-        expression();
-        emitBytes(OpCode::SET_PROPERTY, name);
-        return;
+    if (canAssign) {
+        TokenType assignmentType = m_parser->current.type();
+
+        if (assignmentType == TokenType::EQUAL) {
+            advance();
+            expression();
+            emitBytes(OpCode::SET_PROPERTY, name);
+            return;
+        }
+
+        if (assignmentType == TokenType::PLUS_PLUS ||
+            assignmentType == TokenType::MINUS_MINUS) {
+            advance();
+            emitByte(OpCode::DUP);
+            emitBytes(OpCode::GET_PROPERTY, name);
+            emitConstant(Value(1.0));
+            emitByte(assignmentType == TokenType::PLUS_PLUS ? OpCode::ADD
+                                                            : OpCode::SUB);
+            emitBytes(OpCode::SET_PROPERTY, name);
+            return;
+        }
+
+        if (assignmentType == TokenType::PLUS_EQUAL ||
+            assignmentType == TokenType::MINUS_EQUAL ||
+            assignmentType == TokenType::STAR_EQUAL ||
+            assignmentType == TokenType::SLASH_EQUAL ||
+            assignmentType == TokenType::SHIFT_LEFT_EQUAL ||
+            assignmentType == TokenType::SHIFT_RIGHT_EQUAL) {
+            advance();
+            emitByte(OpCode::DUP);
+            emitBytes(OpCode::GET_PROPERTY, name);
+            expression();
+            emitCompoundBinary(assignmentType);
+            emitBytes(OpCode::SET_PROPERTY, name);
+            return;
+        }
     }
 
     emitBytes(OpCode::GET_PROPERTY, name);

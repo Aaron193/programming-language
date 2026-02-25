@@ -107,6 +107,8 @@ class Compiler {
     int emitJump(uint8_t instruction);
     void patchJump(int offset);
     void emitLoop(int loopStart);
+    bool isAssignmentOperator(TokenType type) const;
+    bool emitCompoundBinary(TokenType assignmentType);
 
     void expression();
     void declaration();
@@ -133,6 +135,7 @@ class Compiler {
     void stringLiteral(bool canAssign);
     void grouping(bool canAssign);
     void unary(bool canAssign);
+    void prefixUpdate(bool canAssign);
     void binary(bool canAssign);
     void call(bool canAssign);
     void dot(bool canAssign);

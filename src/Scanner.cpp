@@ -88,24 +88,36 @@ Token Scanner::nextToken() {
             return match('=') ? createToken(TokenType::BANG_EQUAL)
                               : createToken(TokenType::BANG);
         case '+':
-            return createToken(TokenType::PLUS);
+            if (match('+')) return createToken(TokenType::PLUS_PLUS);
+            return match('=') ? createToken(TokenType::PLUS_EQUAL)
+                              : createToken(TokenType::PLUS);
 
         case '-':
-            return createToken(TokenType::MINUS);
+            if (match('-')) return createToken(TokenType::MINUS_MINUS);
+            return match('=') ? createToken(TokenType::MINUS_EQUAL)
+                              : createToken(TokenType::MINUS);
 
         case '*':
-            return createToken(TokenType::STAR);
+            return match('=') ? createToken(TokenType::STAR_EQUAL)
+                              : createToken(TokenType::STAR);
 
         case '/':
-            return createToken(TokenType::SLASH);
+            return match('=') ? createToken(TokenType::SLASH_EQUAL)
+                              : createToken(TokenType::SLASH);
 
         case '>':
-            if (match('>')) return createToken(TokenType::SHIFT_RIGHT_TOKEN);
+            if (match('>')) {
+                return match('=') ? createToken(TokenType::SHIFT_RIGHT_EQUAL)
+                                  : createToken(TokenType::SHIFT_RIGHT_TOKEN);
+            }
             return match('=') ? createToken(TokenType::GREATER_EQUAL)
                               : createToken(TokenType::GREATER);
 
         case '<':
-            if (match('<')) return createToken(TokenType::SHIFT_LEFT_TOKEN);
+            if (match('<')) {
+                return match('=') ? createToken(TokenType::SHIFT_LEFT_EQUAL)
+                                  : createToken(TokenType::SHIFT_LEFT_TOKEN);
+            }
             return match('=') ? createToken(TokenType::LESS_EQUAL)
                               : createToken(TokenType::LESS);
 

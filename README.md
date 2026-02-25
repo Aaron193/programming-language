@@ -9,7 +9,8 @@ This project is a bytecode-compiled, stack-based interpreter implemented in C++.
 - Comparison/equality: `>`, `>=`, `<`, `<=`, `==`, `!=`
 - Logical operators: `!`, `and`, `or` (short-circuiting)
 - Bit shifts: `<<`, `>>`
-- Variables: `var` declarations, assignment, lexical scope
+- Variables: `var` declarations, assignment, compound assignment (`+=`, `-=`, `*=`, `/=`, `<<=`, `>>=`), lexical scope
+- Update operators: `++`, `--`
 - Control flow: `if`/`else`, `while`, `for`
 - Functions: declarations, parameters, return values, recursion
 - Closures: nested functions with captured/upvalue variables
