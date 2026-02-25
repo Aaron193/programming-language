@@ -1,0 +1,16 @@
+class Box {
+  get() {
+    return this.value;
+  }
+
+  set(v) {
+    this.value = v;
+    return this.value;
+  }
+}
+
+var b = Box();
+b.value = 7;
+print b.get();
+print b.set(9);
+print b.value;

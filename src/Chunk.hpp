@@ -11,6 +11,7 @@
 class Chunk;
 struct ClassObject;
 struct InstanceObject;
+struct BoundMethodObject;
 
 struct FunctionObject {
     std::string name;
@@ -20,6 +21,12 @@ struct FunctionObject {
 
 struct ClassObject {
     std::string name;
+    std::unordered_map<std::string, std::shared_ptr<FunctionObject>> methods;
+};
+
+struct BoundMethodObject {
+    std::shared_ptr<InstanceObject> receiver;
+    std::shared_ptr<FunctionObject> method;
 };
 
 /*
@@ -52,6 +59,8 @@ enum OpCode {
     GET_LOCAL,
     SET_LOCAL,
     CLASS_OP,
+    METHOD,
+    GET_THIS,
     GET_PROPERTY,
     SET_PROPERTY,
     CALL,
@@ -71,9 +80,9 @@ enum ValueType {
 
 struct Value {
     std::variant<double, bool, std::monostate, std::string,
-                 std::shared_ptr<FunctionObject>,
-                 std::shared_ptr<ClassObject>,
-                 std::shared_ptr<InstanceObject>>
+                 std::shared_ptr<FunctionObject>, std::shared_ptr<ClassObject>,
+                 std::shared_ptr<InstanceObject>,
+                 std::shared_ptr<BoundMethodObject>>
         data;
 
     Value() : data(std::monostate{}) {}
@@ -84,6 +93,7 @@ struct Value {
     Value(std::shared_ptr<FunctionObject> value) : data(std::move(value)) {}
     Value(std::shared_ptr<ClassObject> value) : data(std::move(value)) {}
     Value(std::shared_ptr<InstanceObject> value) : data(std::move(value)) {}
+    Value(std::shared_ptr<BoundMethodObject> value) : data(std::move(value)) {}
 
     bool isNumber() const { return std::holds_alternative<double>(data); }
     bool isBool() const { return std::holds_alternative<bool>(data); }
@@ -98,6 +108,9 @@ struct Value {
     bool isInstance() const {
         return std::holds_alternative<std::shared_ptr<InstanceObject>>(data);
     }
+    bool isBoundMethod() const {
+        return std::holds_alternative<std::shared_ptr<BoundMethodObject>>(data);
+    }
 
     double asNumber() const { return std::get<double>(data); }
     bool asBool() const { return std::get<bool>(data); }
@@ -110,6 +123,9 @@ struct Value {
     }
     std::shared_ptr<InstanceObject> asInstance() const {
         return std::get<std::shared_ptr<InstanceObject>>(data);
+    }
+    std::shared_ptr<BoundMethodObject> asBoundMethod() const {
+        return std::get<std::shared_ptr<BoundMethodObject>>(data);
     }
 };
 
@@ -142,6 +158,9 @@ inline std::ostream& operator<<(std::ostream& stream, const Value& value) {
     } else if (value.isInstance()) {
         auto instance = value.asInstance();
         stream << "<instance " << instance->klass->name << ">";
+    } else if (value.isBoundMethod()) {
+        auto bound = value.asBoundMethod();
+        stream << "<bound method " << bound->method->name << ">";
     } else {
         stream << value.asString();
     }

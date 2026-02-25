@@ -255,8 +255,31 @@ void Compiler::classDeclaration() {
     emitBytes(OpCode::CLASS_OP, nameConstant);
     defineVariable(variable);
 
+    if (m_scopeDepth > 0) {
+        int local = resolveLocal(nameToken);
+        emitBytes(OpCode::GET_LOCAL, static_cast<uint8_t>(local));
+    } else {
+        emitBytes(OpCode::GET_GLOBAL, nameConstant);
+    }
+
     consume(TokenType::OPEN_CURLY, "Expected '{' before class body.");
+    while (m_parser->current.type() != TokenType::CLOSE_CURLY &&
+           m_parser->current.type() != TokenType::END_OF_FILE) {
+        methodDeclaration();
+    }
     consume(TokenType::CLOSE_CURLY, "Expected '}' after class body.");
+    emitByte(OpCode::POP);
+}
+
+void Compiler::methodDeclaration() {
+    consume(TokenType::IDENTIFIER, "Expected method name.");
+    Token nameToken = m_parser->previous;
+    uint8_t nameConstant = identifierConstant(nameToken);
+
+    std::shared_ptr<FunctionObject> function = compileFunction(
+        std::string(nameToken.start(), nameToken.length()), true);
+    emitConstant(Value(function));
+    emitBytes(OpCode::METHOD, nameConstant);
 }
 
 void Compiler::statement() {
@@ -500,15 +523,18 @@ Compiler::ParseRule Compiler::getRule(TokenType type) {
                              [this](bool canAssign) { call(canAssign); },
                              PREC_CALL};
         case TokenType::DOT:
-            return ParseRule{nullptr,
-                             [this](bool canAssign) { dot(canAssign); },
-                             PREC_CALL};
+            return ParseRule{
+                nullptr, [this](bool canAssign) { dot(canAssign); }, PREC_CALL};
         case TokenType::NUMBER:
             return ParseRule{[this](bool canAssign) { number(canAssign); },
                              nullptr, PREC_NONE};
         case TokenType::IDENTIFIER:
             return ParseRule{[this](bool canAssign) { variable(canAssign); },
                              nullptr, PREC_NONE};
+        case TokenType::THIS:
+            return ParseRule{
+                [this](bool canAssign) { thisExpression(canAssign); }, nullptr,
+                PREC_NONE};
         case TokenType::STRING:
             return ParseRule{
                 [this](bool canAssign) { stringLiteral(canAssign); }, nullptr,
@@ -596,6 +622,16 @@ void Compiler::variable(bool canAssign) {
     }
 
     emitBytes(getOp, arg);
+}
+
+void Compiler::thisExpression(bool canAssign) {
+    (void)canAssign;
+    if (!m_inMethod) {
+        errorAt(m_parser->previous, "Cannot use 'this' outside of a method.");
+        return;
+    }
+
+    emitByte(OpCode::GET_THIS);
 }
 
 void Compiler::literal(bool canAssign) {
@@ -754,17 +790,19 @@ void Compiler::orOperator(bool canAssign) {
 }
 
 std::shared_ptr<FunctionObject> Compiler::compileFunction(
-    const std::string& name) {
+    const std::string& name, bool isMethod) {
     consume(TokenType::OPEN_PAREN, "Expected '(' after function name.");
 
     Chunk* enclosingChunk = m_chunk;
     bool enclosingInFunction = m_inFunction;
+    bool enclosingInMethod = m_inMethod;
     auto enclosingLocals = m_locals;
     int enclosingScopeDepth = m_scopeDepth;
 
     auto functionChunk = std::make_shared<Chunk>();
     m_chunk = functionChunk.get();
     m_inFunction = true;
+    m_inMethod = isMethod;
     m_locals.clear();
     m_scopeDepth = 1;
 
@@ -798,6 +836,7 @@ std::shared_ptr<FunctionObject> Compiler::compileFunction(
 
     m_chunk = enclosingChunk;
     m_inFunction = enclosingInFunction;
+    m_inMethod = enclosingInMethod;
     m_locals = std::move(enclosingLocals);
     m_scopeDepth = enclosingScopeDepth;
 

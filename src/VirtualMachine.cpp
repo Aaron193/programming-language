@@ -14,7 +14,8 @@ static bool isNumberPair(const Value& lhs, const Value& rhs) {
 }
 
 Status VirtualMachine::callFunction(std::shared_ptr<FunctionObject> function,
-                                    uint8_t argumentCount) {
+                                    uint8_t argumentCount,
+                                    std::shared_ptr<InstanceObject> receiver) {
     if (function->parameters.size() != argumentCount) {
         std::cerr << "Runtime error: Function '" << function->name
                   << "' expected " << function->parameters.size()
@@ -27,7 +28,8 @@ Status VirtualMachine::callFunction(std::shared_ptr<FunctionObject> function,
         m_stack.size() - static_cast<size_t>(argumentCount) - 1;
 
     m_frames.push_back(CallFrame{function->chunk.get(),
-                                 function->chunk->getBytes(), calleeIndex + 1});
+                                 function->chunk->getBytes(), calleeIndex + 1,
+                                 calleeIndex, receiver});
     return Status::OK;
 }
 
@@ -56,8 +58,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                     return Status::OK;
                 }
 
-                size_t calleeIndex = finishedFrame.slotBase - 1;
-                m_stack.popN(m_stack.size() - calleeIndex);
+                m_stack.popN(m_stack.size() - finishedFrame.calleeIndex);
                 m_stack.push(result);
                 break;
             }
@@ -273,25 +274,64 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 m_stack.push(Value(klass));
                 break;
             }
+            case OpCode::METHOD: {
+                std::string name = readNameConstant();
+                Value method = m_stack.peek(0);
+                Value klass = m_stack.peek(1);
+
+                if (!klass.isClass() || !method.isFunction()) {
+                    std::cerr << "Runtime error: Invalid method declaration."
+                              << std::endl;
+                    return Status::RUNTIME_ERROR;
+                }
+
+                klass.asClass()->methods[name] = method.asFunction();
+                m_stack.pop();
+                break;
+            }
+            case OpCode::GET_THIS: {
+                auto receiver = currentFrame().receiver;
+                if (!receiver) {
+                    std::cerr << "Runtime error: Cannot use 'this' outside of "
+                                 "a method."
+                              << std::endl;
+                    return Status::RUNTIME_ERROR;
+                }
+
+                m_stack.push(Value(receiver));
+                break;
+            }
             case OpCode::GET_PROPERTY: {
                 std::string name = readNameConstant();
                 Value receiver = m_stack.peek(0);
                 if (!receiver.isInstance()) {
-                    std::cerr << "Runtime error: Only instances have properties."
-                              << std::endl;
+                    std::cerr
+                        << "Runtime error: Only instances have properties."
+                        << std::endl;
                     return Status::RUNTIME_ERROR;
                 }
 
                 auto instance = receiver.asInstance();
                 auto it = instance->fields.find(name);
-                if (it == instance->fields.end()) {
+                if (it != instance->fields.end()) {
+                    m_stack.pop();
+                    m_stack.push(it->second);
+                    break;
+                }
+
+                auto methodIt = instance->klass->methods.find(name);
+                if (methodIt == instance->klass->methods.end()) {
                     std::cerr << "Runtime error: Undefined property '" << name
                               << "'." << std::endl;
                     return Status::RUNTIME_ERROR;
                 }
 
+                auto bound = std::make_shared<BoundMethodObject>();
+                bound->receiver = instance;
+                bound->method = methodIt->second;
+
                 m_stack.pop();
-                m_stack.push(it->second);
+                m_stack.push(Value(bound));
                 break;
             }
             case OpCode::SET_PROPERTY: {
@@ -334,8 +374,19 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                     break;
                 }
 
+                if (callee.isBoundMethod()) {
+                    auto bound = callee.asBoundMethod();
+                    Status status = callFunction(bound->method, argumentCount,
+                                                 bound->receiver);
+                    if (status != Status::OK) {
+                        return status;
+                    }
+                    break;
+                }
+
                 if (!callee.isFunction()) {
-                    std::cerr << "Runtime error: Can only call functions and classes."
+                    std::cerr << "Runtime error: Can only call functions, "
+                                 "classes, and methods."
                               << std::endl;
                     return Status::RUNTIME_ERROR;
                 }
@@ -409,7 +460,7 @@ Status VirtualMachine::interpret(std::string_view source,
         return Status::COMPILATION_ERROR;
     }
 
-    m_frames.push_back(CallFrame{&chunk, chunk.getBytes(), 0});
+    m_frames.push_back(CallFrame{&chunk, chunk.getBytes(), 0, 0, nullptr});
 
     Value returnValue;
     return run(printReturnValue, returnValue);

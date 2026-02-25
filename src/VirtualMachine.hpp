@@ -21,6 +21,8 @@ class VirtualMachine {
         Chunk* chunk;
         uint8_t* ip;
         size_t slotBase;
+        size_t calleeIndex;
+        std::shared_ptr<InstanceObject> receiver;
     };
 
     // expression evaluation stack
@@ -52,7 +54,8 @@ class VirtualMachine {
 
     Status run(bool printReturnValue, Value& returnValue);
     Status callFunction(std::shared_ptr<FunctionObject> function,
-                        uint8_t argumentCount);
+                        uint8_t argumentCount,
+                        std::shared_ptr<InstanceObject> receiver = nullptr);
 
    public:
     VirtualMachine() = default;

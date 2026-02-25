@@ -50,6 +50,7 @@ class Compiler {
     std::unique_ptr<Scanner> m_scanner;
     std::unique_ptr<Parser> m_parser;
     bool m_inFunction = false;
+    bool m_inMethod = false;
     std::vector<Local> m_locals;
     int m_scopeDepth = 0;
 
@@ -80,6 +81,7 @@ class Compiler {
     void expression();
     void declaration();
     void classDeclaration();
+    void methodDeclaration();
     void functionDeclaration();
     void statement();
     void block();
@@ -95,6 +97,7 @@ class Compiler {
 
     void number(bool canAssign);
     void variable(bool canAssign);
+    void thisExpression(bool canAssign);
     void literal(bool canAssign);
     void stringLiteral(bool canAssign);
     void grouping(bool canAssign);
@@ -105,7 +108,8 @@ class Compiler {
     void andOperator(bool canAssign);
     void orOperator(bool canAssign);
 
-    std::shared_ptr<FunctionObject> compileFunction(const std::string& name);
+    std::shared_ptr<FunctionObject> compileFunction(const std::string& name,
+                                                    bool isMethod = false);
 
    public:
     Compiler() = default;
