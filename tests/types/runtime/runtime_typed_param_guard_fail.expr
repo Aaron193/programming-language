@@ -1,0 +1,14 @@
+class Animal {}
+class Dog < Animal {}
+class Cat < Animal {}
+
+function id(x) {
+    return x;
+}
+
+function acceptDog(Dog dog) {
+    print dog;
+}
+
+var dynamic = id(Cat());
+acceptDog(dynamic);

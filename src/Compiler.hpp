@@ -139,6 +139,7 @@ class Compiler {
                             const TypeRef& leftType = TypeInfo::makeAny());
     TypeRef inferVariableType(const Token& name) const;
     void emitCoerceToType(const TypeRef& targetType);
+    void emitCheckInstanceType(const TypeRef& targetType);
     uint8_t arithmeticOpcode(TokenType operatorType,
                              const TypeRef& leftType) const;
 

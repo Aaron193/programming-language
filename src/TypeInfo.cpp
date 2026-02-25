@@ -3,6 +3,8 @@
 #include <sstream>
 #include <utility>
 
+#include "Chunk.hpp"
+
 namespace {
 TypeRef makePrimitiveSingleton(TypeKind kind) {
     return std::make_shared<TypeInfo>(kind);
@@ -20,6 +22,22 @@ TypeRef widestUnsignedInt(int bitWidth) {
     if (bitWidth <= 16) return TypeInfo::makeU16();
     if (bitWidth <= 32) return TypeInfo::makeU32();
     return TypeInfo::makeU64();
+}
+
+bool isClassSubtype(const ClassObject* derived, const ClassObject* base) {
+    if (!derived || !base) {
+        return false;
+    }
+
+    const ClassObject* current = derived;
+    while (current != nullptr) {
+        if (current == base) {
+            return true;
+        }
+        current = current->superclass;
+    }
+
+    return false;
 }
 }  // namespace
 
@@ -245,10 +263,16 @@ bool isAssignable(const TypeRef& from, const TypeRef& to) {
         }
 
         if (from->classPtr != nullptr && to->classPtr != nullptr) {
-            return from->classPtr == to->classPtr;
+            return isClassSubtype(from->classPtr, to->classPtr);
         }
 
         return from->className == to->className;
+    }
+
+    if (from->kind == TypeKind::CLASS && to->kind == TypeKind::CLASS) {
+        if (from->classPtr != nullptr && to->classPtr != nullptr) {
+            return isClassSubtype(from->classPtr, to->classPtr);
+        }
     }
 
     if (from->kind == TypeKind::NULL_TYPE || to->kind == TypeKind::NULL_TYPE) {

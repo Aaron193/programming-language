@@ -137,6 +137,7 @@ enum OpCode {
     NARROW_INT,
     INT_TO_FLOAT,
     FLOAT_TO_INT,
+    CHECK_INSTANCE_TYPE,
     INT_NEGATE,
     ITER_INIT,
     ITER_HAS_NEXT,

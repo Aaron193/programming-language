@@ -390,6 +390,16 @@ void Compiler::emitCoerceToType(const TypeRef& targetType) {
     }
 }
 
+void Compiler::emitCheckInstanceType(const TypeRef& targetType) {
+    if (!targetType || targetType->kind != TypeKind::CLASS ||
+        targetType->className.empty()) {
+        return;
+    }
+
+    emitBytes(OpCode::CHECK_INSTANCE_TYPE,
+              makeConstant(Value(targetType->className)));
+}
+
 bool Compiler::emitCompoundBinary(TokenType assignmentType,
                                   const TypeRef& leftType) {
     switch (assignmentType) {
@@ -468,6 +478,7 @@ void Compiler::namedVariable(const Token& name, bool canAssign) {
             advance();
             expression();
             emitCoerceToType(declaredType);
+            emitCheckInstanceType(declaredType);
             emitBytes(setOp, arg);
             return;
         }
@@ -1384,6 +1395,8 @@ void Compiler::returnStatement() {
     }
 
     expression();
+    emitCoerceToType(currentContext().returnType);
+    emitCheckInstanceType(currentContext().returnType);
     if (m_parser->current.type() == TokenType::SEMI_COLON) {
         advance();
     }
@@ -1427,6 +1440,7 @@ void Compiler::typedVarDeclaration() {
             "required).");
     expression();
     emitCoerceToType(declaredType);
+    emitCheckInstanceType(declaredType);
 
     consume(TokenType::SEMI_COLON,
             "Expected ';' after typed variable declaration.");
@@ -2079,6 +2093,17 @@ Compiler::CompiledFunction Compiler::compileFunction(
     }
 
     consume(TokenType::OPEN_CURLY, "Expected '{' before function body.");
+
+    for (size_t index = 0; index < parameterTypes.size(); ++index) {
+        const TypeRef& parameterType = parameterTypes[index];
+        if (!parameterType || parameterType->kind != TypeKind::CLASS) {
+            continue;
+        }
+
+        emitBytes(OpCode::GET_LOCAL, static_cast<uint8_t>(index));
+        emitCheckInstanceType(parameterType);
+        emitByte(OpCode::POP);
+    }
 
     while (m_parser->current.type() != TokenType::CLOSE_CURLY &&
            m_parser->current.type() != TokenType::END_OF_FILE) {

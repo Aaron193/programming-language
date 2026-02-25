@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -176,7 +177,13 @@ class CheckerImpl {
         }
 
         std::string current = derived;
+        std::unordered_set<std::string> visited;
         while (true) {
+            if (visited.find(current) != visited.end()) {
+                return false;
+            }
+            visited.insert(current);
+
             auto it = m_superclassOf.find(current);
             if (it == m_superclassOf.end() || it->second.empty()) {
                 return false;
@@ -997,7 +1004,19 @@ class CheckerImpl {
 
         if (match(TokenType::LESS)) {
             consume(TokenType::IDENTIFIER, "Expected superclass name.");
-            m_superclassOf[className] = tokenText(m_previous);
+            std::string superclassName = tokenText(m_previous);
+
+            if (superclassName == className) {
+                addError(m_previous.line(),
+                         "Type error: a class cannot inherit from itself.");
+            }
+
+            if (m_classNames.find(superclassName) == m_classNames.end()) {
+                addError(m_previous.line(), "Type error: unknown superclass '" +
+                                                superclassName + "'.");
+            }
+
+            m_superclassOf[className] = superclassName;
         }
 
         consume(TokenType::OPEN_CURLY, "Expected '{' before class body.");
