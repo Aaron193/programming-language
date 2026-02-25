@@ -12,8 +12,12 @@ struct ClassObject;
 struct InstanceObject;
 struct BoundMethodObject;
 struct NativeFunctionObject;
+struct NativeBoundMethodObject;
 struct ClosureObject;
 struct UpvalueObject;
+struct ArrayObject;
+struct DictObject;
+struct SetObject;
 
 struct FunctionObject {
     std::string name;
@@ -35,7 +39,7 @@ struct BoundMethodObject {
 
 struct NativeFunctionObject {
     std::string name;
-    uint8_t arity;
+    int arity;
 };
 
 /*
@@ -79,7 +83,12 @@ enum OpCode {
     CALL,
     CLOSURE,
     CLOSE_UPVALUE,
+    BUILD_ARRAY,
+    BUILD_DICT,
+    GET_INDEX,
+    SET_INDEX,
     DUP,
+    DUP2,
     JUMP,
     JUMP_IF_FALSE,
     LOOP,
@@ -95,11 +104,14 @@ enum ValueType {
 };
 
 struct Value {
-    std::variant<
-        double, bool, std::monostate, std::string,
-        std::shared_ptr<FunctionObject>, std::shared_ptr<ClassObject>,
-        std::shared_ptr<InstanceObject>, std::shared_ptr<BoundMethodObject>,
-        std::shared_ptr<NativeFunctionObject>, std::shared_ptr<ClosureObject>>
+    std::variant<double, bool, std::monostate, std::string,
+                 std::shared_ptr<FunctionObject>, std::shared_ptr<ClassObject>,
+                 std::shared_ptr<InstanceObject>,
+                 std::shared_ptr<BoundMethodObject>,
+                 std::shared_ptr<NativeFunctionObject>,
+                 std::shared_ptr<NativeBoundMethodObject>,
+                 std::shared_ptr<ClosureObject>, std::shared_ptr<ArrayObject>,
+                 std::shared_ptr<DictObject>, std::shared_ptr<SetObject>>
         data;
 
     Value() : data(std::monostate{}) {}
@@ -113,7 +125,12 @@ struct Value {
     Value(std::shared_ptr<BoundMethodObject> value) : data(std::move(value)) {}
     Value(std::shared_ptr<NativeFunctionObject> value)
         : data(std::move(value)) {}
+    Value(std::shared_ptr<NativeBoundMethodObject> value)
+        : data(std::move(value)) {}
     Value(std::shared_ptr<ClosureObject> value) : data(std::move(value)) {}
+    Value(std::shared_ptr<ArrayObject> value) : data(std::move(value)) {}
+    Value(std::shared_ptr<DictObject> value) : data(std::move(value)) {}
+    Value(std::shared_ptr<SetObject> value) : data(std::move(value)) {}
 
     bool isNumber() const { return std::holds_alternative<double>(data); }
     bool isBool() const { return std::holds_alternative<bool>(data); }
@@ -135,8 +152,21 @@ struct Value {
         return std::holds_alternative<std::shared_ptr<NativeFunctionObject>>(
             data);
     }
+    bool isNativeBound() const {
+        return std::holds_alternative<std::shared_ptr<NativeBoundMethodObject>>(
+            data);
+    }
     bool isClosure() const {
         return std::holds_alternative<std::shared_ptr<ClosureObject>>(data);
+    }
+    bool isArray() const {
+        return std::holds_alternative<std::shared_ptr<ArrayObject>>(data);
+    }
+    bool isDict() const {
+        return std::holds_alternative<std::shared_ptr<DictObject>>(data);
+    }
+    bool isSet() const {
+        return std::holds_alternative<std::shared_ptr<SetObject>>(data);
     }
 
     double asNumber() const { return std::get<double>(data); }
@@ -157,8 +187,20 @@ struct Value {
     std::shared_ptr<NativeFunctionObject> asNative() const {
         return std::get<std::shared_ptr<NativeFunctionObject>>(data);
     }
+    std::shared_ptr<NativeBoundMethodObject> asNativeBound() const {
+        return std::get<std::shared_ptr<NativeBoundMethodObject>>(data);
+    }
     std::shared_ptr<ClosureObject> asClosure() const {
         return std::get<std::shared_ptr<ClosureObject>>(data);
+    }
+    std::shared_ptr<ArrayObject> asArray() const {
+        return std::get<std::shared_ptr<ArrayObject>>(data);
+    }
+    std::shared_ptr<DictObject> asDict() const {
+        return std::get<std::shared_ptr<DictObject>>(data);
+    }
+    std::shared_ptr<SetObject> asSet() const {
+        return std::get<std::shared_ptr<SetObject>>(data);
     }
 };
 
@@ -176,6 +218,23 @@ struct ClosureObject {
 struct InstanceObject {
     std::shared_ptr<ClassObject> klass;
     std::unordered_map<std::string, Value> fields;
+};
+
+struct ArrayObject {
+    std::vector<Value> elements;
+};
+
+struct DictObject {
+    std::unordered_map<std::string, Value> map;
+};
+
+struct SetObject {
+    std::vector<Value> elements;
+};
+
+struct NativeBoundMethodObject {
+    std::string name;
+    Value receiver;
 };
 
 inline bool operator==(const Value& lhs, const Value& rhs) {
@@ -208,9 +267,18 @@ inline std::ostream& operator<<(std::ostream& stream, const Value& value) {
     } else if (value.isNative()) {
         auto native = value.asNative();
         stream << "<native " << native->name << ">";
+    } else if (value.isNativeBound()) {
+        auto bound = value.asNativeBound();
+        stream << "<native method " << bound->name << ">";
     } else if (value.isClosure()) {
         auto closure = value.asClosure();
         stream << "<closure " << closure->function->name << ">";
+    } else if (value.isArray()) {
+        stream << "<array>";
+    } else if (value.isDict()) {
+        stream << "<dict>";
+    } else if (value.isSet()) {
+        stream << "<set>";
     } else {
         stream << value.asString();
     }

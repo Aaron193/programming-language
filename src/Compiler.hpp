@@ -134,11 +134,14 @@ class Compiler {
     void literal(bool canAssign);
     void stringLiteral(bool canAssign);
     void grouping(bool canAssign);
+    void arrayLiteral(bool canAssign);
+    void dictLiteral(bool canAssign);
     void unary(bool canAssign);
     void prefixUpdate(bool canAssign);
     void binary(bool canAssign);
     void call(bool canAssign);
     void dot(bool canAssign);
+    void subscript(bool canAssign);
     void andOperator(bool canAssign);
     void orOperator(bool canAssign);
 

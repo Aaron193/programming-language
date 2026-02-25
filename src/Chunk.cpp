@@ -156,8 +156,20 @@ int Chunk::disassembleInstruction(int offset) {
                                       *m_constants);
         case OpCode::CLOSE_UPVALUE:
             return simpleInstruction("CLOSE_UPVALUE", offset);
+        case OpCode::BUILD_ARRAY:
+            return byteInstruction("BUILD_ARRAY", offset,
+                                   m_bytes->at(offset + 1));
+        case OpCode::BUILD_DICT:
+            return byteInstruction("BUILD_DICT", offset,
+                                   m_bytes->at(offset + 1));
+        case OpCode::GET_INDEX:
+            return simpleInstruction("GET_INDEX", offset);
+        case OpCode::SET_INDEX:
+            return simpleInstruction("SET_INDEX", offset);
         case OpCode::DUP:
             return simpleInstruction("DUP", offset);
+        case OpCode::DUP2:
+            return simpleInstruction("DUP2", offset);
         case OpCode::JUMP:
             return jumpInstruction("JUMP", 1, offset, m_bytes->at(offset + 1),
                                    m_bytes->at(offset + 2));

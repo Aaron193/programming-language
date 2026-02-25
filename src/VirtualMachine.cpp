@@ -28,13 +28,58 @@ static std::string valueTypeName(const Value& value) {
     if (value.isBool()) return "bool";
     if (value.isNil()) return "null";
     if (value.isString()) return "string";
+    if (value.isArray()) return "array";
+    if (value.isDict()) return "dict";
+    if (value.isSet()) return "set";
     if (value.isClass()) return "class";
     if (value.isInstance()) return "instance";
     if (value.isNative()) return "native";
+    if (value.isNativeBound()) return "native_bound_method";
     if (value.isBoundMethod()) return "bound_method";
     if (value.isClosure()) return "closure";
     if (value.isFunction()) return "function";
     return "unknown";
+}
+
+static bool toDictKey(const Value& value, std::string& key) {
+    if (value.isString()) {
+        key = value.asString();
+        return true;
+    }
+
+    if (value.isNumber()) {
+        std::ostringstream stream;
+        stream << value.asNumber();
+        key = stream.str();
+        return true;
+    }
+
+    return false;
+}
+
+static bool toArrayIndex(const Value& value, size_t& index) {
+    if (!value.isNumber()) {
+        return false;
+    }
+
+    double number = value.asNumber();
+    if (number < 0.0 || std::floor(number) != number) {
+        return false;
+    }
+
+    index = static_cast<size_t>(number);
+    return true;
+}
+
+static bool containsValue(const std::vector<Value>& elements,
+                          const Value& needle) {
+    for (const auto& element : elements) {
+        if (element == needle) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 static std::shared_ptr<ClosureObject> findMethodClosure(
@@ -433,6 +478,17 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
             case OpCode::GET_PROPERTY: {
                 std::string name = readNameConstant();
                 Value receiver = m_stack.peek(0);
+
+                if (receiver.isArray() || receiver.isDict() ||
+                    receiver.isSet()) {
+                    auto bound = std::make_shared<NativeBoundMethodObject>();
+                    bound->name = name;
+                    bound->receiver = receiver;
+                    m_stack.pop();
+                    m_stack.push(Value(bound));
+                    break;
+                }
+
                 if (!receiver.isInstance()) {
                     return runtimeError("Only instances have properties.");
                 }
@@ -497,10 +553,10 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
 
                 if (callee.isNative()) {
                     auto native = callee.asNative();
-                    if (native->arity != argumentCount) {
+                    if (native->arity >= 0 && native->arity != argumentCount) {
                         return runtimeError(
                             "Native function '" + native->name + "' expected " +
-                            std::to_string(static_cast<int>(native->arity)) +
+                            std::to_string(native->arity) +
                             " arguments but got " +
                             std::to_string(static_cast<int>(argumentCount)) +
                             ".");
@@ -573,9 +629,301 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                                 "Native function 'num' expects a number or "
                                 "string.");
                         }
+                    } else if (native->name == "Set") {
+                        auto set = std::make_shared<SetObject>();
+                        for (const auto& arg : args) {
+                            if (!containsValue(set->elements, arg)) {
+                                set->elements.push_back(arg);
+                            }
+                        }
+
+                        result = Value(set);
                     } else {
                         return runtimeError("Unknown native function '" +
                                             native->name + "'.");
+                    }
+
+                    m_stack.popN(m_stack.size() - calleeIndex);
+                    m_stack.push(result);
+                    break;
+                }
+
+                if (callee.isNativeBound()) {
+                    auto bound = callee.asNativeBound();
+
+                    std::vector<Value> args;
+                    args.reserve(argumentCount);
+                    for (uint8_t i = 0; i < argumentCount; ++i) {
+                        args.push_back(m_stack.peek(
+                            static_cast<size_t>(argumentCount - 1 - i)));
+                    }
+
+                    Value result;
+                    const std::string& method = bound->name;
+                    Value receiver = bound->receiver;
+
+                    if (receiver.isArray()) {
+                        auto array = receiver.asArray();
+
+                        if (method == "push") {
+                            if (argumentCount != 1) {
+                                return runtimeError(
+                                    "Array method 'push' expects 1 argument.");
+                            }
+
+                            array->elements.push_back(args[0]);
+                            result = Value(
+                                static_cast<double>(array->elements.size()));
+                        } else if (method == "pop") {
+                            if (argumentCount != 0) {
+                                return runtimeError(
+                                    "Array method 'pop' expects 0 arguments.");
+                            }
+
+                            if (array->elements.empty()) {
+                                return runtimeError(
+                                    "Array method 'pop' called on empty "
+                                    "array.");
+                            }
+
+                            result = array->elements.back();
+                            array->elements.pop_back();
+                        } else if (method == "size") {
+                            if (argumentCount != 0) {
+                                return runtimeError(
+                                    "Array method 'size' expects 0 arguments.");
+                            }
+
+                            result = Value(
+                                static_cast<double>(array->elements.size()));
+                        } else if (method == "has") {
+                            if (argumentCount != 1) {
+                                return runtimeError(
+                                    "Array method 'has' expects 1 argument.");
+                            }
+
+                            result =
+                                Value(containsValue(array->elements, args[0]));
+                        } else if (method == "insert") {
+                            if (argumentCount != 2) {
+                                return runtimeError(
+                                    "Array method 'insert' expects 2 "
+                                    "arguments.");
+                            }
+
+                            size_t index = 0;
+                            if (!toArrayIndex(args[0], index)) {
+                                return runtimeError(
+                                    "Array method 'insert' expects a "
+                                    "non-negative integer index.");
+                            }
+
+                            if (index > array->elements.size()) {
+                                return runtimeError(
+                                    "Array method 'insert' index out of "
+                                    "bounds.");
+                            }
+
+                            array->elements.insert(array->elements.begin() +
+                                                       static_cast<long>(index),
+                                                   args[1]);
+                            result = Value(args[1]);
+                        } else if (method == "remove") {
+                            if (argumentCount != 1) {
+                                return runtimeError(
+                                    "Array method 'remove' expects 1 "
+                                    "argument.");
+                            }
+
+                            size_t index = 0;
+                            if (!toArrayIndex(args[0], index)) {
+                                return runtimeError(
+                                    "Array method 'remove' expects a "
+                                    "non-negative integer index.");
+                            }
+
+                            if (index >= array->elements.size()) {
+                                return runtimeError(
+                                    "Array method 'remove' index out of "
+                                    "bounds.");
+                            }
+
+                            result = array->elements[index];
+                            array->elements.erase(array->elements.begin() +
+                                                  static_cast<long>(index));
+                        } else {
+                            return runtimeError("Undefined array method '" +
+                                                method + "'.");
+                        }
+                    } else if (receiver.isDict()) {
+                        auto dict = receiver.asDict();
+
+                        if (method == "get") {
+                            if (argumentCount != 1) {
+                                return runtimeError(
+                                    "Dict method 'get' expects 1 argument.");
+                            }
+
+                            std::string key;
+                            if (!toDictKey(args[0], key)) {
+                                return runtimeError(
+                                    "Dict keys must be strings or numbers.");
+                            }
+
+                            auto it = dict->map.find(key);
+                            if (it == dict->map.end()) {
+                                return runtimeError(
+                                    "Dict method 'get' key not found.");
+                            }
+
+                            result = it->second;
+                        } else if (method == "set") {
+                            if (argumentCount != 2) {
+                                return runtimeError(
+                                    "Dict method 'set' expects 2 arguments.");
+                            }
+
+                            std::string key;
+                            if (!toDictKey(args[0], key)) {
+                                return runtimeError(
+                                    "Dict keys must be strings or numbers.");
+                            }
+
+                            dict->map[key] = args[1];
+                            result = args[1];
+                        } else if (method == "has") {
+                            if (argumentCount != 1) {
+                                return runtimeError(
+                                    "Dict method 'has' expects 1 argument.");
+                            }
+
+                            std::string key;
+                            if (!toDictKey(args[0], key)) {
+                                return runtimeError(
+                                    "Dict keys must be strings or numbers.");
+                            }
+
+                            result =
+                                Value(dict->map.find(key) != dict->map.end());
+                        } else if (method == "keys") {
+                            if (argumentCount != 0) {
+                                return runtimeError(
+                                    "Dict method 'keys' expects 0 arguments.");
+                            }
+
+                            auto keys = std::make_shared<ArrayObject>();
+                            for (const auto& entry : dict->map) {
+                                keys->elements.push_back(Value(entry.first));
+                            }
+                            result = Value(keys);
+                        } else if (method == "values") {
+                            if (argumentCount != 0) {
+                                return runtimeError(
+                                    "Dict method 'values' expects 0 "
+                                    "arguments.");
+                            }
+
+                            auto values = std::make_shared<ArrayObject>();
+                            for (const auto& entry : dict->map) {
+                                values->elements.push_back(entry.second);
+                            }
+                            result = Value(values);
+                        } else if (method == "size") {
+                            if (argumentCount != 0) {
+                                return runtimeError(
+                                    "Dict method 'size' expects 0 arguments.");
+                            }
+
+                            result =
+                                Value(static_cast<double>(dict->map.size()));
+                        } else if (method == "remove") {
+                            if (argumentCount != 1) {
+                                return runtimeError(
+                                    "Dict method 'remove' expects 1 argument.");
+                            }
+
+                            std::string key;
+                            if (!toDictKey(args[0], key)) {
+                                return runtimeError(
+                                    "Dict keys must be strings or numbers.");
+                            }
+
+                            auto it = dict->map.find(key);
+                            if (it == dict->map.end()) {
+                                return runtimeError(
+                                    "Dict method 'remove' key not found.");
+                            }
+
+                            result = it->second;
+                            dict->map.erase(it);
+                        } else {
+                            return runtimeError("Undefined dict method '" +
+                                                method + "'.");
+                        }
+                    } else if (receiver.isSet()) {
+                        auto set = receiver.asSet();
+
+                        if (method == "add") {
+                            if (argumentCount != 1) {
+                                return runtimeError(
+                                    "Set method 'add' expects 1 argument.");
+                            }
+
+                            bool inserted = false;
+                            if (!containsValue(set->elements, args[0])) {
+                                set->elements.push_back(args[0]);
+                                inserted = true;
+                            }
+                            result = Value(inserted);
+                        } else if (method == "has") {
+                            if (argumentCount != 1) {
+                                return runtimeError(
+                                    "Set method 'has' expects 1 argument.");
+                            }
+
+                            result =
+                                Value(containsValue(set->elements, args[0]));
+                        } else if (method == "remove") {
+                            if (argumentCount != 1) {
+                                return runtimeError(
+                                    "Set method 'remove' expects 1 argument.");
+                            }
+
+                            bool removed = false;
+                            for (size_t i = 0; i < set->elements.size(); ++i) {
+                                if (set->elements[i] == args[0]) {
+                                    set->elements.erase(set->elements.begin() +
+                                                        static_cast<long>(i));
+                                    removed = true;
+                                    break;
+                                }
+                            }
+                            result = Value(removed);
+                        } else if (method == "size") {
+                            if (argumentCount != 0) {
+                                return runtimeError(
+                                    "Set method 'size' expects 0 arguments.");
+                            }
+
+                            result = Value(
+                                static_cast<double>(set->elements.size()));
+                        } else if (method == "toArray") {
+                            if (argumentCount != 0) {
+                                return runtimeError(
+                                    "Set method 'toArray' expects 0 "
+                                    "arguments.");
+                            }
+
+                            auto array = std::make_shared<ArrayObject>();
+                            array->elements = set->elements;
+                            result = Value(array);
+                        } else {
+                            return runtimeError("Undefined set method '" +
+                                                method + "'.");
+                        }
+                    } else {
+                        return runtimeError(
+                            "Native bound method receiver is invalid.");
                     }
 
                     m_stack.popN(m_stack.size() - calleeIndex);
@@ -652,8 +1000,130 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 m_stack.pop();
                 break;
             }
+            case OpCode::BUILD_ARRAY: {
+                uint8_t count = readByte();
+                auto array = std::make_shared<ArrayObject>();
+                array->elements.resize(count);
+                for (int i = static_cast<int>(count) - 1; i >= 0; --i) {
+                    array->elements[static_cast<size_t>(i)] = m_stack.pop();
+                }
+
+                m_stack.push(Value(array));
+                break;
+            }
+            case OpCode::BUILD_DICT: {
+                uint8_t pairCount = readByte();
+                auto dict = std::make_shared<DictObject>();
+
+                for (int i = 0; i < pairCount; ++i) {
+                    Value value = m_stack.pop();
+                    Value keyValue = m_stack.pop();
+                    std::string key;
+                    if (!toDictKey(keyValue, key)) {
+                        return runtimeError(
+                            "Dictionary keys must be strings or numbers.");
+                    }
+
+                    dict->map[key] = value;
+                }
+
+                m_stack.push(Value(dict));
+                break;
+            }
+            case OpCode::GET_INDEX: {
+                Value indexValue = m_stack.pop();
+                Value container = m_stack.pop();
+
+                if (container.isArray()) {
+                    size_t index = 0;
+                    if (!toArrayIndex(indexValue, index)) {
+                        return runtimeError(
+                            "Array index must be a non-negative integer.");
+                    }
+
+                    auto array = container.asArray();
+                    if (index >= array->elements.size()) {
+                        return runtimeError("Array index out of bounds.");
+                    }
+
+                    m_stack.push(array->elements[index]);
+                    break;
+                }
+
+                if (container.isDict()) {
+                    std::string key;
+                    if (!toDictKey(indexValue, key)) {
+                        return runtimeError(
+                            "Dictionary keys must be strings or numbers.");
+                    }
+
+                    auto dict = container.asDict();
+                    auto it = dict->map.find(key);
+                    if (it == dict->map.end()) {
+                        return runtimeError("Dictionary key not found.");
+                    }
+
+                    m_stack.push(it->second);
+                    break;
+                }
+
+                if (container.isSet()) {
+                    auto set = container.asSet();
+                    m_stack.push(
+                        Value(containsValue(set->elements, indexValue)));
+                    break;
+                }
+
+                return runtimeError(
+                    "Indexing is only supported on array, dict, and set.");
+            }
+            case OpCode::SET_INDEX: {
+                Value value = m_stack.pop();
+                Value indexValue = m_stack.pop();
+                Value container = m_stack.pop();
+
+                if (container.isArray()) {
+                    size_t index = 0;
+                    if (!toArrayIndex(indexValue, index)) {
+                        return runtimeError(
+                            "Array index must be a non-negative integer.");
+                    }
+
+                    auto array = container.asArray();
+                    if (index >= array->elements.size()) {
+                        return runtimeError("Array index out of bounds.");
+                    }
+
+                    array->elements[index] = value;
+                    m_stack.push(value);
+                    break;
+                }
+
+                if (container.isDict()) {
+                    std::string key;
+                    if (!toDictKey(indexValue, key)) {
+                        return runtimeError(
+                            "Dictionary keys must be strings or numbers.");
+                    }
+
+                    auto dict = container.asDict();
+                    dict->map[key] = value;
+                    m_stack.push(value);
+                    break;
+                }
+
+                return runtimeError(
+                    "Indexed assignment is only supported on array and dict.");
+            }
             case OpCode::DUP: {
                 m_stack.push(m_stack.peek(0));
+                break;
+            }
+            case OpCode::DUP2: {
+                Value second = m_stack.peek(1);
+                Value top = m_stack.peek(0);
+                m_stack.push(second);
+                m_stack.push(top);
                 break;
             }
             case OpCode::JUMP: {
@@ -729,7 +1199,7 @@ Status VirtualMachine::interpret(std::string_view source, bool printReturnValue,
     clockFn->arity = 0;
     m_globals[clockFn->name] = Value(clockFn);
 
-    auto defineNative = [&](const std::string& name, uint8_t arity) {
+    auto defineNative = [&](const std::string& name, int arity) {
         auto nativeFn = std::make_shared<NativeFunctionObject>();
         nativeFn->name = name;
         nativeFn->arity = arity;
@@ -740,6 +1210,7 @@ Status VirtualMachine::interpret(std::string_view source, bool printReturnValue,
     defineNative("type", 1);
     defineNative("str", 1);
     defineNative("num", 1);
+    defineNative("Set", -1);
 
     m_frames.push_back(
         CallFrame{&chunk, chunk.getBytes(), 0, 0, nullptr, nullptr});

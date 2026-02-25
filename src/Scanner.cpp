@@ -127,6 +127,12 @@ Token Scanner::nextToken() {
         case ')':
             return createToken(TokenType::CLOSE_PAREN);
 
+        case '[':
+            return createToken(TokenType::OPEN_BRACKET);
+
+        case ']':
+            return createToken(TokenType::CLOSE_BRACKET);
+
         case '{':
             return createToken(TokenType::OPEN_CURLY);
 
@@ -138,6 +144,9 @@ Token Scanner::nextToken() {
 
         case ',':
             return createToken(TokenType::COMMA);
+
+        case ':':
+            return createToken(TokenType::COLON);
 
         case '.':
             return createToken(TokenType::DOT);

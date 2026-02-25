@@ -1,0 +1,14 @@
+var a = [1, 2, 3];
+print a[0];
+
+a[1] = 9;
+print a[1];
+
+a[0] += 4;
+print a[0];
+
+a.push(7);
+print a.pop();
+print a.size();
+print a.has(3);
+print a.has(99);

@@ -724,6 +724,13 @@ Compiler::ParseRule Compiler::getRule(TokenType type) {
             return ParseRule{[this](bool canAssign) { grouping(canAssign); },
                              [this](bool canAssign) { call(canAssign); },
                              PREC_CALL};
+        case TokenType::OPEN_BRACKET:
+            return ParseRule{
+                [this](bool canAssign) { arrayLiteral(canAssign); },
+                [this](bool canAssign) { subscript(canAssign); }, PREC_CALL};
+        case TokenType::OPEN_CURLY:
+            return ParseRule{[this](bool canAssign) { dictLiteral(canAssign); },
+                             nullptr, PREC_NONE};
         case TokenType::DOT:
             return ParseRule{
                 nullptr, [this](bool canAssign) { dot(canAssign); }, PREC_CALL};
@@ -882,6 +889,60 @@ void Compiler::grouping(bool canAssign) {
     (void)canAssign;
     expression();
     consume(TokenType::CLOSE_PAREN, "Expected ')' after expression.");
+}
+
+void Compiler::arrayLiteral(bool canAssign) {
+    (void)canAssign;
+
+    uint8_t count = 0;
+    if (m_parser->current.type() != TokenType::CLOSE_BRACKET) {
+        do {
+            expression();
+            if (count == UINT8_MAX) {
+                errorAtCurrent(
+                    "Array literal cannot have more than 255 elements.");
+                break;
+            }
+            count++;
+
+            if (m_parser->current.type() != TokenType::COMMA) {
+                break;
+            }
+            advance();
+        } while (true);
+    }
+
+    consume(TokenType::CLOSE_BRACKET, "Expected ']' after array literal.");
+    emitBytes(OpCode::BUILD_ARRAY, count);
+}
+
+void Compiler::dictLiteral(bool canAssign) {
+    (void)canAssign;
+
+    uint8_t pairCount = 0;
+    if (m_parser->current.type() != TokenType::CLOSE_CURLY) {
+        do {
+            expression();
+            consume(TokenType::COLON,
+                    "Expected ':' between dictionary key and value.");
+            expression();
+
+            if (pairCount == UINT8_MAX) {
+                errorAtCurrent(
+                    "Dictionary literal cannot have more than 255 pairs.");
+                break;
+            }
+            pairCount++;
+
+            if (m_parser->current.type() != TokenType::COMMA) {
+                break;
+            }
+            advance();
+        } while (true);
+    }
+
+    consume(TokenType::CLOSE_CURLY, "Expected '}' after dictionary literal.");
+    emitBytes(OpCode::BUILD_DICT, pairCount);
 }
 
 void Compiler::unary(bool canAssign) {
@@ -1100,6 +1161,53 @@ void Compiler::dot(bool canAssign) {
     }
 
     emitBytes(OpCode::GET_PROPERTY, name);
+}
+
+void Compiler::subscript(bool canAssign) {
+    expression();
+    consume(TokenType::CLOSE_BRACKET, "Expected ']' after index.");
+
+    if (!canAssign) {
+        emitByte(OpCode::GET_INDEX);
+        return;
+    }
+
+    TokenType assignmentType = m_parser->current.type();
+    if (assignmentType == TokenType::EQUAL) {
+        advance();
+        expression();
+        emitByte(OpCode::SET_INDEX);
+        return;
+    }
+
+    if (assignmentType == TokenType::PLUS_PLUS ||
+        assignmentType == TokenType::MINUS_MINUS) {
+        advance();
+        emitByte(OpCode::DUP2);
+        emitByte(OpCode::GET_INDEX);
+        emitConstant(Value(1.0));
+        emitByte(assignmentType == TokenType::PLUS_PLUS ? OpCode::ADD
+                                                        : OpCode::SUB);
+        emitByte(OpCode::SET_INDEX);
+        return;
+    }
+
+    if (assignmentType == TokenType::PLUS_EQUAL ||
+        assignmentType == TokenType::MINUS_EQUAL ||
+        assignmentType == TokenType::STAR_EQUAL ||
+        assignmentType == TokenType::SLASH_EQUAL ||
+        assignmentType == TokenType::SHIFT_LEFT_EQUAL ||
+        assignmentType == TokenType::SHIFT_RIGHT_EQUAL) {
+        advance();
+        emitByte(OpCode::DUP2);
+        emitByte(OpCode::GET_INDEX);
+        expression();
+        emitCompoundBinary(assignmentType);
+        emitByte(OpCode::SET_INDEX);
+        return;
+    }
+
+    emitByte(OpCode::GET_INDEX);
 }
 
 void Compiler::andOperator(bool canAssign) {
