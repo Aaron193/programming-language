@@ -2290,6 +2290,22 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.push(Value(converted));
                 break;
             }
+            case OpCode::INT_TO_STR: {
+                Value value = m_stack.pop();
+                if (value.isSignedInt()) {
+                    m_stack.push(Value(std::to_string(value.asSignedInt())));
+                    break;
+                }
+                if (value.isUnsignedInt()) {
+                    m_stack.push(Value(std::to_string(value.asUnsignedInt())));
+                    break;
+                }
+                if (value.isNumber()) {
+                    m_stack.push(Value(std::to_string(value.asNumber())));
+                    break;
+                }
+                return runtimeError("Cannot cast value to str.");
+            }
             case OpCode::CHECK_INSTANCE_TYPE: {
                 const std::string& expectedClass = readNameConstant();
                 Value value = m_stack.peek(0);
