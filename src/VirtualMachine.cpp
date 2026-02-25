@@ -184,6 +184,23 @@ static ClosureObject* findMethodClosure(ClassObject* klass,
     return nullptr;
 }
 
+static bool isInstanceOfClass(const InstanceObject* instance,
+                              const std::string& expectedClassName) {
+    if (!instance || !instance->klass) {
+        return false;
+    }
+
+    ClassObject* current = instance->klass;
+    while (current != nullptr) {
+        if (current->name == expectedClassName) {
+            return true;
+        }
+        current = current->superclass;
+    }
+
+    return false;
+}
+
 UpvalueObject* VirtualMachine::captureUpvalue(size_t stackIndex) {
     for (const auto& upvalue : m_openUpvalues) {
         if (!upvalue->isClosed && upvalue->stackIndex == stackIndex) {
@@ -2271,6 +2288,27 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                     return runtimeError("Cannot cast value to integer.");
                 }
                 m_stack.push(Value(converted));
+                break;
+            }
+            case OpCode::CHECK_INSTANCE_TYPE: {
+                const std::string& expectedClass = readNameConstant();
+                Value value = m_stack.peek(0);
+
+                if (!value.isInstance()) {
+                    return runtimeError("Type error: expected instance of '" +
+                                        expectedClass + "', got '" +
+                                        valueTypeName(value) + "'.");
+                }
+
+                auto instance = value.asInstance();
+                if (!isInstanceOfClass(instance, expectedClass)) {
+                    std::string actualClass = (instance && instance->klass)
+                                                  ? instance->klass->name
+                                                  : std::string("<unknown>");
+                    return runtimeError("Type error: expected instance of '" +
+                                        expectedClass + "', got '" +
+                                        actualClass + "'.");
+                }
                 break;
             }
             case OpCode::INT_NEGATE: {

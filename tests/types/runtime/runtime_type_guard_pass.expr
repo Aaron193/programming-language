@@ -1,0 +1,6 @@
+class Animal {}
+class Dog < Animal {}
+
+var dynamic = Dog();
+Animal a = dynamic;
+print a;
