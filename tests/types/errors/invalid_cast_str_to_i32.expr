@@ -1,0 +1,2 @@
+str label = "123";
+i32 n = label as i32;
