@@ -77,6 +77,7 @@ class Compiler {
     std::vector<FunctionContext> m_contexts;
 
     void advance();
+    void synchronize();
     void errorAtCurrent(const std::string& message);
     void errorAt(const Token& token, const std::string& message);
     void consume(TokenType type, const std::string& message);

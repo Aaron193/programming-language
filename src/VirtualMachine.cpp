@@ -75,16 +75,54 @@ void VirtualMachine::closeUpvalues(size_t fromStackIndex) {
     }
 }
 
+void VirtualMachine::printStackTrace() {
+    std::cerr << "[trace][runtime] stack:" << std::endl;
+
+    for (int index = static_cast<int>(m_frames.size()) - 1; index >= 0;
+         --index) {
+        const CallFrame& frame = m_frames[index];
+        int offset = static_cast<int>(frame.ip - frame.chunk->getBytes()) - 1;
+        if (offset < 0) {
+            offset = 0;
+        }
+
+        std::string functionName = "<script>";
+        if (frame.closure && frame.closure->function) {
+            if (!frame.closure->function->name.empty()) {
+                functionName = frame.closure->function->name;
+            } else {
+                functionName = "<anonymous>";
+            }
+        }
+
+        std::cerr << "  at " << functionName << "() [line "
+                  << frame.chunk->lineAt(offset) << "]" << std::endl;
+    }
+}
+
+Status VirtualMachine::runtimeError(const std::string& message) {
+    CallFrame& frame = currentFrame();
+    int offset = static_cast<int>(frame.ip - frame.chunk->getBytes()) - 1;
+    if (offset < 0) {
+        offset = 0;
+    }
+
+    std::cerr << "[error][runtime][line " << frame.chunk->lineAt(offset) << "] "
+              << message << std::endl;
+    printStackTrace();
+    return Status::RUNTIME_ERROR;
+}
+
 Status VirtualMachine::callClosure(std::shared_ptr<ClosureObject> closure,
                                    uint8_t argumentCount,
                                    std::shared_ptr<InstanceObject> receiver) {
     auto function = closure->function;
     if (function->parameters.size() != argumentCount) {
-        std::cerr << "Runtime error: Function '" << function->name
-                  << "' expected " << function->parameters.size()
-                  << " arguments but got " << static_cast<int>(argumentCount)
-                  << "." << std::endl;
-        return Status::RUNTIME_ERROR;
+        return runtimeError("Function '" + function->name + "' expected " +
+                            std::to_string(function->parameters.size()) +
+                            " arguments but got " +
+                            std::to_string(static_cast<int>(argumentCount)) +
+                            ".");
     }
 
     size_t calleeIndex =
@@ -99,17 +137,6 @@ Status VirtualMachine::callClosure(std::shared_ptr<ClosureObject> closure,
 Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
     while (true) {
         CallFrame& frame = currentFrame();
-        auto runtimeError = [&](const std::string& message) {
-            int offset =
-                static_cast<int>(frame.ip - frame.chunk->getBytes()) - 1;
-            if (offset < 0) {
-                offset = 0;
-            }
-
-            std::cerr << "[line " << frame.chunk->lineAt(offset)
-                      << "] Runtime error: " << message << std::endl;
-            return Status::RUNTIME_ERROR;
-        };
 
 #ifdef VM_TRACE
         m_stack.print();
@@ -195,9 +222,6 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                     break;
                 }
 
-                std::cerr << "Runtime error: Operands must be two numbers or "
-                             "two strings for '+'."
-                          << std::endl;
                 return runtimeError(
                     "Operands must be two numbers or two strings for '+'.");
             }
@@ -205,10 +229,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
                 if (!isNumberPair(a, b)) {
-                    std::cerr
-                        << "Runtime error: Operands must be numbers for '-'."
-                        << std::endl;
-                    return Status::RUNTIME_ERROR;
+                    return runtimeError("Operands must be numbers for '-'.");
                 }
 
                 m_stack.push(Value(a.asNumber() - b.asNumber()));
@@ -218,10 +239,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
                 if (!isNumberPair(a, b)) {
-                    std::cerr
-                        << "Runtime error: Operands must be numbers for '*'."
-                        << std::endl;
-                    return Status::RUNTIME_ERROR;
+                    return runtimeError("Operands must be numbers for '*'.");
                 }
 
                 m_stack.push(Value(a.asNumber() * b.asNumber()));
@@ -231,10 +249,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
                 if (!isNumberPair(a, b)) {
-                    std::cerr
-                        << "Runtime error: Operands must be numbers for '/'."
-                        << std::endl;
-                    return Status::RUNTIME_ERROR;
+                    return runtimeError("Operands must be numbers for '/'.");
                 }
 
                 m_stack.push(Value(a.asNumber() / b.asNumber()));
@@ -244,10 +259,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
                 if (!isNumberPair(a, b)) {
-                    std::cerr
-                        << "Runtime error: Operands must be numbers for '>'."
-                        << std::endl;
-                    return Status::RUNTIME_ERROR;
+                    return runtimeError("Operands must be numbers for '>'.");
                 }
 
                 m_stack.push(Value(a.asNumber() > b.asNumber()));
@@ -257,10 +269,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
                 if (!isNumberPair(a, b)) {
-                    std::cerr
-                        << "Runtime error: Operands must be numbers for '<'."
-                        << std::endl;
-                    return Status::RUNTIME_ERROR;
+                    return runtimeError("Operands must be numbers for '<'.");
                 }
 
                 m_stack.push(Value(a.asNumber() < b.asNumber()));
@@ -270,10 +279,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
                 if (!isNumberPair(a, b)) {
-                    std::cerr
-                        << "Runtime error: Operands must be numbers for '>='."
-                        << std::endl;
-                    return Status::RUNTIME_ERROR;
+                    return runtimeError("Operands must be numbers for '>='.");
                 }
 
                 m_stack.push(Value(a.asNumber() >= b.asNumber()));
@@ -283,10 +289,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
                 if (!isNumberPair(a, b)) {
-                    std::cerr
-                        << "Runtime error: Operands must be numbers for '<='."
-                        << std::endl;
-                    return Status::RUNTIME_ERROR;
+                    return runtimeError("Operands must be numbers for '<='.");
                 }
 
                 m_stack.push(Value(a.asNumber() <= b.asNumber()));
@@ -369,9 +372,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 Value subclassValue = m_stack.peek(0);
 
                 if (!superclassValue.isClass() || !subclassValue.isClass()) {
-                    std::cerr << "Runtime error: Inheritance requires classes."
-                              << std::endl;
-                    return Status::RUNTIME_ERROR;
+                    return runtimeError("Inheritance requires classes.");
                 }
 
                 auto superclass = superclassValue.asClass();
@@ -391,9 +392,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 Value klass = m_stack.peek(1);
 
                 if (!klass.isClass() || !method.isClosure()) {
-                    std::cerr << "Runtime error: Invalid method declaration."
-                              << std::endl;
-                    return Status::RUNTIME_ERROR;
+                    return runtimeError("Invalid method declaration.");
                 }
 
                 klass.asClass()->methods[name] = method.asClosure();
@@ -403,10 +402,8 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
             case OpCode::GET_THIS: {
                 auto receiver = currentFrame().receiver;
                 if (!receiver) {
-                    std::cerr << "Runtime error: Cannot use 'this' outside of "
-                                 "a method."
-                              << std::endl;
-                    return Status::RUNTIME_ERROR;
+                    return runtimeError(
+                        "Cannot use 'this' outside of a method.");
                 }
 
                 m_stack.push(Value(receiver));
@@ -417,17 +414,14 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 auto receiver = currentFrame().receiver;
                 if (!receiver || !receiver->klass ||
                     !receiver->klass->superclass) {
-                    std::cerr << "Runtime error: Invalid super lookup."
-                              << std::endl;
-                    return Status::RUNTIME_ERROR;
+                    return runtimeError("Invalid super lookup.");
                 }
 
                 auto method =
                     findMethodClosure(receiver->klass->superclass, name);
                 if (!method) {
-                    std::cerr << "Runtime error: Undefined superclass method '"
-                              << name << "'." << std::endl;
-                    return Status::RUNTIME_ERROR;
+                    return runtimeError("Undefined superclass method '" + name +
+                                        "'.");
                 }
 
                 auto bound = std::make_shared<BoundMethodObject>();
@@ -440,10 +434,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 std::string name = readNameConstant();
                 Value receiver = m_stack.peek(0);
                 if (!receiver.isInstance()) {
-                    std::cerr
-                        << "Runtime error: Only instances have properties."
-                        << std::endl;
-                    return Status::RUNTIME_ERROR;
+                    return runtimeError("Only instances have properties.");
                 }
 
                 auto instance = receiver.asInstance();
@@ -456,9 +447,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
 
                 auto method = findMethodClosure(instance->klass, name);
                 if (!method) {
-                    std::cerr << "Runtime error: Undefined property '" << name
-                              << "'." << std::endl;
-                    return Status::RUNTIME_ERROR;
+                    return runtimeError("Undefined property '" + name + "'.");
                 }
 
                 auto bound = std::make_shared<BoundMethodObject>();
@@ -474,9 +463,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 Value value = m_stack.peek(0);
                 Value receiver = m_stack.peek(1);
                 if (!receiver.isInstance()) {
-                    std::cerr << "Runtime error: Only instances have fields."
-                              << std::endl;
-                    return Status::RUNTIME_ERROR;
+                    return runtimeError("Only instances have fields.");
                 }
 
                 auto instance = receiver.asInstance();
@@ -687,10 +674,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
                 if (!isNumberPair(a, b)) {
-                    std::cerr
-                        << "Runtime error: Operands must be numbers for '<<'."
-                        << std::endl;
-                    return Status::RUNTIME_ERROR;
+                    return runtimeError("Operands must be numbers for '<<'.");
                 }
 
                 m_stack.push(Value(
@@ -702,10 +686,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
                 if (!isNumberPair(a, b)) {
-                    std::cerr
-                        << "Runtime error: Operands must be numbers for '>>'."
-                        << std::endl;
-                    return Status::RUNTIME_ERROR;
+                    return runtimeError("Operands must be numbers for '>>'.");
                 }
 
                 m_stack.push(

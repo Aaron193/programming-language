@@ -262,6 +262,32 @@ void Compiler::advance() {
     }
 }
 
+void Compiler::synchronize() {
+    m_parser->panicMode = false;
+
+    while (m_parser->current.type() != TokenType::END_OF_FILE) {
+        if (m_parser->previous.type() == TokenType::SEMI_COLON) {
+            return;
+        }
+
+        switch (m_parser->current.type()) {
+            case TokenType::CLASS:
+            case TokenType::FUNCTION:
+            case TokenType::VAR:
+            case TokenType::FOR:
+            case TokenType::IF:
+            case TokenType::WHILE:
+            case TokenType::PRINT:
+            case TokenType::_RETURN:
+                return;
+            default:
+                break;
+        }
+
+        advance();
+    }
+}
+
 void Compiler::errorAtCurrent(const std::string& message) {
     errorAt(m_parser->current, message);
 }
@@ -271,7 +297,7 @@ void Compiler::errorAt(const Token& token, const std::string& message) {
     if (m_parser->panicMode) return;
     m_parser->panicMode = true;
 
-    std::cerr << "[line " << token.line() << "] Error";
+    std::cerr << "[error][compile][line " << token.line() << "]";
 
     if (token.type() == TokenType::END_OF_FILE) {
         std::cerr << " at end";
@@ -282,7 +308,7 @@ void Compiler::errorAt(const Token& token, const std::string& message) {
                   << "'";
     }
 
-    std::cerr << ": " << message << std::endl;
+    std::cerr << " " << message << std::endl;
     m_parser->hadError = true;
 }
 
@@ -301,22 +327,19 @@ void Compiler::declaration() {
     if (m_parser->current.type() == TokenType::CLASS) {
         advance();
         classDeclaration();
-        return;
-    }
-
-    if (m_parser->current.type() == TokenType::FUNCTION) {
+    } else if (m_parser->current.type() == TokenType::FUNCTION) {
         advance();
         functionDeclaration();
-        return;
-    }
-
-    if (m_parser->current.type() == TokenType::VAR) {
+    } else if (m_parser->current.type() == TokenType::VAR) {
         advance();
         varDeclaration();
-        return;
+    } else {
+        statement();
     }
 
-    statement();
+    if (m_parser->panicMode) {
+        synchronize();
+    }
 }
 
 void Compiler::classDeclaration() {

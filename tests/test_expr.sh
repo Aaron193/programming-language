@@ -34,6 +34,9 @@ for file in "${FILES[@]}"; do
     if [[ "$base_name" == sample_native_error_* ]]; then
         continue
     fi
+    if [[ "$base_name" == "sample_compile_multi_error.expr" || "$base_name" == "sample_runtime_stacktrace.expr" ]]; then
+        continue
+    fi
 
     echo "========================================"
     echo "Running: $file"

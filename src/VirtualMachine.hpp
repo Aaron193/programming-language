@@ -55,6 +55,8 @@ class VirtualMachine {
     }
 
     Status run(bool printReturnValue, Value& returnValue);
+    Status runtimeError(const std::string& message);
+    void printStackTrace();
     Status callClosure(std::shared_ptr<ClosureObject> closure,
                        uint8_t argumentCount,
                        std::shared_ptr<InstanceObject> receiver = nullptr);

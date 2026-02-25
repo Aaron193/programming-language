@@ -1,0 +1,13 @@
+function c() {
+  return "x" - 1;
+}
+
+function b() {
+  return c();
+}
+
+function a() {
+  return b();
+}
+
+print a();
