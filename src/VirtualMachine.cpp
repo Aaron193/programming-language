@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 
+#include "StdLib.hpp"
+
 static bool isFalsey(const Value& value) {
     if (value.isNil()) return true;
     if (value.isBool()) return !value.asBool();
@@ -1153,12 +1155,13 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                         result = Value(now);
                     } else if (native->name == "sqrt") {
                         const Value& arg = args[0];
-                        if (!arg.isNumber()) {
+                        if (!arg.isAnyNumeric()) {
                             return runtimeError(
                                 "Native function 'sqrt' expects a number.");
                         }
 
-                        double number = arg.asNumber();
+                        double number = 0.0;
+                        valueToDouble(arg, number);
                         if (number < 0.0) {
                             return runtimeError(
                                 "Native function 'sqrt' cannot take negative "
@@ -1168,21 +1171,38 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                         result = Value(std::sqrt(number));
                     } else if (native->name == "len") {
                         const Value& arg = args[0];
-                        if (!arg.isString()) {
+                        if (arg.isString()) {
+                            result = Value(
+                                static_cast<int64_t>(arg.asString().length()));
+                        } else if (arg.isArray()) {
+                            result = Value(static_cast<int64_t>(
+                                arg.asArray()->elements.size()));
+                        } else if (arg.isDict()) {
+                            result = Value(
+                                static_cast<int64_t>(arg.asDict()->map.size()));
+                        } else if (arg.isSet()) {
+                            result = Value(static_cast<int64_t>(
+                                arg.asSet()->elements.size()));
+                        } else {
                             return runtimeError(
-                                "Native function 'len' expects a string.");
+                                "Native function 'len' expects a string, "
+                                "array, "
+                                "dict, or set.");
                         }
-
-                        result =
-                            Value(static_cast<double>(arg.asString().length()));
                     } else if (native->name == "type") {
                         result = Value(valueTypeName(args[0]));
                     } else if (native->name == "str") {
+                        result = Value(valueToString(args[0]));
+                    } else if (native->name == "toString") {
                         result = Value(valueToString(args[0]));
                     } else if (native->name == "num") {
                         const Value& arg = args[0];
                         if (arg.isNumber()) {
                             result = arg;
+                        } else if (arg.isSignedInt() || arg.isUnsignedInt()) {
+                            double number = 0.0;
+                            valueToDouble(arg, number);
+                            result = Value(number);
                         } else if (arg.isString()) {
                             const std::string& text = arg.asString();
                             size_t parseIndex = 0;
@@ -1204,6 +1224,123 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                                 "Native function 'num' expects a number or "
                                 "string.");
                         }
+                    } else if (native->name == "parseInt") {
+                        const Value& arg = args[0];
+                        if (!arg.isString()) {
+                            return runtimeError(
+                                "Native function 'parseInt' expects a string.");
+                        }
+
+                        size_t parseIndex = 0;
+                        try {
+                            int64_t parsed =
+                                std::stoll(arg.asString(), &parseIndex, 10);
+                            if (parseIndex != arg.asString().size()) {
+                                return runtimeError(
+                                    "Native function 'parseInt' expects an "
+                                    "integer string.");
+                            }
+                            result = Value(parsed);
+                        } catch (const std::exception&) {
+                            return runtimeError(
+                                "Native function 'parseInt' expects an integer "
+                                "string.");
+                        }
+                    } else if (native->name == "parseUInt") {
+                        const Value& arg = args[0];
+                        if (!arg.isString()) {
+                            return runtimeError(
+                                "Native function 'parseUInt' expects a "
+                                "string.");
+                        }
+
+                        size_t parseIndex = 0;
+                        try {
+                            uint64_t parsed =
+                                std::stoull(arg.asString(), &parseIndex, 10);
+                            if (parseIndex != arg.asString().size()) {
+                                return runtimeError(
+                                    "Native function 'parseUInt' expects an "
+                                    "unsigned integer string.");
+                            }
+                            result = Value(parsed);
+                        } catch (const std::exception&) {
+                            return runtimeError(
+                                "Native function 'parseUInt' expects an "
+                                "unsigned integer string.");
+                        }
+                    } else if (native->name == "parseFloat") {
+                        const Value& arg = args[0];
+                        if (!arg.isString()) {
+                            return runtimeError(
+                                "Native function 'parseFloat' expects a "
+                                "string.");
+                        }
+
+                        size_t parseIndex = 0;
+                        try {
+                            double parsed =
+                                std::stod(arg.asString(), &parseIndex);
+                            if (parseIndex != arg.asString().size()) {
+                                return runtimeError(
+                                    "Native function 'parseFloat' expects a "
+                                    "numeric string.");
+                            }
+                            result = Value(parsed);
+                        } catch (const std::exception&) {
+                            return runtimeError(
+                                "Native function 'parseFloat' expects a "
+                                "numeric string.");
+                        }
+                    } else if (native->name == "abs") {
+                        const Value& arg = args[0];
+                        if (!arg.isAnyNumeric()) {
+                            return runtimeError(
+                                "Native function 'abs' expects a number.");
+                        }
+
+                        double number = 0.0;
+                        valueToDouble(arg, number);
+                        result = Value(std::fabs(number));
+                    } else if (native->name == "floor") {
+                        const Value& arg = args[0];
+                        if (!arg.isAnyNumeric()) {
+                            return runtimeError(
+                                "Native function 'floor' expects a number.");
+                        }
+
+                        double number = 0.0;
+                        valueToDouble(arg, number);
+                        result = Value(std::floor(number));
+                    } else if (native->name == "ceil") {
+                        const Value& arg = args[0];
+                        if (!arg.isAnyNumeric()) {
+                            return runtimeError(
+                                "Native function 'ceil' expects a number.");
+                        }
+
+                        double number = 0.0;
+                        valueToDouble(arg, number);
+                        result = Value(std::ceil(number));
+                    } else if (native->name == "pow") {
+                        double base = 0.0;
+                        double exponent = 0.0;
+                        if (!valueToDouble(args[0], base) ||
+                            !valueToDouble(args[1], exponent)) {
+                            return runtimeError(
+                                "Native function 'pow' expects numeric "
+                                "arguments.");
+                        }
+
+                        result = Value(std::pow(base, exponent));
+                    } else if (native->name == "error") {
+                        const Value& arg = args[0];
+                        if (!arg.isString()) {
+                            return runtimeError(
+                                "Native function 'error' expects a string.");
+                        }
+
+                        return runtimeError(arg.asString());
                     } else if (native->name == "Set") {
                         auto set = gcAlloc<SetObject>();
                         for (const auto& arg : args) {
@@ -2392,24 +2529,9 @@ Status VirtualMachine::interpret(std::string_view source, bool printReturnValue,
         }
     };
 
-    auto clockFn = gcAlloc<NativeFunctionObject>();
-    clockFn->name = "clock";
-    clockFn->arity = 0;
-    m_nativeGlobals[clockFn->name] = Value(clockFn);
-    for (size_t i = 0; i < m_globalNames.size(); ++i) {
-        if (m_globalNames[i] == clockFn->name) {
-            m_globalValues[i] = Value(clockFn);
-            m_globalDefined[i] = true;
-            break;
-        }
+    for (const auto& descriptor : standardLibraryNatives()) {
+        defineNative(descriptor.name, descriptor.arity);
     }
-
-    defineNative("sqrt", 1);
-    defineNative("len", 1);
-    defineNative("type", 1);
-    defineNative("str", 1);
-    defineNative("num", 1);
-    defineNative("Set", -1);
 
     m_frames[m_frameCount++] =
         CallFrame{&chunk, chunk.getBytes(), 0, 0, nullptr, nullptr};
