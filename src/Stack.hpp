@@ -39,6 +39,20 @@ class Stack {
         return m_data[m_top - static_cast<int>(distance)];
     }
 
+    T getAt(size_t index) const {
+        if (index > static_cast<size_t>(m_top)) {
+            return T();
+        }
+
+        return m_data[index];
+    }
+
+    void setAt(size_t index, const T& value) {
+        if (index <= static_cast<size_t>(m_top)) {
+            m_data[index] = value;
+        }
+    }
+
     void popN(size_t count) {
         while (count > 0 && m_top >= 0) {
             m_top--;

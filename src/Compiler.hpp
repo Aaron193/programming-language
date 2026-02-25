@@ -2,7 +2,9 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <string>
 #include <string_view>
+#include <vector>
 
 #include "Chunk.hpp"
 #include "Scanner.hpp"
@@ -33,6 +35,11 @@ class Compiler {
    private:
     using ParseFn = std::function<void(bool)>;
 
+    struct Local {
+        Token name;
+        int depth;
+    };
+
     struct ParseRule {
         ParseFn prefix;
         ParseFn infix;
@@ -43,6 +50,8 @@ class Compiler {
     std::unique_ptr<Scanner> m_scanner;
     std::unique_ptr<Parser> m_parser;
     bool m_inFunction = false;
+    std::vector<Local> m_locals;
+    int m_scopeDepth = 0;
 
     void advance();
     void errorAtCurrent(const std::string& message);
@@ -58,6 +67,12 @@ class Compiler {
     uint8_t identifierConstant(const Token& name);
     uint8_t parseVariable(const std::string& message);
     void defineVariable(uint8_t global);
+    void beginScope();
+    void endScope();
+    void addLocal(const Token& name);
+    int resolveLocal(const Token& name);
+    void markInitialized();
+    bool identifiersEqual(const Token& lhs, const Token& rhs) const;
     int emitJump(uint8_t instruction);
     void patchJump(int offset);
     void emitLoop(int loopStart);

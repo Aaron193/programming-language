@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <string>
+#include <string_view>
 
 #include "Chunk.hpp"
 
@@ -9,6 +10,8 @@ bool Compiler::compile(std::string_view source, Chunk& chunk) {
     m_chunk = &chunk;
     m_scanner = std::make_unique<Scanner>(source);
     m_parser = std::make_unique<Parser>();
+    m_locals.clear();
+    m_scopeDepth = 0;
 
     advance();
 
@@ -84,11 +87,88 @@ uint8_t Compiler::identifierConstant(const Token& name) {
 
 uint8_t Compiler::parseVariable(const std::string& message) {
     consume(TokenType::IDENTIFIER, message);
+
+    if (m_scopeDepth > 0) {
+        addLocal(m_parser->previous);
+        return 0;
+    }
+
     return identifierConstant(m_parser->previous);
 }
 
 void Compiler::defineVariable(uint8_t global) {
+    if (m_scopeDepth > 0) {
+        markInitialized();
+        return;
+    }
+
     emitBytes(OpCode::DEFINE_GLOBAL, global);
+}
+
+void Compiler::beginScope() { m_scopeDepth++; }
+
+void Compiler::endScope() {
+    m_scopeDepth--;
+
+    while (!m_locals.empty() && m_locals.back().depth > m_scopeDepth) {
+        emitByte(OpCode::POP);
+        m_locals.pop_back();
+    }
+}
+
+void Compiler::addLocal(const Token& name) {
+    if (m_locals.size() > UINT8_MAX) {
+        errorAt(name, "Too many local variables in function.");
+        return;
+    }
+
+    for (auto it = m_locals.rbegin(); it != m_locals.rend(); ++it) {
+        if (it->depth != -1 && it->depth < m_scopeDepth) {
+            break;
+        }
+
+        if (identifiersEqual(name, it->name)) {
+            errorAt(name,
+                    "Variable with this name already declared in this scope.");
+            return;
+        }
+    }
+
+    m_locals.push_back(Local{name, -1});
+}
+
+int Compiler::resolveLocal(const Token& name) {
+    for (int index = static_cast<int>(m_locals.size()) - 1; index >= 0;
+         --index) {
+        if (!identifiersEqual(name, m_locals[index].name)) {
+            continue;
+        }
+
+        if (m_locals[index].depth == -1) {
+            errorAt(name, "Cannot read local variable in its own initializer.");
+        }
+        return index;
+    }
+
+    return -1;
+}
+
+void Compiler::markInitialized() {
+    if (m_scopeDepth == 0 || m_locals.empty()) {
+        return;
+    }
+
+    m_locals.back().depth = m_scopeDepth;
+}
+
+bool Compiler::identifiersEqual(const Token& lhs, const Token& rhs) const {
+    if (lhs.length() != rhs.length()) {
+        return false;
+    }
+
+    std::string_view lhsView(lhs.start(), lhs.length());
+    std::string_view rhsView(rhs.start(), rhs.length());
+    return lhsView == rhsView;
 }
 
 void Compiler::advance() {
@@ -197,21 +277,30 @@ void Compiler::statement() {
 void Compiler::functionDeclaration() {
     consume(TokenType::IDENTIFIER, "Expected function name.");
     Token nameToken = m_parser->previous;
-    uint8_t global = identifierConstant(nameToken);
+    uint8_t variable = 0;
+
+    if (m_scopeDepth > 0) {
+        addLocal(nameToken);
+    } else {
+        variable = identifierConstant(nameToken);
+    }
 
     std::shared_ptr<FunctionObject> function =
         compileFunction(std::string(nameToken.start(), nameToken.length()));
     emitConstant(Value(function));
-    defineVariable(global);
+    defineVariable(variable);
 }
 
 void Compiler::block() {
+    beginScope();
+
     while (m_parser->current.type() != TokenType::CLOSE_CURLY &&
            m_parser->current.type() != TokenType::END_OF_FILE) {
         declaration();
     }
 
     consume(TokenType::CLOSE_CURLY, "Expected '}' after block.");
+    endScope();
 }
 
 void Compiler::ifStatement() {
@@ -252,6 +341,8 @@ void Compiler::whileStatement() {
 }
 
 void Compiler::forStatement() {
+    beginScope();
+
     consume(TokenType::OPEN_PAREN, "Expected '(' after 'for'.");
 
     if (m_parser->current.type() == TokenType::SEMI_COLON) {
@@ -299,6 +390,8 @@ void Compiler::forStatement() {
         patchJump(exitJump);
         emitByte(OpCode::POP);
     }
+
+    endScope();
 }
 
 void Compiler::printStatement() {
@@ -452,16 +545,28 @@ void Compiler::number(bool canAssign) {
 }
 
 void Compiler::variable(bool canAssign) {
-    uint8_t arg = identifierConstant(m_parser->previous);
+    Token name = m_parser->previous;
+    uint8_t arg = 0;
+    uint8_t getOp = OpCode::GET_GLOBAL;
+    uint8_t setOp = OpCode::SET_GLOBAL;
+
+    int local = resolveLocal(name);
+    if (local != -1) {
+        getOp = OpCode::GET_LOCAL;
+        setOp = OpCode::SET_LOCAL;
+        arg = static_cast<uint8_t>(local);
+    } else {
+        arg = identifierConstant(name);
+    }
 
     if (canAssign && m_parser->current.type() == TokenType::EQUAL) {
         advance();
         expression();
-        emitBytes(OpCode::SET_GLOBAL, arg);
+        emitBytes(setOp, arg);
         return;
     }
 
-    emitBytes(OpCode::GET_GLOBAL, arg);
+    emitBytes(getOp, arg);
 }
 
 void Compiler::literal(bool canAssign) {
@@ -609,12 +714,25 @@ std::shared_ptr<FunctionObject> Compiler::compileFunction(
     const std::string& name) {
     consume(TokenType::OPEN_PAREN, "Expected '(' after function name.");
 
+    Chunk* enclosingChunk = m_chunk;
+    bool enclosingInFunction = m_inFunction;
+    auto enclosingLocals = m_locals;
+    int enclosingScopeDepth = m_scopeDepth;
+
+    auto functionChunk = std::make_shared<Chunk>();
+    m_chunk = functionChunk.get();
+    m_inFunction = true;
+    m_locals.clear();
+    m_scopeDepth = 1;
+
     std::vector<std::string> parameters;
     if (m_parser->current.type() != TokenType::CLOSE_PAREN) {
         do {
             consume(TokenType::IDENTIFIER, "Expected parameter name.");
             parameters.emplace_back(m_parser->previous.start(),
                                     m_parser->previous.length());
+            addLocal(m_parser->previous);
+            markInitialized();
 
             if (m_parser->current.type() != TokenType::COMMA) {
                 break;
@@ -625,12 +743,6 @@ std::shared_ptr<FunctionObject> Compiler::compileFunction(
 
     consume(TokenType::CLOSE_PAREN, "Expected ')' after parameters.");
     consume(TokenType::OPEN_CURLY, "Expected '{' before function body.");
-
-    Chunk* enclosingChunk = m_chunk;
-    bool enclosingInFunction = m_inFunction;
-    auto functionChunk = std::make_shared<Chunk>();
-    m_chunk = functionChunk.get();
-    m_inFunction = true;
 
     while (m_parser->current.type() != TokenType::CLOSE_CURLY &&
            m_parser->current.type() != TokenType::END_OF_FILE) {
@@ -643,6 +755,8 @@ std::shared_ptr<FunctionObject> Compiler::compileFunction(
 
     m_chunk = enclosingChunk;
     m_inFunction = enclosingInFunction;
+    m_locals = std::move(enclosingLocals);
+    m_scopeDepth = enclosingScopeDepth;
 
     auto function = std::make_shared<FunctionObject>();
     function->name = name;

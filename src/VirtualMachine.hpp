@@ -22,6 +22,8 @@ class VirtualMachine {
     uint8_t* m_ip;
     // expression evaluation stack
     Stack<Value> m_stack;
+    // stack base for current call frame
+    size_t m_frameBase = 0;
     // compiler
     Compiler m_compiler;
     // globals

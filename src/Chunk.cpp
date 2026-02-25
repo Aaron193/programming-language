@@ -98,6 +98,12 @@ int Chunk::disassembleInstruction(int offset) {
             return constantInstruction("GET_GLOBAL", offset);
         case OpCode::SET_GLOBAL:
             return constantInstruction("SET_GLOBAL", offset);
+        case OpCode::GET_LOCAL:
+            return byteInstruction("GET_LOCAL", offset,
+                                   m_bytes->at(offset + 1));
+        case OpCode::SET_LOCAL:
+            return byteInstruction("SET_LOCAL", offset,
+                                   m_bytes->at(offset + 1));
         case OpCode::CALL:
             return byteInstruction("CALL", offset, m_bytes->at(offset + 1));
         case OpCode::JUMP:

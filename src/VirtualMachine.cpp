@@ -5,8 +5,6 @@
 #include <iostream>
 #include <string>
 
-#define DEBUG
-
 static bool isFalsey(const Value& value) {
     if (value.isNil()) return true;
     if (value.isBool()) return !value.asBool();
@@ -27,29 +25,13 @@ Status VirtualMachine::callFunction(std::shared_ptr<FunctionObject> function,
         return Status::RUNTIME_ERROR;
     }
 
-    struct BindingBackup {
-        bool hadValue;
-        Value value;
-    };
-
-    std::unordered_map<std::string, BindingBackup> backups;
-
-    for (size_t i = 0; i < function->parameters.size(); ++i) {
-        const std::string& parameter = function->parameters[i];
-        Value argument = m_stack.peek(argumentCount - 1 - i);
-
-        auto globalIt = m_globals.find(parameter);
-        if (globalIt == m_globals.end()) {
-            backups[parameter] = BindingBackup{false, Value()};
-        } else {
-            backups[parameter] = BindingBackup{true, globalIt->second};
-        }
-
-        m_globals[parameter] = argument;
-    }
-
     Chunk* previousChunk = m_chunk;
     uint8_t* previousIp = m_ip;
+    size_t previousFrameBase = m_frameBase;
+
+    size_t calleeIndex =
+        m_stack.size() - static_cast<size_t>(argumentCount) - 1;
+    m_frameBase = calleeIndex + 1;
 
     m_chunk = function->chunk.get();
     m_ip = m_chunk->getBytes();
@@ -59,22 +41,13 @@ Status VirtualMachine::callFunction(std::shared_ptr<FunctionObject> function,
 
     m_chunk = previousChunk;
     m_ip = previousIp;
-
-    for (const auto& pair : backups) {
-        const std::string& parameter = pair.first;
-        const BindingBackup& backup = pair.second;
-        if (backup.hadValue) {
-            m_globals[parameter] = backup.value;
-        } else {
-            m_globals.erase(parameter);
-        }
-    }
+    m_frameBase = previousFrameBase;
 
     if (status != Status::OK) {
         return status;
     }
 
-    m_stack.popN(static_cast<size_t>(argumentCount) + 1);
+    m_stack.popN(m_stack.size() - calleeIndex);
     m_stack.push(functionReturn);
     return Status::OK;
 }
@@ -291,6 +264,16 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 it->second = m_stack.peek(0);
                 break;
             }
+            case OpCode::GET_LOCAL: {
+                uint8_t slot = readByte();
+                m_stack.push(m_stack.getAt(m_frameBase + slot));
+                break;
+            }
+            case OpCode::SET_LOCAL: {
+                uint8_t slot = readByte();
+                m_stack.setAt(m_frameBase + slot, m_stack.peek(0));
+                break;
+            }
             case OpCode::CALL: {
                 uint8_t argumentCount = readByte();
                 Value callee = m_stack.peek(argumentCount);
@@ -361,6 +344,8 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
 
 Status VirtualMachine::interpret(std::string_view source) {
     Chunk chunk;
+    m_stack.reset();
+    m_frameBase = 0;
 
     if (!m_compiler.compile(source, chunk)) {
         return Status::COMPILATION_ERROR;
