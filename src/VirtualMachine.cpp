@@ -1,5 +1,6 @@
 #include "VirtualMachine.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <iostream>
@@ -751,6 +752,52 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                             result = array->elements[index];
                             array->elements.erase(array->elements.begin() +
                                                   static_cast<long>(index));
+                        } else if (method == "clear") {
+                            if (argumentCount != 0) {
+                                return runtimeError(
+                                    "Array method 'clear' expects 0 "
+                                    "arguments.");
+                            }
+
+                            double removed =
+                                static_cast<double>(array->elements.size());
+                            array->elements.clear();
+                            result = Value(removed);
+                        } else if (method == "isEmpty") {
+                            if (argumentCount != 0) {
+                                return runtimeError(
+                                    "Array method 'isEmpty' expects 0 "
+                                    "arguments.");
+                            }
+
+                            result = Value(array->elements.empty());
+                        } else if (method == "first") {
+                            if (argumentCount != 0) {
+                                return runtimeError(
+                                    "Array method 'first' expects 0 "
+                                    "arguments.");
+                            }
+
+                            if (array->elements.empty()) {
+                                return runtimeError(
+                                    "Array method 'first' called on empty "
+                                    "array.");
+                            }
+
+                            result = array->elements.front();
+                        } else if (method == "last") {
+                            if (argumentCount != 0) {
+                                return runtimeError(
+                                    "Array method 'last' expects 0 arguments.");
+                            }
+
+                            if (array->elements.empty()) {
+                                return runtimeError(
+                                    "Array method 'last' called on empty "
+                                    "array.");
+                            }
+
+                            result = array->elements.back();
                         } else {
                             return runtimeError("Undefined array method '" +
                                                 method + "'.");
@@ -812,8 +859,15 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                             }
 
                             auto keys = std::make_shared<ArrayObject>();
+                            std::vector<std::string> orderedKeys;
+                            orderedKeys.reserve(dict->map.size());
                             for (const auto& entry : dict->map) {
-                                keys->elements.push_back(Value(entry.first));
+                                orderedKeys.push_back(entry.first);
+                            }
+                            std::sort(orderedKeys.begin(), orderedKeys.end());
+
+                            for (const auto& key : orderedKeys) {
+                                keys->elements.push_back(Value(key));
                             }
                             result = Value(keys);
                         } else if (method == "values") {
@@ -824,8 +878,15 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                             }
 
                             auto values = std::make_shared<ArrayObject>();
+                            std::vector<std::string> orderedKeys;
+                            orderedKeys.reserve(dict->map.size());
                             for (const auto& entry : dict->map) {
-                                values->elements.push_back(entry.second);
+                                orderedKeys.push_back(entry.first);
+                            }
+                            std::sort(orderedKeys.begin(), orderedKeys.end());
+
+                            for (const auto& key : orderedKeys) {
+                                values->elements.push_back(dict->map.at(key));
                             }
                             result = Value(values);
                         } else if (method == "size") {
@@ -856,6 +917,39 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
 
                             result = it->second;
                             dict->map.erase(it);
+                        } else if (method == "clear") {
+                            if (argumentCount != 0) {
+                                return runtimeError(
+                                    "Dict method 'clear' expects 0 arguments.");
+                            }
+
+                            double removed =
+                                static_cast<double>(dict->map.size());
+                            dict->map.clear();
+                            result = Value(removed);
+                        } else if (method == "isEmpty") {
+                            if (argumentCount != 0) {
+                                return runtimeError(
+                                    "Dict method 'isEmpty' expects 0 "
+                                    "arguments.");
+                            }
+
+                            result = Value(dict->map.empty());
+                        } else if (method == "getOr") {
+                            if (argumentCount != 2) {
+                                return runtimeError(
+                                    "Dict method 'getOr' expects 2 arguments.");
+                            }
+
+                            std::string key;
+                            if (!toDictKey(args[0], key)) {
+                                return runtimeError(
+                                    "Dict keys must be strings or numbers.");
+                            }
+
+                            auto it = dict->map.find(key);
+                            result =
+                                (it != dict->map.end()) ? it->second : args[1];
                         } else {
                             return runtimeError("Undefined dict method '" +
                                                 method + "'.");
@@ -917,6 +1011,86 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                             auto array = std::make_shared<ArrayObject>();
                             array->elements = set->elements;
                             result = Value(array);
+                        } else if (method == "clear") {
+                            if (argumentCount != 0) {
+                                return runtimeError(
+                                    "Set method 'clear' expects 0 arguments.");
+                            }
+
+                            double removed =
+                                static_cast<double>(set->elements.size());
+                            set->elements.clear();
+                            result = Value(removed);
+                        } else if (method == "isEmpty") {
+                            if (argumentCount != 0) {
+                                return runtimeError(
+                                    "Set method 'isEmpty' expects 0 "
+                                    "arguments.");
+                            }
+
+                            result = Value(set->elements.empty());
+                        } else if (method == "union") {
+                            if (argumentCount != 1) {
+                                return runtimeError(
+                                    "Set method 'union' expects 1 argument.");
+                            }
+                            if (!args[0].isSet()) {
+                                return runtimeError(
+                                    "Set method 'union' expects a set "
+                                    "argument.");
+                            }
+
+                            auto out = std::make_shared<SetObject>();
+                            out->elements = set->elements;
+                            auto rhs = args[0].asSet();
+                            for (const auto& element : rhs->elements) {
+                                if (!containsValue(out->elements, element)) {
+                                    out->elements.push_back(element);
+                                }
+                            }
+                            result = Value(out);
+                        } else if (method == "intersect") {
+                            if (argumentCount != 1) {
+                                return runtimeError(
+                                    "Set method 'intersect' expects 1 "
+                                    "argument.");
+                            }
+                            if (!args[0].isSet()) {
+                                return runtimeError(
+                                    "Set method 'intersect' expects a set "
+                                    "argument.");
+                            }
+
+                            auto out = std::make_shared<SetObject>();
+                            auto rhs = args[0].asSet();
+                            for (const auto& element : set->elements) {
+                                if (containsValue(rhs->elements, element) &&
+                                    !containsValue(out->elements, element)) {
+                                    out->elements.push_back(element);
+                                }
+                            }
+                            result = Value(out);
+                        } else if (method == "difference") {
+                            if (argumentCount != 1) {
+                                return runtimeError(
+                                    "Set method 'difference' expects 1 "
+                                    "argument.");
+                            }
+                            if (!args[0].isSet()) {
+                                return runtimeError(
+                                    "Set method 'difference' expects a set "
+                                    "argument.");
+                            }
+
+                            auto out = std::make_shared<SetObject>();
+                            auto rhs = args[0].asSet();
+                            for (const auto& element : set->elements) {
+                                if (!containsValue(rhs->elements, element) &&
+                                    !containsValue(out->elements, element)) {
+                                    out->elements.push_back(element);
+                                }
+                            }
+                            result = Value(out);
                         } else {
                             return runtimeError("Undefined set method '" +
                                                 method + "'.");

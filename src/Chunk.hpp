@@ -1,9 +1,11 @@
 #pragma once
+#include <algorithm>
 #include <cstdint>
 #include <iostream>
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -245,7 +247,15 @@ inline bool operator!=(const Value& lhs, const Value& rhs) {
     return !(lhs == rhs);
 }
 
-inline std::ostream& operator<<(std::ostream& stream, const Value& value) {
+inline void printValueInternal(std::ostream& stream, const Value& value,
+                               std::unordered_set<const void*>& active,
+                               int depth) {
+    constexpr int kMaxPrintDepth = 12;
+    if (depth > kMaxPrintDepth) {
+        stream << "...";
+        return;
+    }
+
     if (value.isNumber()) {
         stream << value.asNumber();
     } else if (value.isBool()) {
@@ -274,14 +284,78 @@ inline std::ostream& operator<<(std::ostream& stream, const Value& value) {
         auto closure = value.asClosure();
         stream << "<closure " << closure->function->name << ">";
     } else if (value.isArray()) {
-        stream << "<array>";
+        auto array = value.asArray();
+        const void* identity = array.get();
+        if (active.find(identity) != active.end()) {
+            stream << "[...]";
+            return;
+        }
+
+        active.insert(identity);
+        stream << "[";
+        for (size_t index = 0; index < array->elements.size(); ++index) {
+            if (index > 0) {
+                stream << ", ";
+            }
+            printValueInternal(stream, array->elements[index], active,
+                               depth + 1);
+        }
+        stream << "]";
+        active.erase(identity);
     } else if (value.isDict()) {
-        stream << "<dict>";
+        auto dict = value.asDict();
+        const void* identity = dict.get();
+        if (active.find(identity) != active.end()) {
+            stream << "{...}";
+            return;
+        }
+
+        active.insert(identity);
+        std::vector<std::string> keys;
+        keys.reserve(dict->map.size());
+        for (const auto& entry : dict->map) {
+            keys.push_back(entry.first);
+        }
+        std::sort(keys.begin(), keys.end());
+
+        stream << "{";
+        for (size_t index = 0; index < keys.size(); ++index) {
+            if (index > 0) {
+                stream << ", ";
+            }
+
+            const std::string& key = keys[index];
+            stream << '"' << key << '"' << ": ";
+            printValueInternal(stream, dict->map.at(key), active, depth + 1);
+        }
+        stream << "}";
+        active.erase(identity);
     } else if (value.isSet()) {
-        stream << "<set>";
+        auto set = value.asSet();
+        const void* identity = set.get();
+        if (active.find(identity) != active.end()) {
+            stream << "Set(...)";
+            return;
+        }
+
+        active.insert(identity);
+        stream << "Set(";
+        for (size_t index = 0; index < set->elements.size(); ++index) {
+            if (index > 0) {
+                stream << ", ";
+            }
+            printValueInternal(stream, set->elements[index], active, depth + 1);
+        }
+        stream << ")";
+        active.erase(identity);
     } else {
         stream << value.asString();
     }
+}
+
+inline std::ostream& operator<<(std::ostream& stream, const Value& value) {
+    std::unordered_set<const void*> active;
+    printValueInternal(stream, value, active, 0);
 
     return stream;
 }
