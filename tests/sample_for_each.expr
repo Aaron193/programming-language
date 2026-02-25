@@ -1,0 +1,15 @@
+var nums = [1, 2, 3];
+for (var n : nums) {
+  print n;
+}
+
+var dict = {"b": 2, "a": 1};
+for (var key : dict) {
+  print key;
+  print dict[key];
+}
+
+var set = Set(4, 5, 4);
+for (var item : set) {
+  print item;
+}

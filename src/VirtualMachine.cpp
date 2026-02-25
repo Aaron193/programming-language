@@ -32,6 +32,7 @@ static std::string valueTypeName(const Value& value) {
     if (value.isArray()) return "array";
     if (value.isDict()) return "dict";
     if (value.isSet()) return "set";
+    if (value.isIterator()) return "iterator";
     if (value.isClass()) return "class";
     if (value.isInstance()) return "instance";
     if (value.isNative()) return "native";
@@ -1328,6 +1329,105 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 Value top = m_stack.peek(0);
                 m_stack.push(second);
                 m_stack.push(top);
+                break;
+            }
+            case OpCode::ITER_INIT: {
+                Value iterable = m_stack.pop();
+                auto iterator = gcAlloc<IteratorObject>();
+
+                if (iterable.isArray()) {
+                    iterator->kind = IteratorObject::ARRAY_ITER;
+                    iterator->array = iterable.asArray();
+                } else if (iterable.isDict()) {
+                    iterator->kind = IteratorObject::DICT_ITER;
+                    iterator->dict = iterable.asDict();
+
+                    iterator->dictKeys.reserve(iterator->dict->map.size());
+                    for (const auto& entry : iterator->dict->map) {
+                        iterator->dictKeys.push_back(entry.first);
+                    }
+                    std::sort(iterator->dictKeys.begin(),
+                              iterator->dictKeys.end());
+                } else if (iterable.isSet()) {
+                    iterator->kind = IteratorObject::SET_ITER;
+                    iterator->set = iterable.asSet();
+                } else {
+                    return runtimeError(
+                        "Foreach expects an iterable (array, dict, or set).");
+                }
+
+                m_stack.push(Value(iterator));
+                break;
+            }
+            case OpCode::ITER_HAS_NEXT: {
+                Value iteratorValue = m_stack.pop();
+                if (!iteratorValue.isIterator()) {
+                    return runtimeError("Internal error: iterator expected.");
+                }
+
+                auto iterator = iteratorValue.asIterator();
+                bool hasNext = false;
+
+                switch (iterator->kind) {
+                    case IteratorObject::ARRAY_ITER:
+                        hasNext =
+                            iterator->array &&
+                            iterator->index < iterator->array->elements.size();
+                        break;
+                    case IteratorObject::DICT_ITER:
+                        hasNext = iterator->dict &&
+                                  iterator->index < iterator->dictKeys.size();
+                        break;
+                    case IteratorObject::SET_ITER:
+                        hasNext =
+                            iterator->set &&
+                            iterator->index < iterator->set->elements.size();
+                        break;
+                }
+
+                m_stack.push(Value(hasNext));
+                break;
+            }
+            case OpCode::ITER_NEXT: {
+                Value iteratorValue = m_stack.pop();
+                if (!iteratorValue.isIterator()) {
+                    return runtimeError("Internal error: iterator expected.");
+                }
+
+                auto iterator = iteratorValue.asIterator();
+                Value nextValue;
+
+                switch (iterator->kind) {
+                    case IteratorObject::ARRAY_ITER:
+                        if (!iterator->array ||
+                            iterator->index >=
+                                iterator->array->elements.size()) {
+                            return runtimeError(
+                                "Foreach iterator exhausted unexpectedly.");
+                        }
+                        nextValue =
+                            iterator->array->elements[iterator->index++];
+                        break;
+                    case IteratorObject::DICT_ITER:
+                        if (!iterator->dict ||
+                            iterator->index >= iterator->dictKeys.size()) {
+                            return runtimeError(
+                                "Foreach iterator exhausted unexpectedly.");
+                        }
+                        nextValue =
+                            Value(iterator->dictKeys[iterator->index++]);
+                        break;
+                    case IteratorObject::SET_ITER:
+                        if (!iterator->set ||
+                            iterator->index >= iterator->set->elements.size()) {
+                            return runtimeError(
+                                "Foreach iterator exhausted unexpectedly.");
+                        }
+                        nextValue = iterator->set->elements[iterator->index++];
+                        break;
+                }
+
+                m_stack.push(nextValue);
                 break;
             }
             case OpCode::JUMP: {

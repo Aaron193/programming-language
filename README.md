@@ -11,7 +11,7 @@ This project is a bytecode-compiled, stack-based interpreter implemented in C++.
 - Bit shifts: `<<`, `>>`
 - Variables: `var` declarations, assignment, compound assignment (`+=`, `-=`, `*=`, `/=`, `<<=`, `>>=`), lexical scope
 - Update operators: `++`, `--`
-- Control flow: `if`/`else`, `while`, `for`
+- Control flow: `if`/`else`, `while`, `for`, foreach (`for (var x : collection)`)
 - Functions: declarations, parameters, return values, recursion
 - Closures: nested functions with captured/upvalue variables
 - Classes: class declarations, fields, methods, `this`

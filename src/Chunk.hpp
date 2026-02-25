@@ -23,6 +23,7 @@ struct UpvalueObject;
 struct ArrayObject;
 struct DictObject;
 struct SetObject;
+struct IteratorObject;
 
 struct FunctionObject : GcObject {
     std::string name;
@@ -107,6 +108,9 @@ enum OpCode {
     LOOP,
     SHIFT_LEFT,
     SHIFT_RIGHT,
+    ITER_INIT,
+    ITER_HAS_NEXT,
+    ITER_NEXT,
 };
 
 enum ValueType {
@@ -120,7 +124,8 @@ struct Value {
     std::variant<double, bool, std::monostate, std::string, FunctionObject*,
                  ClassObject*, InstanceObject*, BoundMethodObject*,
                  NativeFunctionObject*, NativeBoundMethodObject*,
-                 ClosureObject*, ArrayObject*, DictObject*, SetObject*>
+                 ClosureObject*, ArrayObject*, DictObject*, SetObject*,
+                 IteratorObject*>
         data;
 
     Value() : data(std::monostate{}) {}
@@ -138,6 +143,7 @@ struct Value {
     Value(ArrayObject* value) : data(value) {}
     Value(DictObject* value) : data(value) {}
     Value(SetObject* value) : data(value) {}
+    Value(IteratorObject* value) : data(value) {}
 
     bool isNumber() const { return std::holds_alternative<double>(data); }
     bool isBool() const { return std::holds_alternative<bool>(data); }
@@ -165,6 +171,9 @@ struct Value {
     bool isArray() const { return std::holds_alternative<ArrayObject*>(data); }
     bool isDict() const { return std::holds_alternative<DictObject*>(data); }
     bool isSet() const { return std::holds_alternative<SetObject*>(data); }
+    bool isIterator() const {
+        return std::holds_alternative<IteratorObject*>(data);
+    }
 
     double asNumber() const { return std::get<double>(data); }
     bool asBool() const { return std::get<bool>(data); }
@@ -189,6 +198,9 @@ struct Value {
     ArrayObject* asArray() const { return std::get<ArrayObject*>(data); }
     DictObject* asDict() const { return std::get<DictObject*>(data); }
     SetObject* asSet() const { return std::get<SetObject*>(data); }
+    IteratorObject* asIterator() const {
+        return std::get<IteratorObject*>(data);
+    }
 };
 
 struct UpvalueObject : GcObject {
@@ -227,6 +239,18 @@ struct DictObject : GcObject {
 
 struct SetObject : GcObject {
     std::vector<Value> elements;
+
+    void trace(GC& gc) override;
+};
+
+struct IteratorObject : GcObject {
+    enum Kind { ARRAY_ITER, DICT_ITER, SET_ITER } kind = ARRAY_ITER;
+
+    ArrayObject* array = nullptr;
+    DictObject* dict = nullptr;
+    SetObject* set = nullptr;
+    std::vector<std::string> dictKeys;
+    size_t index = 0;
 
     void trace(GC& gc) override;
 };
@@ -347,6 +371,8 @@ inline void printValueInternal(std::ostream& stream, const Value& value,
         }
         stream << ")";
         active.erase(identity);
+    } else if (value.isIterator()) {
+        stream << "<iterator>";
     } else {
         stream << value.asString();
     }

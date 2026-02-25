@@ -594,7 +594,64 @@ void Compiler::forStatement() {
         advance();
     } else if (m_parser->current.type() == TokenType::VAR) {
         advance();
-        varDeclaration();
+
+        consume(TokenType::IDENTIFIER, "Expected variable name.");
+        Token loopVariable = m_parser->previous;
+
+        if (m_parser->current.type() == TokenType::COLON) {
+            advance();
+
+            addLocal(loopVariable);
+            emitByte(OpCode::NIL);
+            markInitialized();
+            uint8_t loopVariableSlot =
+                static_cast<uint8_t>(currentContext().locals.size() - 1);
+
+            expression();
+            consume(TokenType::CLOSE_PAREN,
+                    "Expected ')' after foreach iterable.");
+
+            emitByte(OpCode::ITER_INIT);
+
+            int loopStart = currentChunk()->count();
+            emitByte(OpCode::DUP);
+            emitByte(OpCode::ITER_HAS_NEXT);
+            int exitJump = emitJump(OpCode::JUMP_IF_FALSE);
+            emitByte(OpCode::POP);
+
+            emitByte(OpCode::DUP);
+            emitByte(OpCode::ITER_NEXT);
+            emitBytes(OpCode::SET_LOCAL, loopVariableSlot);
+            emitByte(OpCode::POP);
+
+            statement();
+            emitLoop(loopStart);
+
+            patchJump(exitJump);
+            emitByte(OpCode::POP);
+            emitByte(OpCode::POP);
+
+            endScope();
+            return;
+        }
+
+        uint8_t global = 0;
+        if (currentContext().scopeDepth > 0) {
+            addLocal(loopVariable);
+        } else {
+            global = identifierConstant(loopVariable);
+        }
+
+        if (m_parser->current.type() == TokenType::EQUAL) {
+            advance();
+            expression();
+        } else {
+            emitByte(OpCode::NIL);
+        }
+
+        consume(TokenType::SEMI_COLON,
+                "Expected ';' after variable declaration.");
+        defineVariable(global);
     } else {
         expression();
         consume(TokenType::SEMI_COLON, "Expected ';' after loop initializer.");

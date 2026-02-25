@@ -23,6 +23,8 @@ void GC::markValue(const Value& value) {
         markObject(value.asDict());
     } else if (value.isSet()) {
         markObject(value.asSet());
+    } else if (value.isIterator()) {
+        markObject(value.asIterator());
     }
 }
 

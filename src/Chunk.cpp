@@ -186,6 +186,12 @@ int Chunk::disassembleInstruction(int offset) {
             return simpleInstruction("SHIFT_LEFT", offset);
         case OpCode::SHIFT_RIGHT:
             return simpleInstruction("SHIFT_RIGHT", offset);
+        case OpCode::ITER_INIT:
+            return simpleInstruction("ITER_INIT", offset);
+        case OpCode::ITER_HAS_NEXT:
+            return simpleInstruction("ITER_HAS_NEXT", offset);
+        case OpCode::ITER_NEXT:
+            return simpleInstruction("ITER_NEXT", offset);
 
         default:
             std::cout << "Invalid instruction opcode: " << instruction
@@ -257,6 +263,12 @@ void SetObject::trace(GC& gc) {
     for (const auto& value : elements) {
         gc.markValue(value);
     }
+}
+
+void IteratorObject::trace(GC& gc) {
+    gc.markObject(array);
+    gc.markObject(dict);
+    gc.markObject(set);
 }
 
 void NativeBoundMethodObject::trace(GC& gc) { gc.markValue(receiver); }
