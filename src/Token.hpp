@@ -67,6 +67,12 @@ class Token {
     size_t m_line;
 
    public:
+    Token()
+        : m_scanner(nullptr),
+          m_type(TokenType::ERROR),
+          m_start(""),
+          m_length(0),
+          m_line(0) {}
     TokenType type() const { return m_type; }
     const char* start() const { return m_start; }
     size_t length() const { return m_length; }

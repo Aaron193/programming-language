@@ -65,6 +65,18 @@ Status VirtualMachine::run() {
                 m_stack.push(a < b);
                 break;
             }
+            case OpCode::GREATER_EQUAL_THAN: {
+                Value b = m_stack.pop();
+                Value a = m_stack.pop();
+                m_stack.push(a >= b);
+                break;
+            }
+            case OpCode::LESS_EQUAL_THAN: {
+                Value b = m_stack.pop();
+                Value a = m_stack.pop();
+                m_stack.push(a <= b);
+                break;
+            }
             case OpCode::SHIFT_LEFT: {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
