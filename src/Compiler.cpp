@@ -1896,6 +1896,11 @@ void Compiler::castOperator(bool canAssign) {
 
     if (targetType->isFloat()) {
         emitByte(OpCode::INT_TO_FLOAT);
+        return;
+    }
+
+    if (targetType->kind == TypeKind::STR) {
+        emitByte(OpCode::INT_TO_STR);
     }
 }
 

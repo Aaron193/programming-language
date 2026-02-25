@@ -241,6 +241,8 @@ int Chunk::disassembleInstruction(int offset) {
             return simpleInstruction("INT_TO_FLOAT", offset);
         case OpCode::FLOAT_TO_INT:
             return simpleInstruction("FLOAT_TO_INT", offset);
+        case OpCode::INT_TO_STR:
+            return simpleInstruction("INT_TO_STR", offset);
         case OpCode::CHECK_INSTANCE_TYPE:
             return constantInstruction("CHECK_INSTANCE_TYPE", offset);
         case OpCode::INT_NEGATE:

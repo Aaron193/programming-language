@@ -1,0 +1,8 @@
+i64 big = 1000000;
+i32 small = big as i32;
+str text = small as str;
+print text + "!";
+
+f64 ratio = small as f64;
+i32 truncated = ratio as i32;
+print truncated;
