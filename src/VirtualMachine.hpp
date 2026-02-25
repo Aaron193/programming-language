@@ -58,6 +58,5 @@ class VirtualMachine {
     VirtualMachine() = default;
     ~VirtualMachine() = default;
 
-    Status interpret(std::string_view source,
-                     bool printReturnValue = false);
+    Status interpret(std::string_view source, bool printReturnValue = false);
 };

@@ -219,6 +219,12 @@ void Compiler::consume(TokenType type, const std::string& message) {
 void Compiler::expression() { parsePrecedence(PREC_ASSIGNMENT); }
 
 void Compiler::declaration() {
+    if (m_parser->current.type() == TokenType::CLASS) {
+        advance();
+        classDeclaration();
+        return;
+    }
+
     if (m_parser->current.type() == TokenType::FUNCTION) {
         advance();
         functionDeclaration();
@@ -232,6 +238,25 @@ void Compiler::declaration() {
     }
 
     statement();
+}
+
+void Compiler::classDeclaration() {
+    consume(TokenType::IDENTIFIER, "Expected class name.");
+    Token nameToken = m_parser->previous;
+    uint8_t nameConstant = identifierConstant(nameToken);
+
+    uint8_t variable = 0;
+    if (m_scopeDepth > 0) {
+        addLocal(nameToken);
+    } else {
+        variable = nameConstant;
+    }
+
+    emitBytes(OpCode::CLASS_OP, nameConstant);
+    defineVariable(variable);
+
+    consume(TokenType::OPEN_CURLY, "Expected '{' before class body.");
+    consume(TokenType::CLOSE_CURLY, "Expected '}' after class body.");
 }
 
 void Compiler::statement() {
@@ -474,6 +499,10 @@ Compiler::ParseRule Compiler::getRule(TokenType type) {
             return ParseRule{[this](bool canAssign) { grouping(canAssign); },
                              [this](bool canAssign) { call(canAssign); },
                              PREC_CALL};
+        case TokenType::DOT:
+            return ParseRule{nullptr,
+                             [this](bool canAssign) { dot(canAssign); },
+                             PREC_CALL};
         case TokenType::NUMBER:
             return ParseRule{[this](bool canAssign) { number(canAssign); },
                              nullptr, PREC_NONE};
@@ -687,6 +716,20 @@ void Compiler::call(bool canAssign) {
 
     consume(TokenType::CLOSE_PAREN, "Expected ')' after arguments.");
     emitBytes(OpCode::CALL, argCount);
+}
+
+void Compiler::dot(bool canAssign) {
+    consume(TokenType::IDENTIFIER, "Expected property name after '.'.");
+    uint8_t name = identifierConstant(m_parser->previous);
+
+    if (canAssign && m_parser->current.type() == TokenType::EQUAL) {
+        advance();
+        expression();
+        emitBytes(OpCode::SET_PROPERTY, name);
+        return;
+    }
+
+    emitBytes(OpCode::GET_PROPERTY, name);
 }
 
 void Compiler::andOperator(bool canAssign) {

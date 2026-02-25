@@ -1,0 +1,8 @@
+class Bag {}
+
+var bag = Bag();
+bag.value = 42;
+print bag.value;
+
+bag.label = "ok";
+print bag.label;

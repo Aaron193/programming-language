@@ -104,6 +104,12 @@ int Chunk::disassembleInstruction(int offset) {
         case OpCode::SET_LOCAL:
             return byteInstruction("SET_LOCAL", offset,
                                    m_bytes->at(offset + 1));
+        case OpCode::CLASS_OP:
+            return constantInstruction("CLASS", offset);
+        case OpCode::GET_PROPERTY:
+            return constantInstruction("GET_PROPERTY", offset);
+        case OpCode::SET_PROPERTY:
+            return constantInstruction("SET_PROPERTY", offset);
         case OpCode::CALL:
             return byteInstruction("CALL", offset, m_bytes->at(offset + 1));
         case OpCode::JUMP:

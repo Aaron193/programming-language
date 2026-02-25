@@ -4,15 +4,22 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 
 class Chunk;
+struct ClassObject;
+struct InstanceObject;
 
 struct FunctionObject {
     std::string name;
     std::vector<std::string> parameters;
     std::shared_ptr<Chunk> chunk;
+};
+
+struct ClassObject {
+    std::string name;
 };
 
 /*
@@ -44,6 +51,9 @@ enum OpCode {
     SET_GLOBAL,
     GET_LOCAL,
     SET_LOCAL,
+    CLASS_OP,
+    GET_PROPERTY,
+    SET_PROPERTY,
     CALL,
     JUMP,
     JUMP_IF_FALSE,
@@ -61,7 +71,9 @@ enum ValueType {
 
 struct Value {
     std::variant<double, bool, std::monostate, std::string,
-                 std::shared_ptr<FunctionObject>>
+                 std::shared_ptr<FunctionObject>,
+                 std::shared_ptr<ClassObject>,
+                 std::shared_ptr<InstanceObject>>
         data;
 
     Value() : data(std::monostate{}) {}
@@ -70,6 +82,8 @@ struct Value {
     Value(const std::string& value) : data(value) {}
     Value(const char* value) : data(std::string(value)) {}
     Value(std::shared_ptr<FunctionObject> value) : data(std::move(value)) {}
+    Value(std::shared_ptr<ClassObject> value) : data(std::move(value)) {}
+    Value(std::shared_ptr<InstanceObject> value) : data(std::move(value)) {}
 
     bool isNumber() const { return std::holds_alternative<double>(data); }
     bool isBool() const { return std::holds_alternative<bool>(data); }
@@ -78,6 +92,12 @@ struct Value {
     bool isFunction() const {
         return std::holds_alternative<std::shared_ptr<FunctionObject>>(data);
     }
+    bool isClass() const {
+        return std::holds_alternative<std::shared_ptr<ClassObject>>(data);
+    }
+    bool isInstance() const {
+        return std::holds_alternative<std::shared_ptr<InstanceObject>>(data);
+    }
 
     double asNumber() const { return std::get<double>(data); }
     bool asBool() const { return std::get<bool>(data); }
@@ -85,6 +105,17 @@ struct Value {
     std::shared_ptr<FunctionObject> asFunction() const {
         return std::get<std::shared_ptr<FunctionObject>>(data);
     }
+    std::shared_ptr<ClassObject> asClass() const {
+        return std::get<std::shared_ptr<ClassObject>>(data);
+    }
+    std::shared_ptr<InstanceObject> asInstance() const {
+        return std::get<std::shared_ptr<InstanceObject>>(data);
+    }
+};
+
+struct InstanceObject {
+    std::shared_ptr<ClassObject> klass;
+    std::unordered_map<std::string, Value> fields;
 };
 
 inline bool operator==(const Value& lhs, const Value& rhs) {
@@ -105,6 +136,12 @@ inline std::ostream& operator<<(std::ostream& stream, const Value& value) {
     } else if (value.isFunction()) {
         auto function = value.asFunction();
         stream << "<function " << function->name << ">";
+    } else if (value.isClass()) {
+        auto klass = value.asClass();
+        stream << "<class " << klass->name << ">";
+    } else if (value.isInstance()) {
+        auto instance = value.asInstance();
+        stream << "<instance " << instance->klass->name << ">";
     } else {
         stream << value.asString();
     }

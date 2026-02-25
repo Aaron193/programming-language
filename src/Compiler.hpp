@@ -79,6 +79,7 @@ class Compiler {
 
     void expression();
     void declaration();
+    void classDeclaration();
     void functionDeclaration();
     void statement();
     void block();
@@ -100,6 +101,7 @@ class Compiler {
     void unary(bool canAssign);
     void binary(bool canAssign);
     void call(bool canAssign);
+    void dot(bool canAssign);
     void andOperator(bool canAssign);
     void orOperator(bool canAssign);
 
