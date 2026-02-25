@@ -1,0 +1,14 @@
+var sum = 0;
+
+var timeA = clock();
+
+for (var i = 0; i < 100000; i++) {
+    sum += i;
+}
+
+var timeB = clock();
+
+var timeTaken = timeB - timeA;
+
+print timeTaken;
+print sum

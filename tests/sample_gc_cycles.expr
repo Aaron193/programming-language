@@ -1,0 +1,16 @@
+var a = [];
+a.push(a);
+print a[0] == a;
+
+var d = {};
+d["self"] = d;
+print d["self"] == d;
+
+var s = Set();
+s.add(1);
+s.add(s);
+print s.has(s);
+
+print a;
+print d;
+print s;

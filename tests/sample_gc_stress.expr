@@ -1,0 +1,15 @@
+var i = 0;
+while (i < 40000) {
+  var a = [];
+  a.push(i);
+
+  var d = {};
+  d["i"] = i;
+
+  var s = Set();
+  s.add(i);
+
+  i = i + 1;
+}
+
+print i;

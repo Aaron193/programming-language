@@ -31,6 +31,37 @@ class Stack {
         return T();
     }
 
+    const T& peek(size_t distance) const {
+        static const T empty{};
+        if (m_top < 0 || distance > static_cast<size_t>(m_top)) {
+            return empty;
+        }
+
+        return m_data[m_top - static_cast<int>(distance)];
+    }
+
+    const T& getAt(size_t index) const {
+        static const T empty{};
+        if (index > static_cast<size_t>(m_top)) {
+            return empty;
+        }
+
+        return m_data[index];
+    }
+
+    void setAt(size_t index, const T& value) {
+        if (index <= static_cast<size_t>(m_top)) {
+            m_data[index] = value;
+        }
+    }
+
+    void popN(size_t count) {
+        while (count > 0 && m_top >= 0) {
+            m_top--;
+            count--;
+        }
+    }
+
     void reset() { m_top = -1; }
 
     bool isEmpty() { return m_top == -1; }

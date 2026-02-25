@@ -1,0 +1,8 @@
+var a = false;
+var b = false;
+a and (b = true);
+print b;
+var c = true;
+var d = false;
+c or (d = true);
+print d;

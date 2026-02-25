@@ -6,6 +6,8 @@ cmake_minimum_required(VERSION 3.10)
 
 project(interpreter VERSION 1.0)
 
+option(ENABLE_VM_TRACE "Enable VM stack and disassembly trace output" OFF)
+
 # Set default build type to Release if not specified
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
@@ -20,6 +22,10 @@ file(GLOB_RECURSE SOURCES
 )
 
 add_executable(interpreter ${SOURCES})
+
+if(ENABLE_VM_TRACE)
+    target_compile_definitions(interpreter PRIVATE VM_TRACE)
+endif()
 
 # If using Microsoft Visual Studio, set specific compile options
 if(MSVC)
