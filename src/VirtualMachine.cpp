@@ -1,7 +1,9 @@
 #include "VirtualMachine.hpp"
 
 #include <chrono>
+#include <cmath>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -13,6 +15,26 @@ static bool isFalsey(const Value& value) {
 
 static bool isNumberPair(const Value& lhs, const Value& rhs) {
     return lhs.isNumber() && rhs.isNumber();
+}
+
+static std::string valueToString(const Value& value) {
+    std::ostringstream out;
+    out << value;
+    return out.str();
+}
+
+static std::string valueTypeName(const Value& value) {
+    if (value.isNumber()) return "number";
+    if (value.isBool()) return "bool";
+    if (value.isNil()) return "null";
+    if (value.isString()) return "string";
+    if (value.isClass()) return "class";
+    if (value.isInstance()) return "instance";
+    if (value.isNative()) return "native";
+    if (value.isBoundMethod()) return "bound_method";
+    if (value.isClosure()) return "closure";
+    if (value.isFunction()) return "function";
+    return "unknown";
 }
 
 static std::shared_ptr<ClosureObject> findMethodClosure(
@@ -511,8 +533,62 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                                            .time_since_epoch())
                                        .count();
                         result = Value(now);
+                    } else if (native->name == "sqrt") {
+                        const Value& arg = args[0];
+                        if (!arg.isNumber()) {
+                            return runtimeError(
+                                "Native function 'sqrt' expects a number.");
+                        }
+
+                        double number = arg.asNumber();
+                        if (number < 0.0) {
+                            return runtimeError(
+                                "Native function 'sqrt' cannot take negative "
+                                "numbers.");
+                        }
+
+                        result = Value(std::sqrt(number));
+                    } else if (native->name == "len") {
+                        const Value& arg = args[0];
+                        if (!arg.isString()) {
+                            return runtimeError(
+                                "Native function 'len' expects a string.");
+                        }
+
+                        result =
+                            Value(static_cast<double>(arg.asString().length()));
+                    } else if (native->name == "type") {
+                        result = Value(valueTypeName(args[0]));
+                    } else if (native->name == "str") {
+                        result = Value(valueToString(args[0]));
+                    } else if (native->name == "num") {
+                        const Value& arg = args[0];
+                        if (arg.isNumber()) {
+                            result = arg;
+                        } else if (arg.isString()) {
+                            const std::string& text = arg.asString();
+                            size_t parseIndex = 0;
+                            try {
+                                double number = std::stod(text, &parseIndex);
+                                if (parseIndex != text.size()) {
+                                    return runtimeError(
+                                        "Native function 'num' expects a "
+                                        "numeric string.");
+                                }
+                                result = Value(number);
+                            } catch (const std::exception&) {
+                                return runtimeError(
+                                    "Native function 'num' expects a numeric "
+                                    "string.");
+                            }
+                        } else {
+                            return runtimeError(
+                                "Native function 'num' expects a number or "
+                                "string.");
+                        }
                     } else {
-                        result = Value();
+                        return runtimeError("Unknown native function '" +
+                                            native->name + "'.");
                     }
 
                     m_stack.popN(m_stack.size() - calleeIndex);
@@ -656,6 +732,18 @@ Status VirtualMachine::interpret(std::string_view source,
     clockFn->name = "clock";
     clockFn->arity = 0;
     m_globals[clockFn->name] = Value(clockFn);
+
+    auto defineNative = [&](const std::string& name, uint8_t arity) {
+        auto nativeFn = std::make_shared<NativeFunctionObject>();
+        nativeFn->name = name;
+        nativeFn->arity = arity;
+        m_globals[name] = Value(nativeFn);
+    };
+    defineNative("sqrt", 1);
+    defineNative("len", 1);
+    defineNative("type", 1);
+    defineNative("str", 1);
+    defineNative("num", 1);
 
     m_frames.push_back(
         CallFrame{&chunk, chunk.getBytes(), 0, 0, nullptr, nullptr});

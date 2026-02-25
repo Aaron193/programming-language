@@ -11,40 +11,26 @@ if [[ ! -x "$INTERPRETER" ]]; then
     exit 1
 fi
 
-FILTER="${1:-$SCRIPT_DIR/*.expr}"
-
-shopt -s nullglob
-FILES=( $FILTER )
-shopt -u nullglob
-
-if [[ ${#FILES[@]} -eq 0 ]]; then
-    echo "No expr files matched: $FILTER"
-    exit 1
-fi
+FILES=(
+    "$SCRIPT_DIR/sample_native_error_len.expr"
+    "$SCRIPT_DIR/sample_native_error_sqrt.expr"
+    "$SCRIPT_DIR/sample_native_error_num.expr"
+)
 
 passed=0
 failed=0
 
 for file in "${FILES[@]}"; do
-    if [[ ! -f "$file" || "${file##*.}" != "expr" ]]; then
-        continue
-    fi
-
-    base_name="$(basename "$file")"
-    if [[ "$base_name" == sample_native_error_* ]]; then
-        continue
-    fi
-
     echo "========================================"
-    echo "Running: $file"
+    echo "Running (expect error): $file"
     echo "----------------------------------------"
 
     if "$INTERPRETER" "$file"; then
-        echo "[PASS] $file"
-        passed=$((passed + 1))
-    else
-        echo "[FAIL] $file"
+        echo "[FAIL] Expected runtime error but execution succeeded: $file"
         failed=$((failed + 1))
+    else
+        echo "[PASS] Runtime error occurred as expected: $file"
+        passed=$((passed + 1))
     fi
 
     echo
