@@ -3,9 +3,11 @@
 #include <iostream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "Chunk.hpp"
 #include "ModuleResolver.hpp"
+#include "TypeChecker.hpp"
 
 bool Compiler::compile(std::string_view source, Chunk& chunk,
                        const std::string& sourcePath) {
@@ -17,6 +19,18 @@ bool Compiler::compile(std::string_view source, Chunk& chunk,
     m_classMethodSignatures.clear();
     collectClassNames(source);
     collectFunctionSignatures(source);
+
+    std::vector<TypeError> typeErrors;
+    TypeChecker typeChecker;
+    if (!typeChecker.check(source, m_classNames, m_functionSignatures,
+                           typeErrors)) {
+        for (const auto& error : typeErrors) {
+            std::cerr << "[error][compile][line " << error.line << "] "
+                      << error.message << std::endl;
+        }
+        return false;
+    }
+
     m_scanner = std::make_unique<Scanner>(source);
     m_parser = std::make_unique<Parser>();
     m_currentClass = nullptr;
