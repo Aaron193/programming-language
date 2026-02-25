@@ -125,6 +125,15 @@ int Chunk::disassembleInstruction(int offset) {
             return constantInstruction("GET_GLOBAL", offset);
         case OpCode::SET_GLOBAL:
             return constantInstruction("SET_GLOBAL", offset);
+        case OpCode::DEFINE_GLOBAL_SLOT:
+            return byteInstruction("DEFINE_GLOBAL_SLOT", offset,
+                                   m_bytes->at(offset + 1));
+        case OpCode::GET_GLOBAL_SLOT:
+            return byteInstruction("GET_GLOBAL_SLOT", offset,
+                                   m_bytes->at(offset + 1));
+        case OpCode::SET_GLOBAL_SLOT:
+            return byteInstruction("SET_GLOBAL_SLOT", offset,
+                                   m_bytes->at(offset + 1));
         case OpCode::GET_LOCAL:
             return byteInstruction("GET_LOCAL", offset,
                                    m_bytes->at(offset + 1));

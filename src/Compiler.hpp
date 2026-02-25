@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "Chunk.hpp"
@@ -78,6 +79,8 @@ class Compiler {
     ClassContext* m_currentClass = nullptr;
     std::vector<FunctionContext> m_contexts;
     GC* m_gc = nullptr;
+    std::unordered_map<std::string, uint8_t> m_globalSlots;
+    std::vector<std::string> m_globalNames;
 
     void advance();
     void synchronize();
@@ -92,6 +95,7 @@ class Compiler {
     uint8_t makeConstant(Value value);
     void emitConstant(Value value);
     uint8_t identifierConstant(const Token& name);
+    uint8_t globalSlot(const Token& name);
     void namedVariable(const Token& name, bool canAssign);
     uint8_t parseVariable(const std::string& message);
     void defineVariable(uint8_t global);
@@ -155,6 +159,9 @@ class Compiler {
     ~Compiler() = default;
 
     void setGC(GC* gc) { m_gc = gc; }
+    const std::vector<std::string>& globalNames() const {
+        return m_globalNames;
+    }
 
     bool compile(std::string_view source, Chunk& chunk);
 };

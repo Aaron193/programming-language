@@ -126,16 +126,18 @@ void VirtualMachine::markRoots() {
         m_gc.markValue(m_stack.getAt(i));
     }
 
-    for (const auto& [name, value] : m_globals) {
-        (void)name;
-        m_gc.markValue(value);
+    for (size_t i = 0; i < m_globalValues.size(); ++i) {
+        if (m_globalDefined[i]) {
+            m_gc.markValue(m_globalValues[i]);
+        }
     }
 
     for (auto* upvalue : m_openUpvalues) {
         m_gc.markObject(upvalue);
     }
 
-    for (const auto& frame : m_frames) {
+    for (size_t i = 0; i < m_frameCount; ++i) {
+        const auto& frame = m_frames[i];
         m_gc.markObject(frame.receiver);
         m_gc.markObject(frame.closure);
 
@@ -156,8 +158,7 @@ void VirtualMachine::collectGarbage() {
 void VirtualMachine::printStackTrace() {
     std::cerr << "[trace][runtime] stack:" << std::endl;
 
-    for (int index = static_cast<int>(m_frames.size()) - 1; index >= 0;
-         --index) {
+    for (int index = static_cast<int>(m_frameCount) - 1; index >= 0; --index) {
         const CallFrame& frame = m_frames[index];
         int offset = static_cast<int>(frame.ip - frame.chunk->getBytes()) - 1;
         if (offset < 0) {
@@ -206,9 +207,17 @@ Status VirtualMachine::callClosure(ClosureObject* closure,
     size_t calleeIndex =
         m_stack.size() - static_cast<size_t>(argumentCount) - 1;
 
-    m_frames.push_back(CallFrame{function->chunk.get(),
-                                 function->chunk->getBytes(), calleeIndex + 1,
-                                 calleeIndex, receiver, closure});
+    if (m_frameCount >= MAX_FRAMES) {
+        return runtimeError("Stack overflow: too many nested calls.");
+    }
+
+    m_frames[m_frameCount++] = CallFrame{function->chunk.get(),
+                                         function->chunk->getBytes(),
+                                         calleeIndex + 1,
+                                         calleeIndex,
+                                         receiver,
+                                         closure};
+    m_activeFrame = &m_frames[m_frameCount - 1];
     return Status::OK;
 }
 
@@ -222,15 +231,103 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 static_cast<int>(frame.ip - frame.chunk->getBytes()));
         }
 
-        uint8_t instruction;
-        switch (instruction = readByte()) {
+        uint8_t instruction = readByte();
+
+        if (!m_traceEnabled) {
+            if (instruction == OpCode::GET_LOCAL) {
+                uint8_t slot = readByte();
+                m_stack.push(m_stack.getAt(currentFrame().slotBase + slot));
+                continue;
+            }
+            if (instruction == OpCode::SET_LOCAL) {
+                uint8_t slot = readByte();
+                m_stack.setAt(currentFrame().slotBase + slot, m_stack.peek(0));
+                continue;
+            }
+            if (instruction == OpCode::GET_GLOBAL_SLOT) {
+                uint8_t slot = readByte();
+                if (slot >= m_globalValues.size() || !m_globalDefined[slot]) {
+                    std::string name = slot < m_globalNames.size()
+                                           ? m_globalNames[slot]
+                                           : "<unknown>";
+                    return runtimeError("Undefined variable '" + name + "'.");
+                }
+
+                m_stack.push(m_globalValues[slot]);
+                continue;
+            }
+            if (instruction == OpCode::SET_GLOBAL_SLOT) {
+                uint8_t slot = readByte();
+                if (slot >= m_globalValues.size() || !m_globalDefined[slot]) {
+                    std::string name = slot < m_globalNames.size()
+                                           ? m_globalNames[slot]
+                                           : "<unknown>";
+                    return runtimeError("Undefined variable '" + name + "'.");
+                }
+
+                m_globalValues[slot] = m_stack.peek(0);
+                continue;
+            }
+            if (instruction == OpCode::CONSTANT) {
+                const Value& val = readConstant();
+                m_stack.push(val);
+                continue;
+            }
+            if (instruction == OpCode::ADD) {
+                Value b = m_stack.pop();
+                Value a = m_stack.pop();
+
+                if (a.isNumber() && b.isNumber()) {
+                    m_stack.push(Value(a.asNumber() + b.asNumber()));
+                    continue;
+                }
+
+                if (a.isString() && b.isString()) {
+                    m_stack.push(Value(a.asString() + b.asString()));
+                    continue;
+                }
+
+                return runtimeError(
+                    "Operands must be two numbers or two strings for '+'.");
+            }
+            if (instruction == OpCode::LESS_THAN) {
+                Value b = m_stack.pop();
+                Value a = m_stack.pop();
+                if (!isNumberPair(a, b)) {
+                    return runtimeError("Operands must be numbers for '<'.");
+                }
+
+                m_stack.push(Value(a.asNumber() < b.asNumber()));
+                continue;
+            }
+            if (instruction == OpCode::JUMP_IF_FALSE) {
+                uint16_t offset = readShort();
+                const Value& condition = m_stack.peek(0);
+                if (isFalsey(condition)) {
+                    currentFrame().ip += offset;
+                }
+                continue;
+            }
+            if (instruction == OpCode::LOOP) {
+                uint16_t offset = readShort();
+                currentFrame().ip -= offset;
+                continue;
+            }
+            if (instruction == OpCode::POP) {
+                m_stack.pop();
+                continue;
+            }
+        }
+
+        switch (instruction) {
             case OpCode::RETURN: {
                 Value result = m_stack.pop();
                 CallFrame finishedFrame = currentFrame();
                 closeUpvalues(finishedFrame.slotBase);
-                m_frames.pop_back();
+                m_frameCount--;
 
-                if (m_frames.empty()) {
+                if (m_frameCount == 0) {
+                    m_activeFrame = nullptr;
                     returnValue = result;
                     if (printReturnValue) {
                         std::cout << "Return constant: " << result << std::endl;
@@ -238,12 +335,14 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                     return Status::OK;
                 }
 
+                m_activeFrame = &m_frames[m_frameCount - 1];
+
                 m_stack.popN(m_stack.size() - finishedFrame.calleeIndex);
                 m_stack.push(result);
                 break;
             }
             case OpCode::CONSTANT: {
-                Value val = readConstant();
+                const Value& val = readConstant();
                 m_stack.push(val);
                 break;
             }
@@ -383,15 +482,15 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 break;
             }
             case OpCode::DEFINE_GLOBAL: {
-                std::string name = readNameConstant();
+                const std::string& name = readNameConstant();
                 Value value = m_stack.pop();
-                m_globals[name] = value;
+                m_nativeGlobals[name] = value;
                 break;
             }
             case OpCode::GET_GLOBAL: {
-                std::string name = readNameConstant();
-                auto it = m_globals.find(name);
-                if (it == m_globals.end()) {
+                const std::string& name = readNameConstant();
+                auto it = m_nativeGlobals.find(name);
+                if (it == m_nativeGlobals.end()) {
                     return runtimeError("Undefined variable '" + name + "'.");
                 }
 
@@ -399,13 +498,46 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 break;
             }
             case OpCode::SET_GLOBAL: {
-                std::string name = readNameConstant();
-                auto it = m_globals.find(name);
-                if (it == m_globals.end()) {
+                const std::string& name = readNameConstant();
+                auto it = m_nativeGlobals.find(name);
+                if (it == m_nativeGlobals.end()) {
                     return runtimeError("Undefined variable '" + name + "'.");
                 }
 
                 it->second = m_stack.peek(0);
+                break;
+            }
+            case OpCode::DEFINE_GLOBAL_SLOT: {
+                uint8_t slot = readByte();
+                if (slot >= m_globalValues.size()) {
+                    return runtimeError("Invalid global slot.");
+                }
+                m_globalValues[slot] = m_stack.pop();
+                m_globalDefined[slot] = true;
+                break;
+            }
+            case OpCode::GET_GLOBAL_SLOT: {
+                uint8_t slot = readByte();
+                if (slot >= m_globalValues.size() || !m_globalDefined[slot]) {
+                    std::string name = slot < m_globalNames.size()
+                                           ? m_globalNames[slot]
+                                           : "<unknown>";
+                    return runtimeError("Undefined variable '" + name + "'.");
+                }
+
+                m_stack.push(m_globalValues[slot]);
+                break;
+            }
+            case OpCode::SET_GLOBAL_SLOT: {
+                uint8_t slot = readByte();
+                if (slot >= m_globalValues.size() || !m_globalDefined[slot]) {
+                    std::string name = slot < m_globalNames.size()
+                                           ? m_globalNames[slot]
+                                           : "<unknown>";
+                    return runtimeError("Undefined variable '" + name + "'.");
+                }
+
+                m_globalValues[slot] = m_stack.peek(0);
                 break;
             }
             case OpCode::GET_LOCAL: {
@@ -439,7 +571,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 break;
             }
             case OpCode::CLASS_OP: {
-                std::string name = readNameConstant();
+                const std::string& name = readNameConstant();
                 auto klass = gcAlloc<ClassObject>();
                 klass->name = name;
                 m_stack.push(Value(klass));
@@ -465,7 +597,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 break;
             }
             case OpCode::METHOD: {
-                std::string name = readNameConstant();
+                const std::string& name = readNameConstant();
                 Value method = m_stack.peek(0);
                 Value klass = m_stack.peek(1);
 
@@ -488,7 +620,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 break;
             }
             case OpCode::GET_SUPER: {
-                std::string name = readNameConstant();
+                const std::string& name = readNameConstant();
                 auto receiver = currentFrame().receiver;
                 if (!receiver || !receiver->klass ||
                     !receiver->klass->superclass) {
@@ -509,7 +641,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 break;
             }
             case OpCode::GET_PROPERTY: {
-                std::string name = readNameConstant();
+                const std::string& name = readNameConstant();
                 Value receiver = m_stack.peek(0);
 
                 if (receiver.isArray() || receiver.isDict() ||
@@ -548,7 +680,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 break;
             }
             case OpCode::SET_PROPERTY: {
-                std::string name = readNameConstant();
+                const std::string& name = readNameConstant();
                 Value value = m_stack.peek(0);
                 Value receiver = m_stack.peek(1);
                 if (!receiver.isInstance()) {
@@ -1480,8 +1612,10 @@ Status VirtualMachine::interpret(std::string_view source, bool printReturnValue,
                                  bool traceEnabled, bool disassembleEnabled) {
     Chunk chunk;
     m_stack.reset();
-    m_frames.clear();
+    m_frameCount = 0;
+    m_activeFrame = nullptr;
     m_openUpvalues.clear();
+    m_nativeGlobals.clear();
     m_compiler.setGC(&m_gc);
     m_traceEnabled = traceEnabled;
     m_disassembleEnabled = disassembleEnabled;
@@ -1499,17 +1633,37 @@ Status VirtualMachine::interpret(std::string_view source, bool printReturnValue,
         std::cout << "== end disassembly ==" << std::endl;
     }
 
-    auto clockFn = gcAlloc<NativeFunctionObject>();
-    clockFn->name = "clock";
-    clockFn->arity = 0;
-    m_globals[clockFn->name] = Value(clockFn);
+    m_globalNames = m_compiler.globalNames();
+    m_globalValues.assign(m_globalNames.size(), Value());
+    m_globalDefined.assign(m_globalNames.size(), false);
 
     auto defineNative = [&](const std::string& name, int arity) {
         auto nativeFn = gcAlloc<NativeFunctionObject>();
         nativeFn->name = name;
         nativeFn->arity = arity;
-        m_globals[name] = Value(nativeFn);
+        m_nativeGlobals[name] = Value(nativeFn);
+
+        for (size_t i = 0; i < m_globalNames.size(); ++i) {
+            if (m_globalNames[i] == name) {
+                m_globalValues[i] = Value(nativeFn);
+                m_globalDefined[i] = true;
+                break;
+            }
+        }
     };
+
+    auto clockFn = gcAlloc<NativeFunctionObject>();
+    clockFn->name = "clock";
+    clockFn->arity = 0;
+    m_nativeGlobals[clockFn->name] = Value(clockFn);
+    for (size_t i = 0; i < m_globalNames.size(); ++i) {
+        if (m_globalNames[i] == clockFn->name) {
+            m_globalValues[i] = Value(clockFn);
+            m_globalDefined[i] = true;
+            break;
+        }
+    }
+
     defineNative("sqrt", 1);
     defineNative("len", 1);
     defineNative("type", 1);
@@ -1517,8 +1671,9 @@ Status VirtualMachine::interpret(std::string_view source, bool printReturnValue,
     defineNative("num", 1);
     defineNative("Set", -1);
 
-    m_frames.push_back(
-        CallFrame{&chunk, chunk.getBytes(), 0, 0, nullptr, nullptr});
+    m_frames[m_frameCount++] =
+        CallFrame{&chunk, chunk.getBytes(), 0, 0, nullptr, nullptr};
+    m_activeFrame = &m_frames[m_frameCount - 1];
 
     Value returnValue;
     return run(printReturnValue, returnValue);

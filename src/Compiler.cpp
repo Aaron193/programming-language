@@ -12,6 +12,8 @@ bool Compiler::compile(std::string_view source, Chunk& chunk) {
     m_parser = std::make_unique<Parser>();
     m_currentClass = nullptr;
     m_contexts.clear();
+    m_globalSlots.clear();
+    m_globalNames.clear();
     m_contexts.push_back(FunctionContext{{}, {}, 0, false, false});
 
     advance();
@@ -128,10 +130,28 @@ uint8_t Compiler::identifierConstant(const Token& name) {
     return makeConstant(Value(std::string(name.start(), name.length())));
 }
 
+uint8_t Compiler::globalSlot(const Token& name) {
+    std::string globalName(name.start(), name.length());
+    auto slotIt = m_globalSlots.find(globalName);
+    if (slotIt != m_globalSlots.end()) {
+        return slotIt->second;
+    }
+
+    if (m_globalNames.size() >= (static_cast<size_t>(UINT8_MAX) + 1)) {
+        errorAt(name, "Too many global variables.");
+        return 0;
+    }
+
+    uint8_t slot = static_cast<uint8_t>(m_globalNames.size());
+    m_globalSlots.emplace(globalName, slot);
+    m_globalNames.push_back(std::move(globalName));
+    return slot;
+}
+
 void Compiler::namedVariable(const Token& name, bool canAssign) {
     uint8_t arg = 0;
-    uint8_t getOp = OpCode::GET_GLOBAL;
-    uint8_t setOp = OpCode::SET_GLOBAL;
+    uint8_t getOp = OpCode::GET_GLOBAL_SLOT;
+    uint8_t setOp = OpCode::SET_GLOBAL_SLOT;
 
     int local = resolveLocal(name);
     if (local != -1) {
@@ -146,7 +166,7 @@ void Compiler::namedVariable(const Token& name, bool canAssign) {
             setOp = OpCode::SET_UPVALUE;
             arg = static_cast<uint8_t>(upvalue);
         } else {
-            arg = identifierConstant(name);
+            arg = globalSlot(name);
         }
     }
 
@@ -197,7 +217,7 @@ uint8_t Compiler::parseVariable(const std::string& message) {
         return 0;
     }
 
-    return identifierConstant(m_parser->previous);
+    return globalSlot(m_parser->previous);
 }
 
 void Compiler::defineVariable(uint8_t global) {
@@ -206,7 +226,7 @@ void Compiler::defineVariable(uint8_t global) {
         return;
     }
 
-    emitBytes(OpCode::DEFINE_GLOBAL, global);
+    emitBytes(OpCode::DEFINE_GLOBAL_SLOT, global);
 }
 
 void Compiler::beginScope() { currentContext().scopeDepth++; }
@@ -427,7 +447,7 @@ void Compiler::classDeclaration() {
     if (currentContext().scopeDepth > 0) {
         addLocal(nameToken);
     } else {
-        variable = nameConstant;
+        variable = globalSlot(nameToken);
     }
 
     emitBytes(OpCode::CLASS_OP, nameConstant);
@@ -523,7 +543,7 @@ void Compiler::functionDeclaration() {
     if (currentContext().scopeDepth > 0) {
         addLocal(nameToken);
     } else {
-        variable = identifierConstant(nameToken);
+        variable = globalSlot(nameToken);
     }
 
     CompiledFunction compiled =
@@ -639,7 +659,7 @@ void Compiler::forStatement() {
         if (currentContext().scopeDepth > 0) {
             addLocal(loopVariable);
         } else {
-            global = identifierConstant(loopVariable);
+            global = globalSlot(loopVariable);
         }
 
         if (m_parser->current.type() == TokenType::EQUAL) {
@@ -1028,8 +1048,8 @@ void Compiler::prefixUpdate(bool canAssign) {
 
     auto emitNamedUpdate = [&](const Token& nameToken) {
         uint8_t arg = 0;
-        uint8_t getOp = OpCode::GET_GLOBAL;
-        uint8_t setOp = OpCode::SET_GLOBAL;
+        uint8_t getOp = OpCode::GET_GLOBAL_SLOT;
+        uint8_t setOp = OpCode::SET_GLOBAL_SLOT;
 
         int local = resolveLocal(nameToken);
         if (local != -1) {
@@ -1044,7 +1064,7 @@ void Compiler::prefixUpdate(bool canAssign) {
                 setOp = OpCode::SET_UPVALUE;
                 arg = static_cast<uint8_t>(upvalue);
             } else {
-                arg = identifierConstant(nameToken);
+                arg = globalSlot(nameToken);
             }
         }
 
