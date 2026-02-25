@@ -3,6 +3,7 @@
 #include <optional>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
 
 #include "Chunk.hpp"
 #include "Compiler.hpp"
@@ -16,27 +17,33 @@ enum Status {
 
 class VirtualMachine {
    private:
-    // current chunk being interpreted
-    Chunk* m_chunk;
-    // instruction byte pointer
-    uint8_t* m_ip;
+    struct CallFrame {
+        Chunk* chunk;
+        uint8_t* ip;
+        size_t slotBase;
+    };
+
     // expression evaluation stack
     Stack<Value> m_stack;
-    // stack base for current call frame
-    size_t m_frameBase = 0;
+    // call frame stack
+    std::vector<CallFrame> m_frames;
     // compiler
     Compiler m_compiler;
     // globals
     std::unordered_map<std::string, Value> m_globals;
 
+    CallFrame& currentFrame() { return m_frames.back(); }
+
     // inlined methods
-    uint8_t readByte() { return *this->m_ip++; }
+    uint8_t readByte() { return *currentFrame().ip++; }
     uint16_t readShort() {
-        m_ip += 2;
-        return static_cast<uint16_t>((m_ip[-2] << 8) | m_ip[-1]);
+        CallFrame& frame = currentFrame();
+        frame.ip += 2;
+        return static_cast<uint16_t>((frame.ip[-2] << 8) | frame.ip[-1]);
     }
     Value readConstant() {
-        return this->m_chunk->getConstants()[this->readByte()];
+        CallFrame& frame = currentFrame();
+        return frame.chunk->getConstants()[readByte()];
     }
     std::string readNameConstant() {
         Value constant = readConstant();

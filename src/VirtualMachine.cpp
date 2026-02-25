@@ -1,7 +1,5 @@
 #include "VirtualMachine.hpp"
 
-#include <sys/types.h>
-
 #include <iostream>
 #include <string>
 
@@ -25,49 +23,43 @@ Status VirtualMachine::callFunction(std::shared_ptr<FunctionObject> function,
         return Status::RUNTIME_ERROR;
     }
 
-    Chunk* previousChunk = m_chunk;
-    uint8_t* previousIp = m_ip;
-    size_t previousFrameBase = m_frameBase;
-
     size_t calleeIndex =
         m_stack.size() - static_cast<size_t>(argumentCount) - 1;
-    m_frameBase = calleeIndex + 1;
 
-    m_chunk = function->chunk.get();
-    m_ip = m_chunk->getBytes();
-
-    Value functionReturn;
-    Status status = run(false, functionReturn);
-
-    m_chunk = previousChunk;
-    m_ip = previousIp;
-    m_frameBase = previousFrameBase;
-
-    if (status != Status::OK) {
-        return status;
-    }
-
-    m_stack.popN(m_stack.size() - calleeIndex);
-    m_stack.push(functionReturn);
+    m_frames.push_back(CallFrame{function->chunk.get(),
+                                 function->chunk->getBytes(), calleeIndex + 1});
     return Status::OK;
 }
 
 Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
     while (true) {
+        CallFrame& frame = currentFrame();
+
 #ifdef DEBUG
         m_stack.print();
-        m_chunk->disassembleInstruction((int)(m_ip - m_chunk->getBytes()));
+        frame.chunk->disassembleInstruction(
+            static_cast<int>(frame.ip - frame.chunk->getBytes()));
 #endif
 
         uint8_t instruction;
         switch (instruction = readByte()) {
             case OpCode::RETURN: {
-                Value val = m_stack.pop();
-                returnValue = val;
-                if (printReturnValue) {
-                    std::cout << "Return constant: " << val << std::endl;
+                Value result = m_stack.pop();
+                CallFrame finishedFrame = currentFrame();
+                m_frames.pop_back();
+
+                if (m_frames.empty()) {
+                    returnValue = result;
+                    if (printReturnValue) {
+                        std::cout << "Return constant: " << result << std::endl;
+                    }
+                    return Status::OK;
                 }
-                return Status::OK;
+
+                size_t calleeIndex = finishedFrame.slotBase - 1;
+                m_stack.popN(m_stack.size() - calleeIndex);
+                m_stack.push(result);
+                break;
             }
             case OpCode::CONSTANT: {
                 Value val = readConstant();
@@ -266,12 +258,12 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
             }
             case OpCode::GET_LOCAL: {
                 uint8_t slot = readByte();
-                m_stack.push(m_stack.getAt(m_frameBase + slot));
+                m_stack.push(m_stack.getAt(currentFrame().slotBase + slot));
                 break;
             }
             case OpCode::SET_LOCAL: {
                 uint8_t slot = readByte();
-                m_stack.setAt(m_frameBase + slot, m_stack.peek(0));
+                m_stack.setAt(currentFrame().slotBase + slot, m_stack.peek(0));
                 break;
             }
             case OpCode::CALL: {
@@ -292,20 +284,20 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
             }
             case OpCode::JUMP: {
                 uint16_t offset = readShort();
-                m_ip += offset;
+                currentFrame().ip += offset;
                 break;
             }
             case OpCode::JUMP_IF_FALSE: {
                 uint16_t offset = readShort();
                 Value condition = m_stack.peek(0);
                 if (isFalsey(condition)) {
-                    m_ip += offset;
+                    currentFrame().ip += offset;
                 }
                 break;
             }
             case OpCode::LOOP: {
                 uint16_t offset = readShort();
-                m_ip -= offset;
+                currentFrame().ip -= offset;
                 break;
             }
             case OpCode::SHIFT_LEFT: {
@@ -345,14 +337,13 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
 Status VirtualMachine::interpret(std::string_view source) {
     Chunk chunk;
     m_stack.reset();
-    m_frameBase = 0;
+    m_frames.clear();
 
     if (!m_compiler.compile(source, chunk)) {
         return Status::COMPILATION_ERROR;
     }
 
-    m_chunk = &chunk;
-    m_ip = m_chunk->getBytes();
+    m_frames.push_back(CallFrame{&chunk, chunk.getBytes(), 0});
 
     Value returnValue;
     return run(true, returnValue);
