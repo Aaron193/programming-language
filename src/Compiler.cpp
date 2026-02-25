@@ -1237,7 +1237,7 @@ Compiler::CompiledFunction Compiler::compileFunction(const std::string& name,
 
     Chunk* enclosingChunk = m_chunk;
 
-    auto functionChunk = std::make_shared<Chunk>();
+    auto functionChunk = std::make_unique<Chunk>();
     m_chunk = functionChunk.get();
     m_contexts.push_back(FunctionContext{{}, {}, 1, true, isMethod});
 
@@ -1273,10 +1273,15 @@ Compiler::CompiledFunction Compiler::compileFunction(const std::string& name,
     m_contexts.pop_back();
     m_chunk = enclosingChunk;
 
-    auto function = std::make_shared<FunctionObject>();
+    if (m_gc == nullptr) {
+        errorAtCurrent("Internal compiler error: GC allocator unavailable.");
+        return CompiledFunction{nullptr, {}};
+    }
+
+    auto function = m_gc->allocate<FunctionObject>();
     function->name = name;
     function->parameters = parameters;
-    function->chunk = functionChunk;
+    function->chunk = std::move(functionChunk);
     function->upvalueCount =
         static_cast<uint8_t>(functionContext.upvalues.size());
     return CompiledFunction{function, std::move(functionContext.upvalues)};

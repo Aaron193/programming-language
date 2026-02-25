@@ -2,6 +2,8 @@
 
 #include <iostream>
 
+#include "GC.hpp"
+
 void Chunk::disassemble(std::string label) {
     int offset = 0;
     while (offset < m_bytes->size()) {
@@ -191,3 +193,70 @@ int Chunk::disassembleInstruction(int offset) {
             return offset + 1;
     }
 }
+
+void FunctionObject::trace(GC& gc) {
+    if (!chunk) {
+        return;
+    }
+
+    for (const auto& value : chunk->getConstantsRange()) {
+        gc.markValue(value);
+    }
+}
+
+void ClassObject::trace(GC& gc) {
+    gc.markObject(superclass);
+    for (const auto& [name, method] : methods) {
+        (void)name;
+        gc.markObject(method);
+    }
+}
+
+void BoundMethodObject::trace(GC& gc) {
+    gc.markObject(receiver);
+    gc.markObject(method);
+}
+
+void NativeFunctionObject::trace(GC& gc) { (void)gc; }
+
+void UpvalueObject::trace(GC& gc) {
+    if (isClosed) {
+        gc.markValue(closed);
+    }
+}
+
+void ClosureObject::trace(GC& gc) {
+    gc.markObject(function);
+    for (auto* upvalue : upvalues) {
+        gc.markObject(upvalue);
+    }
+}
+
+void InstanceObject::trace(GC& gc) {
+    gc.markObject(klass);
+    for (const auto& [name, value] : fields) {
+        (void)name;
+        gc.markValue(value);
+    }
+}
+
+void ArrayObject::trace(GC& gc) {
+    for (const auto& value : elements) {
+        gc.markValue(value);
+    }
+}
+
+void DictObject::trace(GC& gc) {
+    for (const auto& [key, value] : map) {
+        (void)key;
+        gc.markValue(value);
+    }
+}
+
+void SetObject::trace(GC& gc) {
+    for (const auto& value : elements) {
+        gc.markValue(value);
+    }
+}
+
+void NativeBoundMethodObject::trace(GC& gc) { gc.markValue(receiver); }

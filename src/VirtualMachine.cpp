@@ -83,9 +83,9 @@ static bool containsValue(const std::vector<Value>& elements,
     return false;
 }
 
-static std::shared_ptr<ClosureObject> findMethodClosure(
-    std::shared_ptr<ClassObject> klass, const std::string& name) {
-    std::shared_ptr<ClassObject> current = klass;
+static ClosureObject* findMethodClosure(ClassObject* klass,
+                                        const std::string& name) {
+    ClassObject* current = klass;
     while (current) {
         auto it = current->methods.find(name);
         if (it != current->methods.end()) {
@@ -97,15 +97,14 @@ static std::shared_ptr<ClosureObject> findMethodClosure(
     return nullptr;
 }
 
-std::shared_ptr<UpvalueObject> VirtualMachine::captureUpvalue(
-    size_t stackIndex) {
+UpvalueObject* VirtualMachine::captureUpvalue(size_t stackIndex) {
     for (const auto& upvalue : m_openUpvalues) {
         if (!upvalue->isClosed && upvalue->stackIndex == stackIndex) {
             return upvalue;
         }
     }
 
-    auto upvalue = std::make_shared<UpvalueObject>();
+    auto upvalue = gcAlloc<UpvalueObject>();
     upvalue->stackIndex = stackIndex;
     upvalue->isClosed = false;
     m_openUpvalues.push_back(upvalue);
@@ -119,6 +118,38 @@ void VirtualMachine::closeUpvalues(size_t fromStackIndex) {
             upvalue->isClosed = true;
         }
     }
+}
+
+void VirtualMachine::markRoots() {
+    for (size_t i = 0; i < m_stack.size(); ++i) {
+        m_gc.markValue(m_stack.getAt(i));
+    }
+
+    for (const auto& [name, value] : m_globals) {
+        (void)name;
+        m_gc.markValue(value);
+    }
+
+    for (auto* upvalue : m_openUpvalues) {
+        m_gc.markObject(upvalue);
+    }
+
+    for (const auto& frame : m_frames) {
+        m_gc.markObject(frame.receiver);
+        m_gc.markObject(frame.closure);
+
+        if (frame.chunk != nullptr) {
+            for (const auto& constant : frame.chunk->getConstantsRange()) {
+                m_gc.markValue(constant);
+            }
+        }
+    }
+}
+
+void VirtualMachine::collectGarbage() {
+    markRoots();
+    m_gc.drainGrayStack();
+    m_gc.sweep();
 }
 
 void VirtualMachine::printStackTrace() {
@@ -159,9 +190,9 @@ Status VirtualMachine::runtimeError(const std::string& message) {
     return Status::RUNTIME_ERROR;
 }
 
-Status VirtualMachine::callClosure(std::shared_ptr<ClosureObject> closure,
+Status VirtualMachine::callClosure(ClosureObject* closure,
                                    uint8_t argumentCount,
-                                   std::shared_ptr<InstanceObject> receiver) {
+                                   InstanceObject* receiver) {
     auto function = closure->function;
     if (function->parameters.size() != argumentCount) {
         return runtimeError("Function '" + function->name + "' expected " +
@@ -408,7 +439,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
             }
             case OpCode::CLASS_OP: {
                 std::string name = readNameConstant();
-                auto klass = std::make_shared<ClassObject>();
+                auto klass = gcAlloc<ClassObject>();
                 klass->name = name;
                 m_stack.push(Value(klass));
                 break;
@@ -470,7 +501,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                                         "'.");
                 }
 
-                auto bound = std::make_shared<BoundMethodObject>();
+                auto bound = gcAlloc<BoundMethodObject>();
                 bound->receiver = receiver;
                 bound->method = method;
                 m_stack.push(Value(bound));
@@ -482,7 +513,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
 
                 if (receiver.isArray() || receiver.isDict() ||
                     receiver.isSet()) {
-                    auto bound = std::make_shared<NativeBoundMethodObject>();
+                    auto bound = gcAlloc<NativeBoundMethodObject>();
                     bound->name = name;
                     bound->receiver = receiver;
                     m_stack.pop();
@@ -507,7 +538,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                     return runtimeError("Undefined property '" + name + "'.");
                 }
 
-                auto bound = std::make_shared<BoundMethodObject>();
+                auto bound = gcAlloc<BoundMethodObject>();
                 bound->receiver = instance;
                 bound->method = method;
 
@@ -546,7 +577,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                             ".");
                     }
 
-                    auto instance = std::make_shared<InstanceObject>();
+                    auto instance = gcAlloc<InstanceObject>();
                     instance->klass = callee.asClass();
                     m_stack.setAt(calleeIndex, Value(instance));
                     break;
@@ -631,7 +662,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                                 "string.");
                         }
                     } else if (native->name == "Set") {
-                        auto set = std::make_shared<SetObject>();
+                        auto set = gcAlloc<SetObject>();
                         for (const auto& arg : args) {
                             if (!containsValue(set->elements, arg)) {
                                 set->elements.push_back(arg);
@@ -858,7 +889,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                                     "Dict method 'keys' expects 0 arguments.");
                             }
 
-                            auto keys = std::make_shared<ArrayObject>();
+                            auto keys = gcAlloc<ArrayObject>();
                             std::vector<std::string> orderedKeys;
                             orderedKeys.reserve(dict->map.size());
                             for (const auto& entry : dict->map) {
@@ -877,7 +908,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                                     "arguments.");
                             }
 
-                            auto values = std::make_shared<ArrayObject>();
+                            auto values = gcAlloc<ArrayObject>();
                             std::vector<std::string> orderedKeys;
                             orderedKeys.reserve(dict->map.size());
                             for (const auto& entry : dict->map) {
@@ -1008,7 +1039,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                                     "arguments.");
                             }
 
-                            auto array = std::make_shared<ArrayObject>();
+                            auto array = gcAlloc<ArrayObject>();
                             array->elements = set->elements;
                             result = Value(array);
                         } else if (method == "clear") {
@@ -1040,7 +1071,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                                     "argument.");
                             }
 
-                            auto out = std::make_shared<SetObject>();
+                            auto out = gcAlloc<SetObject>();
                             out->elements = set->elements;
                             auto rhs = args[0].asSet();
                             for (const auto& element : rhs->elements) {
@@ -1061,7 +1092,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                                     "argument.");
                             }
 
-                            auto out = std::make_shared<SetObject>();
+                            auto out = gcAlloc<SetObject>();
                             auto rhs = args[0].asSet();
                             for (const auto& element : set->elements) {
                                 if (containsValue(rhs->elements, element) &&
@@ -1082,7 +1113,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                                     "argument.");
                             }
 
-                            auto out = std::make_shared<SetObject>();
+                            auto out = gcAlloc<SetObject>();
                             auto rhs = args[0].asSet();
                             for (const auto& element : set->elements) {
                                 if (!containsValue(rhs->elements, element) &&
@@ -1125,7 +1156,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 }
 
                 if (callee.isFunction()) {
-                    auto closure = std::make_shared<ClosureObject>();
+                    auto closure = gcAlloc<ClosureObject>();
                     closure->function = callee.asFunction();
                     closure->upvalues = {};
                     Status status = callClosure(closure, argumentCount);
@@ -1149,9 +1180,10 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 }
 
                 auto function = constant.asFunction();
-                auto closure = std::make_shared<ClosureObject>();
+                auto closure = gcAlloc<ClosureObject>();
                 closure->function = function;
                 closure->upvalues.reserve(function->upvalueCount);
+                m_stack.push(Value(closure));
 
                 for (uint8_t i = 0; i < function->upvalueCount; ++i) {
                     uint8_t isLocal = readByte();
@@ -1165,8 +1197,6 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                             currentFrame().closure->upvalues[index]);
                     }
                 }
-
-                m_stack.push(Value(closure));
                 break;
             }
             case OpCode::CLOSE_UPVALUE: {
@@ -1176,7 +1206,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
             }
             case OpCode::BUILD_ARRAY: {
                 uint8_t count = readByte();
-                auto array = std::make_shared<ArrayObject>();
+                auto array = gcAlloc<ArrayObject>();
                 array->elements.resize(count);
                 for (int i = static_cast<int>(count) - 1; i >= 0; --i) {
                     array->elements[static_cast<size_t>(i)] = m_stack.pop();
@@ -1187,7 +1217,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
             }
             case OpCode::BUILD_DICT: {
                 uint8_t pairCount = readByte();
-                auto dict = std::make_shared<DictObject>();
+                auto dict = gcAlloc<DictObject>();
 
                 for (int i = 0; i < pairCount; ++i) {
                     Value value = m_stack.pop();
@@ -1352,6 +1382,7 @@ Status VirtualMachine::interpret(std::string_view source, bool printReturnValue,
     m_stack.reset();
     m_frames.clear();
     m_openUpvalues.clear();
+    m_compiler.setGC(&m_gc);
     m_traceEnabled = traceEnabled;
     m_disassembleEnabled = disassembleEnabled;
 
@@ -1368,13 +1399,13 @@ Status VirtualMachine::interpret(std::string_view source, bool printReturnValue,
         std::cout << "== end disassembly ==" << std::endl;
     }
 
-    auto clockFn = std::make_shared<NativeFunctionObject>();
+    auto clockFn = gcAlloc<NativeFunctionObject>();
     clockFn->name = "clock";
     clockFn->arity = 0;
     m_globals[clockFn->name] = Value(clockFn);
 
     auto defineNative = [&](const std::string& name, int arity) {
-        auto nativeFn = std::make_shared<NativeFunctionObject>();
+        auto nativeFn = gcAlloc<NativeFunctionObject>();
         nativeFn->name = name;
         nativeFn->arity = arity;
         m_globals[name] = Value(nativeFn);

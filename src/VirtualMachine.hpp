@@ -6,6 +6,7 @@
 
 #include "Chunk.hpp"
 #include "Compiler.hpp"
+#include "GC.hpp"
 #include "Stack.hpp"
 
 enum Status {
@@ -21,8 +22,8 @@ class VirtualMachine {
         uint8_t* ip;
         size_t slotBase;
         size_t calleeIndex;
-        std::shared_ptr<InstanceObject> receiver;
-        std::shared_ptr<ClosureObject> closure;
+        InstanceObject* receiver;
+        ClosureObject* closure;
     };
 
     // expression evaluation stack
@@ -31,10 +32,13 @@ class VirtualMachine {
     std::vector<CallFrame> m_frames;
     // compiler
     Compiler m_compiler;
+    // gc
+    GC m_gc;
+    size_t m_gcThreshold = 1024 * 1024;
     // globals
     std::unordered_map<std::string, Value> m_globals;
     // open upvalues
-    std::vector<std::shared_ptr<UpvalueObject>> m_openUpvalues;
+    std::vector<UpvalueObject*> m_openUpvalues;
     bool m_traceEnabled = false;
     bool m_disassembleEnabled = false;
 
@@ -59,11 +63,23 @@ class VirtualMachine {
     Status run(bool printReturnValue, Value& returnValue);
     Status runtimeError(const std::string& message);
     void printStackTrace();
-    Status callClosure(std::shared_ptr<ClosureObject> closure,
-                       uint8_t argumentCount,
-                       std::shared_ptr<InstanceObject> receiver = nullptr);
-    std::shared_ptr<UpvalueObject> captureUpvalue(size_t stackIndex);
+    Status callClosure(ClosureObject* closure, uint8_t argumentCount,
+                       InstanceObject* receiver = nullptr);
+    UpvalueObject* captureUpvalue(size_t stackIndex);
     void closeUpvalues(size_t fromStackIndex);
+    void markRoots();
+    void collectGarbage();
+
+    template <typename T, typename... Args>
+    T* gcAlloc(Args&&... args) {
+        if (m_gc.bytesAllocated() >= m_gcThreshold) {
+            collectGarbage();
+            size_t next = m_gc.bytesAllocated() * 2;
+            m_gcThreshold = next < (1024 * 1024) ? (1024 * 1024) : next;
+        }
+
+        return m_gc.allocate<T>(std::forward<Args>(args)...);
+    }
 
    public:
     VirtualMachine() = default;

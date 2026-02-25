@@ -9,7 +9,10 @@
 #include <variant>
 #include <vector>
 
+#include "GcObject.hpp"
+
 class Chunk;
+class GC;
 struct ClassObject;
 struct InstanceObject;
 struct BoundMethodObject;
@@ -21,27 +24,35 @@ struct ArrayObject;
 struct DictObject;
 struct SetObject;
 
-struct FunctionObject {
+struct FunctionObject : GcObject {
     std::string name;
     std::vector<std::string> parameters;
-    std::shared_ptr<Chunk> chunk;
+    std::unique_ptr<Chunk> chunk;
     uint8_t upvalueCount = 0;
+
+    void trace(GC& gc) override;
 };
 
-struct ClassObject {
+struct ClassObject : GcObject {
     std::string name;
-    std::shared_ptr<ClassObject> superclass;
-    std::unordered_map<std::string, std::shared_ptr<ClosureObject>> methods;
+    ClassObject* superclass = nullptr;
+    std::unordered_map<std::string, ClosureObject*> methods;
+
+    void trace(GC& gc) override;
 };
 
-struct BoundMethodObject {
-    std::shared_ptr<InstanceObject> receiver;
-    std::shared_ptr<ClosureObject> method;
+struct BoundMethodObject : GcObject {
+    InstanceObject* receiver = nullptr;
+    ClosureObject* method = nullptr;
+
+    void trace(GC& gc) override;
 };
 
-struct NativeFunctionObject {
+struct NativeFunctionObject : GcObject {
     std::string name;
     int arity;
+
+    void trace(GC& gc) override;
 };
 
 /*
@@ -106,14 +117,10 @@ enum ValueType {
 };
 
 struct Value {
-    std::variant<double, bool, std::monostate, std::string,
-                 std::shared_ptr<FunctionObject>, std::shared_ptr<ClassObject>,
-                 std::shared_ptr<InstanceObject>,
-                 std::shared_ptr<BoundMethodObject>,
-                 std::shared_ptr<NativeFunctionObject>,
-                 std::shared_ptr<NativeBoundMethodObject>,
-                 std::shared_ptr<ClosureObject>, std::shared_ptr<ArrayObject>,
-                 std::shared_ptr<DictObject>, std::shared_ptr<SetObject>>
+    std::variant<double, bool, std::monostate, std::string, FunctionObject*,
+                 ClassObject*, InstanceObject*, BoundMethodObject*,
+                 NativeFunctionObject*, NativeBoundMethodObject*,
+                 ClosureObject*, ArrayObject*, DictObject*, SetObject*>
         data;
 
     Value() : data(std::monostate{}) {}
@@ -121,122 +128,114 @@ struct Value {
     Value(bool value) : data(value) {}
     Value(const std::string& value) : data(value) {}
     Value(const char* value) : data(std::string(value)) {}
-    Value(std::shared_ptr<FunctionObject> value) : data(std::move(value)) {}
-    Value(std::shared_ptr<ClassObject> value) : data(std::move(value)) {}
-    Value(std::shared_ptr<InstanceObject> value) : data(std::move(value)) {}
-    Value(std::shared_ptr<BoundMethodObject> value) : data(std::move(value)) {}
-    Value(std::shared_ptr<NativeFunctionObject> value)
-        : data(std::move(value)) {}
-    Value(std::shared_ptr<NativeBoundMethodObject> value)
-        : data(std::move(value)) {}
-    Value(std::shared_ptr<ClosureObject> value) : data(std::move(value)) {}
-    Value(std::shared_ptr<ArrayObject> value) : data(std::move(value)) {}
-    Value(std::shared_ptr<DictObject> value) : data(std::move(value)) {}
-    Value(std::shared_ptr<SetObject> value) : data(std::move(value)) {}
+    Value(FunctionObject* value) : data(value) {}
+    Value(ClassObject* value) : data(value) {}
+    Value(InstanceObject* value) : data(value) {}
+    Value(BoundMethodObject* value) : data(value) {}
+    Value(NativeFunctionObject* value) : data(value) {}
+    Value(NativeBoundMethodObject* value) : data(value) {}
+    Value(ClosureObject* value) : data(value) {}
+    Value(ArrayObject* value) : data(value) {}
+    Value(DictObject* value) : data(value) {}
+    Value(SetObject* value) : data(value) {}
 
     bool isNumber() const { return std::holds_alternative<double>(data); }
     bool isBool() const { return std::holds_alternative<bool>(data); }
     bool isNil() const { return std::holds_alternative<std::monostate>(data); }
     bool isString() const { return std::holds_alternative<std::string>(data); }
     bool isFunction() const {
-        return std::holds_alternative<std::shared_ptr<FunctionObject>>(data);
+        return std::holds_alternative<FunctionObject*>(data);
     }
-    bool isClass() const {
-        return std::holds_alternative<std::shared_ptr<ClassObject>>(data);
-    }
+    bool isClass() const { return std::holds_alternative<ClassObject*>(data); }
     bool isInstance() const {
-        return std::holds_alternative<std::shared_ptr<InstanceObject>>(data);
+        return std::holds_alternative<InstanceObject*>(data);
     }
     bool isBoundMethod() const {
-        return std::holds_alternative<std::shared_ptr<BoundMethodObject>>(data);
+        return std::holds_alternative<BoundMethodObject*>(data);
     }
     bool isNative() const {
-        return std::holds_alternative<std::shared_ptr<NativeFunctionObject>>(
-            data);
+        return std::holds_alternative<NativeFunctionObject*>(data);
     }
     bool isNativeBound() const {
-        return std::holds_alternative<std::shared_ptr<NativeBoundMethodObject>>(
-            data);
+        return std::holds_alternative<NativeBoundMethodObject*>(data);
     }
     bool isClosure() const {
-        return std::holds_alternative<std::shared_ptr<ClosureObject>>(data);
+        return std::holds_alternative<ClosureObject*>(data);
     }
-    bool isArray() const {
-        return std::holds_alternative<std::shared_ptr<ArrayObject>>(data);
-    }
-    bool isDict() const {
-        return std::holds_alternative<std::shared_ptr<DictObject>>(data);
-    }
-    bool isSet() const {
-        return std::holds_alternative<std::shared_ptr<SetObject>>(data);
-    }
+    bool isArray() const { return std::holds_alternative<ArrayObject*>(data); }
+    bool isDict() const { return std::holds_alternative<DictObject*>(data); }
+    bool isSet() const { return std::holds_alternative<SetObject*>(data); }
 
     double asNumber() const { return std::get<double>(data); }
     bool asBool() const { return std::get<bool>(data); }
     const std::string& asString() const { return std::get<std::string>(data); }
-    std::shared_ptr<FunctionObject> asFunction() const {
-        return std::get<std::shared_ptr<FunctionObject>>(data);
+    FunctionObject* asFunction() const {
+        return std::get<FunctionObject*>(data);
     }
-    std::shared_ptr<ClassObject> asClass() const {
-        return std::get<std::shared_ptr<ClassObject>>(data);
+    ClassObject* asClass() const { return std::get<ClassObject*>(data); }
+    InstanceObject* asInstance() const {
+        return std::get<InstanceObject*>(data);
     }
-    std::shared_ptr<InstanceObject> asInstance() const {
-        return std::get<std::shared_ptr<InstanceObject>>(data);
+    BoundMethodObject* asBoundMethod() const {
+        return std::get<BoundMethodObject*>(data);
     }
-    std::shared_ptr<BoundMethodObject> asBoundMethod() const {
-        return std::get<std::shared_ptr<BoundMethodObject>>(data);
+    NativeFunctionObject* asNative() const {
+        return std::get<NativeFunctionObject*>(data);
     }
-    std::shared_ptr<NativeFunctionObject> asNative() const {
-        return std::get<std::shared_ptr<NativeFunctionObject>>(data);
+    NativeBoundMethodObject* asNativeBound() const {
+        return std::get<NativeBoundMethodObject*>(data);
     }
-    std::shared_ptr<NativeBoundMethodObject> asNativeBound() const {
-        return std::get<std::shared_ptr<NativeBoundMethodObject>>(data);
-    }
-    std::shared_ptr<ClosureObject> asClosure() const {
-        return std::get<std::shared_ptr<ClosureObject>>(data);
-    }
-    std::shared_ptr<ArrayObject> asArray() const {
-        return std::get<std::shared_ptr<ArrayObject>>(data);
-    }
-    std::shared_ptr<DictObject> asDict() const {
-        return std::get<std::shared_ptr<DictObject>>(data);
-    }
-    std::shared_ptr<SetObject> asSet() const {
-        return std::get<std::shared_ptr<SetObject>>(data);
-    }
+    ClosureObject* asClosure() const { return std::get<ClosureObject*>(data); }
+    ArrayObject* asArray() const { return std::get<ArrayObject*>(data); }
+    DictObject* asDict() const { return std::get<DictObject*>(data); }
+    SetObject* asSet() const { return std::get<SetObject*>(data); }
 };
 
-struct UpvalueObject {
+struct UpvalueObject : GcObject {
     size_t stackIndex = 0;
     bool isClosed = false;
     Value closed;
+
+    void trace(GC& gc) override;
 };
 
-struct ClosureObject {
-    std::shared_ptr<FunctionObject> function;
-    std::vector<std::shared_ptr<UpvalueObject>> upvalues;
+struct ClosureObject : GcObject {
+    FunctionObject* function = nullptr;
+    std::vector<UpvalueObject*> upvalues;
+
+    void trace(GC& gc) override;
 };
 
-struct InstanceObject {
-    std::shared_ptr<ClassObject> klass;
+struct InstanceObject : GcObject {
+    ClassObject* klass = nullptr;
     std::unordered_map<std::string, Value> fields;
+
+    void trace(GC& gc) override;
 };
 
-struct ArrayObject {
+struct ArrayObject : GcObject {
     std::vector<Value> elements;
+
+    void trace(GC& gc) override;
 };
 
-struct DictObject {
+struct DictObject : GcObject {
     std::unordered_map<std::string, Value> map;
+
+    void trace(GC& gc) override;
 };
 
-struct SetObject {
+struct SetObject : GcObject {
     std::vector<Value> elements;
+
+    void trace(GC& gc) override;
 };
 
-struct NativeBoundMethodObject {
+struct NativeBoundMethodObject : GcObject {
     std::string name;
     Value receiver;
+
+    void trace(GC& gc) override;
 };
 
 inline bool operator==(const Value& lhs, const Value& rhs) {
@@ -285,7 +284,7 @@ inline void printValueInternal(std::ostream& stream, const Value& value,
         stream << "<closure " << closure->function->name << ">";
     } else if (value.isArray()) {
         auto array = value.asArray();
-        const void* identity = array.get();
+        const void* identity = array;
         if (active.find(identity) != active.end()) {
             stream << "[...]";
             return;
@@ -304,7 +303,7 @@ inline void printValueInternal(std::ostream& stream, const Value& value,
         active.erase(identity);
     } else if (value.isDict()) {
         auto dict = value.asDict();
-        const void* identity = dict.get();
+        const void* identity = dict;
         if (active.find(identity) != active.end()) {
             stream << "{...}";
             return;
@@ -332,7 +331,7 @@ inline void printValueInternal(std::ostream& stream, const Value& value,
         active.erase(identity);
     } else if (value.isSet()) {
         auto set = value.asSet();
-        const void* identity = set.get();
+        const void* identity = set;
         if (active.find(identity) != active.end()) {
             stream << "Set(...)";
             return;
@@ -393,4 +392,5 @@ class Chunk {
     // inlined methods
     uint8_t* getBytes() { return this->m_bytes->data(); }
     Value* getConstants() { return this->m_constants->data(); }
+    const std::vector<Value>& getConstantsRange() const { return *m_constants; }
 };

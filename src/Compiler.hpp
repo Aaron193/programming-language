@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "Chunk.hpp"
+#include "GC.hpp"
 #include "Scanner.hpp"
 
 struct Parser {
@@ -56,7 +57,7 @@ class Compiler {
     };
 
     struct CompiledFunction {
-        std::shared_ptr<FunctionObject> function;
+        FunctionObject* function;
         std::vector<Upvalue> upvalues;
     };
 
@@ -76,6 +77,7 @@ class Compiler {
     std::unique_ptr<Parser> m_parser;
     ClassContext* m_currentClass = nullptr;
     std::vector<FunctionContext> m_contexts;
+    GC* m_gc = nullptr;
 
     void advance();
     void synchronize();
@@ -151,6 +153,8 @@ class Compiler {
    public:
     Compiler() = default;
     ~Compiler() = default;
+
+    void setGC(GC* gc) { m_gc = gc; }
 
     bool compile(std::string_view source, Chunk& chunk);
 };
