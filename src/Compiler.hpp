@@ -81,6 +81,8 @@ class Compiler {
     void grouping(bool canAssign);
     void unary(bool canAssign);
     void binary(bool canAssign);
+    void andOperator(bool canAssign);
+    void orOperator(bool canAssign);
 
    public:
     Compiler() = default;

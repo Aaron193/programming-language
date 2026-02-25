@@ -197,16 +197,19 @@ void Compiler::ifStatement() {
     consume(TokenType::CLOSE_PAREN, "Expected ')' after condition.");
 
     int thenJump = emitJump(OpCode::JUMP_IF_FALSE);
+    emitByte(OpCode::POP);
     statement();
 
     if (m_parser->current.type() == TokenType::ELSE) {
         int elseJump = emitJump(OpCode::JUMP);
         patchJump(thenJump);
+        emitByte(OpCode::POP);
         advance();
         statement();
         patchJump(elseJump);
     } else {
         patchJump(thenJump);
+        emitByte(OpCode::POP);
     }
 }
 
@@ -218,9 +221,11 @@ void Compiler::whileStatement() {
     consume(TokenType::CLOSE_PAREN, "Expected ')' after condition.");
 
     int exitJump = emitJump(OpCode::JUMP_IF_FALSE);
+    emitByte(OpCode::POP);
     statement();
     emitLoop(loopStart);
     patchJump(exitJump);
+    emitByte(OpCode::POP);
 }
 
 void Compiler::forStatement() {
@@ -244,6 +249,7 @@ void Compiler::forStatement() {
         expression();
         consume(TokenType::SEMI_COLON, "Expected ';' after loop condition.");
         exitJump = emitJump(OpCode::JUMP_IF_FALSE);
+        emitByte(OpCode::POP);
     } else {
         advance();
     }
@@ -268,6 +274,7 @@ void Compiler::forStatement() {
 
     if (exitJump != -1) {
         patchJump(exitJump);
+        emitByte(OpCode::POP);
     }
 }
 
@@ -380,6 +387,14 @@ Compiler::ParseRule Compiler::getRule(TokenType type) {
             return ParseRule{nullptr,
                              [this](bool canAssign) { binary(canAssign); },
                              PREC_EQUALITY};
+        case TokenType::AND:
+            return ParseRule{nullptr,
+                             [this](bool canAssign) { andOperator(canAssign); },
+                             PREC_AND};
+        case TokenType::OR:
+            return ParseRule{nullptr,
+                             [this](bool canAssign) { orOperator(canAssign); },
+                             PREC_OR};
 
         default:
             return ParseRule{nullptr, nullptr, PREC_NONE};
@@ -500,4 +515,25 @@ void Compiler::binary(bool canAssign) {
         default:
             return;
     }
+}
+
+void Compiler::andOperator(bool canAssign) {
+    (void)canAssign;
+    int endJump = emitJump(OpCode::JUMP_IF_FALSE);
+
+    emitByte(OpCode::POP);
+    parsePrecedence(PREC_AND);
+    patchJump(endJump);
+}
+
+void Compiler::orOperator(bool canAssign) {
+    (void)canAssign;
+    int elseJump = emitJump(OpCode::JUMP_IF_FALSE);
+    int endJump = emitJump(OpCode::JUMP);
+
+    patchJump(elseJump);
+    emitByte(OpCode::POP);
+
+    parsePrecedence(PREC_OR);
+    patchJump(endJump);
 }

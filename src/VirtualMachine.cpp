@@ -233,7 +233,7 @@ Status VirtualMachine::run() {
             }
             case OpCode::JUMP_IF_FALSE: {
                 uint16_t offset = readShort();
-                Value condition = m_stack.pop();
+                Value condition = m_stack.peek(0);
                 if (isFalsey(condition)) {
                     m_ip += offset;
                 }
