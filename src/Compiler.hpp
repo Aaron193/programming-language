@@ -46,11 +46,17 @@ class Compiler {
         Precedence precedence;
     };
 
+    struct ClassContext {
+        bool hasSuperclass;
+        ClassContext* enclosing;
+    };
+
     Chunk* m_chunk = nullptr;
     std::unique_ptr<Scanner> m_scanner;
     std::unique_ptr<Parser> m_parser;
     bool m_inFunction = false;
     bool m_inMethod = false;
+    ClassContext* m_currentClass = nullptr;
     std::vector<Local> m_locals;
     int m_scopeDepth = 0;
 
@@ -66,6 +72,7 @@ class Compiler {
     uint8_t makeConstant(Value value);
     void emitConstant(Value value);
     uint8_t identifierConstant(const Token& name);
+    void namedVariable(const Token& name, bool canAssign);
     uint8_t parseVariable(const std::string& message);
     void defineVariable(uint8_t global);
     void beginScope();
@@ -98,6 +105,7 @@ class Compiler {
     void number(bool canAssign);
     void variable(bool canAssign);
     void thisExpression(bool canAssign);
+    void superExpression(bool canAssign);
     void literal(bool canAssign);
     void stringLiteral(bool canAssign);
     void grouping(bool canAssign);

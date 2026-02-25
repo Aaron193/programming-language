@@ -13,6 +13,20 @@ static bool isNumberPair(const Value& lhs, const Value& rhs) {
     return lhs.isNumber() && rhs.isNumber();
 }
 
+static std::shared_ptr<FunctionObject> findMethod(
+    std::shared_ptr<ClassObject> klass, const std::string& name) {
+    std::shared_ptr<ClassObject> current = klass;
+    while (current) {
+        auto it = current->methods.find(name);
+        if (it != current->methods.end()) {
+            return it->second;
+        }
+        current = current->superclass;
+    }
+
+    return nullptr;
+}
+
 Status VirtualMachine::callFunction(std::shared_ptr<FunctionObject> function,
                                     uint8_t argumentCount,
                                     std::shared_ptr<InstanceObject> receiver) {
@@ -274,6 +288,27 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 m_stack.push(Value(klass));
                 break;
             }
+            case OpCode::INHERIT: {
+                Value superclassValue = m_stack.pop();
+                Value subclassValue = m_stack.peek(0);
+
+                if (!superclassValue.isClass() || !subclassValue.isClass()) {
+                    std::cerr << "Runtime error: Inheritance requires classes."
+                              << std::endl;
+                    return Status::RUNTIME_ERROR;
+                }
+
+                auto superclass = superclassValue.asClass();
+                auto subclass = subclassValue.asClass();
+                subclass->superclass = superclass;
+                for (const auto& method : superclass->methods) {
+                    if (subclass->methods.find(method.first) ==
+                        subclass->methods.end()) {
+                        subclass->methods[method.first] = method.second;
+                    }
+                }
+                break;
+            }
             case OpCode::METHOD: {
                 std::string name = readNameConstant();
                 Value method = m_stack.peek(0);
@@ -301,6 +336,29 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 m_stack.push(Value(receiver));
                 break;
             }
+            case OpCode::GET_SUPER: {
+                std::string name = readNameConstant();
+                auto receiver = currentFrame().receiver;
+                if (!receiver || !receiver->klass ||
+                    !receiver->klass->superclass) {
+                    std::cerr << "Runtime error: Invalid super lookup."
+                              << std::endl;
+                    return Status::RUNTIME_ERROR;
+                }
+
+                auto method = findMethod(receiver->klass->superclass, name);
+                if (!method) {
+                    std::cerr << "Runtime error: Undefined superclass method '"
+                              << name << "'." << std::endl;
+                    return Status::RUNTIME_ERROR;
+                }
+
+                auto bound = std::make_shared<BoundMethodObject>();
+                bound->receiver = receiver;
+                bound->method = method;
+                m_stack.push(Value(bound));
+                break;
+            }
             case OpCode::GET_PROPERTY: {
                 std::string name = readNameConstant();
                 Value receiver = m_stack.peek(0);
@@ -319,8 +377,8 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                     break;
                 }
 
-                auto methodIt = instance->klass->methods.find(name);
-                if (methodIt == instance->klass->methods.end()) {
+                auto method = findMethod(instance->klass, name);
+                if (!method) {
                     std::cerr << "Runtime error: Undefined property '" << name
                               << "'." << std::endl;
                     return Status::RUNTIME_ERROR;
@@ -328,7 +386,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
 
                 auto bound = std::make_shared<BoundMethodObject>();
                 bound->receiver = instance;
-                bound->method = methodIt->second;
+                bound->method = method;
 
                 m_stack.pop();
                 m_stack.push(Value(bound));
@@ -367,7 +425,8 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                     }
 
                     size_t calleeIndex =
-                        m_stack.size() - static_cast<size_t>(argumentCount) - 1;
+                        m_stack.size() - static_cast<size_t>(argumentCount) -
+                        1;
                     auto instance = std::make_shared<InstanceObject>();
                     instance->klass = callee.asClass();
                     m_stack.setAt(calleeIndex, Value(instance));
@@ -391,8 +450,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                     return Status::RUNTIME_ERROR;
                 }
 
-                Status status =
-                    callFunction(callee.asFunction(), argumentCount);
+                Status status = callFunction(callee.asFunction(), argumentCount);
                 if (status != Status::OK) {
                     return status;
                 }

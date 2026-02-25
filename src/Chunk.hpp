@@ -21,6 +21,7 @@ struct FunctionObject {
 
 struct ClassObject {
     std::string name;
+    std::shared_ptr<ClassObject> superclass;
     std::unordered_map<std::string, std::shared_ptr<FunctionObject>> methods;
 };
 
@@ -59,8 +60,10 @@ enum OpCode {
     GET_LOCAL,
     SET_LOCAL,
     CLASS_OP,
+    INHERIT,
     METHOD,
     GET_THIS,
+    GET_SUPER,
     GET_PROPERTY,
     SET_PROPERTY,
     CALL,

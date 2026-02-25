@@ -106,10 +106,14 @@ int Chunk::disassembleInstruction(int offset) {
                                    m_bytes->at(offset + 1));
         case OpCode::CLASS_OP:
             return constantInstruction("CLASS", offset);
+        case OpCode::INHERIT:
+            return simpleInstruction("INHERIT", offset);
         case OpCode::METHOD:
             return constantInstruction("METHOD", offset);
         case OpCode::GET_THIS:
             return simpleInstruction("GET_THIS", offset);
+        case OpCode::GET_SUPER:
+            return constantInstruction("GET_SUPER", offset);
         case OpCode::GET_PROPERTY:
             return constantInstruction("GET_PROPERTY", offset);
         case OpCode::SET_PROPERTY:

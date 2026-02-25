@@ -10,6 +10,7 @@ bool Compiler::compile(std::string_view source, Chunk& chunk) {
     m_chunk = &chunk;
     m_scanner = std::make_unique<Scanner>(source);
     m_parser = std::make_unique<Parser>();
+    m_currentClass = nullptr;
     m_locals.clear();
     m_scopeDepth = 0;
 
@@ -83,6 +84,30 @@ void Compiler::emitLoop(int loopStart) {
 
 uint8_t Compiler::identifierConstant(const Token& name) {
     return makeConstant(Value(std::string(name.start(), name.length())));
+}
+
+void Compiler::namedVariable(const Token& name, bool canAssign) {
+    uint8_t arg = 0;
+    uint8_t getOp = OpCode::GET_GLOBAL;
+    uint8_t setOp = OpCode::SET_GLOBAL;
+
+    int local = resolveLocal(name);
+    if (local != -1) {
+        getOp = OpCode::GET_LOCAL;
+        setOp = OpCode::SET_LOCAL;
+        arg = static_cast<uint8_t>(local);
+    } else {
+        arg = identifierConstant(name);
+    }
+
+    if (canAssign && m_parser->current.type() == TokenType::EQUAL) {
+        advance();
+        expression();
+        emitBytes(setOp, arg);
+        return;
+    }
+
+    emitBytes(getOp, arg);
 }
 
 uint8_t Compiler::parseVariable(const std::string& message) {
@@ -241,6 +266,11 @@ void Compiler::declaration() {
 }
 
 void Compiler::classDeclaration() {
+    ClassContext classContext;
+    classContext.hasSuperclass = false;
+    classContext.enclosing = m_currentClass;
+    m_currentClass = &classContext;
+
     consume(TokenType::IDENTIFIER, "Expected class name.");
     Token nameToken = m_parser->previous;
     uint8_t nameConstant = identifierConstant(nameToken);
@@ -255,11 +285,20 @@ void Compiler::classDeclaration() {
     emitBytes(OpCode::CLASS_OP, nameConstant);
     defineVariable(variable);
 
-    if (m_scopeDepth > 0) {
-        int local = resolveLocal(nameToken);
-        emitBytes(OpCode::GET_LOCAL, static_cast<uint8_t>(local));
-    } else {
-        emitBytes(OpCode::GET_GLOBAL, nameConstant);
+    namedVariable(nameToken, false);
+
+    if (m_parser->current.type() == TokenType::LESS) {
+        advance();
+        consume(TokenType::IDENTIFIER, "Expected superclass name.");
+        Token superclassName = m_parser->previous;
+
+        if (identifiersEqual(nameToken, superclassName)) {
+            errorAt(superclassName, "A class cannot inherit from itself.");
+        }
+
+        namedVariable(superclassName, false);
+        emitByte(OpCode::INHERIT);
+        classContext.hasSuperclass = true;
     }
 
     consume(TokenType::OPEN_CURLY, "Expected '{' before class body.");
@@ -269,6 +308,8 @@ void Compiler::classDeclaration() {
     }
     consume(TokenType::CLOSE_CURLY, "Expected '}' after class body.");
     emitByte(OpCode::POP);
+
+    m_currentClass = m_currentClass->enclosing;
 }
 
 void Compiler::methodDeclaration() {
@@ -535,6 +576,10 @@ Compiler::ParseRule Compiler::getRule(TokenType type) {
             return ParseRule{
                 [this](bool canAssign) { thisExpression(canAssign); }, nullptr,
                 PREC_NONE};
+        case TokenType::SUPER:
+            return ParseRule{
+                [this](bool canAssign) { superExpression(canAssign); }, nullptr,
+                PREC_NONE};
         case TokenType::STRING:
             return ParseRule{
                 [this](bool canAssign) { stringLiteral(canAssign); }, nullptr,
@@ -600,28 +645,7 @@ void Compiler::number(bool canAssign) {
 }
 
 void Compiler::variable(bool canAssign) {
-    Token name = m_parser->previous;
-    uint8_t arg = 0;
-    uint8_t getOp = OpCode::GET_GLOBAL;
-    uint8_t setOp = OpCode::SET_GLOBAL;
-
-    int local = resolveLocal(name);
-    if (local != -1) {
-        getOp = OpCode::GET_LOCAL;
-        setOp = OpCode::SET_LOCAL;
-        arg = static_cast<uint8_t>(local);
-    } else {
-        arg = identifierConstant(name);
-    }
-
-    if (canAssign && m_parser->current.type() == TokenType::EQUAL) {
-        advance();
-        expression();
-        emitBytes(setOp, arg);
-        return;
-    }
-
-    emitBytes(getOp, arg);
+    namedVariable(m_parser->previous, canAssign);
 }
 
 void Compiler::thisExpression(bool canAssign) {
@@ -632,6 +656,25 @@ void Compiler::thisExpression(bool canAssign) {
     }
 
     emitByte(OpCode::GET_THIS);
+}
+
+void Compiler::superExpression(bool canAssign) {
+    (void)canAssign;
+    if (m_currentClass == nullptr) {
+        errorAt(m_parser->previous, "Cannot use 'super' outside of a class.");
+        return;
+    }
+
+    if (!m_currentClass->hasSuperclass) {
+        errorAt(m_parser->previous,
+                "Cannot use 'super' in a class with no superclass.");
+        return;
+    }
+
+    consume(TokenType::DOT, "Expected '.' after 'super'.");
+    consume(TokenType::IDENTIFIER, "Expected superclass method name.");
+    uint8_t name = identifierConstant(m_parser->previous);
+    emitBytes(OpCode::GET_SUPER, name);
 }
 
 void Compiler::literal(bool canAssign) {
