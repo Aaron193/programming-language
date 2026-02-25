@@ -24,6 +24,7 @@ struct ArrayObject;
 struct DictObject;
 struct SetObject;
 struct IteratorObject;
+struct ModuleObject;
 
 struct FunctionObject : GcObject {
     std::string name;
@@ -114,6 +115,8 @@ enum OpCode {
     ITER_INIT,
     ITER_HAS_NEXT,
     ITER_NEXT,
+    IMPORT_MODULE,
+    EXPORT_NAME,
 };
 
 enum ValueType {
@@ -128,7 +131,7 @@ struct Value {
                  ClassObject*, InstanceObject*, BoundMethodObject*,
                  NativeFunctionObject*, NativeBoundMethodObject*,
                  ClosureObject*, ArrayObject*, DictObject*, SetObject*,
-                 IteratorObject*>
+                 IteratorObject*, ModuleObject*>
         data;
 
     Value() : data(std::monostate{}) {}
@@ -147,6 +150,7 @@ struct Value {
     Value(DictObject* value) : data(value) {}
     Value(SetObject* value) : data(value) {}
     Value(IteratorObject* value) : data(value) {}
+    Value(ModuleObject* value) : data(value) {}
 
     bool isNumber() const { return std::holds_alternative<double>(data); }
     bool isBool() const { return std::holds_alternative<bool>(data); }
@@ -177,6 +181,9 @@ struct Value {
     bool isIterator() const {
         return std::holds_alternative<IteratorObject*>(data);
     }
+    bool isModule() const {
+        return std::holds_alternative<ModuleObject*>(data);
+    }
 
     double asNumber() const { return std::get<double>(data); }
     bool asBool() const { return std::get<bool>(data); }
@@ -204,6 +211,7 @@ struct Value {
     IteratorObject* asIterator() const {
         return std::get<IteratorObject*>(data);
     }
+    ModuleObject* asModule() const { return std::get<ModuleObject*>(data); }
 };
 
 struct UpvalueObject : GcObject {
@@ -254,6 +262,13 @@ struct IteratorObject : GcObject {
     SetObject* set = nullptr;
     std::vector<std::string> dictKeys;
     size_t index = 0;
+
+    void trace(GC& gc) override;
+};
+
+struct ModuleObject : GcObject {
+    std::string path;
+    std::unordered_map<std::string, Value> exports;
 
     void trace(GC& gc) override;
 };
@@ -376,6 +391,9 @@ inline void printValueInternal(std::ostream& stream, const Value& value,
         active.erase(identity);
     } else if (value.isIterator()) {
         stream << "<iterator>";
+    } else if (value.isModule()) {
+        auto module = value.asModule();
+        stream << "<module " << module->path << ">";
     } else {
         stream << value.asString();
     }
@@ -408,6 +426,10 @@ class Chunk {
 
    public:
     Chunk() = default;
+    Chunk(const Chunk&) = delete;
+    Chunk& operator=(const Chunk&) = delete;
+    Chunk(Chunk&&) noexcept = default;
+    Chunk& operator=(Chunk&&) noexcept = default;
     ~Chunk() = default;
 
     void write(uint8_t byte, int line);

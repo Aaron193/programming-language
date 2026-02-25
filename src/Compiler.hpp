@@ -81,6 +81,8 @@ class Compiler {
     GC* m_gc = nullptr;
     std::unordered_map<std::string, uint8_t> m_globalSlots;
     std::vector<std::string> m_globalNames;
+    std::vector<std::string> m_exportedNames;
+    std::string m_sourcePath;
 
     void advance();
     void synchronize();
@@ -121,6 +123,9 @@ class Compiler {
     void classDeclaration();
     void methodDeclaration();
     void functionDeclaration();
+    void importDeclaration();
+    void exportDeclaration();
+    void emitExportName(const Token& nameToken);
     void statement();
     void block();
     void ifStatement();
@@ -159,9 +164,14 @@ class Compiler {
     ~Compiler() = default;
 
     void setGC(GC* gc) { m_gc = gc; }
+    void setSourcePath(const std::string& path) { m_sourcePath = path; }
     const std::vector<std::string>& globalNames() const {
         return m_globalNames;
     }
+    const std::vector<std::string>& exportedNames() const {
+        return m_exportedNames;
+    }
 
-    bool compile(std::string_view source, Chunk& chunk);
+    bool compile(std::string_view source, Chunk& chunk,
+                 const std::string& sourcePath = "");
 };

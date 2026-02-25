@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -33,6 +34,7 @@ static std::string valueTypeName(const Value& value) {
     if (value.isDict()) return "dict";
     if (value.isSet()) return "set";
     if (value.isIterator()) return "iterator";
+    if (value.isModule()) return "module";
     if (value.isClass()) return "class";
     if (value.isInstance()) return "instance";
     if (value.isNative()) return "native";
@@ -136,6 +138,13 @@ void VirtualMachine::markRoots() {
         m_gc.markObject(upvalue);
     }
 
+    for (const auto& [path, module] : m_moduleCache) {
+        (void)path;
+        m_gc.markObject(module);
+    }
+
+    m_gc.markObject(m_currentModule);
+
     for (size_t i = 0; i < m_frameCount; ++i) {
         const auto& frame = m_frames[i];
         m_gc.markObject(frame.receiver);
@@ -221,7 +230,8 @@ Status VirtualMachine::callClosure(ClosureObject* closure,
     return Status::OK;
 }
 
-Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
+Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
+                           size_t stopFrameCount) {
     while (true) {
         CallFrame& frame = currentFrame();
 
@@ -326,8 +336,10 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 closeUpvalues(finishedFrame.slotBase);
                 m_frameCount--;
 
-                if (m_frameCount == 0) {
-                    m_activeFrame = nullptr;
+                if (m_frameCount == stopFrameCount) {
+                    m_activeFrame = (m_frameCount == 0)
+                                        ? nullptr
+                                        : &m_frames[m_frameCount - 1];
                     returnValue = result;
                     if (printReturnValue) {
                         std::cout << "Return constant: " << result << std::endl;
@@ -643,6 +655,19 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
             case OpCode::GET_PROPERTY: {
                 const std::string& name = readNameConstant();
                 Value receiver = m_stack.peek(0);
+
+                if (receiver.isModule()) {
+                    auto module = receiver.asModule();
+                    auto it = module->exports.find(name);
+                    if (it == module->exports.end()) {
+                        return runtimeError("Module '" + module->path +
+                                            "' has no export '" + name + "'.");
+                    }
+
+                    m_stack.pop();
+                    m_stack.push(it->second);
+                    break;
+                }
 
                 if (receiver.isArray() || receiver.isDict() ||
                     receiver.isSet()) {
@@ -1562,6 +1587,112 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 m_stack.push(nextValue);
                 break;
             }
+            case OpCode::IMPORT_MODULE: {
+                const std::string& path = readConstant().asString();
+
+                auto cached = m_moduleCache.find(path);
+                if (cached != m_moduleCache.end()) {
+                    m_stack.push(Value(cached->second));
+                    break;
+                }
+
+                if (m_importStack.find(path) != m_importStack.end()) {
+                    return runtimeError("Circular import detected: '" + path +
+                                        "'.");
+                }
+
+                std::ifstream file(path);
+                if (!file) {
+                    return runtimeError("Failed to open module '" + path +
+                                        "'.");
+                }
+
+                std::string source((std::istreambuf_iterator<char>(file)),
+                                   std::istreambuf_iterator<char>());
+
+                m_importStack.insert(path);
+
+                Chunk importedChunk;
+                if (!m_compiler.compile(source, importedChunk, path)) {
+                    m_importStack.erase(path);
+                    return Status::COMPILATION_ERROR;
+                }
+
+                auto* module = gcAlloc<ModuleObject>();
+                module->path = path;
+
+                auto savedGlobalNames = m_globalNames;
+                auto savedGlobalValues = m_globalValues;
+                auto savedGlobalDefined = m_globalDefined;
+                ModuleObject* outerModule = m_currentModule;
+
+                m_globalNames = m_compiler.globalNames();
+                m_globalValues.assign(m_globalNames.size(), Value());
+                m_globalDefined.assign(m_globalNames.size(), false);
+                for (size_t i = 0; i < m_globalNames.size(); ++i) {
+                    auto nativeIt = m_nativeGlobals.find(m_globalNames[i]);
+                    if (nativeIt != m_nativeGlobals.end()) {
+                        m_globalValues[i] = nativeIt->second;
+                        m_globalDefined[i] = true;
+                    }
+                }
+
+                m_currentModule = module;
+
+                auto function = gcAlloc<FunctionObject>();
+                function->name = path;
+                function->parameters = {};
+                function->chunk =
+                    std::make_unique<Chunk>(std::move(importedChunk));
+                function->upvalueCount = 0;
+
+                auto closure = gcAlloc<ClosureObject>();
+                closure->function = function;
+                closure->upvalues = {};
+
+                m_stack.push(Value(closure));
+                size_t callerFrameCount = m_frameCount;
+                Status callStatus = callClosure(closure, 0);
+                if (callStatus != Status::OK) {
+                    m_stack.pop();
+                    m_currentModule = outerModule;
+                    m_globalNames = std::move(savedGlobalNames);
+                    m_globalValues = std::move(savedGlobalValues);
+                    m_globalDefined = std::move(savedGlobalDefined);
+                    m_importStack.erase(path);
+                    return callStatus;
+                }
+
+                Value ignored;
+                Status moduleStatus = run(false, ignored, callerFrameCount);
+                if (moduleStatus != Status::OK) {
+                    m_currentModule = outerModule;
+                    m_globalNames = std::move(savedGlobalNames);
+                    m_globalValues = std::move(savedGlobalValues);
+                    m_globalDefined = std::move(savedGlobalDefined);
+                    m_importStack.erase(path);
+                    return moduleStatus;
+                }
+
+                m_stack.pop();
+
+                m_currentModule = outerModule;
+                m_globalNames = std::move(savedGlobalNames);
+                m_globalValues = std::move(savedGlobalValues);
+                m_globalDefined = std::move(savedGlobalDefined);
+
+                m_moduleCache[path] = module;
+                m_importStack.erase(path);
+                m_stack.push(Value(module));
+                break;
+            }
+            case OpCode::EXPORT_NAME: {
+                const std::string& name = readConstant().asString();
+                if (m_currentModule != nullptr) {
+                    m_currentModule->exports[name] = m_stack.peek(0);
+                }
+                break;
+            }
             case OpCode::JUMP: {
                 uint16_t offset = readShort();
                 currentFrame().ip += offset;
@@ -1609,18 +1740,22 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
 }
 
 Status VirtualMachine::interpret(std::string_view source, bool printReturnValue,
-                                 bool traceEnabled, bool disassembleEnabled) {
+                                 bool traceEnabled, bool disassembleEnabled,
+                                 const std::string& sourcePath) {
     Chunk chunk;
     m_stack.reset();
     m_frameCount = 0;
     m_activeFrame = nullptr;
     m_openUpvalues.clear();
     m_nativeGlobals.clear();
+    m_moduleCache.clear();
+    m_importStack.clear();
+    m_currentModule = nullptr;
     m_compiler.setGC(&m_gc);
     m_traceEnabled = traceEnabled;
     m_disassembleEnabled = disassembleEnabled;
 
-    if (!m_compiler.compile(source, chunk)) {
+    if (!m_compiler.compile(source, chunk, sourcePath)) {
         return Status::COMPILATION_ERROR;
     }
 
@@ -1676,5 +1811,5 @@ Status VirtualMachine::interpret(std::string_view source, bool printReturnValue,
     m_activeFrame = &m_frames[m_frameCount - 1];
 
     Value returnValue;
-    return run(printReturnValue, returnValue);
+    return run(printReturnValue, returnValue, 0);
 }

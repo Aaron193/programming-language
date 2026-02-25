@@ -1,0 +1,4 @@
+import { add, PI } from "./modules/math.expr";
+
+print PI;
+print add(3, 4);

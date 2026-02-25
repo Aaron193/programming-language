@@ -1,8 +1,10 @@
 #pragma once
 #include <array>
 #include <cstdint>
+#include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "Chunk.hpp"
@@ -45,6 +47,9 @@ class VirtualMachine {
     std::vector<Value> m_globalValues;
     std::vector<bool> m_globalDefined;
     std::unordered_map<std::string, Value> m_nativeGlobals;
+    std::unordered_map<std::string, ModuleObject*> m_moduleCache;
+    std::unordered_set<std::string> m_importStack;
+    ModuleObject* m_currentModule = nullptr;
     // open upvalues
     std::vector<UpvalueObject*> m_openUpvalues;
     bool m_traceEnabled = false;
@@ -65,7 +70,8 @@ class VirtualMachine {
     }
     const std::string& readNameConstant() { return readConstant().asString(); }
 
-    Status run(bool printReturnValue, Value& returnValue);
+    Status run(bool printReturnValue, Value& returnValue,
+               size_t stopFrameCount = 0);
     Status runtimeError(const std::string& message);
     void printStackTrace();
     Status callClosure(ClosureObject* closure, uint8_t argumentCount,
@@ -91,6 +97,6 @@ class VirtualMachine {
     ~VirtualMachine() = default;
 
     Status interpret(std::string_view source, bool printReturnValue = false,
-                     bool traceEnabled = false,
-                     bool disassembleEnabled = false);
+                     bool traceEnabled = false, bool disassembleEnabled = false,
+                     const std::string& sourcePath = "");
 };

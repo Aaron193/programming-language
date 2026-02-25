@@ -59,6 +59,10 @@ enum TokenType {
     THIS,
     VAR,
     _RETURN,
+    IMPORT,
+    EXPORT,
+    FROM,
+    AS,
 
     END_OF_FILE,
     ERROR,

@@ -5,15 +5,19 @@
 #include <string_view>
 
 #include "Chunk.hpp"
+#include "ModuleResolver.hpp"
 
-bool Compiler::compile(std::string_view source, Chunk& chunk) {
+bool Compiler::compile(std::string_view source, Chunk& chunk,
+                       const std::string& sourcePath) {
     m_chunk = &chunk;
+    m_sourcePath = sourcePath;
     m_scanner = std::make_unique<Scanner>(source);
     m_parser = std::make_unique<Parser>();
     m_currentClass = nullptr;
     m_contexts.clear();
     m_globalSlots.clear();
     m_globalNames.clear();
+    m_exportedNames.clear();
     m_contexts.push_back(FunctionContext{{}, {}, 0, false, false});
 
     advance();
@@ -365,6 +369,8 @@ void Compiler::synchronize() {
             case TokenType::CLASS:
             case TokenType::FUNCTION:
             case TokenType::VAR:
+            case TokenType::IMPORT:
+            case TokenType::EXPORT:
             case TokenType::FOR:
             case TokenType::IF:
             case TokenType::WHILE:
@@ -418,6 +424,12 @@ void Compiler::declaration() {
     if (m_parser->current.type() == TokenType::CLASS) {
         advance();
         classDeclaration();
+    } else if (m_parser->current.type() == TokenType::IMPORT) {
+        advance();
+        importDeclaration();
+    } else if (m_parser->current.type() == TokenType::EXPORT) {
+        advance();
+        exportDeclaration();
     } else if (m_parser->current.type() == TokenType::FUNCTION) {
         advance();
         functionDeclaration();
@@ -431,6 +443,176 @@ void Compiler::declaration() {
     if (m_parser->panicMode) {
         synchronize();
     }
+}
+
+void Compiler::emitExportName(const Token& nameToken) {
+    std::string exportedName(nameToken.start(), nameToken.length());
+    m_exportedNames.push_back(exportedName);
+
+    uint8_t slot = globalSlot(nameToken);
+    emitBytes(OpCode::GET_GLOBAL_SLOT, slot);
+    emitBytes(OpCode::EXPORT_NAME, identifierConstant(nameToken));
+    emitByte(OpCode::POP);
+}
+
+void Compiler::exportDeclaration() {
+    if (currentContext().scopeDepth != 0) {
+        errorAtCurrent("'export' is only allowed at the top level.");
+    }
+
+    if (m_parser->current.type() == TokenType::FUNCTION) {
+        advance();
+        if (m_parser->current.type() != TokenType::IDENTIFIER) {
+            errorAtCurrent("Expected function name.");
+            return;
+        }
+        Token exportName = m_parser->current;
+        functionDeclaration();
+        emitExportName(exportName);
+        return;
+    }
+
+    if (m_parser->current.type() == TokenType::VAR) {
+        advance();
+        if (m_parser->current.type() != TokenType::IDENTIFIER) {
+            errorAtCurrent("Expected variable name.");
+            return;
+        }
+        Token exportName = m_parser->current;
+        varDeclaration();
+        emitExportName(exportName);
+        return;
+    }
+
+    if (m_parser->current.type() == TokenType::CLASS) {
+        advance();
+        if (m_parser->current.type() != TokenType::IDENTIFIER) {
+            errorAtCurrent("Expected class name.");
+            return;
+        }
+        Token exportName = m_parser->current;
+        classDeclaration();
+        emitExportName(exportName);
+        return;
+    }
+
+    errorAtCurrent("Expected 'function', 'var', or 'class' after 'export'.");
+}
+
+void Compiler::importDeclaration() {
+    if (m_sourcePath.empty()) {
+        errorAtCurrent(
+            "Import statements are not allowed in interactive mode.");
+        return;
+    }
+
+    auto emitImportPath = [&](const std::string& resolvedPath) {
+        emitBytes(OpCode::IMPORT_MODULE, makeConstant(Value(resolvedPath)));
+    };
+
+    auto parseAndResolvePath = [&]() -> std::string {
+        consume(TokenType::FROM, "Expected 'from' in import declaration.");
+        consume(TokenType::STRING,
+                "Expected string literal module path in import declaration.");
+
+        std::string pathText(m_parser->previous.start(),
+                             m_parser->previous.length());
+        if (pathText.length() < 2) {
+            errorAt(m_parser->previous, "Invalid import path.");
+            return "";
+        }
+
+        std::string rawPath = pathText.substr(1, pathText.length() - 2);
+        std::string resolvedPath = resolveImportPath(m_sourcePath, rawPath);
+        if (resolvedPath.empty()) {
+            errorAt(m_parser->previous,
+                    "Cannot find module '" + rawPath + "'.");
+            return "";
+        }
+
+        return resolvedPath;
+    };
+
+    if (m_parser->current.type() == TokenType::OPEN_CURLY) {
+        struct NamedBinding {
+            Token exportName;
+            Token localName;
+        };
+
+        advance();
+        std::vector<NamedBinding> bindings;
+
+        if (m_parser->current.type() != TokenType::CLOSE_CURLY) {
+            do {
+                consume(TokenType::IDENTIFIER,
+                        "Expected export name in named import list.");
+                Token exportName = m_parser->previous;
+                Token localName = exportName;
+
+                if (m_parser->current.type() == TokenType::AS) {
+                    advance();
+                    consume(TokenType::IDENTIFIER,
+                            "Expected local alias after 'as'.");
+                    localName = m_parser->previous;
+                }
+
+                bindings.push_back(NamedBinding{exportName, localName});
+
+                if (m_parser->current.type() != TokenType::COMMA) {
+                    break;
+                }
+                advance();
+            } while (true);
+        }
+
+        consume(TokenType::CLOSE_CURLY,
+                "Expected '}' after named import list.");
+        std::string resolvedPath = parseAndResolvePath();
+        consume(TokenType::SEMI_COLON,
+                "Expected ';' after import declaration.");
+
+        if (resolvedPath.empty()) {
+            return;
+        }
+
+        emitImportPath(resolvedPath);
+        for (const auto& binding : bindings) {
+            emitByte(OpCode::DUP);
+            emitBytes(OpCode::GET_PROPERTY,
+                      identifierConstant(binding.exportName));
+
+            uint8_t variable = 0;
+            if (currentContext().scopeDepth > 0) {
+                addLocal(binding.localName);
+            } else {
+                variable = globalSlot(binding.localName);
+            }
+            defineVariable(variable);
+        }
+        emitByte(OpCode::POP);
+        return;
+    }
+
+    consume(TokenType::IDENTIFIER,
+            "Expected module alias or named import list after 'import'.");
+    Token aliasName = m_parser->previous;
+
+    std::string resolvedPath = parseAndResolvePath();
+    consume(TokenType::SEMI_COLON, "Expected ';' after import declaration.");
+
+    if (resolvedPath.empty()) {
+        return;
+    }
+
+    emitImportPath(resolvedPath);
+
+    uint8_t variable = 0;
+    if (currentContext().scopeDepth > 0) {
+        addLocal(aliasName);
+    } else {
+        variable = globalSlot(aliasName);
+    }
+    defineVariable(variable);
 }
 
 void Compiler::classDeclaration() {

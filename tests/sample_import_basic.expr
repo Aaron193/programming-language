@@ -1,0 +1,4 @@
+import math from "./modules/math.expr";
+
+print math.PI;
+print math.add(1, 2);

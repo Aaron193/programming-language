@@ -16,6 +16,7 @@ This project is a bytecode-compiled, stack-based interpreter implemented in C++.
 - Closures: nested functions with captured/upvalue variables
 - Classes: class declarations, fields, methods, `this`
 - Inheritance: subclassing with `<` and `super.method()` calls
+- Modules: `import` / `export` with runtime module cache and circular import detection
 
 ## Runtime / Engine Features
 
@@ -70,4 +71,35 @@ Run additional suites:
 ./tests/test_runtime_stacktrace.sh
 ./tests/test_cli_flags.sh
 ./tests/test_repl.sh
+./tests/test_import.sh
 ```
+
+## Modules
+
+Top-level exports:
+
+```expr
+export function add(a, b) { return a + b; }
+export var PI = 3.14159;
+export class Vector {}
+```
+
+Namespace import:
+
+```expr
+import math from "./math.expr";
+print math.PI;
+print math.add(1, 2);
+```
+
+Named import and aliasing:
+
+```expr
+import { add, PI } from "./math.expr";
+import { add as sum } from "./math.expr";
+```
+
+Notes:
+- Import paths must be string literals and include full filename.
+- Relative paths are resolved from the importing file's directory.
+- REPL mode does not allow `import` statements.

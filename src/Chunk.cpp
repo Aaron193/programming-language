@@ -201,6 +201,10 @@ int Chunk::disassembleInstruction(int offset) {
             return simpleInstruction("ITER_HAS_NEXT", offset);
         case OpCode::ITER_NEXT:
             return simpleInstruction("ITER_NEXT", offset);
+        case OpCode::IMPORT_MODULE:
+            return constantInstruction("IMPORT_MODULE", offset);
+        case OpCode::EXPORT_NAME:
+            return constantInstruction("EXPORT_NAME", offset);
 
         default:
             std::cout << "Invalid instruction opcode: " << instruction
@@ -278,6 +282,13 @@ void IteratorObject::trace(GC& gc) {
     gc.markObject(array);
     gc.markObject(dict);
     gc.markObject(set);
+}
+
+void ModuleObject::trace(GC& gc) {
+    for (const auto& [name, value] : exports) {
+        (void)name;
+        gc.markValue(value);
+    }
 }
 
 void NativeBoundMethodObject::trace(GC& gc) { gc.markValue(receiver); }

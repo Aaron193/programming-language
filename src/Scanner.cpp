@@ -189,6 +189,7 @@ TokenType Scanner::getIdentifier() {
     switch (m_start[0]) {
         case 'a':
             if (matchKeyword("and", 3)) return TokenType::AND;
+            if (matchKeyword("as", 2)) return TokenType::AS;
             break;
 
         case 'c':
@@ -197,16 +198,19 @@ TokenType Scanner::getIdentifier() {
 
         case 'e':
             if (matchKeyword("else", 4)) return TokenType::ELSE;
+            if (matchKeyword("export", 6)) return TokenType::EXPORT;
             break;
 
         case 'f':
             if (matchKeyword("false", 5)) return TokenType::FALSE;
             if (matchKeyword("for", 3)) return TokenType::FOR;
+            if (matchKeyword("from", 4)) return TokenType::FROM;
             if (matchKeyword("function", 8)) return TokenType::FUNCTION;
             break;
 
         case 'i':
             if (matchKeyword("if", 2)) return TokenType::IF;
+            if (matchKeyword("import", 6)) return TokenType::IMPORT;
             break;
 
         case 'n':
