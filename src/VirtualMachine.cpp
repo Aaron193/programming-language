@@ -15,7 +15,7 @@ static bool isNumberPair(const Value& lhs, const Value& rhs) {
     return lhs.isNumber() && rhs.isNumber();
 }
 
-static std::shared_ptr<FunctionObject> findMethod(
+static std::shared_ptr<ClosureObject> findMethodClosure(
     std::shared_ptr<ClassObject> klass, const std::string& name) {
     std::shared_ptr<ClassObject> current = klass;
     while (current) {
@@ -29,9 +29,34 @@ static std::shared_ptr<FunctionObject> findMethod(
     return nullptr;
 }
 
-Status VirtualMachine::callFunction(std::shared_ptr<FunctionObject> function,
-                                    uint8_t argumentCount,
-                                    std::shared_ptr<InstanceObject> receiver) {
+std::shared_ptr<UpvalueObject> VirtualMachine::captureUpvalue(
+    size_t stackIndex) {
+    for (const auto& upvalue : m_openUpvalues) {
+        if (!upvalue->isClosed && upvalue->stackIndex == stackIndex) {
+            return upvalue;
+        }
+    }
+
+    auto upvalue = std::make_shared<UpvalueObject>();
+    upvalue->stackIndex = stackIndex;
+    upvalue->isClosed = false;
+    m_openUpvalues.push_back(upvalue);
+    return upvalue;
+}
+
+void VirtualMachine::closeUpvalues(size_t fromStackIndex) {
+    for (const auto& upvalue : m_openUpvalues) {
+        if (!upvalue->isClosed && upvalue->stackIndex >= fromStackIndex) {
+            upvalue->closed = m_stack.getAt(upvalue->stackIndex);
+            upvalue->isClosed = true;
+        }
+    }
+}
+
+Status VirtualMachine::callClosure(std::shared_ptr<ClosureObject> closure,
+                                   uint8_t argumentCount,
+                                   std::shared_ptr<InstanceObject> receiver) {
+    auto function = closure->function;
     if (function->parameters.size() != argumentCount) {
         std::cerr << "Runtime error: Function '" << function->name
                   << "' expected " << function->parameters.size()
@@ -45,7 +70,7 @@ Status VirtualMachine::callFunction(std::shared_ptr<FunctionObject> function,
 
     m_frames.push_back(CallFrame{function->chunk.get(),
                                  function->chunk->getBytes(), calleeIndex + 1,
-                                 calleeIndex, receiver});
+                                 calleeIndex, receiver, closure});
     return Status::OK;
 }
 
@@ -75,6 +100,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
             case OpCode::RETURN: {
                 Value result = m_stack.pop();
                 CallFrame finishedFrame = currentFrame();
+                closeUpvalues(finishedFrame.slotBase);
                 m_frames.pop_back();
 
                 if (m_frames.empty()) {
@@ -289,6 +315,26 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 m_stack.setAt(currentFrame().slotBase + slot, m_stack.peek(0));
                 break;
             }
+            case OpCode::GET_UPVALUE: {
+                uint8_t slot = readByte();
+                auto upvalue = currentFrame().closure->upvalues[slot];
+                if (upvalue->isClosed) {
+                    m_stack.push(upvalue->closed);
+                } else {
+                    m_stack.push(m_stack.getAt(upvalue->stackIndex));
+                }
+                break;
+            }
+            case OpCode::SET_UPVALUE: {
+                uint8_t slot = readByte();
+                auto upvalue = currentFrame().closure->upvalues[slot];
+                if (upvalue->isClosed) {
+                    upvalue->closed = m_stack.peek(0);
+                } else {
+                    m_stack.setAt(upvalue->stackIndex, m_stack.peek(0));
+                }
+                break;
+            }
             case OpCode::CLASS_OP: {
                 std::string name = readNameConstant();
                 auto klass = std::make_shared<ClassObject>();
@@ -322,13 +368,13 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 Value method = m_stack.peek(0);
                 Value klass = m_stack.peek(1);
 
-                if (!klass.isClass() || !method.isFunction()) {
+                if (!klass.isClass() || !method.isClosure()) {
                     std::cerr << "Runtime error: Invalid method declaration."
                               << std::endl;
                     return Status::RUNTIME_ERROR;
                 }
 
-                klass.asClass()->methods[name] = method.asFunction();
+                klass.asClass()->methods[name] = method.asClosure();
                 m_stack.pop();
                 break;
             }
@@ -354,7 +400,8 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                     return Status::RUNTIME_ERROR;
                 }
 
-                auto method = findMethod(receiver->klass->superclass, name);
+                auto method =
+                    findMethodClosure(receiver->klass->superclass, name);
                 if (!method) {
                     std::cerr << "Runtime error: Undefined superclass method '"
                               << name << "'." << std::endl;
@@ -385,7 +432,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                     break;
                 }
 
-                auto method = findMethod(instance->klass, name);
+                auto method = findMethodClosure(instance->klass, name);
                 if (!method) {
                     std::cerr << "Runtime error: Undefined property '" << name
                               << "'." << std::endl;
@@ -475,8 +522,28 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
 
                 if (callee.isBoundMethod()) {
                     auto bound = callee.asBoundMethod();
-                    Status status = callFunction(bound->method, argumentCount,
-                                                 bound->receiver);
+                    Status status = callClosure(bound->method, argumentCount,
+                                                bound->receiver);
+                    if (status != Status::OK) {
+                        return status;
+                    }
+                    break;
+                }
+
+                if (callee.isClosure()) {
+                    Status status =
+                        callClosure(callee.asClosure(), argumentCount);
+                    if (status != Status::OK) {
+                        return status;
+                    }
+                    break;
+                }
+
+                if (callee.isFunction()) {
+                    auto closure = std::make_shared<ClosureObject>();
+                    closure->function = callee.asFunction();
+                    closure->upvalues = {};
+                    Status status = callClosure(closure, argumentCount);
                     if (status != Status::OK) {
                         return status;
                     }
@@ -488,12 +555,38 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                         "Can only call functions, classes, methods, and "
                         "natives.");
                 }
-
-                Status status =
-                    callFunction(callee.asFunction(), argumentCount);
-                if (status != Status::OK) {
-                    return status;
+                break;
+            }
+            case OpCode::CLOSURE: {
+                Value constant = readConstant();
+                if (!constant.isFunction()) {
+                    return runtimeError("CLOSURE expects a function constant.");
                 }
+
+                auto function = constant.asFunction();
+                auto closure = std::make_shared<ClosureObject>();
+                closure->function = function;
+                closure->upvalues.reserve(function->upvalueCount);
+
+                for (uint8_t i = 0; i < function->upvalueCount; ++i) {
+                    uint8_t isLocal = readByte();
+                    uint8_t index = readByte();
+
+                    if (isLocal) {
+                        size_t stackIndex = currentFrame().slotBase + index;
+                        closure->upvalues.push_back(captureUpvalue(stackIndex));
+                    } else {
+                        closure->upvalues.push_back(
+                            currentFrame().closure->upvalues[index]);
+                    }
+                }
+
+                m_stack.push(Value(closure));
+                break;
+            }
+            case OpCode::CLOSE_UPVALUE: {
+                closeUpvalues(m_stack.size() - 1);
+                m_stack.pop();
                 break;
             }
             case OpCode::JUMP: {
@@ -553,6 +646,7 @@ Status VirtualMachine::interpret(std::string_view source,
     Chunk chunk;
     m_stack.reset();
     m_frames.clear();
+    m_openUpvalues.clear();
 
     if (!m_compiler.compile(source, chunk)) {
         return Status::COMPILATION_ERROR;
@@ -563,7 +657,8 @@ Status VirtualMachine::interpret(std::string_view source,
     clockFn->arity = 0;
     m_globals[clockFn->name] = Value(clockFn);
 
-    m_frames.push_back(CallFrame{&chunk, chunk.getBytes(), 0, 0, nullptr});
+    m_frames.push_back(
+        CallFrame{&chunk, chunk.getBytes(), 0, 0, nullptr, nullptr});
 
     Value returnValue;
     return run(printReturnValue, returnValue);

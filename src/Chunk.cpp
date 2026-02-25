@@ -39,6 +39,31 @@ static int byteInstruction(const std::string& label, int offset,
     return offset + 2;
 }
 
+static int closureInstruction(const std::string& label, int offset,
+                              const std::vector<uint8_t>& bytes,
+                              const std::vector<Value>& constants) {
+    std::cout << label << " ";
+    uint8_t index = bytes.at(offset + 1);
+    Value val = constants.at(index);
+    std::cout << val << std::endl;
+
+    if (!val.isFunction()) {
+        return offset + 2;
+    }
+
+    auto function = val.asFunction();
+    int current = offset + 2;
+    for (uint8_t i = 0; i < function->upvalueCount; ++i) {
+        uint8_t isLocal = bytes.at(current++);
+        uint8_t slot = bytes.at(current++);
+        std::cout << "  | upvalue " << static_cast<int>(i) << " "
+                  << (isLocal ? "local " : "upvalue ") << static_cast<int>(slot)
+                  << std::endl;
+    }
+
+    return current;
+}
+
 void Chunk::write(uint8_t byte, int line) {
     m_bytes->push_back(byte);
     m_lines->push_back(line);
@@ -104,6 +129,12 @@ int Chunk::disassembleInstruction(int offset) {
         case OpCode::SET_LOCAL:
             return byteInstruction("SET_LOCAL", offset,
                                    m_bytes->at(offset + 1));
+        case OpCode::GET_UPVALUE:
+            return byteInstruction("GET_UPVALUE", offset,
+                                   m_bytes->at(offset + 1));
+        case OpCode::SET_UPVALUE:
+            return byteInstruction("SET_UPVALUE", offset,
+                                   m_bytes->at(offset + 1));
         case OpCode::CLASS_OP:
             return constantInstruction("CLASS", offset);
         case OpCode::INHERIT:
@@ -120,6 +151,11 @@ int Chunk::disassembleInstruction(int offset) {
             return constantInstruction("SET_PROPERTY", offset);
         case OpCode::CALL:
             return byteInstruction("CALL", offset, m_bytes->at(offset + 1));
+        case OpCode::CLOSURE:
+            return closureInstruction("CLOSURE", offset, *m_bytes,
+                                      *m_constants);
+        case OpCode::CLOSE_UPVALUE:
+            return simpleInstruction("CLOSE_UPVALUE", offset);
         case OpCode::JUMP:
             return jumpInstruction("JUMP", 1, offset, m_bytes->at(offset + 1),
                                    m_bytes->at(offset + 2));

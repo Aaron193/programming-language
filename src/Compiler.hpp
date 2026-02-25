@@ -38,6 +38,25 @@ class Compiler {
     struct Local {
         Token name;
         int depth;
+        bool isCaptured;
+    };
+
+    struct Upvalue {
+        uint8_t index;
+        bool isLocal;
+    };
+
+    struct FunctionContext {
+        std::vector<Local> locals;
+        std::vector<Upvalue> upvalues;
+        int scopeDepth;
+        bool inFunction;
+        bool inMethod;
+    };
+
+    struct CompiledFunction {
+        std::shared_ptr<FunctionObject> function;
+        std::vector<Upvalue> upvalues;
     };
 
     struct ParseRule {
@@ -54,11 +73,8 @@ class Compiler {
     Chunk* m_chunk = nullptr;
     std::unique_ptr<Scanner> m_scanner;
     std::unique_ptr<Parser> m_parser;
-    bool m_inFunction = false;
-    bool m_inMethod = false;
     ClassContext* m_currentClass = nullptr;
-    std::vector<Local> m_locals;
-    int m_scopeDepth = 0;
+    std::vector<FunctionContext> m_contexts;
 
     void advance();
     void errorAtCurrent(const std::string& message);
@@ -79,7 +95,12 @@ class Compiler {
     void endScope();
     void addLocal(const Token& name);
     int resolveLocal(const Token& name);
+    int resolveLocalInContext(const Token& name, int contextIndex);
+    int addUpvalue(int contextIndex, uint8_t index, bool isLocal);
+    int resolveUpvalue(const Token& name, int contextIndex);
     void markInitialized();
+    FunctionContext& currentContext() { return m_contexts.back(); }
+    const FunctionContext& currentContext() const { return m_contexts.back(); }
     bool identifiersEqual(const Token& lhs, const Token& rhs) const;
     int emitJump(uint8_t instruction);
     void patchJump(int offset);
@@ -116,8 +137,8 @@ class Compiler {
     void andOperator(bool canAssign);
     void orOperator(bool canAssign);
 
-    std::shared_ptr<FunctionObject> compileFunction(const std::string& name,
-                                                    bool isMethod = false);
+    CompiledFunction compileFunction(const std::string& name,
+                                     bool isMethod = false);
 
    public:
     Compiler() = default;

@@ -11,8 +11,8 @@ bool Compiler::compile(std::string_view source, Chunk& chunk) {
     m_scanner = std::make_unique<Scanner>(source);
     m_parser = std::make_unique<Parser>();
     m_currentClass = nullptr;
-    m_locals.clear();
-    m_scopeDepth = 0;
+    m_contexts.clear();
+    m_contexts.push_back(FunctionContext{{}, {}, 0, false, false});
 
     advance();
 
@@ -97,7 +97,15 @@ void Compiler::namedVariable(const Token& name, bool canAssign) {
         setOp = OpCode::SET_LOCAL;
         arg = static_cast<uint8_t>(local);
     } else {
-        arg = identifierConstant(name);
+        int upvalue =
+            resolveUpvalue(name, static_cast<int>(m_contexts.size()) - 1);
+        if (upvalue != -1) {
+            getOp = OpCode::GET_UPVALUE;
+            setOp = OpCode::SET_UPVALUE;
+            arg = static_cast<uint8_t>(upvalue);
+        } else {
+            arg = identifierConstant(name);
+        }
     }
 
     if (canAssign && m_parser->current.type() == TokenType::EQUAL) {
@@ -113,7 +121,7 @@ void Compiler::namedVariable(const Token& name, bool canAssign) {
 uint8_t Compiler::parseVariable(const std::string& message) {
     consume(TokenType::IDENTIFIER, message);
 
-    if (m_scopeDepth > 0) {
+    if (currentContext().scopeDepth > 0) {
         addLocal(m_parser->previous);
         return 0;
     }
@@ -122,7 +130,7 @@ uint8_t Compiler::parseVariable(const std::string& message) {
 }
 
 void Compiler::defineVariable(uint8_t global) {
-    if (m_scopeDepth > 0) {
+    if (currentContext().scopeDepth > 0) {
         markInitialized();
         return;
     }
@@ -130,25 +138,31 @@ void Compiler::defineVariable(uint8_t global) {
     emitBytes(OpCode::DEFINE_GLOBAL, global);
 }
 
-void Compiler::beginScope() { m_scopeDepth++; }
+void Compiler::beginScope() { currentContext().scopeDepth++; }
 
 void Compiler::endScope() {
-    m_scopeDepth--;
+    currentContext().scopeDepth--;
 
-    while (!m_locals.empty() && m_locals.back().depth > m_scopeDepth) {
-        emitByte(OpCode::POP);
-        m_locals.pop_back();
+    while (!currentContext().locals.empty() &&
+           currentContext().locals.back().depth > currentContext().scopeDepth) {
+        if (currentContext().locals.back().isCaptured) {
+            emitByte(OpCode::CLOSE_UPVALUE);
+        } else {
+            emitByte(OpCode::POP);
+        }
+        currentContext().locals.pop_back();
     }
 }
 
 void Compiler::addLocal(const Token& name) {
-    if (m_locals.size() > UINT8_MAX) {
+    if (currentContext().locals.size() > UINT8_MAX) {
         errorAt(name, "Too many local variables in function.");
         return;
     }
 
-    for (auto it = m_locals.rbegin(); it != m_locals.rend(); ++it) {
-        if (it->depth != -1 && it->depth < m_scopeDepth) {
+    for (auto it = currentContext().locals.rbegin();
+         it != currentContext().locals.rend(); ++it) {
+        if (it->depth != -1 && it->depth < currentContext().scopeDepth) {
             break;
         }
 
@@ -159,17 +173,21 @@ void Compiler::addLocal(const Token& name) {
         }
     }
 
-    m_locals.push_back(Local{name, -1});
+    currentContext().locals.push_back(Local{name, -1, false});
 }
 
 int Compiler::resolveLocal(const Token& name) {
-    for (int index = static_cast<int>(m_locals.size()) - 1; index >= 0;
-         --index) {
-        if (!identifiersEqual(name, m_locals[index].name)) {
+    return resolveLocalInContext(name, static_cast<int>(m_contexts.size()) - 1);
+}
+
+int Compiler::resolveLocalInContext(const Token& name, int contextIndex) {
+    auto& locals = m_contexts[contextIndex].locals;
+    for (int index = static_cast<int>(locals.size()) - 1; index >= 0; --index) {
+        if (!identifiersEqual(name, locals[index].name)) {
             continue;
         }
 
-        if (m_locals[index].depth == -1) {
+        if (locals[index].depth == -1) {
             errorAt(name, "Cannot read local variable in its own initializer.");
         }
         return index;
@@ -178,12 +196,48 @@ int Compiler::resolveLocal(const Token& name) {
     return -1;
 }
 
+int Compiler::addUpvalue(int contextIndex, uint8_t index, bool isLocal) {
+    auto& upvalues = m_contexts[contextIndex].upvalues;
+    for (size_t i = 0; i < upvalues.size(); ++i) {
+        if (upvalues[i].index == index && upvalues[i].isLocal == isLocal) {
+            return static_cast<int>(i);
+        }
+    }
+
+    if (upvalues.size() >= UINT8_MAX) {
+        errorAtCurrent("Too many closure variables in function.");
+        return -1;
+    }
+
+    upvalues.push_back(Upvalue{index, isLocal});
+    return static_cast<int>(upvalues.size()) - 1;
+}
+
+int Compiler::resolveUpvalue(const Token& name, int contextIndex) {
+    if (contextIndex <= 0) {
+        return -1;
+    }
+
+    int local = resolveLocalInContext(name, contextIndex - 1);
+    if (local != -1) {
+        m_contexts[contextIndex - 1].locals[local].isCaptured = true;
+        return addUpvalue(contextIndex, static_cast<uint8_t>(local), true);
+    }
+
+    int upvalue = resolveUpvalue(name, contextIndex - 1);
+    if (upvalue != -1) {
+        return addUpvalue(contextIndex, static_cast<uint8_t>(upvalue), false);
+    }
+
+    return -1;
+}
+
 void Compiler::markInitialized() {
-    if (m_scopeDepth == 0 || m_locals.empty()) {
+    if (currentContext().scopeDepth == 0 || currentContext().locals.empty()) {
         return;
     }
 
-    m_locals.back().depth = m_scopeDepth;
+    currentContext().locals.back().depth = currentContext().scopeDepth;
 }
 
 bool Compiler::identifiersEqual(const Token& lhs, const Token& rhs) const {
@@ -276,7 +330,7 @@ void Compiler::classDeclaration() {
     uint8_t nameConstant = identifierConstant(nameToken);
 
     uint8_t variable = 0;
-    if (m_scopeDepth > 0) {
+    if (currentContext().scopeDepth > 0) {
         addLocal(nameToken);
     } else {
         variable = nameConstant;
@@ -317,9 +371,13 @@ void Compiler::methodDeclaration() {
     Token nameToken = m_parser->previous;
     uint8_t nameConstant = identifierConstant(nameToken);
 
-    std::shared_ptr<FunctionObject> function = compileFunction(
+    CompiledFunction compiled = compileFunction(
         std::string(nameToken.start(), nameToken.length()), true);
-    emitConstant(Value(function));
+    emitBytes(OpCode::CLOSURE, makeConstant(Value(compiled.function)));
+    for (const auto& upvalue : compiled.upvalues) {
+        emitByte(static_cast<uint8_t>(upvalue.isLocal ? 1 : 0));
+        emitByte(upvalue.index);
+    }
     emitBytes(OpCode::METHOD, nameConstant);
 }
 
@@ -368,15 +426,19 @@ void Compiler::functionDeclaration() {
     Token nameToken = m_parser->previous;
     uint8_t variable = 0;
 
-    if (m_scopeDepth > 0) {
+    if (currentContext().scopeDepth > 0) {
         addLocal(nameToken);
     } else {
         variable = identifierConstant(nameToken);
     }
 
-    std::shared_ptr<FunctionObject> function =
+    CompiledFunction compiled =
         compileFunction(std::string(nameToken.start(), nameToken.length()));
-    emitConstant(Value(function));
+    emitBytes(OpCode::CLOSURE, makeConstant(Value(compiled.function)));
+    for (const auto& upvalue : compiled.upvalues) {
+        emitByte(static_cast<uint8_t>(upvalue.isLocal ? 1 : 0));
+        emitByte(upvalue.index);
+    }
     defineVariable(variable);
 }
 
@@ -492,7 +554,7 @@ void Compiler::printStatement() {
 }
 
 void Compiler::returnStatement() {
-    if (!m_inFunction) {
+    if (!currentContext().inFunction) {
         errorAtCurrent("Cannot return from top-level code.");
     }
 
@@ -650,7 +712,7 @@ void Compiler::variable(bool canAssign) {
 
 void Compiler::thisExpression(bool canAssign) {
     (void)canAssign;
-    if (!m_inMethod) {
+    if (!currentContext().inMethod) {
         errorAt(m_parser->previous, "Cannot use 'this' outside of a method.");
         return;
     }
@@ -832,22 +894,15 @@ void Compiler::orOperator(bool canAssign) {
     patchJump(endJump);
 }
 
-std::shared_ptr<FunctionObject> Compiler::compileFunction(
-    const std::string& name, bool isMethod) {
+Compiler::CompiledFunction Compiler::compileFunction(const std::string& name,
+                                                     bool isMethod) {
     consume(TokenType::OPEN_PAREN, "Expected '(' after function name.");
 
     Chunk* enclosingChunk = m_chunk;
-    bool enclosingInFunction = m_inFunction;
-    bool enclosingInMethod = m_inMethod;
-    auto enclosingLocals = m_locals;
-    int enclosingScopeDepth = m_scopeDepth;
 
     auto functionChunk = std::make_shared<Chunk>();
     m_chunk = functionChunk.get();
-    m_inFunction = true;
-    m_inMethod = isMethod;
-    m_locals.clear();
-    m_scopeDepth = 1;
+    m_contexts.push_back(FunctionContext{{}, {}, 1, true, isMethod});
 
     std::vector<std::string> parameters;
     if (m_parser->current.type() != TokenType::CLOSE_PAREN) {
@@ -877,15 +932,15 @@ std::shared_ptr<FunctionObject> Compiler::compileFunction(
     emitByte(OpCode::NIL);
     emitByte(OpCode::RETURN);
 
+    FunctionContext functionContext = std::move(currentContext());
+    m_contexts.pop_back();
     m_chunk = enclosingChunk;
-    m_inFunction = enclosingInFunction;
-    m_inMethod = enclosingInMethod;
-    m_locals = std::move(enclosingLocals);
-    m_scopeDepth = enclosingScopeDepth;
 
     auto function = std::make_shared<FunctionObject>();
     function->name = name;
     function->parameters = parameters;
     function->chunk = functionChunk;
-    return function;
+    function->upvalueCount =
+        static_cast<uint8_t>(functionContext.upvalues.size());
+    return CompiledFunction{function, std::move(functionContext.upvalues)};
 }

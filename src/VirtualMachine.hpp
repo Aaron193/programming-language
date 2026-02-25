@@ -1,6 +1,5 @@
 #pragma once
 #include <cstdint>
-#include <optional>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -23,6 +22,7 @@ class VirtualMachine {
         size_t slotBase;
         size_t calleeIndex;
         std::shared_ptr<InstanceObject> receiver;
+        std::shared_ptr<ClosureObject> closure;
     };
 
     // expression evaluation stack
@@ -33,6 +33,8 @@ class VirtualMachine {
     Compiler m_compiler;
     // globals
     std::unordered_map<std::string, Value> m_globals;
+    // open upvalues
+    std::vector<std::shared_ptr<UpvalueObject>> m_openUpvalues;
 
     CallFrame& currentFrame() { return m_frames.back(); }
 
@@ -53,9 +55,11 @@ class VirtualMachine {
     }
 
     Status run(bool printReturnValue, Value& returnValue);
-    Status callFunction(std::shared_ptr<FunctionObject> function,
-                        uint8_t argumentCount,
-                        std::shared_ptr<InstanceObject> receiver = nullptr);
+    Status callClosure(std::shared_ptr<ClosureObject> closure,
+                       uint8_t argumentCount,
+                       std::shared_ptr<InstanceObject> receiver = nullptr);
+    std::shared_ptr<UpvalueObject> captureUpvalue(size_t stackIndex);
+    void closeUpvalues(size_t fromStackIndex);
 
    public:
     VirtualMachine() = default;

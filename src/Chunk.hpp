@@ -2,7 +2,6 @@
 #include <cstdint>
 #include <iostream>
 #include <memory>
-#include <optional>
 #include <string>
 #include <unordered_map>
 #include <variant>
@@ -13,22 +12,25 @@ struct ClassObject;
 struct InstanceObject;
 struct BoundMethodObject;
 struct NativeFunctionObject;
+struct ClosureObject;
+struct UpvalueObject;
 
 struct FunctionObject {
     std::string name;
     std::vector<std::string> parameters;
     std::shared_ptr<Chunk> chunk;
+    uint8_t upvalueCount = 0;
 };
 
 struct ClassObject {
     std::string name;
     std::shared_ptr<ClassObject> superclass;
-    std::unordered_map<std::string, std::shared_ptr<FunctionObject>> methods;
+    std::unordered_map<std::string, std::shared_ptr<ClosureObject>> methods;
 };
 
 struct BoundMethodObject {
     std::shared_ptr<InstanceObject> receiver;
-    std::shared_ptr<FunctionObject> method;
+    std::shared_ptr<ClosureObject> method;
 };
 
 struct NativeFunctionObject {
@@ -65,6 +67,8 @@ enum OpCode {
     SET_GLOBAL,
     GET_LOCAL,
     SET_LOCAL,
+    GET_UPVALUE,
+    SET_UPVALUE,
     CLASS_OP,
     INHERIT,
     METHOD,
@@ -73,6 +77,8 @@ enum OpCode {
     GET_PROPERTY,
     SET_PROPERTY,
     CALL,
+    CLOSURE,
+    CLOSE_UPVALUE,
     JUMP,
     JUMP_IF_FALSE,
     LOOP,
@@ -88,11 +94,11 @@ enum ValueType {
 };
 
 struct Value {
-    std::variant<double, bool, std::monostate, std::string,
-                 std::shared_ptr<FunctionObject>, std::shared_ptr<ClassObject>,
-                 std::shared_ptr<InstanceObject>,
-                 std::shared_ptr<BoundMethodObject>,
-                 std::shared_ptr<NativeFunctionObject>>
+    std::variant<
+        double, bool, std::monostate, std::string,
+        std::shared_ptr<FunctionObject>, std::shared_ptr<ClassObject>,
+        std::shared_ptr<InstanceObject>, std::shared_ptr<BoundMethodObject>,
+        std::shared_ptr<NativeFunctionObject>, std::shared_ptr<ClosureObject>>
         data;
 
     Value() : data(std::monostate{}) {}
@@ -106,6 +112,7 @@ struct Value {
     Value(std::shared_ptr<BoundMethodObject> value) : data(std::move(value)) {}
     Value(std::shared_ptr<NativeFunctionObject> value)
         : data(std::move(value)) {}
+    Value(std::shared_ptr<ClosureObject> value) : data(std::move(value)) {}
 
     bool isNumber() const { return std::holds_alternative<double>(data); }
     bool isBool() const { return std::holds_alternative<bool>(data); }
@@ -127,6 +134,9 @@ struct Value {
         return std::holds_alternative<std::shared_ptr<NativeFunctionObject>>(
             data);
     }
+    bool isClosure() const {
+        return std::holds_alternative<std::shared_ptr<ClosureObject>>(data);
+    }
 
     double asNumber() const { return std::get<double>(data); }
     bool asBool() const { return std::get<bool>(data); }
@@ -146,6 +156,20 @@ struct Value {
     std::shared_ptr<NativeFunctionObject> asNative() const {
         return std::get<std::shared_ptr<NativeFunctionObject>>(data);
     }
+    std::shared_ptr<ClosureObject> asClosure() const {
+        return std::get<std::shared_ptr<ClosureObject>>(data);
+    }
+};
+
+struct UpvalueObject {
+    size_t stackIndex = 0;
+    bool isClosed = false;
+    Value closed;
+};
+
+struct ClosureObject {
+    std::shared_ptr<FunctionObject> function;
+    std::vector<std::shared_ptr<UpvalueObject>> upvalues;
 };
 
 struct InstanceObject {
@@ -179,10 +203,13 @@ inline std::ostream& operator<<(std::ostream& stream, const Value& value) {
         stream << "<instance " << instance->klass->name << ">";
     } else if (value.isBoundMethod()) {
         auto bound = value.asBoundMethod();
-        stream << "<bound method " << bound->method->name << ">";
+        stream << "<bound method " << bound->method->function->name << ">";
     } else if (value.isNative()) {
         auto native = value.asNative();
         stream << "<native " << native->name << ">";
+    } else if (value.isClosure()) {
+        auto closure = value.asClosure();
+        stream << "<closure " << closure->function->name << ">";
     } else {
         stream << value.asString();
     }
