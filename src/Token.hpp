@@ -54,6 +54,8 @@ enum TokenType {
 class Scanner;
 
 class Token {
+    friend class Scanner;
+
    private:
     Token(Scanner* scanner, TokenType type);
     Token(Scanner* scanner, std::string message);
