@@ -127,15 +127,17 @@ enum ValueType {
 };
 
 struct Value {
-    std::variant<double, bool, std::monostate, std::string, FunctionObject*,
-                 ClassObject*, InstanceObject*, BoundMethodObject*,
-                 NativeFunctionObject*, NativeBoundMethodObject*,
-                 ClosureObject*, ArrayObject*, DictObject*, SetObject*,
-                 IteratorObject*, ModuleObject*>
+    std::variant<double, int64_t, uint64_t, bool, std::monostate, std::string,
+                 FunctionObject*, ClassObject*, InstanceObject*,
+                 BoundMethodObject*, NativeFunctionObject*,
+                 NativeBoundMethodObject*, ClosureObject*, ArrayObject*,
+                 DictObject*, SetObject*, IteratorObject*, ModuleObject*>
         data;
 
     Value() : data(std::monostate{}) {}
     Value(double value) : data(value) {}
+    Value(int64_t value) : data(value) {}
+    Value(uint64_t value) : data(value) {}
     Value(bool value) : data(value) {}
     Value(const std::string& value) : data(value) {}
     Value(const char* value) : data(std::string(value)) {}
@@ -153,6 +155,13 @@ struct Value {
     Value(ModuleObject* value) : data(value) {}
 
     bool isNumber() const { return std::holds_alternative<double>(data); }
+    bool isSignedInt() const { return std::holds_alternative<int64_t>(data); }
+    bool isUnsignedInt() const {
+        return std::holds_alternative<uint64_t>(data);
+    }
+    bool isAnyNumeric() const {
+        return isNumber() || isSignedInt() || isUnsignedInt();
+    }
     bool isBool() const { return std::holds_alternative<bool>(data); }
     bool isNil() const { return std::holds_alternative<std::monostate>(data); }
     bool isString() const { return std::holds_alternative<std::string>(data); }
@@ -186,6 +195,8 @@ struct Value {
     }
 
     double asNumber() const { return std::get<double>(data); }
+    int64_t asSignedInt() const { return std::get<int64_t>(data); }
+    uint64_t asUnsignedInt() const { return std::get<uint64_t>(data); }
     bool asBool() const { return std::get<bool>(data); }
     const std::string& asString() const { return std::get<std::string>(data); }
     FunctionObject* asFunction() const {
@@ -299,6 +310,10 @@ inline void printValueInternal(std::ostream& stream, const Value& value,
 
     if (value.isNumber()) {
         stream << value.asNumber();
+    } else if (value.isSignedInt()) {
+        stream << value.asSignedInt();
+    } else if (value.isUnsignedInt()) {
+        stream << value.asUnsignedInt();
     } else if (value.isBool()) {
         stream << (value.asBool() ? "true" : "false");
     } else if (value.isNil()) {
