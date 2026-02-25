@@ -94,6 +94,7 @@ Token Scanner::nextToken() {
 
         case '-':
             if (match('-')) return createToken(TokenType::MINUS_MINUS);
+            if (match('>')) return createToken(TokenType::ARROW);
             return match('=') ? createToken(TokenType::MINUS_EQUAL)
                               : createToken(TokenType::MINUS);
 
@@ -184,12 +185,14 @@ bool Scanner::matchKeyword(const char* keyword, size_t length) {
 }
 
 TokenType Scanner::getIdentifier() {
-    const size_t length = m_current - m_start;
-
     switch (m_start[0]) {
         case 'a':
             if (matchKeyword("and", 3)) return TokenType::AND;
-            if (matchKeyword("as", 2)) return TokenType::AS;
+            if (matchKeyword("as", 2)) return TokenType::AS_KW;
+            break;
+
+        case 'b':
+            if (matchKeyword("bool", 4)) return TokenType::TYPE_BOOL;
             break;
 
         case 'c':
@@ -202,6 +205,8 @@ TokenType Scanner::getIdentifier() {
             break;
 
         case 'f':
+            if (matchKeyword("f32", 3)) return TokenType::TYPE_F32;
+            if (matchKeyword("f64", 3)) return TokenType::TYPE_F64;
             if (matchKeyword("false", 5)) return TokenType::FALSE;
             if (matchKeyword("for", 3)) return TokenType::FOR;
             if (matchKeyword("from", 4)) return TokenType::FROM;
@@ -209,12 +214,16 @@ TokenType Scanner::getIdentifier() {
             break;
 
         case 'i':
+            if (matchKeyword("i8", 2)) return TokenType::TYPE_I8;
+            if (matchKeyword("i16", 3)) return TokenType::TYPE_I16;
+            if (matchKeyword("i32", 3)) return TokenType::TYPE_I32;
+            if (matchKeyword("i64", 3)) return TokenType::TYPE_I64;
             if (matchKeyword("if", 2)) return TokenType::IF;
             if (matchKeyword("import", 6)) return TokenType::IMPORT;
             break;
 
         case 'n':
-            if (matchKeyword("null", 4)) return TokenType::_NULL;
+            if (matchKeyword("null", 4)) return TokenType::TYPE_NULL_KW;
             break;
 
         case 'o':
@@ -230,12 +239,21 @@ TokenType Scanner::getIdentifier() {
             break;
 
         case 's':
+            if (matchKeyword("str", 3)) return TokenType::TYPE_STR;
             if (matchKeyword("super", 5)) return TokenType::SUPER;
             break;
 
         case 't':
             if (matchKeyword("true", 4)) return TokenType::TRUE;
             if (matchKeyword("this", 4)) return TokenType::THIS;
+            break;
+
+        case 'u':
+            if (matchKeyword("u8", 2)) return TokenType::TYPE_U8;
+            if (matchKeyword("u16", 3)) return TokenType::TYPE_U16;
+            if (matchKeyword("u32", 3)) return TokenType::TYPE_U32;
+            if (matchKeyword("u64", 3)) return TokenType::TYPE_U64;
+            if (matchKeyword("usize", 5)) return TokenType::TYPE_USIZE;
             break;
 
         case 'v':

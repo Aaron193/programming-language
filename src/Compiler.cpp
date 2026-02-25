@@ -549,7 +549,8 @@ void Compiler::importDeclaration() {
                 Token exportName = m_parser->previous;
                 Token localName = exportName;
 
-                if (m_parser->current.type() == TokenType::AS) {
+                if (m_parser->current.type() == TokenType::AS ||
+                    m_parser->current.type() == TokenType::AS_KW) {
                     advance();
                     consume(TokenType::IDENTIFIER,
                             "Expected local alias after 'as'.");
@@ -1014,6 +1015,7 @@ Compiler::ParseRule Compiler::getRule(TokenType type) {
         case TokenType::TRUE:
         case TokenType::FALSE:
         case TokenType::_NULL:
+        case TokenType::TYPE_NULL_KW:
             return ParseRule{[this](bool canAssign) { literal(canAssign); },
                              nullptr, PREC_NONE};
 
@@ -1124,6 +1126,7 @@ void Compiler::literal(bool canAssign) {
             emitByte(OpCode::FALSE_LITERAL);
             break;
         case TokenType::_NULL:
+        case TokenType::TYPE_NULL_KW:
             emitByte(OpCode::NIL);
             break;
         default:
