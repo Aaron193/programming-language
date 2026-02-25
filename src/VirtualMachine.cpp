@@ -35,7 +35,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
     while (true) {
         CallFrame& frame = currentFrame();
 
-#ifdef DEBUG
+#ifdef VM_TRACE
         m_stack.print();
         frame.chunk->disassembleInstruction(
             static_cast<int>(frame.ip - frame.chunk->getBytes()));
@@ -334,7 +334,8 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
     }
 }
 
-Status VirtualMachine::interpret(std::string_view source) {
+Status VirtualMachine::interpret(std::string_view source,
+                                 bool printReturnValue) {
     Chunk chunk;
     m_stack.reset();
     m_frames.clear();
@@ -346,5 +347,5 @@ Status VirtualMachine::interpret(std::string_view source) {
     m_frames.push_back(CallFrame{&chunk, chunk.getBytes(), 0});
 
     Value returnValue;
-    return run(true, returnValue);
+    return run(printReturnValue, returnValue);
 }
