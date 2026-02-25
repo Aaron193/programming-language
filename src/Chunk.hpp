@@ -32,6 +32,10 @@ enum OpCode {
     PRINT_OP,
     DEFINE_GLOBAL,
     GET_GLOBAL,
+    SET_GLOBAL,
+    JUMP,
+    JUMP_IF_FALSE,
+    LOOP,
     SHIFT_LEFT,
     SHIFT_RIGHT,
 };
@@ -109,6 +113,9 @@ class Chunk {
     void write(uint8_t byte, int line);
     int addConstant(Value value);
     int disassembleInstruction(int offset);
+    int count() const { return static_cast<int>(m_bytes->size()); }
+    uint8_t byteAt(int index) const { return m_bytes->at(index); }
+    void setByteAt(int index, uint8_t byte) { m_bytes->at(index) = byte; }
 
     // inlined methods
     uint8_t* getBytes() { return this->m_bytes->data(); }

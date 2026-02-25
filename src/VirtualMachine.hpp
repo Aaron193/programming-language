@@ -28,6 +28,10 @@ class VirtualMachine {
 
     // inlined methods
     uint8_t readByte() { return *this->m_ip++; }
+    uint16_t readShort() {
+        m_ip += 2;
+        return static_cast<uint16_t>((m_ip[-2] << 8) | m_ip[-1]);
+    }
     Value readConstant() {
         return this->m_chunk->getConstants()[this->readByte()];
     }

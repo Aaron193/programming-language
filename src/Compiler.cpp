@@ -47,6 +47,37 @@ void Compiler::emitConstant(Value value) {
     emitBytes(OpCode::CONSTANT, makeConstant(value));
 }
 
+int Compiler::emitJump(uint8_t instruction) {
+    emitByte(instruction);
+    emitByte(0xff);
+    emitByte(0xff);
+    return currentChunk()->count() - 2;
+}
+
+void Compiler::patchJump(int offset) {
+    int jump = currentChunk()->count() - offset - 2;
+    if (jump > UINT16_MAX) {
+        errorAtCurrent("Too much code to jump over.");
+        return;
+    }
+
+    currentChunk()->setByteAt(offset, static_cast<uint8_t>((jump >> 8) & 0xff));
+    currentChunk()->setByteAt(offset + 1, static_cast<uint8_t>(jump & 0xff));
+}
+
+void Compiler::emitLoop(int loopStart) {
+    emitByte(OpCode::LOOP);
+
+    int offset = currentChunk()->count() - loopStart + 2;
+    if (offset > UINT16_MAX) {
+        errorAtCurrent("Loop body too large.");
+        return;
+    }
+
+    emitByte(static_cast<uint8_t>((offset >> 8) & 0xff));
+    emitByte(static_cast<uint8_t>(offset & 0xff));
+}
+
 uint8_t Compiler::identifierConstant(const Token& name) {
     return makeConstant(Value(std::string(name.start(), name.length())));
 }
@@ -124,7 +155,120 @@ void Compiler::statement() {
         return;
     }
 
+    if (m_parser->current.type() == TokenType::IF) {
+        advance();
+        ifStatement();
+        return;
+    }
+
+    if (m_parser->current.type() == TokenType::WHILE) {
+        advance();
+        whileStatement();
+        return;
+    }
+
+    if (m_parser->current.type() == TokenType::FOR) {
+        advance();
+        forStatement();
+        return;
+    }
+
+    if (m_parser->current.type() == TokenType::OPEN_CURLY) {
+        advance();
+        block();
+        return;
+    }
+
     expressionStatement();
+}
+
+void Compiler::block() {
+    while (m_parser->current.type() != TokenType::CLOSE_CURLY &&
+           m_parser->current.type() != TokenType::END_OF_FILE) {
+        declaration();
+    }
+
+    consume(TokenType::CLOSE_CURLY, "Expected '}' after block.");
+}
+
+void Compiler::ifStatement() {
+    consume(TokenType::OPEN_PAREN, "Expected '(' after 'if'.");
+    expression();
+    consume(TokenType::CLOSE_PAREN, "Expected ')' after condition.");
+
+    int thenJump = emitJump(OpCode::JUMP_IF_FALSE);
+    statement();
+
+    if (m_parser->current.type() == TokenType::ELSE) {
+        int elseJump = emitJump(OpCode::JUMP);
+        patchJump(thenJump);
+        advance();
+        statement();
+        patchJump(elseJump);
+    } else {
+        patchJump(thenJump);
+    }
+}
+
+void Compiler::whileStatement() {
+    int loopStart = currentChunk()->count();
+
+    consume(TokenType::OPEN_PAREN, "Expected '(' after 'while'.");
+    expression();
+    consume(TokenType::CLOSE_PAREN, "Expected ')' after condition.");
+
+    int exitJump = emitJump(OpCode::JUMP_IF_FALSE);
+    statement();
+    emitLoop(loopStart);
+    patchJump(exitJump);
+}
+
+void Compiler::forStatement() {
+    consume(TokenType::OPEN_PAREN, "Expected '(' after 'for'.");
+
+    if (m_parser->current.type() == TokenType::SEMI_COLON) {
+        advance();
+    } else if (m_parser->current.type() == TokenType::VAR) {
+        advance();
+        varDeclaration();
+    } else {
+        expression();
+        consume(TokenType::SEMI_COLON, "Expected ';' after loop initializer.");
+        emitByte(OpCode::POP);
+    }
+
+    int loopStart = currentChunk()->count();
+    int exitJump = -1;
+
+    if (m_parser->current.type() != TokenType::SEMI_COLON) {
+        expression();
+        consume(TokenType::SEMI_COLON, "Expected ';' after loop condition.");
+        exitJump = emitJump(OpCode::JUMP_IF_FALSE);
+    } else {
+        advance();
+    }
+
+    if (m_parser->current.type() != TokenType::CLOSE_PAREN) {
+        int bodyJump = emitJump(OpCode::JUMP);
+        int incrementStart = currentChunk()->count();
+
+        expression();
+        emitByte(OpCode::POP);
+        consume(TokenType::CLOSE_PAREN, "Expected ')' after for clauses.");
+
+        emitLoop(loopStart);
+        loopStart = incrementStart;
+        patchJump(bodyJump);
+    } else {
+        advance();
+    }
+
+    statement();
+    emitLoop(loopStart);
+
+    if (exitJump != -1) {
+        patchJump(exitJump);
+    }
 }
 
 void Compiler::printStatement() {
@@ -159,6 +303,7 @@ void Compiler::varDeclaration() {
 
 void Compiler::parsePrecedence(Precedence precedence) {
     advance();
+    bool canAssign = precedence <= PREC_ASSIGNMENT;
 
     ParseFn prefixRule = getRule(m_parser->previous.type()).prefix;
     if (!prefixRule) {
@@ -166,69 +311,103 @@ void Compiler::parsePrecedence(Precedence precedence) {
         return;
     }
 
-    prefixRule();
+    prefixRule(canAssign);
 
     while (precedence <= getRule(m_parser->current.type()).precedence) {
         advance();
         ParseFn infixRule = getRule(m_parser->previous.type()).infix;
-        infixRule();
+        infixRule(canAssign);
+    }
+
+    if (canAssign && m_parser->current.type() == TokenType::EQUAL) {
+        errorAtCurrent("Invalid assignment target.");
+        advance();
+        expression();
     }
 }
 
 Compiler::ParseRule Compiler::getRule(TokenType type) {
     switch (type) {
         case TokenType::OPEN_PAREN:
-            return ParseRule{[this]() { grouping(); }, nullptr, PREC_NONE};
+            return ParseRule{[this](bool canAssign) { grouping(canAssign); },
+                             nullptr, PREC_NONE};
         case TokenType::NUMBER:
-            return ParseRule{[this]() { number(); }, nullptr, PREC_NONE};
+            return ParseRule{[this](bool canAssign) { number(canAssign); },
+                             nullptr, PREC_NONE};
         case TokenType::IDENTIFIER:
-            return ParseRule{[this]() { variable(); }, nullptr, PREC_NONE};
+            return ParseRule{[this](bool canAssign) { variable(canAssign); },
+                             nullptr, PREC_NONE};
         case TokenType::STRING:
-            return ParseRule{[this]() { stringLiteral(); }, nullptr, PREC_NONE};
+            return ParseRule{
+                [this](bool canAssign) { stringLiteral(canAssign); }, nullptr,
+                PREC_NONE};
         case TokenType::TRUE:
         case TokenType::FALSE:
         case TokenType::_NULL:
-            return ParseRule{[this]() { literal(); }, nullptr, PREC_NONE};
+            return ParseRule{[this](bool canAssign) { literal(canAssign); },
+                             nullptr, PREC_NONE};
 
         case TokenType::BANG:
-            return ParseRule{[this]() { unary(); }, nullptr, PREC_NONE};
+            return ParseRule{[this](bool canAssign) { unary(canAssign); },
+                             nullptr, PREC_NONE};
         case TokenType::MINUS:
-            return ParseRule{[this]() { unary(); }, [this]() { binary(); },
+            return ParseRule{[this](bool canAssign) { unary(canAssign); },
+                             [this](bool canAssign) { binary(canAssign); },
                              PREC_TERM};
         case TokenType::PLUS:
-            return ParseRule{nullptr, [this]() { binary(); }, PREC_TERM};
+            return ParseRule{nullptr,
+                             [this](bool canAssign) { binary(canAssign); },
+                             PREC_TERM};
 
         case TokenType::SLASH:
-            return ParseRule{nullptr, [this]() { binary(); }, PREC_FACTOR};
+            return ParseRule{nullptr,
+                             [this](bool canAssign) { binary(canAssign); },
+                             PREC_FACTOR};
         case TokenType::STAR:
-            return ParseRule{nullptr, [this]() { binary(); }, PREC_FACTOR};
+            return ParseRule{nullptr,
+                             [this](bool canAssign) { binary(canAssign); },
+                             PREC_FACTOR};
 
         case TokenType::GREATER:
         case TokenType::GREATER_EQUAL:
         case TokenType::LESS:
         case TokenType::LESS_EQUAL:
-            return ParseRule{nullptr, [this]() { binary(); }, PREC_COMPARISON};
+            return ParseRule{nullptr,
+                             [this](bool canAssign) { binary(canAssign); },
+                             PREC_COMPARISON};
         case TokenType::EQUAL_EQUAL:
         case TokenType::BANG_EQUAL:
-            return ParseRule{nullptr, [this]() { binary(); }, PREC_EQUALITY};
+            return ParseRule{nullptr,
+                             [this](bool canAssign) { binary(canAssign); },
+                             PREC_EQUALITY};
 
         default:
             return ParseRule{nullptr, nullptr, PREC_NONE};
     }
 }
 
-void Compiler::number() {
+void Compiler::number(bool canAssign) {
+    (void)canAssign;
     std::string literal(m_parser->previous.start(),
                         m_parser->previous.length());
     emitConstant(std::stod(literal));
 }
 
-void Compiler::variable() {
+void Compiler::variable(bool canAssign) {
     uint8_t arg = identifierConstant(m_parser->previous);
+
+    if (canAssign && m_parser->current.type() == TokenType::EQUAL) {
+        advance();
+        expression();
+        emitBytes(OpCode::SET_GLOBAL, arg);
+        return;
+    }
+
     emitBytes(OpCode::GET_GLOBAL, arg);
 }
 
-void Compiler::literal() {
+void Compiler::literal(bool canAssign) {
+    (void)canAssign;
     switch (m_parser->previous.type()) {
         case TokenType::TRUE:
             emitByte(OpCode::TRUE_LITERAL);
@@ -244,7 +423,8 @@ void Compiler::literal() {
     }
 }
 
-void Compiler::stringLiteral() {
+void Compiler::stringLiteral(bool canAssign) {
+    (void)canAssign;
     std::string tokenText(m_parser->previous.start(),
                           m_parser->previous.length());
     if (tokenText.length() < 2) {
@@ -256,12 +436,14 @@ void Compiler::stringLiteral() {
     emitConstant(Value(value));
 }
 
-void Compiler::grouping() {
+void Compiler::grouping(bool canAssign) {
+    (void)canAssign;
     expression();
     consume(TokenType::CLOSE_PAREN, "Expected ')' after expression.");
 }
 
-void Compiler::unary() {
+void Compiler::unary(bool canAssign) {
+    (void)canAssign;
     TokenType operatorType = m_parser->previous.type();
 
     parsePrecedence(PREC_UNARY);
@@ -278,7 +460,8 @@ void Compiler::unary() {
     }
 }
 
-void Compiler::binary() {
+void Compiler::binary(bool canAssign) {
+    (void)canAssign;
     TokenType operatorType = m_parser->previous.type();
     ParseRule rule = getRule(operatorType);
     parsePrecedence(static_cast<Precedence>(rule.precedence + 1));

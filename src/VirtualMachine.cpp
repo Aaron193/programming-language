@@ -214,6 +214,36 @@ Status VirtualMachine::run() {
                 m_stack.push(it->second);
                 break;
             }
+            case OpCode::SET_GLOBAL: {
+                std::string name = readNameConstant();
+                auto it = m_globals.find(name);
+                if (it == m_globals.end()) {
+                    std::cerr << "Runtime error: Undefined variable '" << name
+                              << "'." << std::endl;
+                    return Status::RUNTIME_ERROR;
+                }
+
+                it->second = m_stack.peek(0);
+                break;
+            }
+            case OpCode::JUMP: {
+                uint16_t offset = readShort();
+                m_ip += offset;
+                break;
+            }
+            case OpCode::JUMP_IF_FALSE: {
+                uint16_t offset = readShort();
+                Value condition = m_stack.pop();
+                if (isFalsey(condition)) {
+                    m_ip += offset;
+                }
+                break;
+            }
+            case OpCode::LOOP: {
+                uint16_t offset = readShort();
+                m_ip -= offset;
+                break;
+            }
             case OpCode::SHIFT_LEFT: {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();

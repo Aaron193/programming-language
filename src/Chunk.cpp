@@ -25,6 +25,14 @@ int Chunk::constantInstruction(const std::string& label, int offset) {
     return offset + 2;
 }
 
+static int jumpInstruction(const std::string& label, int sign, int offset,
+                           uint8_t highByte, uint8_t lowByte) {
+    uint16_t jump = static_cast<uint16_t>((highByte << 8) | lowByte);
+    std::cout << label << " " << offset << " -> " << offset + 3 + (sign * jump)
+              << std::endl;
+    return offset + 3;
+}
+
 void Chunk::write(uint8_t byte, int line) {
     m_bytes->push_back(byte);
     m_lines->push_back(line);
@@ -82,6 +90,18 @@ int Chunk::disassembleInstruction(int offset) {
             return constantInstruction("DEFINE_GLOBAL", offset);
         case OpCode::GET_GLOBAL:
             return constantInstruction("GET_GLOBAL", offset);
+        case OpCode::SET_GLOBAL:
+            return constantInstruction("SET_GLOBAL", offset);
+        case OpCode::JUMP:
+            return jumpInstruction("JUMP", 1, offset, m_bytes->at(offset + 1),
+                                   m_bytes->at(offset + 2));
+        case OpCode::JUMP_IF_FALSE:
+            return jumpInstruction("JUMP_IF_FALSE", 1, offset,
+                                   m_bytes->at(offset + 1),
+                                   m_bytes->at(offset + 2));
+        case OpCode::LOOP:
+            return jumpInstruction("LOOP", -1, offset, m_bytes->at(offset + 1),
+                                   m_bytes->at(offset + 2));
         case OpCode::SHIFT_LEFT:
             return simpleInstruction("SHIFT_LEFT", offset);
         case OpCode::SHIFT_RIGHT:

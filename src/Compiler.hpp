@@ -31,7 +31,7 @@ enum Precedence {
 
 class Compiler {
    private:
-    using ParseFn = std::function<void()>;
+    using ParseFn = std::function<void(bool)>;
 
     struct ParseRule {
         ParseFn prefix;
@@ -57,23 +57,30 @@ class Compiler {
     uint8_t identifierConstant(const Token& name);
     uint8_t parseVariable(const std::string& message);
     void defineVariable(uint8_t global);
+    int emitJump(uint8_t instruction);
+    void patchJump(int offset);
+    void emitLoop(int loopStart);
 
     void expression();
     void declaration();
     void statement();
+    void block();
+    void ifStatement();
+    void whileStatement();
+    void forStatement();
     void printStatement();
     void expressionStatement();
     void varDeclaration();
     void parsePrecedence(Precedence precedence);
     ParseRule getRule(TokenType type);
 
-    void number();
-    void variable();
-    void literal();
-    void stringLiteral();
-    void grouping();
-    void unary();
-    void binary();
+    void number(bool canAssign);
+    void variable(bool canAssign);
+    void literal(bool canAssign);
+    void stringLiteral(bool canAssign);
+    void grouping(bool canAssign);
+    void unary(bool canAssign);
+    void binary(bool canAssign);
 
    public:
     Compiler() = default;

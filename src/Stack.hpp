@@ -31,6 +31,14 @@ class Stack {
         return T();
     }
 
+    T peek(size_t distance) const {
+        if (m_top < 0 || distance > static_cast<size_t>(m_top)) {
+            return T();
+        }
+
+        return m_data[m_top - static_cast<int>(distance)];
+    }
+
     void reset() { m_top = -1; }
 
     bool isEmpty() { return m_top == -1; }
