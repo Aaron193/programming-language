@@ -138,11 +138,11 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
     while (true) {
         CallFrame& frame = currentFrame();
 
-#ifdef VM_TRACE
-        m_stack.print();
-        frame.chunk->disassembleInstruction(
-            static_cast<int>(frame.ip - frame.chunk->getBytes()));
-#endif
+        if (m_traceEnabled) {
+            m_stack.print();
+            frame.chunk->disassembleInstruction(
+                static_cast<int>(frame.ip - frame.chunk->getBytes()));
+        }
 
         uint8_t instruction;
         switch (instruction = readByte()) {
@@ -698,15 +698,26 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
     }
 }
 
-Status VirtualMachine::interpret(std::string_view source,
-                                 bool printReturnValue) {
+Status VirtualMachine::interpret(std::string_view source, bool printReturnValue,
+                                 bool traceEnabled, bool disassembleEnabled) {
     Chunk chunk;
     m_stack.reset();
     m_frames.clear();
     m_openUpvalues.clear();
+    m_traceEnabled = traceEnabled;
+    m_disassembleEnabled = disassembleEnabled;
 
     if (!m_compiler.compile(source, chunk)) {
         return Status::COMPILATION_ERROR;
+    }
+
+    if (m_disassembleEnabled) {
+        std::cout << "== disassembly ==" << std::endl;
+        int offset = 0;
+        while (offset < chunk.count()) {
+            offset = chunk.disassembleInstruction(offset);
+        }
+        std::cout << "== end disassembly ==" << std::endl;
     }
 
     auto clockFn = std::make_shared<NativeFunctionObject>();

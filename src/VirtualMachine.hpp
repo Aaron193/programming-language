@@ -35,6 +35,8 @@ class VirtualMachine {
     std::unordered_map<std::string, Value> m_globals;
     // open upvalues
     std::vector<std::shared_ptr<UpvalueObject>> m_openUpvalues;
+    bool m_traceEnabled = false;
+    bool m_disassembleEnabled = false;
 
     CallFrame& currentFrame() { return m_frames.back(); }
 
@@ -67,5 +69,7 @@ class VirtualMachine {
     VirtualMachine() = default;
     ~VirtualMachine() = default;
 
-    Status interpret(std::string_view source, bool printReturnValue = false);
+    Status interpret(std::string_view source, bool printReturnValue = false,
+                     bool traceEnabled = false,
+                     bool disassembleEnabled = false);
 };
