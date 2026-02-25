@@ -118,7 +118,15 @@ Compiler::ParseRule Compiler::getRule(TokenType type) {
             return ParseRule{[this]() { grouping(); }, nullptr, PREC_NONE};
         case TokenType::NUMBER:
             return ParseRule{[this]() { number(); }, nullptr, PREC_NONE};
+        case TokenType::STRING:
+            return ParseRule{[this]() { stringLiteral(); }, nullptr, PREC_NONE};
+        case TokenType::TRUE:
+        case TokenType::FALSE:
+        case TokenType::_NULL:
+            return ParseRule{[this]() { literal(); }, nullptr, PREC_NONE};
 
+        case TokenType::BANG:
+            return ParseRule{[this]() { unary(); }, nullptr, PREC_NONE};
         case TokenType::MINUS:
             return ParseRule{[this]() { unary(); }, [this]() { binary(); },
                              PREC_TERM};
@@ -135,6 +143,9 @@ Compiler::ParseRule Compiler::getRule(TokenType type) {
         case TokenType::LESS:
         case TokenType::LESS_EQUAL:
             return ParseRule{nullptr, [this]() { binary(); }, PREC_COMPARISON};
+        case TokenType::EQUAL_EQUAL:
+        case TokenType::BANG_EQUAL:
+            return ParseRule{nullptr, [this]() { binary(); }, PREC_EQUALITY};
 
         default:
             return ParseRule{nullptr, nullptr, PREC_NONE};
@@ -145,6 +156,34 @@ void Compiler::number() {
     std::string literal(m_parser->previous.start(),
                         m_parser->previous.length());
     emitConstant(std::stod(literal));
+}
+
+void Compiler::literal() {
+    switch (m_parser->previous.type()) {
+        case TokenType::TRUE:
+            emitByte(OpCode::TRUE_LITERAL);
+            break;
+        case TokenType::FALSE:
+            emitByte(OpCode::FALSE_LITERAL);
+            break;
+        case TokenType::_NULL:
+            emitByte(OpCode::NIL);
+            break;
+        default:
+            return;
+    }
+}
+
+void Compiler::stringLiteral() {
+    std::string tokenText(m_parser->previous.start(),
+                          m_parser->previous.length());
+    if (tokenText.length() < 2) {
+        errorAt(m_parser->previous, "Invalid string literal.");
+        return;
+    }
+
+    std::string value = tokenText.substr(1, tokenText.length() - 2);
+    emitConstant(Value(value));
 }
 
 void Compiler::grouping() {
@@ -158,6 +197,9 @@ void Compiler::unary() {
     parsePrecedence(PREC_UNARY);
 
     switch (operatorType) {
+        case TokenType::BANG:
+            emitByte(OpCode::NOT);
+            break;
         case TokenType::MINUS:
             emitByte(OpCode::NEGATE);
             break;
@@ -195,6 +237,12 @@ void Compiler::binary() {
             break;
         case TokenType::LESS_EQUAL:
             emitByte(OpCode::LESS_EQUAL_THAN);
+            break;
+        case TokenType::EQUAL_EQUAL:
+            emitByte(OpCode::EQUAL_OP);
+            break;
+        case TokenType::BANG_EQUAL:
+            emitByte(OpCode::NOT_EQUAL_OP);
             break;
         default:
             return;

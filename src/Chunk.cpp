@@ -44,8 +44,20 @@ int Chunk::disassembleInstruction(int offset) {
             return simpleInstruction("RETURN", offset);
         case OpCode::CONSTANT:
             return constantInstruction("CONSTANT", offset);
+        case OpCode::NIL:
+            return simpleInstruction("NIL", offset);
+        case OpCode::TRUE_LITERAL:
+            return simpleInstruction("TRUE_LITERAL", offset);
+        case OpCode::FALSE_LITERAL:
+            return simpleInstruction("FALSE_LITERAL", offset);
         case OpCode::NEGATE:
             return simpleInstruction("NEGATE", offset);
+        case OpCode::NOT:
+            return simpleInstruction("NOT", offset);
+        case OpCode::EQUAL_OP:
+            return simpleInstruction("EQUAL", offset);
+        case OpCode::NOT_EQUAL_OP:
+            return simpleInstruction("NOT_EQUAL", offset);
         case OpCode::ADD:
             return simpleInstruction("ADD", offset);
         case OpCode::SUB:

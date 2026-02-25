@@ -3,8 +3,19 @@
 #include <sys/types.h>
 
 #include <iostream>
+#include <string>
 
 #define DEBUG
+
+static bool isFalsey(const Value& value) {
+    if (value.isNil()) return true;
+    if (value.isBool()) return !value.asBool();
+    return false;
+}
+
+static bool isNumberPair(const Value& lhs, const Value& rhs) {
+    return lhs.isNumber() && rhs.isNumber();
+}
 
 Status VirtualMachine::run() {
     while (true) {
@@ -25,70 +36,185 @@ Status VirtualMachine::run() {
                 m_stack.push(val);
                 break;
             }
+            case OpCode::NIL: {
+                m_stack.push(Value());
+                break;
+            }
+            case OpCode::TRUE_LITERAL: {
+                m_stack.push(Value(true));
+                break;
+            }
+            case OpCode::FALSE_LITERAL: {
+                m_stack.push(Value(false));
+                break;
+            }
             case OpCode::NEGATE: {
-                m_stack.push(-m_stack.pop());
+                Value value = m_stack.pop();
+                if (!value.isNumber()) {
+                    std::cerr << "Runtime error: Operand must be a number for "
+                                 "unary '-'."
+                              << std::endl;
+                    return Status::RUNTIME_ERROR;
+                }
+
+                m_stack.push(Value(-value.asNumber()));
+                break;
+            }
+            case OpCode::NOT: {
+                Value value = m_stack.pop();
+                m_stack.push(Value(isFalsey(value)));
+                break;
+            }
+            case OpCode::EQUAL_OP: {
+                Value b = m_stack.pop();
+                Value a = m_stack.pop();
+                m_stack.push(Value(a == b));
+                break;
+            }
+            case OpCode::NOT_EQUAL_OP: {
+                Value b = m_stack.pop();
+                Value a = m_stack.pop();
+                m_stack.push(Value(a != b));
                 break;
             }
             case OpCode::ADD: {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
-                m_stack.push(a + b);
-                break;
+
+                if (a.isNumber() && b.isNumber()) {
+                    m_stack.push(Value(a.asNumber() + b.asNumber()));
+                    break;
+                }
+
+                if (a.isString() && b.isString()) {
+                    m_stack.push(Value(a.asString() + b.asString()));
+                    break;
+                }
+
+                std::cerr << "Runtime error: Operands must be two numbers or "
+                             "two strings for '+'."
+                          << std::endl;
+                return Status::RUNTIME_ERROR;
             }
             case OpCode::SUB: {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
-                m_stack.push(a - b);
+                if (!isNumberPair(a, b)) {
+                    std::cerr
+                        << "Runtime error: Operands must be numbers for '-'."
+                        << std::endl;
+                    return Status::RUNTIME_ERROR;
+                }
+
+                m_stack.push(Value(a.asNumber() - b.asNumber()));
                 break;
             }
             case OpCode::MULT: {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
-                m_stack.push(a * b);
+                if (!isNumberPair(a, b)) {
+                    std::cerr
+                        << "Runtime error: Operands must be numbers for '*'."
+                        << std::endl;
+                    return Status::RUNTIME_ERROR;
+                }
+
+                m_stack.push(Value(a.asNumber() * b.asNumber()));
                 break;
             }
             case OpCode::DIV: {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
-                m_stack.push(a / b);
+                if (!isNumberPair(a, b)) {
+                    std::cerr
+                        << "Runtime error: Operands must be numbers for '/'."
+                        << std::endl;
+                    return Status::RUNTIME_ERROR;
+                }
+
+                m_stack.push(Value(a.asNumber() / b.asNumber()));
                 break;
             }
             case OpCode::GREATER_THAN: {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
-                m_stack.push(a > b);
+                if (!isNumberPair(a, b)) {
+                    std::cerr
+                        << "Runtime error: Operands must be numbers for '>'."
+                        << std::endl;
+                    return Status::RUNTIME_ERROR;
+                }
+
+                m_stack.push(Value(a.asNumber() > b.asNumber()));
                 break;
             }
             case OpCode::LESS_THAN: {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
-                m_stack.push(a < b);
+                if (!isNumberPair(a, b)) {
+                    std::cerr
+                        << "Runtime error: Operands must be numbers for '<'."
+                        << std::endl;
+                    return Status::RUNTIME_ERROR;
+                }
+
+                m_stack.push(Value(a.asNumber() < b.asNumber()));
                 break;
             }
             case OpCode::GREATER_EQUAL_THAN: {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
-                m_stack.push(a >= b);
+                if (!isNumberPair(a, b)) {
+                    std::cerr
+                        << "Runtime error: Operands must be numbers for '>='."
+                        << std::endl;
+                    return Status::RUNTIME_ERROR;
+                }
+
+                m_stack.push(Value(a.asNumber() >= b.asNumber()));
                 break;
             }
             case OpCode::LESS_EQUAL_THAN: {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
-                m_stack.push(a <= b);
+                if (!isNumberPair(a, b)) {
+                    std::cerr
+                        << "Runtime error: Operands must be numbers for '<='."
+                        << std::endl;
+                    return Status::RUNTIME_ERROR;
+                }
+
+                m_stack.push(Value(a.asNumber() <= b.asNumber()));
                 break;
             }
             case OpCode::SHIFT_LEFT: {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
-                m_stack.push(static_cast<Value>(static_cast<int>(a)
-                                                << static_cast<int>(b)));
+                if (!isNumberPair(a, b)) {
+                    std::cerr
+                        << "Runtime error: Operands must be numbers for '<<'."
+                        << std::endl;
+                    return Status::RUNTIME_ERROR;
+                }
+
+                m_stack.push(Value(
+                    static_cast<double>(static_cast<int>(a.asNumber())
+                                        << static_cast<int>(b.asNumber()))));
                 break;
             }
             case OpCode::SHIFT_RIGHT: {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
-                m_stack.push(static_cast<Value>(static_cast<int>(a) >>
-                                                static_cast<int>(b)));
+                if (!isNumberPair(a, b)) {
+                    std::cerr
+                        << "Runtime error: Operands must be numbers for '>>'."
+                        << std::endl;
+                    return Status::RUNTIME_ERROR;
+                }
+
+                m_stack.push(
+                    Value(static_cast<double>(static_cast<int>(a.asNumber()) >>
+                                              static_cast<int>(b.asNumber()))));
                 break;
             }
         }

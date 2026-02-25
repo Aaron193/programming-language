@@ -60,6 +60,8 @@ class Compiler {
     ParseRule getRule(TokenType type);
 
     void number();
+    void literal();
+    void stringLiteral();
     void grouping();
     void unary();
     void binary();

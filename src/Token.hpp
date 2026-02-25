@@ -62,7 +62,7 @@ class Token {
 
     Scanner* m_scanner;
     TokenType m_type;
-    const char* m_start;
+    std::string m_lexeme;
     size_t m_length;
     size_t m_line;
 
@@ -70,11 +70,11 @@ class Token {
     Token()
         : m_scanner(nullptr),
           m_type(TokenType::ERROR),
-          m_start(""),
+          m_lexeme(""),
           m_length(0),
           m_line(0) {}
     TokenType type() const { return m_type; }
-    const char* start() const { return m_start; }
+    const char* start() const { return m_lexeme.c_str(); }
     size_t length() const { return m_length; }
     size_t line() const { return m_line; }
 };
