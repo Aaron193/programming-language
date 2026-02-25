@@ -1,0 +1,5 @@
+function bad() {
+    export var x = 1;
+}
+
+bad();

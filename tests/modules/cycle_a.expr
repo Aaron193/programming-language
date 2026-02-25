@@ -1,0 +1,3 @@
+import b from "./cycle_b.expr";
+
+export var A = b.B + 1;

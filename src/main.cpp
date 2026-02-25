@@ -1,3 +1,4 @@
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -68,9 +69,17 @@ static int runFile(const CliOptions& options) {
                                       std::istreambuf_iterator<char>());
     file.close();
 
+    std::string absolutePath;
+    try {
+        absolutePath =
+            std::filesystem::weakly_canonical(options.sourceFile).string();
+    } catch (const std::exception&) {
+        absolutePath = options.sourceFile;
+    }
+
     VirtualMachine vm;
     Status status = vm.interpret(*source, options.showReturn, options.trace,
-                                 options.disassemble);
+                                 options.disassemble, absolutePath);
 
     if (status == Status::COMPILATION_ERROR) {
         std::cerr << "Compilation error in source file: " << options.sourceFile

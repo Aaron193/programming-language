@@ -25,6 +25,8 @@ void GC::markValue(const Value& value) {
         markObject(value.asSet());
     } else if (value.isIterator()) {
         markObject(value.asIterator());
+    } else if (value.isModule()) {
+        markObject(value.asModule());
     }
 }
 

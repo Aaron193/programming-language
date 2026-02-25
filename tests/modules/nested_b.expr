@@ -1,0 +1,3 @@
+import { C } from "./nested_c.expr";
+
+export var B = C + 1;

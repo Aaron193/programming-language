@@ -1,0 +1,5 @@
+import classes from "./modules/class_mod.expr";
+
+var c = classes.Counter();
+c.value = 1;
+print c.inc();

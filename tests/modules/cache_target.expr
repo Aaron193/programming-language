@@ -1,0 +1,2 @@
+print "cache_target_loaded";
+export var VALUE = 42;
