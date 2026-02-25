@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "GcObject.hpp"
+#include "TypeInfo.hpp"
 
 class Chunk;
 class GC;
@@ -39,6 +40,8 @@ struct ClassObject : GcObject {
     std::string name;
     ClassObject* superclass = nullptr;
     std::unordered_map<std::string, ClosureObject*> methods;
+    std::unordered_map<std::string, TypeRef> fieldTypes;
+    std::unordered_map<std::string, TypeRef> methodTypes;
 
     void trace(GC& gc) override;
 };

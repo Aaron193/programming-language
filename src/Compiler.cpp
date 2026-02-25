@@ -26,7 +26,8 @@ bool Compiler::compile(std::string_view source, Chunk& chunk,
     m_globalNames.clear();
     m_exportedNames.clear();
     m_hasBufferedToken = false;
-    m_contexts.push_back(FunctionContext{{}, {}, 0, false, false});
+    m_contexts.push_back(
+        FunctionContext{{}, {}, 0, false, false, TypeInfo::makeAny()});
 
     advance();
 
@@ -411,7 +412,8 @@ uint8_t Compiler::parseVariable(const std::string& message,
     consume(TokenType::IDENTIFIER, message);
 
     if (currentContext().scopeDepth > 0) {
-        addLocal(m_parser->previous);
+        addLocal(m_parser->previous,
+                 declaredType ? declaredType : TypeInfo::makeAny());
         return 0;
     }
 
@@ -990,15 +992,13 @@ void Compiler::typedClassMemberDeclaration() {
     }
 
     uint8_t nameConstant = identifierConstant(memberName);
-    CompiledFunction compiled = compileFunction(
-        std::string(memberName.start(), memberName.length()), true);
+    CompiledFunction compiled =
+        compileFunction(std::string(memberName.start(), memberName.length()),
+                        true, declaredType);
 
     if (!className.empty()) {
-        std::vector<TypeRef> paramTypes(
-            compiled.function ? compiled.function->parameters.size() : 0,
-            TypeInfo::makeAny());
         m_classMethodSignatures[className][memberNameText] =
-            TypeInfo::makeFunction(paramTypes, declaredType);
+            TypeInfo::makeFunction(compiled.parameterTypes, declaredType);
     }
 
     emitBytes(OpCode::CLOSURE, makeConstant(Value(compiled.function)));
@@ -1019,11 +1019,9 @@ void Compiler::methodDeclaration() {
         std::string(nameToken.start(), nameToken.length()), true);
 
     if (m_currentClass && !m_currentClass->className.empty()) {
-        std::vector<TypeRef> paramTypes(
-            compiled.function ? compiled.function->parameters.size() : 0,
-            TypeInfo::makeAny());
         m_classMethodSignatures[m_currentClass->className][methodName] =
-            TypeInfo::makeFunction(paramTypes, TypeInfo::makeAny());
+            TypeInfo::makeFunction(compiled.parameterTypes,
+                                   TypeInfo::makeAny());
     }
 
     emitBytes(OpCode::CLOSURE, makeConstant(Value(compiled.function)));
@@ -1094,8 +1092,11 @@ void Compiler::functionDeclaration() {
         }
     }
 
-    CompiledFunction compiled =
-        compileFunction(std::string(nameToken.start(), nameToken.length()));
+    CompiledFunction compiled = compileFunction(
+        std::string(nameToken.start(), nameToken.length()), false,
+        functionType && functionType->kind == TypeKind::FUNCTION
+            ? functionType->returnType
+            : TypeInfo::makeAny());
     emitBytes(OpCode::CLOSURE, makeConstant(Value(compiled.function)));
     for (const auto& upvalue : compiled.upvalues) {
         emitByte(static_cast<uint8_t>(upvalue.isLocal ? 1 : 0));
@@ -1891,23 +1892,32 @@ void Compiler::orOperator(bool canAssign) {
     patchJump(endJump);
 }
 
-Compiler::CompiledFunction Compiler::compileFunction(const std::string& name,
-                                                     bool isMethod) {
+Compiler::CompiledFunction Compiler::compileFunction(
+    const std::string& name, bool isMethod, const TypeRef& declaredReturnType) {
     consume(TokenType::OPEN_PAREN, "Expected '(' after function name.");
 
     Chunk* enclosingChunk = m_chunk;
 
     auto functionChunk = std::make_unique<Chunk>();
     m_chunk = functionChunk.get();
-    m_contexts.push_back(FunctionContext{{}, {}, 1, true, isMethod});
+    m_contexts.push_back(FunctionContext{
+        {},
+        {},
+        1,
+        true,
+        isMethod,
+        declaredReturnType ? declaredReturnType : TypeInfo::makeAny()});
 
     std::vector<std::string> parameters;
+    std::vector<TypeRef> parameterTypes;
     if (m_parser->current.type() != TokenType::CLOSE_PAREN) {
         do {
+            TypeRef parameterType = TypeInfo::makeAny();
             if (isTypeToken(m_parser->current.type()) ||
                 (m_parser->current.type() == TokenType::IDENTIFIER &&
                  peekNextToken().type() == TokenType::IDENTIFIER)) {
-                if (!parseTypeExpr()) {
+                parameterType = parseTypeExprType();
+                if (!parameterType) {
                     errorAtCurrent("Expected parameter type annotation.");
                 }
             }
@@ -1915,7 +1925,8 @@ Compiler::CompiledFunction Compiler::compileFunction(const std::string& name,
             consume(TokenType::IDENTIFIER, "Expected parameter name.");
             parameters.emplace_back(m_parser->previous.start(),
                                     m_parser->previous.length());
-            addLocal(m_parser->previous);
+            parameterTypes.push_back(parameterType);
+            addLocal(m_parser->previous, parameterType);
             markInitialized();
 
             if (m_parser->current.type() != TokenType::COMMA) {
@@ -1929,8 +1940,11 @@ Compiler::CompiledFunction Compiler::compileFunction(const std::string& name,
 
     if (m_parser->current.type() == TokenType::ARROW) {
         advance();
-        if (!parseTypeExpr()) {
+        TypeRef parsedReturnType = parseTypeExprType();
+        if (!parsedReturnType) {
             errorAtCurrent("Expected return type after '->'.");
+        } else {
+            currentContext().returnType = parsedReturnType;
         }
     }
 
@@ -1951,7 +1965,8 @@ Compiler::CompiledFunction Compiler::compileFunction(const std::string& name,
 
     if (m_gc == nullptr) {
         errorAtCurrent("Internal compiler error: GC allocator unavailable.");
-        return CompiledFunction{nullptr, {}};
+        return CompiledFunction{
+            nullptr, {}, std::move(parameterTypes), functionContext.returnType};
     }
 
     auto function = m_gc->allocate<FunctionObject>();
@@ -1960,5 +1975,7 @@ Compiler::CompiledFunction Compiler::compileFunction(const std::string& name,
     function->chunk = std::move(functionChunk);
     function->upvalueCount =
         static_cast<uint8_t>(functionContext.upvalues.size());
-    return CompiledFunction{function, std::move(functionContext.upvalues)};
+    return CompiledFunction{function, std::move(functionContext.upvalues),
+                            std::move(parameterTypes),
+                            functionContext.returnType};
 }

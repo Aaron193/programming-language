@@ -58,11 +58,14 @@ class Compiler {
         int scopeDepth;
         bool inFunction;
         bool inMethod;
+        TypeRef returnType;
     };
 
     struct CompiledFunction {
         FunctionObject* function;
         std::vector<Upvalue> upvalues;
+        std::vector<TypeRef> parameterTypes;
+        TypeRef returnType;
     };
 
     struct ParseRule {
@@ -182,8 +185,9 @@ class Compiler {
     void andOperator(bool canAssign);
     void orOperator(bool canAssign);
 
-    CompiledFunction compileFunction(const std::string& name,
-                                     bool isMethod = false);
+    CompiledFunction compileFunction(
+        const std::string& name, bool isMethod = false,
+        const TypeRef& declaredReturnType = TypeInfo::makeAny());
 
    public:
     Compiler() = default;
