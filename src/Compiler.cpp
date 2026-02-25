@@ -703,6 +703,11 @@ Compiler::ParseRule Compiler::getRule(TokenType type) {
             return ParseRule{nullptr,
                              [this](bool canAssign) { binary(canAssign); },
                              PREC_COMPARISON};
+        case TokenType::SHIFT_LEFT_TOKEN:
+        case TokenType::SHIFT_RIGHT_TOKEN:
+            return ParseRule{nullptr,
+                             [this](bool canAssign) { binary(canAssign); },
+                             PREC_SHIFT};
         case TokenType::EQUAL_EQUAL:
         case TokenType::BANG_EQUAL:
             return ParseRule{nullptr,
@@ -846,6 +851,12 @@ void Compiler::binary(bool canAssign) {
             break;
         case TokenType::LESS_EQUAL:
             emitByte(OpCode::LESS_EQUAL_THAN);
+            break;
+        case TokenType::SHIFT_LEFT_TOKEN:
+            emitByte(OpCode::SHIFT_LEFT);
+            break;
+        case TokenType::SHIFT_RIGHT_TOKEN:
+            emitByte(OpCode::SHIFT_RIGHT);
             break;
         case TokenType::EQUAL_EQUAL:
             emitByte(OpCode::EQUAL_OP);

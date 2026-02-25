@@ -1,0 +1,32 @@
+var base = 1;
+{
+  var a1 = base + 1;
+  {
+    var a2 = a1 + 1;
+    {
+      var a3 = a2 + 1;
+      {
+        var a4 = a3 + 1;
+        {
+          var a5 = a4 + 1;
+          {
+            var a6 = a5 + 1;
+            {
+              var a7 = a6 + 1;
+              {
+                var a8 = a7 + 1;
+                {
+                  var a9 = a8 + 1;
+                  {
+                    var a10 = a9 + 1;
+                    print a10;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

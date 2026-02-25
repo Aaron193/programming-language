@@ -100,10 +100,12 @@ Token Scanner::nextToken() {
             return createToken(TokenType::SLASH);
 
         case '>':
+            if (match('>')) return createToken(TokenType::SHIFT_RIGHT_TOKEN);
             return match('=') ? createToken(TokenType::GREATER_EQUAL)
                               : createToken(TokenType::GREATER);
 
         case '<':
+            if (match('<')) return createToken(TokenType::SHIFT_LEFT_TOKEN);
             return match('=') ? createToken(TokenType::LESS_EQUAL)
                               : createToken(TokenType::LESS);
 

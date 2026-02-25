@@ -13,6 +13,8 @@ enum TokenType {
     GREATER_EQUAL,
     LESS,
     LESS_EQUAL,
+    SHIFT_LEFT_TOKEN,
+    SHIFT_RIGHT_TOKEN,
     SLASH,
     OPEN_PAREN,
     CLOSE_PAREN,
