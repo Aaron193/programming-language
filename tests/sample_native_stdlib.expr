@@ -1,0 +1,9 @@
+print len("hello");
+print sqrt(9);
+print type(123);
+print type(true);
+print type(null);
+print type("hi");
+print str(42);
+print num("12.5") + 0.5;
+print num(7);

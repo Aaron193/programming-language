@@ -1,0 +1,14 @@
+function outer() {
+  var a = 1;
+  function middle() {
+    var b = 2;
+    function inner() {
+      return a + b;
+    }
+    return inner;
+  }
+  return middle();
+}
+
+var f = outer();
+print f();

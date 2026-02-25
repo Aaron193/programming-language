@@ -1,0 +1,5 @@
+function inc(x) { return x + 1; }
+function sum3(a, b, c) {
+  return inc(a) + inc(b) + inc(c);
+}
+print sum3(1, 2, 3);

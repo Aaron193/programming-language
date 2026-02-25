@@ -1,0 +1,13 @@
+function makeCounter() {
+  var x = 0;
+  function inc() {
+    x = x + 1;
+    return x;
+  }
+  return inc;
+}
+
+var counter = makeCounter();
+print counter();
+print counter();
+print counter();

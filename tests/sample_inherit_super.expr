@@ -1,0 +1,19 @@
+class A {
+  greet() {
+    return "A";
+  }
+
+  id() {
+    return "idA";
+  }
+}
+
+class B < A {
+  greet() {
+    return super.greet() + "B";
+  }
+}
+
+var b = B();
+print b.greet();
+print b.id();
