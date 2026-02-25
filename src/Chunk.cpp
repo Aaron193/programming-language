@@ -107,6 +107,26 @@ int Chunk::disassembleInstruction(int offset) {
             return simpleInstruction("MULT", offset);
         case OpCode::DIV:
             return simpleInstruction("DIV", offset);
+        case OpCode::IADD:
+            return simpleInstruction("IADD", offset);
+        case OpCode::ISUB:
+            return simpleInstruction("ISUB", offset);
+        case OpCode::IMULT:
+            return simpleInstruction("IMULT", offset);
+        case OpCode::IDIV:
+            return simpleInstruction("IDIV", offset);
+        case OpCode::IMOD:
+            return simpleInstruction("IMOD", offset);
+        case OpCode::UADD:
+            return simpleInstruction("UADD", offset);
+        case OpCode::USUB:
+            return simpleInstruction("USUB", offset);
+        case OpCode::UMULT:
+            return simpleInstruction("UMULT", offset);
+        case OpCode::UDIV:
+            return simpleInstruction("UDIV", offset);
+        case OpCode::UMOD:
+            return simpleInstruction("UMOD", offset);
         case OpCode::GREATER_THAN:
             return simpleInstruction("GREATER_THAN", offset);
         case OpCode::LESS_THAN:
@@ -115,6 +135,14 @@ int Chunk::disassembleInstruction(int offset) {
             return simpleInstruction("GREATER_EQUAL_THAN", offset);
         case OpCode::LESS_EQUAL_THAN:
             return simpleInstruction("LESS_EQUAL_THAN", offset);
+        case OpCode::IGREATER:
+            return simpleInstruction("IGREATER", offset);
+        case OpCode::ILESS:
+            return simpleInstruction("ILESS", offset);
+        case OpCode::IGREATER_EQ:
+            return simpleInstruction("IGREATER_EQ", offset);
+        case OpCode::ILESS_EQ:
+            return simpleInstruction("ILESS_EQ", offset);
         case OpCode::POP:
             return simpleInstruction("POP", offset);
         case OpCode::PRINT_OP:
@@ -195,6 +223,26 @@ int Chunk::disassembleInstruction(int offset) {
             return simpleInstruction("SHIFT_LEFT", offset);
         case OpCode::SHIFT_RIGHT:
             return simpleInstruction("SHIFT_RIGHT", offset);
+        case OpCode::BITWISE_AND:
+            return simpleInstruction("BITWISE_AND", offset);
+        case OpCode::BITWISE_OR:
+            return simpleInstruction("BITWISE_OR", offset);
+        case OpCode::BITWISE_XOR:
+            return simpleInstruction("BITWISE_XOR", offset);
+        case OpCode::BITWISE_NOT:
+            return simpleInstruction("BITWISE_NOT", offset);
+        case OpCode::WIDEN_INT:
+            return byteInstruction("WIDEN_INT", offset,
+                                   m_bytes->at(offset + 1));
+        case OpCode::NARROW_INT:
+            return byteInstruction("NARROW_INT", offset,
+                                   m_bytes->at(offset + 1));
+        case OpCode::INT_TO_FLOAT:
+            return simpleInstruction("INT_TO_FLOAT", offset);
+        case OpCode::FLOAT_TO_INT:
+            return simpleInstruction("FLOAT_TO_INT", offset);
+        case OpCode::INT_NEGATE:
+            return simpleInstruction("INT_NEGATE", offset);
         case OpCode::ITER_INIT:
             return simpleInstruction("ITER_INIT", offset);
         case OpCode::ITER_HAS_NEXT:

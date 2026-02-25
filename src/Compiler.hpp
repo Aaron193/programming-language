@@ -135,7 +135,12 @@ class Compiler {
     void patchJump(int offset);
     void emitLoop(int loopStart);
     bool isAssignmentOperator(TokenType type) const;
-    bool emitCompoundBinary(TokenType assignmentType);
+    bool emitCompoundBinary(TokenType assignmentType,
+                            const TypeRef& leftType = TypeInfo::makeAny());
+    TypeRef inferVariableType(const Token& name) const;
+    void emitCoerceToType(const TypeRef& targetType);
+    uint8_t arithmeticOpcode(TokenType operatorType,
+                             const TypeRef& leftType) const;
 
     void expression();
     void declaration();
@@ -179,6 +184,7 @@ class Compiler {
     void unary(bool canAssign);
     void prefixUpdate(bool canAssign);
     void binary(bool canAssign);
+    void castOperator(bool canAssign);
     void call(bool canAssign);
     void dot(bool canAssign);
     void subscript(bool canAssign);
