@@ -12,6 +12,7 @@ class Chunk;
 struct ClassObject;
 struct InstanceObject;
 struct BoundMethodObject;
+struct NativeFunctionObject;
 
 struct FunctionObject {
     std::string name;
@@ -28,6 +29,11 @@ struct ClassObject {
 struct BoundMethodObject {
     std::shared_ptr<InstanceObject> receiver;
     std::shared_ptr<FunctionObject> method;
+};
+
+struct NativeFunctionObject {
+    std::string name;
+    uint8_t arity;
 };
 
 /*
@@ -85,7 +91,8 @@ struct Value {
     std::variant<double, bool, std::monostate, std::string,
                  std::shared_ptr<FunctionObject>, std::shared_ptr<ClassObject>,
                  std::shared_ptr<InstanceObject>,
-                 std::shared_ptr<BoundMethodObject>>
+                 std::shared_ptr<BoundMethodObject>,
+                 std::shared_ptr<NativeFunctionObject>>
         data;
 
     Value() : data(std::monostate{}) {}
@@ -97,6 +104,8 @@ struct Value {
     Value(std::shared_ptr<ClassObject> value) : data(std::move(value)) {}
     Value(std::shared_ptr<InstanceObject> value) : data(std::move(value)) {}
     Value(std::shared_ptr<BoundMethodObject> value) : data(std::move(value)) {}
+    Value(std::shared_ptr<NativeFunctionObject> value)
+        : data(std::move(value)) {}
 
     bool isNumber() const { return std::holds_alternative<double>(data); }
     bool isBool() const { return std::holds_alternative<bool>(data); }
@@ -114,6 +123,10 @@ struct Value {
     bool isBoundMethod() const {
         return std::holds_alternative<std::shared_ptr<BoundMethodObject>>(data);
     }
+    bool isNative() const {
+        return std::holds_alternative<std::shared_ptr<NativeFunctionObject>>(
+            data);
+    }
 
     double asNumber() const { return std::get<double>(data); }
     bool asBool() const { return std::get<bool>(data); }
@@ -129,6 +142,9 @@ struct Value {
     }
     std::shared_ptr<BoundMethodObject> asBoundMethod() const {
         return std::get<std::shared_ptr<BoundMethodObject>>(data);
+    }
+    std::shared_ptr<NativeFunctionObject> asNative() const {
+        return std::get<std::shared_ptr<NativeFunctionObject>>(data);
     }
 };
 
@@ -164,6 +180,9 @@ inline std::ostream& operator<<(std::ostream& stream, const Value& value) {
     } else if (value.isBoundMethod()) {
         auto bound = value.asBoundMethod();
         stream << "<bound method " << bound->method->name << ">";
+    } else if (value.isNative()) {
+        auto native = value.asNative();
+        stream << "<native " << native->name << ">";
     } else {
         stream << value.asString();
     }
@@ -198,6 +217,7 @@ class Chunk {
     int disassembleInstruction(int offset);
     int count() const { return static_cast<int>(m_bytes->size()); }
     uint8_t byteAt(int index) const { return m_bytes->at(index); }
+    int lineAt(int index) const { return m_lines->at(index); }
     void setByteAt(int index, uint8_t byte) { m_bytes->at(index) = byte; }
 
     // inlined methods

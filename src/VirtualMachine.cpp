@@ -1,7 +1,9 @@
 #include "VirtualMachine.hpp"
 
+#include <chrono>
 #include <iostream>
 #include <string>
+#include <vector>
 
 static bool isFalsey(const Value& value) {
     if (value.isNil()) return true;
@@ -50,6 +52,17 @@ Status VirtualMachine::callFunction(std::shared_ptr<FunctionObject> function,
 Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
     while (true) {
         CallFrame& frame = currentFrame();
+        auto runtimeError = [&](const std::string& message) {
+            int offset =
+                static_cast<int>(frame.ip - frame.chunk->getBytes()) - 1;
+            if (offset < 0) {
+                offset = 0;
+            }
+
+            std::cerr << "[line " << frame.chunk->lineAt(offset)
+                      << "] Runtime error: " << message << std::endl;
+            return Status::RUNTIME_ERROR;
+        };
 
 #ifdef VM_TRACE
         m_stack.print();
@@ -96,10 +109,8 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
             case OpCode::NEGATE: {
                 Value value = m_stack.pop();
                 if (!value.isNumber()) {
-                    std::cerr << "Runtime error: Operand must be a number for "
-                                 "unary '-'."
-                              << std::endl;
-                    return Status::RUNTIME_ERROR;
+                    return runtimeError(
+                        "Operand must be a number for unary '-'.");
                 }
 
                 m_stack.push(Value(-value.asNumber()));
@@ -139,7 +150,8 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 std::cerr << "Runtime error: Operands must be two numbers or "
                              "two strings for '+'."
                           << std::endl;
-                return Status::RUNTIME_ERROR;
+                return runtimeError(
+                    "Operands must be two numbers or two strings for '+'.");
             }
             case OpCode::SUB: {
                 Value b = m_stack.pop();
@@ -251,9 +263,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 std::string name = readNameConstant();
                 auto it = m_globals.find(name);
                 if (it == m_globals.end()) {
-                    std::cerr << "Runtime error: Undefined variable '" << name
-                              << "'." << std::endl;
-                    return Status::RUNTIME_ERROR;
+                    return runtimeError("Undefined variable '" + name + "'.");
                 }
 
                 m_stack.push(it->second);
@@ -263,9 +273,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 std::string name = readNameConstant();
                 auto it = m_globals.find(name);
                 if (it == m_globals.end()) {
-                    std::cerr << "Runtime error: Undefined variable '" << name
-                              << "'." << std::endl;
-                    return Status::RUNTIME_ERROR;
+                    return runtimeError("Undefined variable '" + name + "'.");
                 }
 
                 it->second = m_stack.peek(0);
@@ -413,23 +421,55 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
             case OpCode::CALL: {
                 uint8_t argumentCount = readByte();
                 Value callee = m_stack.peek(argumentCount);
+                size_t calleeIndex =
+                    m_stack.size() - static_cast<size_t>(argumentCount) - 1;
 
                 if (callee.isClass()) {
                     if (argumentCount != 0) {
-                        std::cerr << "Runtime error: Class '"
-                                  << callee.asClass()->name
-                                  << "' expected 0 arguments but got "
-                                  << static_cast<int>(argumentCount) << "."
-                                  << std::endl;
-                        return Status::RUNTIME_ERROR;
+                        return runtimeError(
+                            "Class '" + callee.asClass()->name +
+                            "' expected 0 arguments but got " +
+                            std::to_string(static_cast<int>(argumentCount)) +
+                            ".");
                     }
 
-                    size_t calleeIndex =
-                        m_stack.size() - static_cast<size_t>(argumentCount) -
-                        1;
                     auto instance = std::make_shared<InstanceObject>();
                     instance->klass = callee.asClass();
                     m_stack.setAt(calleeIndex, Value(instance));
+                    break;
+                }
+
+                if (callee.isNative()) {
+                    auto native = callee.asNative();
+                    if (native->arity != argumentCount) {
+                        return runtimeError(
+                            "Native function '" + native->name + "' expected " +
+                            std::to_string(static_cast<int>(native->arity)) +
+                            " arguments but got " +
+                            std::to_string(static_cast<int>(argumentCount)) +
+                            ".");
+                    }
+
+                    std::vector<Value> args;
+                    args.reserve(argumentCount);
+                    for (uint8_t i = 0; i < argumentCount; ++i) {
+                        args.push_back(m_stack.peek(
+                            static_cast<size_t>(argumentCount - 1 - i)));
+                    }
+
+                    Value result;
+                    if (native->name == "clock") {
+                        auto now = std::chrono::duration<double>(
+                                       std::chrono::system_clock::now()
+                                           .time_since_epoch())
+                                       .count();
+                        result = Value(now);
+                    } else {
+                        result = Value();
+                    }
+
+                    m_stack.popN(m_stack.size() - calleeIndex);
+                    m_stack.push(result);
                     break;
                 }
 
@@ -444,13 +484,13 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue) {
                 }
 
                 if (!callee.isFunction()) {
-                    std::cerr << "Runtime error: Can only call functions, "
-                                 "classes, and methods."
-                              << std::endl;
-                    return Status::RUNTIME_ERROR;
+                    return runtimeError(
+                        "Can only call functions, classes, methods, and "
+                        "natives.");
                 }
 
-                Status status = callFunction(callee.asFunction(), argumentCount);
+                Status status =
+                    callFunction(callee.asFunction(), argumentCount);
                 if (status != Status::OK) {
                     return status;
                 }
@@ -517,6 +557,11 @@ Status VirtualMachine::interpret(std::string_view source,
     if (!m_compiler.compile(source, chunk)) {
         return Status::COMPILATION_ERROR;
     }
+
+    auto clockFn = std::make_shared<NativeFunctionObject>();
+    clockFn->name = "clock";
+    clockFn->arity = 0;
+    m_globals[clockFn->name] = Value(clockFn);
 
     m_frames.push_back(CallFrame{&chunk, chunk.getBytes(), 0, 0, nullptr});
 
