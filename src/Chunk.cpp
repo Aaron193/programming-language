@@ -143,6 +143,14 @@ int Chunk::disassembleInstruction(int offset) {
             return simpleInstruction("IGREATER_EQ", offset);
         case OpCode::ILESS_EQ:
             return simpleInstruction("ILESS_EQ", offset);
+        case OpCode::UGREATER:
+            return simpleInstruction("UGREATER", offset);
+        case OpCode::ULESS:
+            return simpleInstruction("ULESS", offset);
+        case OpCode::UGREATER_EQ:
+            return simpleInstruction("UGREATER_EQ", offset);
+        case OpCode::ULESS_EQ:
+            return simpleInstruction("ULESS_EQ", offset);
         case OpCode::POP:
             return simpleInstruction("POP", offset);
         case OpCode::PRINT_OP:

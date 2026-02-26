@@ -1009,6 +1009,30 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.push(Value(lhs <= rhs));
                 break;
             }
+            case OpCode::UGREATER: {
+                uint64_t rhs = requireUnsignedInt(m_stack.pop());
+                uint64_t lhs = requireUnsignedInt(m_stack.pop());
+                m_stack.push(Value(lhs > rhs));
+                break;
+            }
+            case OpCode::ULESS: {
+                uint64_t rhs = requireUnsignedInt(m_stack.pop());
+                uint64_t lhs = requireUnsignedInt(m_stack.pop());
+                m_stack.push(Value(lhs < rhs));
+                break;
+            }
+            case OpCode::UGREATER_EQ: {
+                uint64_t rhs = requireUnsignedInt(m_stack.pop());
+                uint64_t lhs = requireUnsignedInt(m_stack.pop());
+                m_stack.push(Value(lhs >= rhs));
+                break;
+            }
+            case OpCode::ULESS_EQ: {
+                uint64_t rhs = requireUnsignedInt(m_stack.pop());
+                uint64_t lhs = requireUnsignedInt(m_stack.pop());
+                m_stack.push(Value(lhs <= rhs));
+                break;
+            }
             case OpCode::POP: {
                 m_stack.pop();
                 break;
