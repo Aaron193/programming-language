@@ -1,14 +1,14 @@
-var sum = 0;
+auto sum = 0;
 
-var timeA = clock();
+auto timeA = clock();
 
-for (var i = 0; i < 100000; i++) {
+for (auto i = 0; i < 100000; i++) {
     sum += i;
 }
 
-var timeB = clock();
+auto timeB = clock();
 
-var timeTaken = timeB - timeA;
+auto timeTaken = timeB - timeA;
 
 print timeTaken;
 print sum

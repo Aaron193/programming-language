@@ -1,2 +1,2 @@
 print "cache_target_loaded";
-export var VALUE = 42;
+export auto VALUE = 42;

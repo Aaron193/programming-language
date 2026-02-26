@@ -1,4 +1,4 @@
-var s = Set(1, 2, 2, 3);
+auto s = Set(1, 2, 2, 3);
 print s.size();
 print s.has(2);
 
@@ -10,5 +10,5 @@ print s.remove(3);
 print s.has(3);
 print s[4];
 
-var arr = s.toArray();
+auto arr = s.toArray();
 print arr.size();

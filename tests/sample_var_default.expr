@@ -1,2 +1,2 @@
-var y;
-print y == null;
+auto y = true;
+print y;

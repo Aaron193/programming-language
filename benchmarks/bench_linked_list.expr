@@ -1,28 +1,28 @@
 class Node {}
 
-var start = clock();
+auto start = clock();
 
-var head = Node();
+auto head = Node();
 head.value = 1;
 head.next = head;
 
-var tail = head;
-for (var i = 2; i <= 100000; i++) {
-  var node = Node();
+auto tail = head;
+for (auto i = 2; i <= 100000; i++) {
+  auto node = Node();
   node.value = i;
   node.next = head;
   tail.next = node;
   tail = node;
 }
 
-var sum = 0;
-var current = head;
-for (var steps = 0; steps < 100000; steps++) {
+auto sum = 0;
+auto current = head;
+for (auto steps = 0; steps < 100000; steps++) {
   sum += current.value;
   current = current.next;
 }
 
-var elapsed = clock() - start;
+auto elapsed = clock() - start;
 
 print sum;
 print elapsed;

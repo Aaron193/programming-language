@@ -1,6 +1,6 @@
 class Bag {}
 
-var bag = Bag();
+auto bag = Bag();
 bag.value = 42;
 print bag.value;
 

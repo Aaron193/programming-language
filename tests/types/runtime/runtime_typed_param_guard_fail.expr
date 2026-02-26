@@ -10,5 +10,5 @@ function acceptDog(Dog dog) {
     print dog;
 }
 
-var dynamic = id(Cat());
+auto dynamic = id(Cat());
 acceptDog(dynamic);

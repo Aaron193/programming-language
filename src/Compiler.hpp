@@ -165,7 +165,6 @@ class Compiler {
     void returnStatement();
     void expressionStatement();
     void autoVarDeclaration();
-    void varDeclaration();
     void typedVarDeclaration();
     bool isTypeToken(TokenType type) const;
     bool isCollectionTypeName(const Token& token) const;

@@ -275,6 +275,10 @@ class CheckerImpl {
     }
 
     bool isAssignableType(const TypeRef& from, const TypeRef& to) const {
+        if (from && to && (from->isAny() || to->isAny())) {
+            return true;
+        }
+
         if (isAssignable(from, to)) {
             return true;
         }
@@ -473,7 +477,14 @@ class CheckerImpl {
             }
 
             TypeRef targetType = resolveSymbol(lhs.name);
-            if (!targetType || targetType->isAny()) {
+            if (!targetType) {
+                addError(line, "Type error: unknown assignment target '" +
+                                   lhs.name + "'.");
+                return ExprInfo{TypeInfo::makeAny(), false, false, lhs.name,
+                                line};
+            }
+
+            if (targetType->isAny()) {
                 return ExprInfo{TypeInfo::makeAny(), false, false, lhs.name,
                                 line};
             }
@@ -495,7 +506,9 @@ class CheckerImpl {
 
         TypeRef targetType = resolveSymbol(lhs.name);
         if (!targetType) {
-            targetType = TypeInfo::makeAny();
+            addError(line, "Type error: unknown assignment target '" +
+                               lhs.name + "'.");
+            return ExprInfo{TypeInfo::makeAny(), false, false, lhs.name, line};
         }
 
         if (assignmentType == TokenType::EQUAL) {
@@ -942,7 +955,7 @@ class CheckerImpl {
         if (match(TokenType::SEMI_COLON)) {
             if (!m_functionContexts.empty()) {
                 TypeRef expected = m_functionContexts.back().returnType;
-                if (expected && !expected->isAny() && !expected->isVoid()) {
+                if (expected && !expected->isVoid()) {
                     addError(line,
                              "Type error: function expects return type '" +
                                  expected->toString() + "'.");
@@ -958,8 +971,7 @@ class CheckerImpl {
 
         if (!m_functionContexts.empty()) {
             TypeRef expected = m_functionContexts.back().returnType;
-            if (expected && !expected->isAny() &&
-                !isAssignableType(value.type, expected)) {
+            if (expected && !isAssignableType(value.type, expected)) {
                 addError(line, "Type error: cannot return '" +
                                    value.type->toString() +
                                    "' from function returning '" +
@@ -998,8 +1010,7 @@ class CheckerImpl {
         consume(TokenType::OPEN_PAREN, "Expected '(' after 'for'.");
 
         if (match(TokenType::SEMI_COLON)) {
-        } else if (match(TokenType::VAR) || match(TokenType::AUTO)) {
-            bool isAutoDeclaration = m_previous.type() == TokenType::AUTO;
+        } else if (match(TokenType::AUTO)) {
             consume(TokenType::IDENTIFIER, "Expected variable name.");
             std::string variableName = tokenText(m_previous);
 
@@ -1016,7 +1027,7 @@ class CheckerImpl {
             TypeRef declared = TypeInfo::makeAny();
             if (match(TokenType::EQUAL)) {
                 declared = parseExpression().type;
-            } else if (isAutoDeclaration) {
+            } else {
                 addError(
                     m_previous.line(),
                     "Type error: 'auto' declaration requires an initializer.");
@@ -1056,20 +1067,6 @@ class CheckerImpl {
         }
         consume(TokenType::CLOSE_CURLY, "Expected '}' after block.");
         endScope();
-    }
-
-    void parseVarDeclaration() {
-        consume(TokenType::IDENTIFIER, "Expected variable name.");
-        std::string name = tokenText(m_previous);
-
-        TypeRef declared = TypeInfo::makeAny();
-        if (match(TokenType::EQUAL)) {
-            declared = parseExpression().type;
-        }
-
-        consume(TokenType::SEMI_COLON,
-                "Expected ';' after variable declaration.");
-        defineSymbol(name, declared ? declared : TypeInfo::makeAny());
     }
 
     void parseAutoVarDeclaration() {
@@ -1316,11 +1313,6 @@ class CheckerImpl {
             return;
         }
 
-        if (match(TokenType::VAR)) {
-            parseVarDeclaration();
-            return;
-        }
-
         if (match(TokenType::AUTO)) {
             parseAutoVarDeclaration();
             return;
@@ -1389,11 +1381,6 @@ class CheckerImpl {
 
         if (match(TokenType::FUNCTION)) {
             parseFunctionDeclaration();
-            return;
-        }
-
-        if (match(TokenType::VAR)) {
-            parseVarDeclaration();
             return;
         }
 

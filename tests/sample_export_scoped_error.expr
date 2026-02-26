@@ -1,5 +1,5 @@
 function bad() {
-    export var x = 1;
+    export auto x = 1;
 }
 
 bad();

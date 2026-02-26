@@ -260,10 +260,6 @@ TokenType Scanner::getIdentifier() {
             if (matchKeyword("usize", 5)) return TokenType::TYPE_USIZE;
             break;
 
-        case 'v':
-            if (matchKeyword("var", 3)) return TokenType::VAR;
-            break;
-
         case 'w':
             if (matchKeyword("while", 5)) return TokenType::WHILE;
             break;
