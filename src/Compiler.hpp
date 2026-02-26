@@ -164,6 +164,7 @@ class Compiler {
     void printStatement();
     void returnStatement();
     void expressionStatement();
+    void autoVarDeclaration();
     void varDeclaration();
     void typedVarDeclaration();
     bool isTypeToken(TokenType type) const;

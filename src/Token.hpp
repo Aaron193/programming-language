@@ -58,6 +58,7 @@ enum TokenType {
     FALSE,
     _NULL,
     THIS,
+    AUTO,
     VAR,
     _RETURN,
     IMPORT,

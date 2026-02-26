@@ -8,7 +8,7 @@ const std::vector<NativeDescriptor>& makeDescriptors() {
         {"sqrt", {TypeInfo::makeF64()}, TypeInfo::makeF64(), 1},
         {"len", {TypeInfo::makeAny()}, TypeInfo::makeI64(), 1},
         {"error", {TypeInfo::makeStr()}, TypeInfo::makeVoid(), 1},
-        {"num", {TypeInfo::makeStr()}, TypeInfo::makeF64(), 1},
+        {"num", {TypeInfo::makeAny()}, TypeInfo::makeF64(), 1},
         {"type", {TypeInfo::makeAny()}, TypeInfo::makeStr(), 1},
         {"str", {TypeInfo::makeAny()}, TypeInfo::makeStr(), 1},
         {"toString", {TypeInfo::makeAny()}, TypeInfo::makeStr(), 1},

@@ -190,6 +190,7 @@ bool Scanner::matchKeyword(const char* keyword, size_t length) {
 TokenType Scanner::getIdentifier() {
     switch (m_start[0]) {
         case 'a':
+            if (matchKeyword("auto", 4)) return TokenType::AUTO;
             if (matchKeyword("and", 3)) return TokenType::AND;
             if (matchKeyword("as", 2)) return TokenType::AS_KW;
             break;
