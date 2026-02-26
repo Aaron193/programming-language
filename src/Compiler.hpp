@@ -94,6 +94,7 @@ class Compiler {
     std::unordered_map<std::string, std::unordered_map<std::string, TypeRef>>
         m_classMethodSignatures;
     std::vector<TypeRef> m_globalTypes;
+    std::vector<TypeRef> m_exprTypeStack;
     std::vector<std::string> m_globalNames;
     std::vector<std::string> m_exportedNames;
     std::string m_sourcePath;
@@ -136,12 +137,16 @@ class Compiler {
     void emitLoop(int loopStart);
     bool isAssignmentOperator(TokenType type) const;
     bool emitCompoundBinary(TokenType assignmentType,
-                            const TypeRef& leftType = TypeInfo::makeAny());
+                            const TypeRef& leftType = TypeInfo::makeAny(),
+                            const TypeRef& rightType = TypeInfo::makeAny());
     TypeRef inferVariableType(const Token& name) const;
     void emitCoerceToType(const TypeRef& targetType);
     void emitCheckInstanceType(const TypeRef& targetType);
     uint8_t arithmeticOpcode(TokenType operatorType,
-                             const TypeRef& leftType) const;
+                             const TypeRef& numericType) const;
+    void pushExprType(const TypeRef& type);
+    TypeRef popExprType();
+    TypeRef peekExprType() const;
 
     void expression();
     void declaration();

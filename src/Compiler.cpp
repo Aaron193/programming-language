@@ -46,6 +46,7 @@ bool Compiler::compile(std::string_view source, Chunk& chunk,
     m_contexts.clear();
     m_globalSlots.clear();
     m_globalTypes.clear();
+    m_exprTypeStack.clear();
     m_globalNames.clear();
     m_exportedNames.clear();
     m_hasBufferedToken = false;
@@ -391,10 +392,32 @@ bool Compiler::isAssignmentOperator(TokenType type) const {
     }
 }
 
+void Compiler::pushExprType(const TypeRef& type) {
+    m_exprTypeStack.push_back(type ? type : TypeInfo::makeAny());
+}
+
+TypeRef Compiler::popExprType() {
+    if (m_exprTypeStack.empty()) {
+        return TypeInfo::makeAny();
+    }
+
+    TypeRef type = m_exprTypeStack.back();
+    m_exprTypeStack.pop_back();
+    return type ? type : TypeInfo::makeAny();
+}
+
+TypeRef Compiler::peekExprType() const {
+    if (m_exprTypeStack.empty()) {
+        return TypeInfo::makeAny();
+    }
+    return m_exprTypeStack.back() ? m_exprTypeStack.back()
+                                  : TypeInfo::makeAny();
+}
+
 uint8_t Compiler::arithmeticOpcode(TokenType operatorType,
-                                   const TypeRef& leftType) const {
-    if (leftType && leftType->isInteger()) {
-        const bool isSigned = leftType->isSigned();
+                                   const TypeRef& numericType) const {
+    if (numericType && numericType->isInteger()) {
+        const bool isSigned = numericType->isSigned();
         switch (operatorType) {
             case TokenType::PLUS:
             case TokenType::PLUS_EQUAL:
@@ -480,13 +503,17 @@ void Compiler::emitCheckInstanceType(const TypeRef& targetType) {
 }
 
 bool Compiler::emitCompoundBinary(TokenType assignmentType,
-                                  const TypeRef& leftType) {
+                                  const TypeRef& leftType,
+                                  const TypeRef& rightType) {
+    TypeRef promoted = numericPromotion(leftType, rightType);
+    TypeRef arithmeticType = promoted ? promoted : leftType;
+
     switch (assignmentType) {
         case TokenType::PLUS_EQUAL:
         case TokenType::MINUS_EQUAL:
         case TokenType::STAR_EQUAL:
         case TokenType::SLASH_EQUAL:
-            emitByte(arithmeticOpcode(assignmentType, leftType));
+            emitByte(arithmeticOpcode(assignmentType, arithmeticType));
             return true;
         case TokenType::SHIFT_LEFT_EQUAL:
             emitByte(OpCode::SHIFT_LEFT);
@@ -556,9 +583,12 @@ void Compiler::namedVariable(const Token& name, bool canAssign) {
         if (assignmentType == TokenType::EQUAL) {
             advance();
             expression();
+            TypeRef rhsType = popExprType();
             emitCoerceToType(declaredType);
             emitCheckInstanceType(declaredType);
             emitBytes(setOp, arg);
+            pushExprType(declaredType && !declaredType->isAny() ? declaredType
+                                                                : rhsType);
             return;
         }
 
@@ -566,13 +596,14 @@ void Compiler::namedVariable(const Token& name, bool canAssign) {
             assignmentType == TokenType::MINUS_MINUS) {
             advance();
             emitBytes(getOp, arg);
-            emitConstant(Value(1.0));
+            emitConstant(Value(static_cast<int64_t>(1)));
             emitByte(arithmeticOpcode(assignmentType == TokenType::PLUS_PLUS
                                           ? TokenType::PLUS
                                           : TokenType::MINUS,
                                       declaredType));
             emitCoerceToType(declaredType);
             emitBytes(setOp, arg);
+            pushExprType(declaredType);
             return;
         }
 
@@ -585,14 +616,17 @@ void Compiler::namedVariable(const Token& name, bool canAssign) {
             advance();
             emitBytes(getOp, arg);
             expression();
-            emitCompoundBinary(assignmentType, declaredType);
+            TypeRef rhsType = popExprType();
+            emitCompoundBinary(assignmentType, declaredType, rhsType);
             emitCoerceToType(declaredType);
             emitBytes(setOp, arg);
+            pushExprType(declaredType);
             return;
         }
     }
 
     emitBytes(getOp, arg);
+    pushExprType(declaredType);
 }
 
 uint8_t Compiler::parseVariable(const std::string& message,
@@ -1409,6 +1443,7 @@ void Compiler::block() {
 void Compiler::ifStatement() {
     consume(TokenType::OPEN_PAREN, "Expected '(' after 'if'.");
     expression();
+    popExprType();
     consume(TokenType::CLOSE_PAREN, "Expected ')' after condition.");
 
     int thenJump = emitJump(OpCode::JUMP_IF_FALSE);
@@ -1433,6 +1468,7 @@ void Compiler::whileStatement() {
 
     consume(TokenType::OPEN_PAREN, "Expected '(' after 'while'.");
     expression();
+    popExprType();
     consume(TokenType::CLOSE_PAREN, "Expected ')' after condition.");
 
     int exitJump = emitJump(OpCode::JUMP_IF_FALSE);
@@ -1466,6 +1502,7 @@ void Compiler::forStatement() {
                 static_cast<uint8_t>(currentContext().locals.size() - 1);
 
             expression();
+            popExprType();
             consume(TokenType::CLOSE_PAREN,
                     "Expected ')' after foreach iterable.");
 
@@ -1503,6 +1540,17 @@ void Compiler::forStatement() {
         if (m_parser->current.type() == TokenType::EQUAL) {
             advance();
             expression();
+            TypeRef inferredType = popExprType();
+            if (!inferredType) {
+                inferredType = TypeInfo::makeAny();
+            }
+
+            if (currentContext().scopeDepth > 0 &&
+                !currentContext().locals.empty()) {
+                currentContext().locals.back().type = inferredType;
+            } else if (global < m_globalTypes.size()) {
+                m_globalTypes[global] = inferredType;
+            }
         } else {
             errorAtCurrent("'auto' declaration requires an initializer.");
             emitByte(OpCode::NIL);
@@ -1513,6 +1561,7 @@ void Compiler::forStatement() {
         defineVariable(global);
     } else {
         expression();
+        popExprType();
         consume(TokenType::SEMI_COLON, "Expected ';' after loop initializer.");
         emitByte(OpCode::POP);
     }
@@ -1522,6 +1571,7 @@ void Compiler::forStatement() {
 
     if (m_parser->current.type() != TokenType::SEMI_COLON) {
         expression();
+        popExprType();
         consume(TokenType::SEMI_COLON, "Expected ';' after loop condition.");
         exitJump = emitJump(OpCode::JUMP_IF_FALSE);
         emitByte(OpCode::POP);
@@ -1534,6 +1584,7 @@ void Compiler::forStatement() {
         int incrementStart = currentChunk()->count();
 
         expression();
+        popExprType();
         emitByte(OpCode::POP);
         consume(TokenType::CLOSE_PAREN, "Expected ')' after for clauses.");
 
@@ -1557,6 +1608,7 @@ void Compiler::forStatement() {
 
 void Compiler::printStatement() {
     expression();
+    popExprType();
     if (m_parser->current.type() == TokenType::SEMI_COLON) {
         advance();
     }
@@ -1576,6 +1628,7 @@ void Compiler::returnStatement() {
     }
 
     expression();
+    popExprType();
     emitCoerceToType(currentContext().returnType);
     emitCheckInstanceType(currentContext().returnType);
     if (m_parser->current.type() == TokenType::SEMI_COLON) {
@@ -1586,6 +1639,7 @@ void Compiler::returnStatement() {
 
 void Compiler::expressionStatement() {
     expression();
+    popExprType();
     if (m_parser->current.type() == TokenType::SEMI_COLON) {
         advance();
     }
@@ -1607,6 +1661,16 @@ void Compiler::autoVarDeclaration() {
 
     advance();
     expression();
+    TypeRef inferredType = popExprType();
+    if (!inferredType) {
+        inferredType = TypeInfo::makeAny();
+    }
+
+    if (currentContext().scopeDepth > 0 && !currentContext().locals.empty()) {
+        currentContext().locals.back().type = inferredType;
+    } else if (global < m_globalTypes.size()) {
+        m_globalTypes[global] = inferredType;
+    }
 
     consume(TokenType::SEMI_COLON,
             "Expected ';' after auto variable declaration.");
@@ -1626,6 +1690,7 @@ void Compiler::typedVarDeclaration() {
             "Expected '=' in typed variable declaration (initializer is "
             "required).");
     expression();
+    popExprType();
     emitCoerceToType(declaredType);
     emitCheckInstanceType(declaredType);
 
@@ -1783,7 +1848,14 @@ void Compiler::number(bool canAssign) {
     (void)canAssign;
     std::string literal(m_parser->previous.start(),
                         m_parser->previous.length());
-    emitConstant(std::stod(literal));
+    if (literal.find('.') != std::string::npos) {
+        emitConstant(std::stod(literal));
+        pushExprType(TypeInfo::makeF64());
+        return;
+    }
+
+    emitConstant(static_cast<int64_t>(std::stoll(literal)));
+    pushExprType(TypeInfo::makeI32());
 }
 
 void Compiler::variable(bool canAssign) {
@@ -1798,6 +1870,12 @@ void Compiler::thisExpression(bool canAssign) {
     }
 
     emitByte(OpCode::GET_THIS);
+
+    if (m_currentClass && !m_currentClass->className.empty()) {
+        pushExprType(TypeInfo::makeClass(m_currentClass->className));
+    } else {
+        pushExprType(TypeInfo::makeAny());
+    }
 }
 
 void Compiler::superExpression(bool canAssign) {
@@ -1816,7 +1894,21 @@ void Compiler::superExpression(bool canAssign) {
     consume(TokenType::DOT, "Expected '.' after 'super'.");
     consume(TokenType::IDENTIFIER, "Expected superclass method name.");
     uint8_t name = identifierConstant(m_parser->previous);
+    std::string methodName(m_parser->previous.start(),
+                           m_parser->previous.length());
     emitBytes(OpCode::GET_SUPER, name);
+
+    TypeRef methodType = TypeInfo::makeAny();
+    if (m_currentClass && !m_currentClass->className.empty()) {
+        auto classIt = m_classMethodSignatures.find(m_currentClass->className);
+        if (classIt != m_classMethodSignatures.end()) {
+            auto methodIt = classIt->second.find(methodName);
+            if (methodIt != classIt->second.end() && methodIt->second) {
+                methodType = methodIt->second;
+            }
+        }
+    }
+    pushExprType(methodType);
 }
 
 void Compiler::literal(bool canAssign) {
@@ -1824,13 +1916,16 @@ void Compiler::literal(bool canAssign) {
     switch (m_parser->previous.type()) {
         case TokenType::TRUE:
             emitByte(OpCode::TRUE_LITERAL);
+            pushExprType(TypeInfo::makeBool());
             break;
         case TokenType::FALSE:
             emitByte(OpCode::FALSE_LITERAL);
+            pushExprType(TypeInfo::makeBool());
             break;
         case TokenType::_NULL:
         case TokenType::TYPE_NULL_KW:
             emitByte(OpCode::NIL);
+            pushExprType(TypeInfo::makeNull());
             break;
         default:
             return;
@@ -1848,6 +1943,7 @@ void Compiler::stringLiteral(bool canAssign) {
 
     std::string value = tokenText.substr(1, tokenText.length() - 2);
     emitConstant(Value(value));
+    pushExprType(TypeInfo::makeStr());
 }
 
 void Compiler::grouping(bool canAssign) {
@@ -1860,9 +1956,29 @@ void Compiler::arrayLiteral(bool canAssign) {
     (void)canAssign;
 
     uint8_t count = 0;
+    TypeRef inferredElementType = nullptr;
     if (m_parser->current.type() != TokenType::CLOSE_BRACKET) {
         do {
             expression();
+            TypeRef elementType = popExprType();
+            if (!inferredElementType) {
+                inferredElementType = elementType;
+            } else if (elementType && inferredElementType &&
+                       elementType->isNumeric() &&
+                       inferredElementType->isNumeric()) {
+                TypeRef promoted =
+                    numericPromotion(inferredElementType, elementType);
+                inferredElementType = promoted ? promoted : TypeInfo::makeAny();
+            } else if (elementType && inferredElementType &&
+                       isAssignable(elementType, inferredElementType)) {
+                // keep inferredElementType
+            } else if (elementType && inferredElementType &&
+                       isAssignable(inferredElementType, elementType)) {
+                inferredElementType = elementType;
+            } else {
+                inferredElementType = TypeInfo::makeAny();
+            }
+
             if (count == UINT8_MAX) {
                 errorAtCurrent(
                     "Array literal cannot have more than 255 elements.");
@@ -1879,18 +1995,54 @@ void Compiler::arrayLiteral(bool canAssign) {
 
     consume(TokenType::CLOSE_BRACKET, "Expected ']' after array literal.");
     emitBytes(OpCode::BUILD_ARRAY, count);
+    pushExprType(TypeInfo::makeArray(
+        inferredElementType ? inferredElementType : TypeInfo::makeAny()));
 }
 
 void Compiler::dictLiteral(bool canAssign) {
     (void)canAssign;
 
     uint8_t pairCount = 0;
+    TypeRef inferredKeyType = nullptr;
+    TypeRef inferredValueType = nullptr;
     if (m_parser->current.type() != TokenType::CLOSE_CURLY) {
         do {
             expression();
+            TypeRef keyType = popExprType();
             consume(TokenType::COLON,
                     "Expected ':' between dictionary key and value.");
             expression();
+            TypeRef valueType = popExprType();
+
+            if (!inferredKeyType) {
+                inferredKeyType = keyType;
+            } else if (keyType && inferredKeyType &&
+                       isAssignable(keyType, inferredKeyType)) {
+                // keep inferredKeyType
+            } else if (keyType && inferredKeyType &&
+                       isAssignable(inferredKeyType, keyType)) {
+                inferredKeyType = keyType;
+            } else {
+                inferredKeyType = TypeInfo::makeAny();
+            }
+
+            if (!inferredValueType) {
+                inferredValueType = valueType;
+            } else if (valueType && inferredValueType &&
+                       valueType->isNumeric() &&
+                       inferredValueType->isNumeric()) {
+                TypeRef promoted =
+                    numericPromotion(inferredValueType, valueType);
+                inferredValueType = promoted ? promoted : TypeInfo::makeAny();
+            } else if (valueType && inferredValueType &&
+                       isAssignable(valueType, inferredValueType)) {
+                // keep inferredValueType
+            } else if (valueType && inferredValueType &&
+                       isAssignable(inferredValueType, valueType)) {
+                inferredValueType = valueType;
+            } else {
+                inferredValueType = TypeInfo::makeAny();
+            }
 
             if (pairCount == UINT8_MAX) {
                 errorAtCurrent(
@@ -1908,6 +2060,9 @@ void Compiler::dictLiteral(bool canAssign) {
 
     consume(TokenType::CLOSE_CURLY, "Expected '}' after dictionary literal.");
     emitBytes(OpCode::BUILD_DICT, pairCount);
+    pushExprType(TypeInfo::makeDict(
+        inferredKeyType ? inferredKeyType : TypeInfo::makeAny(),
+        inferredValueType ? inferredValueType : TypeInfo::makeAny()));
 }
 
 void Compiler::unary(bool canAssign) {
@@ -1915,17 +2070,28 @@ void Compiler::unary(bool canAssign) {
     TokenType operatorType = m_parser->previous.type();
 
     parsePrecedence(PREC_UNARY);
+    TypeRef operandType = popExprType();
+    TypeRef resultType = TypeInfo::makeAny();
 
     switch (operatorType) {
         case TokenType::BANG:
             emitByte(OpCode::NOT);
+            resultType = TypeInfo::makeBool();
             break;
         case TokenType::MINUS:
-            emitByte(OpCode::NEGATE);
+            if (operandType && operandType->isInteger()) {
+                emitByte(OpCode::INT_NEGATE);
+                resultType = operandType;
+            } else {
+                emitByte(OpCode::NEGATE);
+                resultType = operandType;
+            }
             break;
         default:
             return;
     }
+
+    pushExprType(resultType);
 }
 
 void Compiler::prefixUpdate(bool canAssign) {
@@ -1963,11 +2129,12 @@ void Compiler::prefixUpdate(bool canAssign) {
         }
 
         emitBytes(getOp, arg);
-        emitConstant(Value(1.0));
+        emitConstant(Value(static_cast<int64_t>(1)));
         emitByte(arithmeticOpcode(
             isIncrement ? TokenType::PLUS : TokenType::MINUS, declaredType));
         emitCoerceToType(declaredType);
         emitBytes(setOp, arg);
+        pushExprType(declaredType);
     };
 
     if (m_parser->current.type() == TokenType::IDENTIFIER) {
@@ -2014,57 +2181,117 @@ void Compiler::prefixUpdate(bool canAssign) {
 
     emitByte(OpCode::DUP);
     emitBytes(OpCode::GET_PROPERTY, propertyName);
-    emitConstant(Value(1.0));
+    emitConstant(Value(static_cast<int64_t>(1)));
     emitByte(isIncrement ? OpCode::ADD : OpCode::SUB);
     emitBytes(OpCode::SET_PROPERTY, propertyName);
+    pushExprType(TypeInfo::makeAny());
 }
 
 void Compiler::binary(bool canAssign) {
     (void)canAssign;
     TokenType operatorType = m_parser->previous.type();
+    TypeRef leftType = popExprType();
     ParseRule rule = getRule(operatorType);
     parsePrecedence(static_cast<Precedence>(rule.precedence + 1));
+    TypeRef rightType = popExprType();
+
+    TypeRef resultType = TypeInfo::makeAny();
+    TypeRef promotedNumeric = numericPromotion(leftType, rightType);
 
     switch (operatorType) {
         case TokenType::PLUS:
-            emitByte(OpCode::ADD);
+            if (leftType && rightType && leftType->kind == TypeKind::STR &&
+                rightType->kind == TypeKind::STR) {
+                emitByte(OpCode::ADD);
+                resultType = TypeInfo::makeStr();
+            } else if (promotedNumeric) {
+                emitByte(arithmeticOpcode(operatorType, promotedNumeric));
+                resultType = promotedNumeric;
+            } else {
+                emitByte(OpCode::ADD);
+            }
             break;
         case TokenType::MINUS:
-            emitByte(OpCode::SUB);
+            if (promotedNumeric) {
+                emitByte(arithmeticOpcode(operatorType, promotedNumeric));
+                resultType = promotedNumeric;
+            } else {
+                emitByte(OpCode::SUB);
+            }
             break;
         case TokenType::STAR:
-            emitByte(OpCode::MULT);
+            if (promotedNumeric) {
+                emitByte(arithmeticOpcode(operatorType, promotedNumeric));
+                resultType = promotedNumeric;
+            } else {
+                emitByte(OpCode::MULT);
+            }
             break;
         case TokenType::SLASH:
-            emitByte(OpCode::DIV);
+            if (promotedNumeric) {
+                emitByte(arithmeticOpcode(operatorType, promotedNumeric));
+                resultType = promotedNumeric;
+            } else {
+                emitByte(OpCode::DIV);
+            }
             break;
         case TokenType::GREATER:
-            emitByte(OpCode::GREATER_THAN);
+            if (promotedNumeric && promotedNumeric->isInteger() &&
+                promotedNumeric->isSigned()) {
+                emitByte(OpCode::IGREATER);
+            } else {
+                emitByte(OpCode::GREATER_THAN);
+            }
+            resultType = TypeInfo::makeBool();
             break;
         case TokenType::GREATER_EQUAL:
-            emitByte(OpCode::GREATER_EQUAL_THAN);
+            if (promotedNumeric && promotedNumeric->isInteger() &&
+                promotedNumeric->isSigned()) {
+                emitByte(OpCode::IGREATER_EQ);
+            } else {
+                emitByte(OpCode::GREATER_EQUAL_THAN);
+            }
+            resultType = TypeInfo::makeBool();
             break;
         case TokenType::LESS:
-            emitByte(OpCode::LESS_THAN);
+            if (promotedNumeric && promotedNumeric->isInteger() &&
+                promotedNumeric->isSigned()) {
+                emitByte(OpCode::ILESS);
+            } else {
+                emitByte(OpCode::LESS_THAN);
+            }
+            resultType = TypeInfo::makeBool();
             break;
         case TokenType::LESS_EQUAL:
-            emitByte(OpCode::LESS_EQUAL_THAN);
+            if (promotedNumeric && promotedNumeric->isInteger() &&
+                promotedNumeric->isSigned()) {
+                emitByte(OpCode::ILESS_EQ);
+            } else {
+                emitByte(OpCode::LESS_EQUAL_THAN);
+            }
+            resultType = TypeInfo::makeBool();
             break;
         case TokenType::SHIFT_LEFT_TOKEN:
             emitByte(OpCode::SHIFT_LEFT);
+            resultType = leftType;
             break;
         case TokenType::SHIFT_RIGHT_TOKEN:
             emitByte(OpCode::SHIFT_RIGHT);
+            resultType = leftType;
             break;
         case TokenType::EQUAL_EQUAL:
             emitByte(OpCode::EQUAL_OP);
+            resultType = TypeInfo::makeBool();
             break;
         case TokenType::BANG_EQUAL:
             emitByte(OpCode::NOT_EQUAL_OP);
+            resultType = TypeInfo::makeBool();
             break;
         default:
             return;
     }
+
+    pushExprType(resultType);
 }
 
 void Compiler::castOperator(bool canAssign) {
@@ -2076,28 +2303,38 @@ void Compiler::castOperator(bool canAssign) {
         return;
     }
 
+    popExprType();
+
     if (targetType->isInteger()) {
         emitBytes(OpCode::NARROW_INT, static_cast<uint8_t>(targetType->kind));
+        pushExprType(targetType);
         return;
     }
 
     if (targetType->isFloat()) {
         emitByte(OpCode::INT_TO_FLOAT);
+        pushExprType(targetType);
         return;
     }
 
     if (targetType->kind == TypeKind::STR) {
         emitByte(OpCode::INT_TO_STR);
     }
+
+    pushExprType(targetType);
 }
 
 void Compiler::call(bool canAssign) {
     (void)canAssign;
 
+    TypeRef calleeType = popExprType();
+    std::vector<TypeRef> argumentTypes;
+
     uint8_t argCount = 0;
     if (m_parser->current.type() != TokenType::CLOSE_PAREN) {
         do {
             expression();
+            argumentTypes.push_back(popExprType());
             if (argCount == UINT8_MAX) {
                 errorAtCurrent("Cannot have more than 255 arguments.");
                 break;
@@ -2113,11 +2350,44 @@ void Compiler::call(bool canAssign) {
 
     consume(TokenType::CLOSE_PAREN, "Expected ')' after arguments.");
     emitBytes(OpCode::CALL, argCount);
+
+    if (calleeType && calleeType->kind == TypeKind::FUNCTION &&
+        calleeType->returnType) {
+        pushExprType(calleeType->returnType);
+    } else {
+        pushExprType(TypeInfo::makeAny());
+    }
 }
 
 void Compiler::dot(bool canAssign) {
+    TypeRef objectType = popExprType();
     consume(TokenType::IDENTIFIER, "Expected property name after '.'.");
+    Token propertyToken = m_parser->previous;
     uint8_t name = identifierConstant(m_parser->previous);
+    std::string propertyName(propertyToken.start(), propertyToken.length());
+
+    TypeRef memberType = TypeInfo::makeAny();
+    if (objectType && objectType->kind == TypeKind::CLASS) {
+        auto classFields = m_classFieldTypes.find(objectType->className);
+        if (classFields != m_classFieldTypes.end()) {
+            auto fieldIt = classFields->second.find(propertyName);
+            if (fieldIt != classFields->second.end() && fieldIt->second) {
+                memberType = fieldIt->second;
+            }
+        }
+
+        if (!memberType || memberType->isAny()) {
+            auto classMethods =
+                m_classMethodSignatures.find(objectType->className);
+            if (classMethods != m_classMethodSignatures.end()) {
+                auto methodIt = classMethods->second.find(propertyName);
+                if (methodIt != classMethods->second.end() &&
+                    methodIt->second) {
+                    memberType = methodIt->second;
+                }
+            }
+        }
+    }
 
     if (canAssign) {
         TokenType assignmentType = m_parser->current.type();
@@ -2125,7 +2395,10 @@ void Compiler::dot(bool canAssign) {
         if (assignmentType == TokenType::EQUAL) {
             advance();
             expression();
+            TypeRef rhsType = popExprType();
             emitBytes(OpCode::SET_PROPERTY, name);
+            pushExprType((memberType && !memberType->isAny()) ? memberType
+                                                              : rhsType);
             return;
         }
 
@@ -2134,10 +2407,11 @@ void Compiler::dot(bool canAssign) {
             advance();
             emitByte(OpCode::DUP);
             emitBytes(OpCode::GET_PROPERTY, name);
-            emitConstant(Value(1.0));
+            emitConstant(Value(static_cast<int64_t>(1)));
             emitByte(assignmentType == TokenType::PLUS_PLUS ? OpCode::ADD
                                                             : OpCode::SUB);
             emitBytes(OpCode::SET_PROPERTY, name);
+            pushExprType(memberType);
             return;
         }
 
@@ -2151,21 +2425,38 @@ void Compiler::dot(bool canAssign) {
             emitByte(OpCode::DUP);
             emitBytes(OpCode::GET_PROPERTY, name);
             expression();
-            emitCompoundBinary(assignmentType);
+            TypeRef rhsType = popExprType();
+            emitCompoundBinary(assignmentType, memberType, rhsType);
             emitBytes(OpCode::SET_PROPERTY, name);
+            pushExprType(memberType);
             return;
         }
     }
 
     emitBytes(OpCode::GET_PROPERTY, name);
+    pushExprType(memberType);
 }
 
 void Compiler::subscript(bool canAssign) {
+    TypeRef containerType = popExprType();
     expression();
+    popExprType();
     consume(TokenType::CLOSE_BRACKET, "Expected ']' after index.");
+
+    TypeRef elementType = TypeInfo::makeAny();
+    if (containerType) {
+        if (containerType->kind == TypeKind::ARRAY &&
+            containerType->elementType) {
+            elementType = containerType->elementType;
+        } else if (containerType->kind == TypeKind::DICT &&
+                   containerType->valueType) {
+            elementType = containerType->valueType;
+        }
+    }
 
     if (!canAssign) {
         emitByte(OpCode::GET_INDEX);
+        pushExprType(elementType);
         return;
     }
 
@@ -2173,7 +2464,10 @@ void Compiler::subscript(bool canAssign) {
     if (assignmentType == TokenType::EQUAL) {
         advance();
         expression();
+        TypeRef rhsType = popExprType();
         emitByte(OpCode::SET_INDEX);
+        pushExprType((elementType && !elementType->isAny()) ? elementType
+                                                            : rhsType);
         return;
     }
 
@@ -2182,10 +2476,11 @@ void Compiler::subscript(bool canAssign) {
         advance();
         emitByte(OpCode::DUP2);
         emitByte(OpCode::GET_INDEX);
-        emitConstant(Value(1.0));
+        emitConstant(Value(static_cast<int64_t>(1)));
         emitByte(assignmentType == TokenType::PLUS_PLUS ? OpCode::ADD
                                                         : OpCode::SUB);
         emitByte(OpCode::SET_INDEX);
+        pushExprType(elementType);
         return;
     }
 
@@ -2199,25 +2494,32 @@ void Compiler::subscript(bool canAssign) {
         emitByte(OpCode::DUP2);
         emitByte(OpCode::GET_INDEX);
         expression();
-        emitCompoundBinary(assignmentType);
+        TypeRef rhsType = popExprType();
+        emitCompoundBinary(assignmentType, elementType, rhsType);
         emitByte(OpCode::SET_INDEX);
+        pushExprType(elementType);
         return;
     }
 
     emitByte(OpCode::GET_INDEX);
+    pushExprType(elementType);
 }
 
 void Compiler::andOperator(bool canAssign) {
     (void)canAssign;
+    TypeRef leftType = popExprType();
     int endJump = emitJump(OpCode::JUMP_IF_FALSE);
 
     emitByte(OpCode::POP);
     parsePrecedence(PREC_AND);
+    TypeRef rightType = popExprType();
     patchJump(endJump);
+    pushExprType((leftType && !leftType->isAny()) ? leftType : rightType);
 }
 
 void Compiler::orOperator(bool canAssign) {
     (void)canAssign;
+    TypeRef leftType = popExprType();
     int elseJump = emitJump(OpCode::JUMP_IF_FALSE);
     int endJump = emitJump(OpCode::JUMP);
 
@@ -2225,7 +2527,9 @@ void Compiler::orOperator(bool canAssign) {
     emitByte(OpCode::POP);
 
     parsePrecedence(PREC_OR);
+    TypeRef rightType = popExprType();
     patchJump(endJump);
+    pushExprType((leftType && !leftType->isAny()) ? leftType : rightType);
 }
 
 Compiler::CompiledFunction Compiler::compileFunction(
