@@ -1,0 +1,20 @@
+var d = {};
+
+var start = clock();
+
+for (var i = 0; i < 30000; i++) {
+  var key = "key" + str(i);
+  d[key] = i;
+}
+
+var sum = 0;
+for (var i = 0; i < 30000; i++) {
+  var key = "key" + str(i);
+  sum += d[key];
+}
+
+var elapsed = clock() - start;
+
+print sum;
+print d.size();
+print elapsed;

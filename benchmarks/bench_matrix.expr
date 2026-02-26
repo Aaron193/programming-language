@@ -1,0 +1,36 @@
+var n = 30;
+var size = n * n;
+
+var a = [];
+var b = [];
+var c = [];
+
+for (var i = 0; i < n; i++) {
+  for (var j = 0; j < n; j++) {
+    a.push(i + j);
+    b.push(i * j);
+    c.push(0);
+  }
+}
+
+var start = clock();
+
+for (var row = 0; row < n; row++) {
+  for (var col = 0; col < n; col++) {
+    var sum = 0;
+    for (var k = 0; k < n; k++) {
+      sum += a[row * n + k] * b[k * n + col];
+    }
+    c[row * n + col] = sum;
+  }
+}
+
+var checksum = 0;
+for (var idx = 0; idx < size; idx++) {
+  checksum += c[idx];
+}
+
+var elapsed = clock() - start;
+
+print checksum;
+print elapsed;
