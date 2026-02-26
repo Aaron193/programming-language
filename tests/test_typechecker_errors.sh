@@ -77,6 +77,10 @@ run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/optional_member_access_without_check.expr" \
     "cannot access members on optional value of type 'Dog?' without a null check" || failed=1
 
+run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/optional_call_without_check.expr" \
+    "cannot call optional value of type 'Dog?' without a null check" || failed=1
+
 if [[ $failed -ne 0 ]]; then
     exit 1
 fi
