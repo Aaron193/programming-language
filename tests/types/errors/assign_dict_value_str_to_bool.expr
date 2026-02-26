@@ -1,0 +1,1 @@
+Dict<str, bool> flags = {"ready": "yes"};

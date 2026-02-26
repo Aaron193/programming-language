@@ -1,5 +1,6 @@
 #include "Compiler.hpp"
 
+#include <functional>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -9,6 +10,12 @@
 #include "ModuleResolver.hpp"
 #include "StdLib.hpp"
 #include "TypeChecker.hpp"
+
+namespace {
+bool isCollectionTypeNameText(std::string_view name) {
+    return name == "Array" || name == "Dict" || name == "Set";
+}
+}  // namespace
 
 bool Compiler::compile(std::string_view source, Chunk& chunk,
                        const std::string& sourcePath) {
@@ -124,10 +131,90 @@ void Compiler::collectClassNames(std::string_view source) {
 
 void Compiler::collectFunctionSignatures(std::string_view source) {
     Scanner scanner(source);
+    bool hasBufferedToken = false;
+    Token bufferedToken;
+
+    auto nextToken = [&]() -> Token {
+        if (hasBufferedToken) {
+            hasBufferedToken = false;
+            return bufferedToken;
+        }
+        return scanner.nextToken();
+    };
+
+    auto peekToken = [&]() -> Token {
+        if (!hasBufferedToken) {
+            bufferedToken = scanner.nextToken();
+            hasBufferedToken = true;
+        }
+        return bufferedToken;
+    };
+
+    std::function<TypeRef(const Token&)> parseTypeFromToken;
+    parseTypeFromToken = [&](const Token& token) -> TypeRef {
+        if (isTypeToken(token.type())) {
+            return tokenToType(token);
+        }
+
+        if (token.type() != TokenType::IDENTIFIER) {
+            return nullptr;
+        }
+
+        std::string name(token.start(), token.length());
+        if (isCollectionTypeNameText(name)) {
+            Token lessToken = nextToken();
+            if (lessToken.type() != TokenType::LESS) {
+                return nullptr;
+            }
+
+            if (name == "Array") {
+                TypeRef elementType = parseTypeFromToken(nextToken());
+                Token greaterToken = nextToken();
+                if (!elementType || greaterToken.type() != TokenType::GREATER) {
+                    return nullptr;
+                }
+                return TypeInfo::makeArray(elementType);
+            }
+
+            if (name == "Set") {
+                TypeRef elementType = parseTypeFromToken(nextToken());
+                Token greaterToken = nextToken();
+                if (!elementType || greaterToken.type() != TokenType::GREATER) {
+                    return nullptr;
+                }
+                return TypeInfo::makeSet(elementType);
+            }
+
+            TypeRef keyType = parseTypeFromToken(nextToken());
+            if (!keyType) {
+                return nullptr;
+            }
+            Token commaToken = nextToken();
+            if (commaToken.type() != TokenType::COMMA) {
+                return nullptr;
+            }
+            TypeRef valueType = parseTypeFromToken(nextToken());
+            if (!valueType) {
+                return nullptr;
+            }
+            Token greaterToken = nextToken();
+            if (greaterToken.type() != TokenType::GREATER) {
+                return nullptr;
+            }
+            return TypeInfo::makeDict(keyType, valueType);
+        }
+
+        if (m_classNames.find(name) != m_classNames.end()) {
+            return TypeInfo::makeClass(name);
+        }
+
+        return nullptr;
+    };
+
     int classDepth = 0;
 
     while (true) {
-        Token token = scanner.nextToken();
+        Token token = nextToken();
         if (token.type() == TokenType::END_OF_FILE) {
             return;
         }
@@ -145,64 +232,41 @@ void Compiler::collectFunctionSignatures(std::string_view source) {
             continue;
         }
 
-        Token functionName = scanner.nextToken();
+        Token functionName = nextToken();
         if (functionName.type() != TokenType::IDENTIFIER) {
             continue;
         }
 
-        Token openParen = scanner.nextToken();
+        Token openParen = nextToken();
         if (openParen.type() != TokenType::OPEN_PAREN) {
             continue;
         }
 
         std::vector<TypeRef> params;
-        Token current = scanner.nextToken();
+        Token current = nextToken();
         if (current.type() != TokenType::CLOSE_PAREN) {
             while (true) {
-                Token maybeType = current;
-                Token maybeName;
                 TypeRef parameterType = TypeInfo::makeAny();
 
-                if (isTypeToken(maybeType.type())) {
-                    parameterType = tokenToType(maybeType);
-                    maybeName = scanner.nextToken();
-                } else if (maybeType.type() == TokenType::IDENTIFIER) {
-                    Token lookahead = scanner.nextToken();
-                    if (lookahead.type() == TokenType::IDENTIFIER) {
-                        TypeRef identifierType = tokenToType(maybeType);
-                        if (identifierType) {
-                            parameterType = identifierType;
-                            maybeName = lookahead;
-                        } else {
-                            maybeName = maybeType;
-                            current = lookahead;
-                            params.push_back(parameterType);
-
-                            if (current.type() == TokenType::COMMA) {
-                                current = scanner.nextToken();
-                                continue;
-                            }
-                            if (current.type() == TokenType::CLOSE_PAREN) {
-                                break;
-                            }
-                            break;
+                Token maybeName = current;
+                if (isTypeToken(current.type())) {
+                    parameterType = parseTypeFromToken(current);
+                    maybeName = nextToken();
+                } else if (current.type() == TokenType::IDENTIFIER) {
+                    std::string typeName(current.start(), current.length());
+                    if (isCollectionTypeNameText(typeName)) {
+                        if (peekToken().type() == TokenType::LESS) {
+                            parameterType = parseTypeFromToken(current);
+                            maybeName = nextToken();
                         }
                     } else {
-                        maybeName = maybeType;
-                        current = lookahead;
-                        params.push_back(parameterType);
-
-                        if (current.type() == TokenType::COMMA) {
-                            current = scanner.nextToken();
-                            continue;
+                        Token lookahead = peekToken();
+                        if (lookahead.type() == TokenType::IDENTIFIER &&
+                            m_classNames.find(typeName) != m_classNames.end()) {
+                            parameterType = TypeInfo::makeClass(typeName);
+                            maybeName = nextToken();
                         }
-                        if (current.type() == TokenType::CLOSE_PAREN) {
-                            break;
-                        }
-                        break;
                     }
-                } else {
-                    break;
                 }
 
                 if (maybeName.type() != TokenType::IDENTIFIER) {
@@ -211,10 +275,10 @@ void Compiler::collectFunctionSignatures(std::string_view source) {
 
                 params.push_back(parameterType ? parameterType
                                                : TypeInfo::makeAny());
-                current = scanner.nextToken();
+                current = nextToken();
 
                 if (current.type() == TokenType::COMMA) {
-                    current = scanner.nextToken();
+                    current = nextToken();
                     continue;
                 }
                 if (current.type() == TokenType::CLOSE_PAREN) {
@@ -225,10 +289,10 @@ void Compiler::collectFunctionSignatures(std::string_view source) {
         }
 
         TypeRef returnType = TypeInfo::makeAny();
-        Token maybeArrow = scanner.nextToken();
+        Token maybeArrow = nextToken();
         if (maybeArrow.type() == TokenType::ARROW) {
-            Token returnToken = scanner.nextToken();
-            TypeRef typedReturn = tokenToType(returnToken);
+            Token returnToken = nextToken();
+            TypeRef typedReturn = parseTypeFromToken(returnToken);
             if (typedReturn) {
                 returnType = typedReturn;
             }
@@ -680,6 +744,34 @@ bool Compiler::isTypeToken(TokenType type) const {
     }
 }
 
+bool Compiler::isCollectionTypeName(const Token& token) const {
+    if (token.type() != TokenType::IDENTIFIER) {
+        return false;
+    }
+
+    std::string_view name(token.start(), token.length());
+    return isCollectionTypeNameText(name);
+}
+
+bool Compiler::isTypedTypeAnnotationStart() {
+    if (isTypeToken(m_parser->current.type())) {
+        return true;
+    }
+
+    if (m_parser->current.type() != TokenType::IDENTIFIER) {
+        return false;
+    }
+
+    const Token& next = peekNextToken();
+    if (isCollectionTypeName(m_parser->current)) {
+        return next.type() == TokenType::LESS;
+    }
+
+    std::string typeName(m_parser->current.start(), m_parser->current.length());
+    return m_classNames.find(typeName) != m_classNames.end() &&
+           next.type() == TokenType::IDENTIFIER;
+}
+
 bool Compiler::parseTypeExpr() { return parseTypeExprType() != nullptr; }
 
 TypeRef Compiler::parseTypeExprType() {
@@ -690,7 +782,50 @@ TypeRef Compiler::parseTypeExprType() {
     }
 
     if (m_parser->current.type() == TokenType::IDENTIFIER) {
-        TypeRef type = tokenToType(m_parser->current);
+        Token identifierToken = m_parser->current;
+        std::string name(identifierToken.start(), identifierToken.length());
+
+        if (isCollectionTypeName(identifierToken)) {
+            advance();
+            consume(TokenType::LESS,
+                    "Expected '<' after collection type name.");
+
+            if (name == "Array") {
+                TypeRef elementType = parseTypeExprType();
+                if (!elementType) {
+                    errorAtCurrent("Expected element type in Array<T>.");
+                    return nullptr;
+                }
+                consume(TokenType::GREATER, "Expected '>' after Array type.");
+                return TypeInfo::makeArray(elementType);
+            }
+
+            if (name == "Set") {
+                TypeRef elementType = parseTypeExprType();
+                if (!elementType) {
+                    errorAtCurrent("Expected element type in Set<T>.");
+                    return nullptr;
+                }
+                consume(TokenType::GREATER, "Expected '>' after Set type.");
+                return TypeInfo::makeSet(elementType);
+            }
+
+            TypeRef keyType = parseTypeExprType();
+            if (!keyType) {
+                errorAtCurrent("Expected key type in Dict<K, V>.");
+                return nullptr;
+            }
+            consume(TokenType::COMMA, "Expected ',' in Dict<K, V> type.");
+            TypeRef valueType = parseTypeExprType();
+            if (!valueType) {
+                errorAtCurrent("Expected value type in Dict<K, V>.");
+                return nullptr;
+            }
+            consume(TokenType::GREATER, "Expected '>' after Dict type.");
+            return TypeInfo::makeDict(keyType, valueType);
+        }
+
+        TypeRef type = tokenToType(identifierToken);
         if (!type) return nullptr;
         advance();
         return type;
@@ -700,13 +835,22 @@ TypeRef Compiler::parseTypeExprType() {
 }
 
 bool Compiler::isTypedVarDeclarationStart() {
-    if (!isTypeToken(m_parser->current.type()) &&
-        m_parser->current.type() != TokenType::IDENTIFIER) {
+    if (isTypeToken(m_parser->current.type())) {
+        return peekNextToken().type() == TokenType::IDENTIFIER;
+    }
+
+    if (m_parser->current.type() != TokenType::IDENTIFIER) {
         return false;
     }
 
     const Token& next = peekNextToken();
-    return next.type() == TokenType::IDENTIFIER;
+    if (isCollectionTypeName(m_parser->current)) {
+        return next.type() == TokenType::LESS;
+    }
+
+    std::string typeName(m_parser->current.start(), m_parser->current.length());
+    return m_classNames.find(typeName) != m_classNames.end() &&
+           next.type() == TokenType::IDENTIFIER;
 }
 
 void Compiler::advance() {
@@ -1067,9 +1211,7 @@ void Compiler::classDeclaration() {
 }
 
 void Compiler::classMemberDeclaration() {
-    if (isTypeToken(m_parser->current.type()) ||
-        (m_parser->current.type() == TokenType::IDENTIFIER &&
-         peekNextToken().type() == TokenType::IDENTIFIER)) {
+    if (isTypedTypeAnnotationStart()) {
         typedClassMemberDeclaration();
         return;
     }
@@ -2064,9 +2206,7 @@ Compiler::CompiledFunction Compiler::compileFunction(
     if (m_parser->current.type() != TokenType::CLOSE_PAREN) {
         do {
             TypeRef parameterType = TypeInfo::makeAny();
-            if (isTypeToken(m_parser->current.type()) ||
-                (m_parser->current.type() == TokenType::IDENTIFIER &&
-                 peekNextToken().type() == TokenType::IDENTIFIER)) {
+            if (isTypedTypeAnnotationStart()) {
                 parameterType = parseTypeExprType();
                 if (!parameterType) {
                     errorAtCurrent("Expected parameter type annotation.");

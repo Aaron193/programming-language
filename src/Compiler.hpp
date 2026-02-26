@@ -167,6 +167,8 @@ class Compiler {
     void varDeclaration();
     void typedVarDeclaration();
     bool isTypeToken(TokenType type) const;
+    bool isCollectionTypeName(const Token& token) const;
+    bool isTypedTypeAnnotationStart();
     bool isTypedVarDeclarationStart();
     bool parseTypeExpr();
     TypeRef parseTypeExprType();

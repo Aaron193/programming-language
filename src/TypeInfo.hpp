@@ -43,6 +43,10 @@ struct TypeInfo {
     std::vector<TypeRef> paramTypes;
     TypeRef returnType;
 
+    TypeRef elementType;
+    TypeRef keyType;
+    TypeRef valueType;
+
     explicit TypeInfo(TypeKind kind) : kind(kind) {}
 
     static TypeRef makeI8();
@@ -63,6 +67,9 @@ struct TypeInfo {
     static TypeRef makeNull();
     static TypeRef makeClass(const std::string& name);
     static TypeRef makeFunction(std::vector<TypeRef> params, TypeRef ret);
+    static TypeRef makeArray(TypeRef element);
+    static TypeRef makeDict(TypeRef key, TypeRef value);
+    static TypeRef makeSet(TypeRef element);
 
     bool isInteger() const;
     bool isFloat() const;
