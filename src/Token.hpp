@@ -59,7 +59,6 @@ enum TokenType {
     _NULL,
     THIS,
     AUTO,
-    VAR,
     _RETURN,
     IMPORT,
     EXPORT,

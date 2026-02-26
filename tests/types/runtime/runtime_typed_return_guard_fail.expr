@@ -7,7 +7,7 @@ function id(x) {
 }
 
 function makeDog() -> Dog {
-    var dynamic = id(Cat());
+    auto dynamic = id(Cat());
     return dynamic;
 }
 

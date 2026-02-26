@@ -1,15 +1,15 @@
-var nums = [1, 2, 3];
-for (var n : nums) {
+auto nums = [1, 2, 3];
+for (auto n : nums) {
   print n;
 }
 
-var dict = {"b": 2, "a": 1};
-for (var key : dict) {
+auto dict = {"b": 2, "a": 1};
+for (auto key : dict) {
   print key;
   print dict[key];
 }
 
-var set = Set(4, 5, 4);
-for (var item : set) {
+auto set = Set(4, 5, 4);
+for (auto item : set) {
   print item;
 }

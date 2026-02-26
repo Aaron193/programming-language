@@ -1,17 +1,17 @@
-var n = 5000;
-var arr = [];
+auto n = 5000;
+auto arr = [];
 
-for (var value = n; value > 0; value--) {
+for (auto value = n; value > 0; value--) {
   arr.push(value);
 }
 
-var start = clock();
+auto start = clock();
 
-var i = 1;
+auto i = 1;
 while (i < arr.size()) {
-  var key = arr[i];
-  var j = i - 1;
-  var shifting = true;
+  auto key = arr[i];
+  auto j = i - 1;
+  auto shifting = true;
 
   while (j >= 0 and shifting) {
     if (arr[j] > key) {
@@ -26,7 +26,7 @@ while (i < arr.size()) {
   i = i + 1;
 }
 
-var elapsed = clock() - start;
+auto elapsed = clock() - start;
 
 print arr[0];
 print arr[n - 1];

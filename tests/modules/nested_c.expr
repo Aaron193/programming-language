@@ -1,1 +1,1 @@
-export var C = 40;
+export auto C = 40;

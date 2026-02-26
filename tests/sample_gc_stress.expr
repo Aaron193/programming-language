@@ -1,12 +1,12 @@
-var i = 0;
+auto i = 0;
 while (i < 40000) {
-  var a = [];
+  auto a = [];
   a.push(i);
 
-  var d = {};
+  auto d = {};
   d["i"] = i;
 
-  var s = Set();
+  auto s = Set();
   s.add(i);
 
   i = i + 1;

@@ -1,11 +1,11 @@
-var limit = 100000;
-var composite = [];
+auto limit = 100000;
+auto composite = [];
 
-for (var i = 0; i <= limit; i++) {
+for (auto i = 0; i <= limit; i++) {
   composite.push(false);
 }
 
-var start = clock();
+auto start = clock();
 
 i64 p = 2;
 while (p * p <= limit) {
@@ -19,14 +19,14 @@ while (p * p <= limit) {
   p = p + 1;
 }
 
-var count = 0;
+auto count = 0;
 i64 n = 2;
 while (n <= limit) {
   if (!composite[n]) count += 1;
   n = n + 1;
 }
 
-var elapsed = clock() - start;
+auto elapsed = clock() - start;
 
 print count;
 print elapsed;

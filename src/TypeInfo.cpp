@@ -284,20 +284,22 @@ bool isAssignable(const TypeRef& from, const TypeRef& to) {
         return false;
     }
 
-    if (to->isAny() || from->isAny()) {
-        return true;
-    }
-
     if (to->kind == TypeKind::OPTIONAL) {
         if (from->kind == TypeKind::NULL_TYPE) {
             return true;
         }
 
-        TypeRef optionalInner =
-            to->innerType ? to->innerType : TypeInfo::makeAny();
+        if (!to->innerType) {
+            return false;
+        }
+
+        TypeRef optionalInner = to->innerType;
         if (from->kind == TypeKind::OPTIONAL) {
-            TypeRef fromInner =
-                from->innerType ? from->innerType : TypeInfo::makeAny();
+            if (!from->innerType) {
+                return false;
+            }
+
+            TypeRef fromInner = from->innerType;
             return isAssignable(fromInner, optionalInner);
         }
 
@@ -310,29 +312,35 @@ bool isAssignable(const TypeRef& from, const TypeRef& to) {
 
     if (from->kind == to->kind) {
         if (from->kind == TypeKind::ARRAY) {
-            TypeRef fromElem =
-                from->elementType ? from->elementType : TypeInfo::makeAny();
-            TypeRef toElem =
-                to->elementType ? to->elementType : TypeInfo::makeAny();
+            if (!from->elementType || !to->elementType) {
+                return false;
+            }
+
+            TypeRef fromElem = from->elementType;
+            TypeRef toElem = to->elementType;
             return isAssignable(fromElem, toElem);
         }
 
         if (from->kind == TypeKind::SET) {
-            TypeRef fromElem =
-                from->elementType ? from->elementType : TypeInfo::makeAny();
-            TypeRef toElem =
-                to->elementType ? to->elementType : TypeInfo::makeAny();
+            if (!from->elementType || !to->elementType) {
+                return false;
+            }
+
+            TypeRef fromElem = from->elementType;
+            TypeRef toElem = to->elementType;
             return isAssignable(fromElem, toElem);
         }
 
         if (from->kind == TypeKind::DICT) {
-            TypeRef fromKey =
-                from->keyType ? from->keyType : TypeInfo::makeAny();
-            TypeRef toKey = to->keyType ? to->keyType : TypeInfo::makeAny();
-            TypeRef fromValue =
-                from->valueType ? from->valueType : TypeInfo::makeAny();
-            TypeRef toValue =
-                to->valueType ? to->valueType : TypeInfo::makeAny();
+            if (!from->keyType || !to->keyType || !from->valueType ||
+                !to->valueType) {
+                return false;
+            }
+
+            TypeRef fromKey = from->keyType;
+            TypeRef toKey = to->keyType;
+            TypeRef fromValue = from->valueType;
+            TypeRef toValue = to->valueType;
             return isAssignable(fromKey, toKey) &&
                    isAssignable(fromValue, toValue);
         }

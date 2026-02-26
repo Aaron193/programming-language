@@ -5,20 +5,20 @@ function makeAdder(n) {
   return addOne;
 }
 
-var funcs = [];
+auto funcs = [];
 
-var start = clock();
+auto start = clock();
 
-for (var i = 0; i < 10000; i++) {
+for (auto i = 0; i < 10000; i++) {
   funcs.push(makeAdder(i));
 }
 
-var sum = 0;
-for (var i = 0; i < funcs.size(); i++) {
+auto sum = 0;
+for (auto i = 0; i < funcs.size(); i++) {
   sum += funcs[i](1);
 }
 
-var elapsed = clock() - start;
+auto elapsed = clock() - start;
 
 print sum;
 print elapsed;

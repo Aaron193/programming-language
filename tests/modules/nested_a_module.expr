@@ -1,3 +1,3 @@
 import { B } from "./nested_b.expr";
 
-export var A = B + 1;
+export auto A = B + 1;

@@ -12,38 +12,38 @@ function makeMultiplier(k) {
   return multiply;
 }
 
-var mul2 = makeMultiplier(2);
-var mul3 = makeMultiplier(3);
+auto mul2 = makeMultiplier(2);
+auto mul3 = makeMultiplier(3);
 
-var counter = Counter();
+auto counter = Counter();
 counter.value = 0;
 
-var history = [];
-var table = {};
-var keys = Set();
+auto history = [];
+auto table = {};
+auto keys = Set();
 
-var start = clock();
+auto start = clock();
 
-for (var i = 0; i < 25000; i++) {
-  var k = "k" + str(i);
-  var value = mul2(i) + mul3(i) + counter.inc();
+for (auto i = 0; i < 25000; i++) {
+  auto k = "k" + str(i);
+  auto value = mul2(i) + mul3(i) + counter.inc();
   table[k] = value;
   keys.add(k);
   history.push(value);
 }
 
-var sumA = 0;
-for (var i = 0; i < history.size(); i++) {
+auto sumA = 0;
+for (auto i = 0; i < history.size(); i++) {
   sumA += history[i];
 }
 
-var sumB = 0;
-var keyList = keys.toArray();
-for (var i = 0; i < keyList.size(); i++) {
+auto sumB = 0;
+auto keyList = keys.toArray();
+for (auto i = 0; i < keyList.size(); i++) {
   sumB += table[keyList[i]];
 }
 
-var elapsed = clock() - start;
+auto elapsed = clock() - start;
 
 print sumA;
 print sumB;

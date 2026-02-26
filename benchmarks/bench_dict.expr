@@ -1,19 +1,19 @@
-var d = {};
+auto d = {};
 
-var start = clock();
+auto start = clock();
 
-for (var i = 0; i < 30000; i++) {
-  var key = "key" + str(i);
+for (auto i = 0; i < 30000; i++) {
+  auto key = "key" + str(i);
   d[key] = i;
 }
 
-var sum = 0;
-for (var i = 0; i < 30000; i++) {
-  var key = "key" + str(i);
+auto sum = 0;
+for (auto i = 0; i < 30000; i++) {
+  auto key = "key" + str(i);
   sum += d[key];
 }
 
-var elapsed = clock() - start;
+auto elapsed = clock() - start;
 
 print sum;
 print d.size();

@@ -9,9 +9,9 @@ This project is a bytecode-compiled, stack-based interpreter implemented in C++.
 - Comparison/equality: `>`, `>=`, `<`, `<=`, `==`, `!=`
 - Logical operators: `!`, `and`, `or` (short-circuiting)
 - Bit shifts: `<<`, `>>`
-- Variables: `var` declarations, assignment, compound assignment (`+=`, `-=`, `*=`, `/=`, `<<=`, `>>=`), lexical scope
+- Variables: `auto` declarations (with required initializer), assignment, compound assignment (`+=`, `-=`, `*=`, `/=`, `<<=`, `>>=`), lexical scope
 - Update operators: `++`, `--`
-- Control flow: `if`/`else`, `while`, `for`, foreach (`for (var x : collection)`)
+- Control flow: `if`/`else`, `while`, `for`, foreach (`for (auto x : collection)`)
 - Functions: declarations, parameters, return values, recursion
 - Closures: nested functions with captured/upvalue variables
 - Classes: class declarations, fields, methods, `this`
@@ -80,7 +80,7 @@ Top-level exports:
 
 ```expr
 export function add(a, b) { return a + b; }
-export var PI = 3.14159;
+export auto PI = 3.14159;
 export class Vector {}
 ```
 

@@ -6,27 +6,27 @@ class Particle {
   }
 }
 
-var particles = [];
-for (var i = 0; i < 50000; i++) {
-  var p = Particle();
+auto particles = [];
+for (auto i = 0; i < 50000; i++) {
+  auto p = Particle();
   p.x = i;
   p.y = i * 2;
   particles.push(p);
 }
 
-var start = clock();
+auto start = clock();
 
-var checksum = 0;
-for (var round = 0; round < 10; round++) {
-  for (var i = 0; i < particles.size(); i++) {
-    var p = particles[i];
+auto checksum = 0;
+for (auto round = 0; round < 10; round++) {
+  for (auto i = 0; i < particles.size(); i++) {
+    auto p = particles[i];
     checksum += p.move(1, 2);
     checksum += p.x;
     checksum += p.y;
   }
 }
 
-var elapsed = clock() - start;
+auto elapsed = clock() - start;
 
 print checksum;
 print particles.size();

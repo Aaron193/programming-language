@@ -2,4 +2,4 @@ export function add(i32 a, i32 b) -> i32 {
     return a + b;
 }
 
-export var PI = 3.14159;
+export auto PI = 3.14159;

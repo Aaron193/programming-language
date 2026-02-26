@@ -3,9 +3,9 @@ function fib(n) {
   return fib(n - 1) + fib(n - 2);
 }
 
-var start = clock();
-var result = fib(35);
-var elapsed = clock() - start;
+auto start = clock();
+auto result = fib(35);
+auto elapsed = clock() - start;
 
 print result;
 print elapsed;

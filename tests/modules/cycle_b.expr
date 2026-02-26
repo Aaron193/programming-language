@@ -1,3 +1,3 @@
 import a from "./cycle_a.expr";
 
-export var B = a.A + 1;
+export auto B = a.A + 1;

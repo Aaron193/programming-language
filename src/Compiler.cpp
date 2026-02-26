@@ -934,7 +934,6 @@ void Compiler::synchronize() {
             case TokenType::CLASS:
             case TokenType::FUNCTION:
             case TokenType::AUTO:
-            case TokenType::VAR:
             case TokenType::TYPE_I8:
             case TokenType::TYPE_I16:
             case TokenType::TYPE_I32:
@@ -1016,9 +1015,6 @@ void Compiler::declaration() {
     } else if (m_parser->current.type() == TokenType::AUTO) {
         advance();
         autoVarDeclaration();
-    } else if (m_parser->current.type() == TokenType::VAR) {
-        advance();
-        varDeclaration();
     } else if (isTypedVarDeclarationStart()) {
         typedVarDeclaration();
     } else {
@@ -1069,18 +1065,6 @@ void Compiler::exportDeclaration() {
         return;
     }
 
-    if (m_parser->current.type() == TokenType::VAR) {
-        advance();
-        if (m_parser->current.type() != TokenType::IDENTIFIER) {
-            errorAtCurrent("Expected variable name.");
-            return;
-        }
-        Token exportName = m_parser->current;
-        varDeclaration();
-        emitExportName(exportName);
-        return;
-    }
-
     if (m_parser->current.type() == TokenType::CLASS) {
         advance();
         if (m_parser->current.type() != TokenType::IDENTIFIER) {
@@ -1093,8 +1077,7 @@ void Compiler::exportDeclaration() {
         return;
     }
 
-    errorAtCurrent(
-        "Expected 'function', 'auto', 'var', or 'class' after 'export'.");
+    errorAtCurrent("Expected 'function', 'auto', or 'class' after 'export'.");
 }
 
 void Compiler::importDeclaration() {
@@ -1467,10 +1450,7 @@ void Compiler::forStatement() {
 
     if (m_parser->current.type() == TokenType::SEMI_COLON) {
         advance();
-    } else if (m_parser->current.type() == TokenType::VAR ||
-               m_parser->current.type() == TokenType::AUTO) {
-        const bool isAutoDeclaration =
-            m_parser->current.type() == TokenType::AUTO;
+    } else if (m_parser->current.type() == TokenType::AUTO) {
         advance();
 
         consume(TokenType::IDENTIFIER, "Expected variable name.");
@@ -1524,9 +1504,7 @@ void Compiler::forStatement() {
             advance();
             expression();
         } else {
-            if (isAutoDeclaration) {
-                errorAtCurrent("'auto' declaration requires an initializer.");
-            }
+            errorAtCurrent("'auto' declaration requires an initializer.");
             emitByte(OpCode::NIL);
         }
 
@@ -1612,21 +1590,6 @@ void Compiler::expressionStatement() {
         advance();
     }
     emitByte(OpCode::POP);
-}
-
-void Compiler::varDeclaration() {
-    uint8_t global =
-        parseVariable("Expected variable name.", TypeInfo::makeAny());
-
-    if (m_parser->current.type() == TokenType::EQUAL) {
-        advance();
-        expression();
-    } else {
-        emitByte(OpCode::NIL);
-    }
-
-    consume(TokenType::SEMI_COLON, "Expected ';' after variable declaration.");
-    defineVariable(global);
 }
 
 void Compiler::autoVarDeclaration() {
