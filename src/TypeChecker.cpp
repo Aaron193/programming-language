@@ -1370,6 +1370,120 @@ class CheckerImpl {
         return expr;
     }
 
+    ExprInfo parseFunctionLiteralExpr(
+        const TypeRef& expectedSignature = nullptr) {
+        consume(TokenType::OPEN_PAREN, "Expected '(' after 'function'.");
+
+        const bool hasExpectedFunctionType =
+            expectedSignature && expectedSignature->kind == TypeKind::FUNCTION;
+        const auto& expectedParams = hasExpectedFunctionType
+                                         ? expectedSignature->paramTypes
+                                         : std::vector<TypeRef>{};
+
+        std::vector<std::pair<std::string, TypeRef>> params;
+        std::vector<TypeRef> paramTypes;
+
+        if (!check(TokenType::CLOSE_PAREN)) {
+            do {
+                TypeRef paramType = nullptr;
+                std::string paramName;
+                size_t paramIndex = paramTypes.size();
+
+                if (!isTypedTypeAnnotationStart()) {
+                    consume(TokenType::IDENTIFIER, "Expected parameter name.");
+                    paramName = tokenText(m_previous);
+
+                    if (hasExpectedFunctionType &&
+                        paramIndex < expectedParams.size() &&
+                        expectedParams[paramIndex] &&
+                        !expectedParams[paramIndex]->isAny()) {
+                        paramType = expectedParams[paramIndex];
+                    } else {
+                        addError(m_previous.line(),
+                                 "Type error: parameter '" + paramName +
+                                     "' must have a type annotation.");
+                        paramType = TypeInfo::makeAny();
+                    }
+                } else {
+                    paramType = parseTypeExprType();
+                    if (!paramType) {
+                        addError(m_current.line(),
+                                 "Type error: expected parameter type "
+                                 "annotation.");
+                        paramType = TypeInfo::makeAny();
+                    }
+
+                    consume(TokenType::IDENTIFIER, "Expected parameter name.");
+                    paramName = tokenText(m_previous);
+                }
+
+                if (paramType && paramType->isVoid()) {
+                    addError(m_previous.line(),
+                             "Type error: parameter '" + paramName +
+                                 "' cannot have type 'void'.");
+                }
+
+                params.emplace_back(
+                    paramName, paramType ? paramType : TypeInfo::makeAny());
+                paramTypes.push_back(paramType ? paramType
+                                               : TypeInfo::makeAny());
+            } while (match(TokenType::COMMA));
+        }
+
+        if (hasExpectedFunctionType &&
+            paramTypes.size() != expectedParams.size()) {
+            addError(m_current.line(),
+                     "Type error: closure parameter count mismatch: expected " +
+                         std::to_string(expectedParams.size()) + ", got " +
+                         std::to_string(paramTypes.size()) + ".");
+        }
+
+        consume(TokenType::CLOSE_PAREN, "Expected ')' after parameters.");
+
+        TypeRef returnType = TypeInfo::makeAny();
+        bool hasExplicitReturnType = false;
+        if (match(TokenType::ARROW)) {
+            hasExplicitReturnType = true;
+            TypeRef parsedReturnType = parseTypeExprType();
+            if (!parsedReturnType) {
+                addError(m_previous.line(),
+                         "Type error: expected return type after '->'.");
+            } else {
+                returnType = parsedReturnType;
+            }
+        } else if (hasExpectedFunctionType && expectedSignature->returnType &&
+                   !expectedSignature->returnType->isAny()) {
+            returnType = expectedSignature->returnType;
+        }
+
+        if (!hasExplicitReturnType && (!returnType || returnType->isAny())) {
+            addError(m_current.line(),
+                     "Type error: function '<closure>' must declare a return "
+                     "type with '->'.");
+        }
+
+        consume(TokenType::OPEN_CURLY, "Expected '{' before function body.");
+
+        m_functionContexts.push_back(FunctionCtx{returnType});
+        beginScope();
+        for (const auto& param : params) {
+            defineSymbol(param.first,
+                         param.second ? param.second : TypeInfo::makeAny());
+        }
+
+        while (!check(TokenType::CLOSE_CURLY) &&
+               !check(TokenType::END_OF_FILE)) {
+            declaration();
+        }
+
+        consume(TokenType::CLOSE_CURLY, "Expected '}' after function body.");
+        endScope();
+        m_functionContexts.pop_back();
+
+        return ExprInfo{TypeInfo::makeFunction(paramTypes, returnType), false,
+                        false, "", m_previous.line()};
+    }
+
     ExprInfo parsePrimary() {
         if (match(TokenType::NUMBER)) {
             return ExprInfo{inferNumberLiteralType(m_previous), false, false,
@@ -1395,6 +1509,10 @@ class CheckerImpl {
             ExprInfo expr = parseExpression();
             consume(TokenType::CLOSE_PAREN, "Expected ')' after expression.");
             return ExprInfo{expr.type, false, false, "", m_previous.line()};
+        }
+
+        if (match(TokenType::FUNCTION)) {
+            return parseFunctionLiteralExpr();
         }
 
         if (match(TokenType::THIS)) {
@@ -1734,7 +1852,14 @@ class CheckerImpl {
         consume(TokenType::EQUAL,
                 "Expected '=' in typed variable declaration (initializer is "
                 "required).");
-        ExprInfo initializer = parseExpression();
+        ExprInfo initializer;
+        if (declaredType->kind == TypeKind::FUNCTION &&
+            check(TokenType::FUNCTION)) {
+            advance();
+            initializer = parseFunctionLiteralExpr(declaredType);
+        } else {
+            initializer = parseExpression();
+        }
 
         if (!isAssignableType(initializer.type, declaredType)) {
             addError(nameToken.line(), "Type error: cannot assign '" +

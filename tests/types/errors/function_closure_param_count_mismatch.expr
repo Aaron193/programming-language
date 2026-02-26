@@ -1,0 +1,3 @@
+fn(i32) -> i32 bad = function(i32 x, i32 y) -> i32 {
+  return x + y;
+};

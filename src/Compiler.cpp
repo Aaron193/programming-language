@@ -2025,8 +2025,15 @@ void Compiler::typedVarDeclaration() {
     consume(TokenType::EQUAL,
             "Expected '=' in typed variable declaration (initializer is "
             "required).");
-    expression();
-    TypeRef initializerType = popExprType();
+    TypeRef initializerType = TypeInfo::makeAny();
+    if (declaredType->kind == TypeKind::FUNCTION &&
+        m_parser->current.type() == TokenType::FUNCTION) {
+        advance();
+        initializerType = emitFunctionLiteral(declaredType);
+    } else {
+        expression();
+        initializerType = popExprType();
+    }
     emitCoerceToType(initializerType, declaredType);
     emitCheckInstanceType(declaredType);
 
@@ -2118,6 +2125,10 @@ Compiler::ParseRule Compiler::getRule(TokenType type) {
         case TokenType::TYPE_NULL_KW:
             return ParseRule{[this](bool canAssign) { literal(canAssign); },
                              nullptr, PREC_NONE};
+        case TokenType::FUNCTION:
+            return ParseRule{
+                [this](bool canAssign) { functionLiteral(canAssign); }, nullptr,
+                PREC_NONE};
 
         case TokenType::BANG:
             return ParseRule{[this](bool canAssign) { unary(canAssign); },
@@ -2890,8 +2901,36 @@ void Compiler::orOperator(bool canAssign) {
     pushExprType((leftType && !leftType->isAny()) ? leftType : rightType);
 }
 
+void Compiler::functionLiteral(bool canAssign) {
+    (void)canAssign;
+    TypeRef functionType = emitFunctionLiteral();
+    pushExprType(functionType ? functionType : TypeInfo::makeAny());
+}
+
+TypeRef Compiler::emitFunctionLiteral(const TypeRef& expectedType) {
+    TypeRef declaredReturnType = TypeInfo::makeAny();
+    if (expectedType && expectedType->kind == TypeKind::FUNCTION &&
+        expectedType->returnType) {
+        declaredReturnType = expectedType->returnType;
+    }
+
+    CompiledFunction compiled =
+        compileFunction("<closure>", false, declaredReturnType, expectedType);
+
+    emitBytes(OpCode::CLOSURE, makeConstant(Value(compiled.function)));
+    for (const auto& upvalue : compiled.upvalues) {
+        emitByte(static_cast<uint8_t>(upvalue.isLocal ? 1 : 0));
+        emitByte(upvalue.index);
+    }
+
+    return TypeInfo::makeFunction(
+        compiled.parameterTypes,
+        compiled.returnType ? compiled.returnType : TypeInfo::makeAny());
+}
+
 Compiler::CompiledFunction Compiler::compileFunction(
-    const std::string& name, bool isMethod, const TypeRef& declaredReturnType) {
+    const std::string& name, bool isMethod, const TypeRef& declaredReturnType,
+    const TypeRef& expectedFunctionType) {
     consume(TokenType::OPEN_PAREN, "Expected '(' after function name.");
 
     Chunk* enclosingChunk = m_chunk;
@@ -2908,20 +2947,34 @@ Compiler::CompiledFunction Compiler::compileFunction(
 
     std::vector<std::string> parameters;
     std::vector<TypeRef> parameterTypes;
+    const bool hasExpectedFunctionType =
+        expectedFunctionType &&
+        expectedFunctionType->kind == TypeKind::FUNCTION;
+    const auto& expectedParams = hasExpectedFunctionType
+                                     ? expectedFunctionType->paramTypes
+                                     : std::vector<TypeRef>{};
     if (m_parser->current.type() != TokenType::CLOSE_PAREN) {
         do {
             TypeRef parameterType = nullptr;
             Token parameterNameToken;
+            size_t parameterIndex = parameterTypes.size();
 
             if (!isTypedTypeAnnotationStart()) {
                 consume(TokenType::IDENTIFIER, "Expected parameter name.");
                 parameterNameToken = m_parser->previous;
-                std::string parameterName(parameterNameToken.start(),
-                                          parameterNameToken.length());
-                errorAt(parameterNameToken,
-                        "Parameter '" + parameterName +
-                            "' must have a type annotation.");
-                parameterType = TypeInfo::makeAny();
+                if (hasExpectedFunctionType &&
+                    parameterIndex < expectedParams.size() &&
+                    expectedParams[parameterIndex] &&
+                    !expectedParams[parameterIndex]->isAny()) {
+                    parameterType = expectedParams[parameterIndex];
+                } else {
+                    std::string parameterName(parameterNameToken.start(),
+                                              parameterNameToken.length());
+                    errorAt(parameterNameToken,
+                            "Parameter '" + parameterName +
+                                "' must have a type annotation.");
+                    parameterType = TypeInfo::makeAny();
+                }
             } else {
                 parameterType = parseTypeExprType();
                 if (!parameterType) {
@@ -2955,6 +3008,13 @@ Compiler::CompiledFunction Compiler::compileFunction(
         } while (true);
     }
 
+    if (hasExpectedFunctionType &&
+        parameterTypes.size() != expectedParams.size()) {
+        errorAtCurrent("Closure parameter count mismatch: expected " +
+                       std::to_string(expectedParams.size()) + ", got " +
+                       std::to_string(parameterTypes.size()) + ".");
+    }
+
     consume(TokenType::CLOSE_PAREN, "Expected ')' after parameters.");
 
     const bool isInitializer = isMethod && name == "init";
@@ -2969,6 +3029,9 @@ Compiler::CompiledFunction Compiler::compileFunction(
         } else {
             currentContext().returnType = parsedReturnType;
         }
+    } else if (hasExpectedFunctionType && expectedFunctionType->returnType &&
+               !expectedFunctionType->returnType->isAny()) {
+        currentContext().returnType = expectedFunctionType->returnType;
     } else if (!isInitializer && !hasDeclaredReturnType) {
         errorAtCurrent("Function '" + name +
                        "' must declare a return type with '->'.");

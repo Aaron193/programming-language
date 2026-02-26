@@ -203,10 +203,13 @@ class Compiler {
     void subscript(bool canAssign);
     void andOperator(bool canAssign);
     void orOperator(bool canAssign);
+    void functionLiteral(bool canAssign);
+    TypeRef emitFunctionLiteral(const TypeRef& expectedType = nullptr);
 
     CompiledFunction compileFunction(
         const std::string& name, bool isMethod = false,
-        const TypeRef& declaredReturnType = TypeInfo::makeAny());
+        const TypeRef& declaredReturnType = TypeInfo::makeAny(),
+        const TypeRef& expectedFunctionType = nullptr);
 
    public:
     Compiler() = default;

@@ -81,6 +81,10 @@ run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/optional_call_without_check.expr" \
     "cannot call optional value of type 'Dog?' without a null check" || failed=1
 
+run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/function_closure_param_count_mismatch.expr" \
+    "closure parameter count mismatch: expected 1, got 2." || failed=1
+
 if [[ $failed -ne 0 ]]; then
     exit 1
 fi
