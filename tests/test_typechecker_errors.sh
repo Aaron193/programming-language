@@ -61,6 +61,14 @@ run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/subtype_assignment_invalid.expr" \
     "cannot assign 'Animal' to variable 'd' of type 'Dog'" || failed=1
 
+run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/assign_array_str_to_array_i32.expr" \
+    "cannot assign 'Array<str>' to variable 'nums' of type 'Array<i32>'" || failed=1
+
+run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/assign_dict_value_str_to_bool.expr" \
+    "cannot assign 'Dict<str, str>' to variable 'flags' of type 'Dict<str, bool>'" || failed=1
+
 if [[ $failed -ne 0 ]]; then
     exit 1
 fi

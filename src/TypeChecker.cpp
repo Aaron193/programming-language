@@ -65,6 +65,10 @@ bool isEqualityOperator(TokenType type) {
     return type == TokenType::EQUAL_EQUAL || type == TokenType::BANG_EQUAL;
 }
 
+bool isCollectionTypeNameText(std::string_view name) {
+    return name == "Array" || name == "Dict" || name == "Set";
+}
+
 class CheckerImpl {
    private:
     struct ExprInfo {
@@ -95,6 +99,51 @@ class CheckerImpl {
 
     std::string tokenText(const Token& token) const {
         return std::string(token.start(), token.length());
+    }
+
+    bool isCollectionTypeNameToken(const Token& token) const {
+        if (token.type() != TokenType::IDENTIFIER) {
+            return false;
+        }
+        return isCollectionTypeNameText(tokenText(token));
+    }
+
+    bool isTypedTypeAnnotationStart() {
+        if (isTypeToken(m_current.type())) {
+            return true;
+        }
+
+        if (!check(TokenType::IDENTIFIER)) {
+            return false;
+        }
+
+        Token lookahead = peekToken();
+        if (isCollectionTypeNameToken(m_current)) {
+            return lookahead.type() == TokenType::LESS;
+        }
+
+        std::string typeName = tokenText(m_current);
+        return m_classNames.find(typeName) != m_classNames.end() &&
+               lookahead.type() == TokenType::IDENTIFIER;
+    }
+
+    TypeRef mergeInferredTypes(const TypeRef& lhs, const TypeRef& rhs) const {
+        if (!lhs) return rhs;
+        if (!rhs) return lhs;
+        if (lhs->isAny() || rhs->isAny()) {
+            return TypeInfo::makeAny();
+        }
+        if (lhs->isNumeric() && rhs->isNumeric()) {
+            TypeRef promoted = numericPromotion(lhs, rhs);
+            return promoted ? promoted : TypeInfo::makeAny();
+        }
+        if (isAssignableType(rhs, lhs)) {
+            return lhs;
+        }
+        if (isAssignableType(lhs, rhs)) {
+            return rhs;
+        }
+        return TypeInfo::makeAny();
     }
 
     void addError(size_t line, const std::string& message) {
@@ -275,6 +324,57 @@ class CheckerImpl {
 
         if (check(TokenType::IDENTIFIER)) {
             std::string className = tokenText(m_current);
+
+            if (isCollectionTypeNameText(className)) {
+                advance();
+                consume(TokenType::LESS,
+                        "Type error: expected '<' after collection type.");
+
+                if (className == "Array") {
+                    TypeRef elementType = parseTypeExprType();
+                    if (!elementType) {
+                        addError(
+                            m_current.line(),
+                            "Type error: expected element type in Array<T>.");
+                        return nullptr;
+                    }
+                    consume(TokenType::GREATER,
+                            "Type error: expected '>' after Array<T>.");
+                    return TypeInfo::makeArray(elementType);
+                }
+
+                if (className == "Set") {
+                    TypeRef elementType = parseTypeExprType();
+                    if (!elementType) {
+                        addError(
+                            m_current.line(),
+                            "Type error: expected element type in Set<T>.");
+                        return nullptr;
+                    }
+                    consume(TokenType::GREATER,
+                            "Type error: expected '>' after Set<T>.");
+                    return TypeInfo::makeSet(elementType);
+                }
+
+                TypeRef keyType = parseTypeExprType();
+                if (!keyType) {
+                    addError(m_current.line(),
+                             "Type error: expected key type in Dict<K, V>.");
+                    return nullptr;
+                }
+                consume(TokenType::COMMA,
+                        "Type error: expected ',' in Dict<K, V>.");
+                TypeRef valueType = parseTypeExprType();
+                if (!valueType) {
+                    addError(m_current.line(),
+                             "Type error: expected value type in Dict<K, V>.");
+                    return nullptr;
+                }
+                consume(TokenType::GREATER,
+                        "Type error: expected '>' after Dict<K, V>.");
+                return TypeInfo::makeDict(keyType, valueType);
+            }
+
             if (m_classNames.find(className) != m_classNames.end()) {
                 advance();
                 return TypeInfo::makeClass(className);
@@ -285,22 +385,22 @@ class CheckerImpl {
     }
 
     bool isTypedVarDeclarationStart() {
-        if (!isTypeToken(m_current.type()) && !check(TokenType::IDENTIFIER)) {
+        if (isTypeToken(m_current.type())) {
+            return peekToken().type() == TokenType::IDENTIFIER;
+        }
+
+        if (!check(TokenType::IDENTIFIER)) {
             return false;
         }
 
-        Token maybeType = m_current;
-        Token maybeName = peekToken();
-        if (maybeName.type() != TokenType::IDENTIFIER) {
-            return false;
+        Token lookahead = peekToken();
+        if (isCollectionTypeNameToken(m_current)) {
+            return lookahead.type() == TokenType::LESS;
         }
 
-        if (isTypeToken(maybeType.type())) {
-            return true;
-        }
-
-        std::string typeName(maybeType.start(), maybeType.length());
-        return m_classNames.find(typeName) != m_classNames.end();
+        std::string typeName = tokenText(m_current);
+        return m_classNames.find(typeName) != m_classNames.end() &&
+               lookahead.type() == TokenType::IDENTIFIER;
     }
 
     ExprInfo parseExpression() { return parseAssignment(); }
@@ -698,30 +798,40 @@ class CheckerImpl {
         }
 
         if (match(TokenType::OPEN_BRACKET)) {
+            TypeRef elementType = nullptr;
             if (!check(TokenType::CLOSE_BRACKET)) {
                 do {
-                    parseExpression();
+                    ExprInfo item = parseExpression();
+                    elementType = mergeInferredTypes(elementType, item.type);
                 } while (match(TokenType::COMMA));
             }
             consume(TokenType::CLOSE_BRACKET,
                     "Expected ']' after array literal.");
-            return ExprInfo{TypeInfo::makeAny(), false, false, "",
-                            m_previous.line()};
+            return ExprInfo{
+                TypeInfo::makeArray(elementType ? elementType
+                                                : TypeInfo::makeAny()),
+                false, false, "", m_previous.line()};
         }
 
         if (match(TokenType::OPEN_CURLY)) {
+            TypeRef keyType = nullptr;
+            TypeRef valueType = nullptr;
             if (!check(TokenType::CLOSE_CURLY)) {
                 do {
-                    parseExpression();
+                    ExprInfo keyExpr = parseExpression();
+                    keyType = mergeInferredTypes(keyType, keyExpr.type);
                     consume(TokenType::COLON,
                             "Expected ':' between dictionary key and value.");
-                    parseExpression();
+                    ExprInfo valueExpr = parseExpression();
+                    valueType = mergeInferredTypes(valueType, valueExpr.type);
                 } while (match(TokenType::COMMA));
             }
             consume(TokenType::CLOSE_CURLY,
                     "Expected '}' after dictionary literal.");
-            return ExprInfo{TypeInfo::makeAny(), false, false, "",
-                            m_previous.line()};
+            return ExprInfo{
+                TypeInfo::makeDict(keyType ? keyType : TypeInfo::makeAny(),
+                                   valueType ? valueType : TypeInfo::makeAny()),
+                false, false, "", m_previous.line()};
         }
 
         if (check(TokenType::IDENTIFIER) || isTypeToken(m_current.type())) {
@@ -929,19 +1039,8 @@ class CheckerImpl {
             do {
                 TypeRef paramType = TypeInfo::makeAny();
 
-                if (isTypeToken(m_current.type())) {
+                if (isTypedTypeAnnotationStart()) {
                     paramType = parseTypeExprType();
-                } else if (check(TokenType::IDENTIFIER)) {
-                    Token maybeType = m_current;
-                    Token maybeName = peekToken();
-                    if (maybeName.type() == TokenType::IDENTIFIER) {
-                        std::string typeName(maybeType.start(),
-                                             maybeType.length());
-                        if (m_classNames.find(typeName) != m_classNames.end()) {
-                            paramType = TypeInfo::makeClass(typeName);
-                            advance();
-                        }
-                    }
                 }
 
                 consume(TokenType::IDENTIFIER, "Expected parameter name.");
@@ -1026,10 +1125,7 @@ class CheckerImpl {
             bool typedHead = false;
             TypeRef memberType = nullptr;
 
-            if (isTypeToken(m_current.type()) ||
-                (check(TokenType::IDENTIFIER) &&
-                 m_classNames.find(tokenText(m_current)) !=
-                     m_classNames.end())) {
+            if (isTypedTypeAnnotationStart()) {
                 typedHead = true;
                 memberType = parseTypeExprType();
             }
