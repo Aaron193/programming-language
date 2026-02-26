@@ -27,6 +27,7 @@ bool isTypeToken(TokenType type) {
         case TokenType::TYPE_F64:
         case TokenType::TYPE_BOOL:
         case TokenType::TYPE_STR:
+        case TokenType::TYPE_VOID:
         case TokenType::TYPE_NULL_KW:
             return true;
         default:
@@ -144,17 +145,151 @@ class CheckerImpl {
 
     TypeRef inferNumberLiteralType(const Token& token) {
         std::string literal = tokenText(token);
-        if (literal.find('.') != std::string::npos) {
-            return TypeInfo::makeF64();
+        std::string core = literal;
+
+        TypeRef inferredType = nullptr;
+        bool unsignedLiteral = false;
+        bool floatLiteral = false;
+
+        auto assignSuffix = [&](size_t suffixLength, const TypeRef& type,
+                                bool isUnsigned, bool isFloat) {
+            inferredType = type;
+            unsignedLiteral = isUnsigned;
+            floatLiteral = isFloat;
+            core = literal.substr(0, literal.length() - suffixLength);
+        };
+
+        if (literal.size() >= 5 &&
+            literal.compare(literal.size() - 5, 5, "usize") == 0) {
+            assignSuffix(5, TypeInfo::makeUSize(), true, false);
+        } else if (literal.size() >= 3 &&
+                   literal.compare(literal.size() - 3, 3, "i16") == 0) {
+            assignSuffix(3, TypeInfo::makeI16(), false, false);
+        } else if (literal.size() >= 3 &&
+                   literal.compare(literal.size() - 3, 3, "i32") == 0) {
+            assignSuffix(3, TypeInfo::makeI32(), false, false);
+        } else if (literal.size() >= 3 &&
+                   literal.compare(literal.size() - 3, 3, "i64") == 0) {
+            assignSuffix(3, TypeInfo::makeI64(), false, false);
+        } else if (literal.size() >= 3 &&
+                   literal.compare(literal.size() - 3, 3, "u16") == 0) {
+            assignSuffix(3, TypeInfo::makeU16(), true, false);
+        } else if (literal.size() >= 3 &&
+                   literal.compare(literal.size() - 3, 3, "u32") == 0) {
+            assignSuffix(3, TypeInfo::makeU32(), true, false);
+        } else if (literal.size() >= 3 &&
+                   literal.compare(literal.size() - 3, 3, "u64") == 0) {
+            assignSuffix(3, TypeInfo::makeU64(), true, false);
+        } else if (literal.size() >= 3 &&
+                   literal.compare(literal.size() - 3, 3, "f32") == 0) {
+            assignSuffix(3, TypeInfo::makeF32(), false, true);
+        } else if (literal.size() >= 3 &&
+                   literal.compare(literal.size() - 3, 3, "f64") == 0) {
+            assignSuffix(3, TypeInfo::makeF64(), false, true);
+        } else if (literal.size() >= 2 &&
+                   literal.compare(literal.size() - 2, 2, "i8") == 0) {
+            assignSuffix(2, TypeInfo::makeI8(), false, false);
+        } else if (literal.size() >= 2 &&
+                   literal.compare(literal.size() - 2, 2, "u8") == 0) {
+            assignSuffix(2, TypeInfo::makeU8(), true, false);
+        } else if (!literal.empty() && literal.back() == 'u') {
+            assignSuffix(1, TypeInfo::makeU32(), true, false);
+        }
+
+        if (core.empty()) {
+            addError(token.line(),
+                     "Type error: invalid numeric literal '" + literal + "'.");
+            return TypeInfo::makeAny();
+        }
+
+        const bool hasDecimal = core.find('.') != std::string::npos;
+        if (!inferredType) {
+            if (hasDecimal) {
+                inferredType = TypeInfo::makeF64();
+                floatLiteral = true;
+            } else {
+                inferredType = TypeInfo::makeI32();
+            }
+        }
+
+        if (inferredType->isFloat()) {
+            floatLiteral = true;
+        }
+
+        if (inferredType->isInteger() && hasDecimal) {
+            addError(token.line(), "Type error: integer literal '" + literal +
+                                       "' cannot contain a decimal point.");
+            return TypeInfo::makeAny();
         }
 
         try {
-            long long value = std::stoll(literal);
-            if (value < std::numeric_limits<int32_t>::min() ||
-                value > std::numeric_limits<int32_t>::max()) {
-                addError(token.line(),
-                         "Type error: integer literal '" + literal +
-                             "' is out of range for default type 'i32'.");
+            if (floatLiteral) {
+                (void)std::stod(core);
+                return inferredType;
+            }
+
+            if (unsignedLiteral) {
+                unsigned long long value = std::stoull(core);
+                unsigned long long maxValue =
+                    std::numeric_limits<uint64_t>::max();
+                switch (inferredType->kind) {
+                    case TypeKind::U8:
+                        maxValue = std::numeric_limits<uint8_t>::max();
+                        break;
+                    case TypeKind::U16:
+                        maxValue = std::numeric_limits<uint16_t>::max();
+                        break;
+                    case TypeKind::U32:
+                        maxValue = std::numeric_limits<uint32_t>::max();
+                        break;
+                    case TypeKind::U64:
+                    case TypeKind::USIZE:
+                        maxValue = std::numeric_limits<uint64_t>::max();
+                        break;
+                    default:
+                        break;
+                }
+
+                if (value > maxValue) {
+                    addError(token.line(), "Type error: integer literal '" +
+                                               literal +
+                                               "' is out of range for type '" +
+                                               inferredType->toString() + "'.");
+                    return TypeInfo::makeAny();
+                }
+
+                return inferredType;
+            }
+
+            long long value = std::stoll(core);
+            long long minValue = std::numeric_limits<int64_t>::min();
+            long long maxValue = std::numeric_limits<int64_t>::max();
+            switch (inferredType->kind) {
+                case TypeKind::I8:
+                    minValue = std::numeric_limits<int8_t>::min();
+                    maxValue = std::numeric_limits<int8_t>::max();
+                    break;
+                case TypeKind::I16:
+                    minValue = std::numeric_limits<int16_t>::min();
+                    maxValue = std::numeric_limits<int16_t>::max();
+                    break;
+                case TypeKind::I32:
+                    minValue = std::numeric_limits<int32_t>::min();
+                    maxValue = std::numeric_limits<int32_t>::max();
+                    break;
+                case TypeKind::I64:
+                    minValue = std::numeric_limits<int64_t>::min();
+                    maxValue = std::numeric_limits<int64_t>::max();
+                    break;
+                default:
+                    break;
+            }
+
+            if (value < minValue || value > maxValue) {
+                addError(token.line(), "Type error: integer literal '" +
+                                           literal +
+                                           "' is out of range for type '" +
+                                           inferredType->toString() + "'.");
                 return TypeInfo::makeAny();
             }
         } catch (...) {
@@ -163,7 +298,7 @@ class CheckerImpl {
             return TypeInfo::makeAny();
         }
 
-        return TypeInfo::makeI32();
+        return inferredType;
     }
 
     TypeRef mergeInferredTypes(const TypeRef& lhs, const TypeRef& rhs) const {
@@ -553,6 +688,8 @@ class CheckerImpl {
                     return applyOptionalSuffix(TypeInfo::makeBool());
                 case TokenType::TYPE_STR:
                     return applyOptionalSuffix(TypeInfo::makeStr());
+                case TokenType::TYPE_VOID:
+                    return applyOptionalSuffix(TypeInfo::makeVoid());
                 case TokenType::TYPE_NULL_KW:
                     return applyOptionalSuffix(TypeInfo::makeNull());
                 default:
@@ -576,6 +713,12 @@ class CheckerImpl {
                             "Type error: expected element type in Array<T>.");
                         return nullptr;
                     }
+                    if (elementType->isVoid()) {
+                        addError(m_current.line(),
+                                 "Type error: 'void' is not valid as an "
+                                 "Array element type.");
+                        return nullptr;
+                    }
                     consume(TokenType::GREATER,
                             "Type error: expected '>' after Array<T>.");
                     return applyOptionalSuffix(
@@ -590,6 +733,12 @@ class CheckerImpl {
                             "Type error: expected element type in Set<T>.");
                         return nullptr;
                     }
+                    if (elementType->isVoid()) {
+                        addError(m_current.line(),
+                                 "Type error: 'void' is not valid as a Set "
+                                 "element type.");
+                        return nullptr;
+                    }
                     consume(TokenType::GREATER,
                             "Type error: expected '>' after Set<T>.");
                     return applyOptionalSuffix(TypeInfo::makeSet(elementType));
@@ -601,12 +750,24 @@ class CheckerImpl {
                              "Type error: expected key type in Dict<K, V>.");
                     return nullptr;
                 }
+                if (keyType->isVoid()) {
+                    addError(m_current.line(),
+                             "Type error: 'void' is not valid as a Dict key "
+                             "type.");
+                    return nullptr;
+                }
                 consume(TokenType::COMMA,
                         "Type error: expected ',' in Dict<K, V>.");
                 TypeRef valueType = parseTypeExprType();
                 if (!valueType) {
                     addError(m_current.line(),
                              "Type error: expected value type in Dict<K, V>.");
+                    return nullptr;
+                }
+                if (valueType->isVoid()) {
+                    addError(m_current.line(),
+                             "Type error: 'void' is not valid as a Dict "
+                             "value type.");
                     return nullptr;
                 }
                 consume(TokenType::GREATER,
@@ -1500,6 +1661,11 @@ class CheckerImpl {
             return;
         }
 
+        if (declaredType->isVoid()) {
+            addError(m_current.line(),
+                     "Type error: variables cannot have type 'void'.");
+        }
+
         consume(TokenType::IDENTIFIER, "Expected variable name after type.");
         Token nameToken = m_previous;
         std::string name = tokenText(nameToken);
@@ -1550,6 +1716,12 @@ class CheckerImpl {
 
                     consume(TokenType::IDENTIFIER, "Expected parameter name.");
                     paramName = tokenText(m_previous);
+                }
+
+                if (paramType && paramType->isVoid()) {
+                    addError(m_previous.line(),
+                             "Type error: parameter '" + paramName +
+                                 "' cannot have type 'void'.");
                 }
 
                 params.emplace_back(
@@ -1667,6 +1839,11 @@ class CheckerImpl {
                         addError(m_previous.line(),
                                  "Type error: class fields must be declared "
                                  "before method declarations.");
+                    }
+                    if (memberType && memberType->isVoid()) {
+                        addError(m_previous.line(),
+                                 "Type error: class field '" + memberName +
+                                     "' cannot have type 'void'.");
                     }
                     m_classFieldTypes[className][memberName] =
                         memberType ? memberType : TypeInfo::makeAny();
