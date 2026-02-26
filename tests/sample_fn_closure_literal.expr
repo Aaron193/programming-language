@@ -1,0 +1,10 @@
+fn(i32) -> i32 addOne = function(x) {
+  return x + 1;
+};
+
+auto mul = function(i32 a, i32 b) -> i32 {
+  return a * b;
+};
+
+print addOne(41);
+print mul(3, 4);
