@@ -1,0 +1,17 @@
+class Dog {
+    bark() {
+        return "woof";
+    }
+}
+
+Dog? maybeDog = Dog();
+
+if (maybeDog != null) {
+    print "dog present";
+}
+
+maybeDog = null;
+
+if (maybeDog == null) {
+    print "dog missing";
+}

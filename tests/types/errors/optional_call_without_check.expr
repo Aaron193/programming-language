@@ -1,0 +1,6 @@
+class Dog {
+    bark() { return "woof"; }
+}
+
+Dog? maybeDog = Dog();
+maybeDog();
