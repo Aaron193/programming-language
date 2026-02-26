@@ -93,6 +93,7 @@ class Compiler {
         m_classFieldTypes;
     std::unordered_map<std::string, std::unordered_map<std::string, TypeRef>>
         m_classMethodSignatures;
+    std::unordered_map<std::string, std::string> m_superclassOf;
     std::vector<TypeRef> m_globalTypes;
     std::vector<TypeRef> m_exprTypeStack;
     std::vector<std::string> m_globalNames;
@@ -141,6 +142,10 @@ class Compiler {
                             const TypeRef& leftType = TypeInfo::makeAny(),
                             const TypeRef& rightType = TypeInfo::makeAny());
     TypeRef inferVariableType(const Token& name) const;
+    TypeRef lookupClassFieldType(const std::string& className,
+                                 const std::string& fieldName) const;
+    TypeRef lookupClassMethodType(const std::string& className,
+                                  const std::string& methodName) const;
     void emitCoerceToType(const TypeRef& sourceType, const TypeRef& targetType);
     void emitCheckInstanceType(const TypeRef& targetType);
     uint8_t arithmeticOpcode(TokenType operatorType,

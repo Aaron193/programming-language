@@ -2195,6 +2195,14 @@ class CheckerImpl {
             declaration();
         }
     }
+
+    TypeCheckerMetadata metadata() const {
+        TypeCheckerMetadata out;
+        out.classFieldTypes = m_classFieldTypes;
+        out.classMethodSignatures = m_classMethodSignatures;
+        out.superclassOf = m_superclassOf;
+        return out;
+    }
 };
 
 }  // namespace
@@ -2202,8 +2210,11 @@ class CheckerImpl {
 bool TypeChecker::check(
     std::string_view source, const std::unordered_set<std::string>& classNames,
     const std::unordered_map<std::string, TypeRef>& functionSignatures,
-    std::vector<TypeError>& out) {
+    std::vector<TypeError>& out, TypeCheckerMetadata* outMetadata) {
     CheckerImpl checker(source, classNames, functionSignatures, out);
     checker.run();
+    if (outMetadata) {
+        *outMetadata = checker.metadata();
+    }
     return out.empty();
 }

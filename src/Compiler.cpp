@@ -6,6 +6,7 @@
 #include <iostream>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "Chunk.hpp"
@@ -112,19 +113,44 @@ bool Compiler::compile(std::string_view source, Chunk& chunk,
     m_functionSignatures.clear();
     m_classFieldTypes.clear();
     m_classMethodSignatures.clear();
+    m_superclassOf.clear();
     registerStandardLibraryTypeSignatures(m_functionSignatures);
     collectClassNames(source);
     collectFunctionSignatures(source);
 
     std::vector<TypeError> typeErrors;
+    TypeCheckerMetadata typeMetadata;
     TypeChecker typeChecker;
-    if (m_strictMode && !typeChecker.check(source, m_classNames,
-                                           m_functionSignatures, typeErrors)) {
+    if (m_strictMode &&
+        !typeChecker.check(source, m_classNames, m_functionSignatures,
+                           typeErrors, &typeMetadata)) {
         for (const auto& error : typeErrors) {
             std::cerr << "[error][compile][line " << error.line << "] "
                       << error.message << std::endl;
         }
         return false;
+    }
+
+    if (m_strictMode) {
+        for (const auto& classEntry : typeMetadata.classFieldTypes) {
+            auto& fieldMap = m_classFieldTypes[classEntry.first];
+            for (const auto& fieldEntry : classEntry.second) {
+                if (fieldMap.find(fieldEntry.first) == fieldMap.end()) {
+                    fieldMap[fieldEntry.first] = fieldEntry.second;
+                }
+            }
+        }
+
+        for (const auto& classEntry : typeMetadata.classMethodSignatures) {
+            auto& methodMap = m_classMethodSignatures[classEntry.first];
+            for (const auto& methodEntry : classEntry.second) {
+                if (methodMap.find(methodEntry.first) == methodMap.end()) {
+                    methodMap[methodEntry.first] = methodEntry.second;
+                }
+            }
+        }
+
+        m_superclassOf = std::move(typeMetadata.superclassOf);
     }
 
     m_scanner = std::make_unique<Scanner>(source);
@@ -648,6 +674,56 @@ TypeRef Compiler::inferVariableType(const Token& name) const {
     }
 
     return TypeInfo::makeAny();
+}
+
+TypeRef Compiler::lookupClassFieldType(const std::string& className,
+                                       const std::string& fieldName) const {
+    std::string current = className;
+    std::unordered_set<std::string> visited;
+
+    while (!current.empty() && visited.emplace(current).second) {
+        auto classFields = m_classFieldTypes.find(current);
+        if (classFields != m_classFieldTypes.end()) {
+            auto fieldIt = classFields->second.find(fieldName);
+            if (fieldIt != classFields->second.end() && fieldIt->second) {
+                return fieldIt->second;
+            }
+        }
+
+        auto superIt = m_superclassOf.find(current);
+        if (superIt == m_superclassOf.end()) {
+            break;
+        }
+
+        current = superIt->second;
+    }
+
+    return nullptr;
+}
+
+TypeRef Compiler::lookupClassMethodType(const std::string& className,
+                                        const std::string& methodName) const {
+    std::string current = className;
+    std::unordered_set<std::string> visited;
+
+    while (!current.empty() && visited.emplace(current).second) {
+        auto classMethods = m_classMethodSignatures.find(current);
+        if (classMethods != m_classMethodSignatures.end()) {
+            auto methodIt = classMethods->second.find(methodName);
+            if (methodIt != classMethods->second.end() && methodIt->second) {
+                return methodIt->second;
+            }
+        }
+
+        auto superIt = m_superclassOf.find(current);
+        if (superIt == m_superclassOf.end()) {
+            break;
+        }
+
+        current = superIt->second;
+    }
+
+    return nullptr;
 }
 
 void Compiler::emitCoerceToType(const TypeRef& sourceType,
@@ -1557,6 +1633,7 @@ void Compiler::classDeclaration() {
     consume(TokenType::IDENTIFIER, "Expected class name.");
     Token nameToken = m_parser->previous;
     classContext.className = std::string(nameToken.start(), nameToken.length());
+    m_superclassOf[classContext.className] = "";
     uint8_t nameConstant = identifierConstant(nameToken);
 
     uint8_t variable = 0;
@@ -1579,6 +1656,9 @@ void Compiler::classDeclaration() {
         if (identifiersEqual(nameToken, superclassName)) {
             errorAt(superclassName, "A class cannot inherit from itself.");
         }
+
+        m_superclassOf[classContext.className] =
+            std::string(superclassName.start(), superclassName.length());
 
         namedVariable(superclassName, false);
         emitByte(OpCode::INHERIT);
@@ -2737,24 +2817,17 @@ void Compiler::dot(bool canAssign) {
 
     TypeRef memberType = TypeInfo::makeAny();
     if (objectType && objectType->kind == TypeKind::CLASS) {
-        auto classFields = m_classFieldTypes.find(objectType->className);
-        if (classFields != m_classFieldTypes.end()) {
-            auto fieldIt = classFields->second.find(propertyName);
-            if (fieldIt != classFields->second.end() && fieldIt->second) {
-                memberType = fieldIt->second;
-            }
-        }
+        memberType = lookupClassFieldType(objectType->className, propertyName);
 
         if (!memberType || memberType->isAny()) {
-            auto classMethods =
-                m_classMethodSignatures.find(objectType->className);
-            if (classMethods != m_classMethodSignatures.end()) {
-                auto methodIt = classMethods->second.find(propertyName);
-                if (methodIt != classMethods->second.end() &&
-                    methodIt->second) {
-                    memberType = methodIt->second;
-                }
-            }
+            memberType =
+                lookupClassMethodType(objectType->className, propertyName);
+        }
+
+        if ((!memberType || memberType->isAny()) && m_strictMode) {
+            errorAt(propertyToken, "Class '" + objectType->className +
+                                       "' has no field or method named '" +
+                                       propertyName + "'.");
         }
     }
 
