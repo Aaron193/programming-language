@@ -11,6 +11,7 @@
 #include "Chunk.hpp"
 #include "GC.hpp"
 #include "Scanner.hpp"
+#include "TypeChecker.hpp"
 #include "TypeInfo.hpp"
 
 struct Parser {
@@ -94,6 +95,8 @@ class Compiler {
     std::unordered_map<std::string, std::unordered_map<std::string, TypeRef>>
         m_classMethodSignatures;
     std::unordered_map<std::string, std::string> m_superclassOf;
+    std::unordered_map<std::string, TypeRef> m_checkerTopLevelSymbolTypes;
+    std::vector<TypeCheckerDeclarationType> m_checkerDeclarationTypes;
     std::vector<TypeRef> m_globalTypes;
     std::vector<TypeRef> m_exprTypeStack;
     std::vector<std::string> m_globalNames;
@@ -141,6 +144,9 @@ class Compiler {
     bool emitCompoundBinary(TokenType assignmentType,
                             const TypeRef& leftType = TypeInfo::makeAny(),
                             const TypeRef& rightType = TypeInfo::makeAny());
+    bool shouldPreserveCheckerGlobalType(uint8_t slot,
+                                         const TypeRef& newType) const;
+    TypeRef lookupCheckerDeclarationType(const Token& nameToken) const;
     TypeRef inferVariableType(const Token& name) const;
     TypeRef lookupClassFieldType(const std::string& className,
                                  const std::string& fieldName) const;
@@ -156,8 +162,6 @@ class Compiler {
 
     void expression();
     void declaration();
-    void collectClassNames(std::string_view source);
-    void collectFunctionSignatures(std::string_view source);
     bool resolveModuleExportTypes(
         const std::string& resolvedPath,
         std::unordered_map<std::string, TypeRef>& outExportTypes,
