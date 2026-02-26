@@ -1,10 +1,9 @@
-function outer() {
-  var x = 10;
-  function inner() {
+function outer() -> i32 {
+  i32 x = 10;
+  function inner() -> i32 {
     return x + 1;
   }
-  return inner;
+  return inner();
 }
 
-var fn = outer();
-print fn();
+print outer();

@@ -1,5 +1,5 @@
 export class Counter {
-    inc() {
+    inc() -> i32 {
         this.value = this.value + 1;
         return this.value;
     }

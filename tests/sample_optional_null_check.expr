@@ -1,5 +1,5 @@
 class Dog {
-    bark() {
+    bark() -> str {
         return "woof";
     }
 }

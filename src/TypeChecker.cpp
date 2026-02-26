@@ -1072,27 +1072,47 @@ class CheckerImpl {
         defineSymbol(name, declaredType);
     }
 
-    void parseFunctionCommon(const TypeRef& signature) {
+    void parseFunctionCommon(const std::string& functionName,
+                             const TypeRef& signature, bool isMethod) {
         consume(TokenType::OPEN_PAREN, "Expected '(' after function name.");
 
         std::vector<std::pair<std::string, TypeRef>> params;
         if (!check(TokenType::CLOSE_PAREN)) {
             do {
-                TypeRef paramType = TypeInfo::makeAny();
+                TypeRef paramType = nullptr;
+                std::string paramName;
 
-                if (isTypedTypeAnnotationStart()) {
+                if (!isTypedTypeAnnotationStart()) {
+                    consume(TokenType::IDENTIFIER, "Expected parameter name.");
+                    paramName = tokenText(m_previous);
+                    addError(m_previous.line(),
+                             "Type error: parameter '" + paramName +
+                                 "' must have a type annotation.");
+                    paramType = TypeInfo::makeAny();
+                } else {
                     paramType = parseTypeExprType();
+                    if (!paramType) {
+                        addError(m_current.line(),
+                                 "Type error: expected parameter type "
+                                 "annotation.");
+                        paramType = TypeInfo::makeAny();
+                    }
+
+                    consume(TokenType::IDENTIFIER, "Expected parameter name.");
+                    paramName = tokenText(m_previous);
                 }
 
-                consume(TokenType::IDENTIFIER, "Expected parameter name.");
-                params.emplace_back(tokenText(m_previous), paramType);
+                params.emplace_back(
+                    paramName, paramType ? paramType : TypeInfo::makeAny());
             } while (match(TokenType::COMMA));
         }
 
         consume(TokenType::CLOSE_PAREN, "Expected ')' after parameters.");
 
         TypeRef returnType = TypeInfo::makeAny();
+        bool hasExplicitReturnType = false;
         if (match(TokenType::ARROW)) {
+            hasExplicitReturnType = true;
             TypeRef parsedReturnType = parseTypeExprType();
             if (!parsedReturnType) {
                 addError(m_previous.line(),
@@ -1100,9 +1120,22 @@ class CheckerImpl {
             } else {
                 returnType = parsedReturnType;
             }
-        } else if (signature && signature->kind == TypeKind::FUNCTION &&
-                   signature->returnType) {
+        }
+
+        const bool hasSignatureReturnType =
+            signature && signature->kind == TypeKind::FUNCTION &&
+            signature->returnType && !signature->returnType->isAny();
+        const bool isInitializer = isMethod && functionName == "init";
+
+        if (!hasExplicitReturnType && hasSignatureReturnType) {
             returnType = signature->returnType;
+        }
+
+        if (!hasExplicitReturnType && !hasSignatureReturnType &&
+            !isInitializer) {
+            addError(m_current.line(),
+                     "Type error: function '" + functionName +
+                         "' must declare a return type with '->'.");
         }
 
         consume(TokenType::OPEN_CURLY, "Expected '{' before function body.");
@@ -1135,7 +1168,7 @@ class CheckerImpl {
         }
         defineSymbol(name, functionType);
 
-        parseFunctionCommon(functionType);
+        parseFunctionCommon(name, functionType, false);
     }
 
     void parseClassDeclaration() {
@@ -1179,9 +1212,10 @@ class CheckerImpl {
                 }
 
                 if (check(TokenType::OPEN_PAREN)) {
+                    std::string memberName = tokenText(m_previous);
                     TypeRef sig = TypeInfo::makeFunction(
                         {}, memberType ? memberType : TypeInfo::makeAny());
-                    parseFunctionCommon(sig);
+                    parseFunctionCommon(memberName, sig, true);
                     continue;
                 }
 
@@ -1194,8 +1228,10 @@ class CheckerImpl {
             if (check(TokenType::IDENTIFIER) &&
                 peekToken().type() == TokenType::OPEN_PAREN) {
                 advance();
+                std::string memberName = tokenText(m_previous);
                 parseFunctionCommon(
-                    TypeInfo::makeFunction({}, TypeInfo::makeAny()));
+                    memberName, TypeInfo::makeFunction({}, TypeInfo::makeAny()),
+                    true);
                 continue;
             }
 

@@ -1,14 +1,13 @@
-function outer() {
-  var a = 1;
-  function middle() {
-    var b = 2;
-    function inner() {
+function outer() -> i32 {
+  i32 a = 1;
+  function middle() -> i32 {
+    i32 b = 2;
+    function inner() -> i32 {
       return a + b;
     }
-    return inner;
+    return inner();
   }
   return middle();
 }
 
-var f = outer();
-print f();
+print outer();

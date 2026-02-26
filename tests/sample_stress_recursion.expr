@@ -1,4 +1,4 @@
-function countDown(n) {
+function countDown(i32 n) -> i32 {
   if (n == 0) return 0;
   return countDown(n - 1);
 }

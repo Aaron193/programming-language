@@ -1,14 +1,14 @@
 class Counter {
-  bump() {
+  bump() -> Counter {
     this.value = this.value + 1;
     return this;
   }
 
-  get() {
+  get() -> i32 {
     return this.value;
   }
 }
 
-var c = Counter();
+Counter c = Counter();
 c.value = 0;
 print c.bump().bump().bump().get();
