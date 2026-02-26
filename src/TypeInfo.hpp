@@ -29,6 +29,7 @@ enum class TypeKind : uint8_t {
     ARRAY,
     DICT,
     SET,
+    OPTIONAL,
 };
 
 struct TypeInfo;
@@ -46,6 +47,7 @@ struct TypeInfo {
     TypeRef elementType;
     TypeRef keyType;
     TypeRef valueType;
+    TypeRef innerType;
 
     explicit TypeInfo(TypeKind kind) : kind(kind) {}
 
@@ -70,6 +72,7 @@ struct TypeInfo {
     static TypeRef makeArray(TypeRef element);
     static TypeRef makeDict(TypeRef key, TypeRef value);
     static TypeRef makeSet(TypeRef element);
+    static TypeRef makeOptional(TypeRef inner);
 
     bool isInteger() const;
     bool isFloat() const;
@@ -79,6 +82,7 @@ struct TypeInfo {
     bool isAny() const { return kind == TypeKind::ANY; }
     bool isVoid() const { return kind == TypeKind::VOID; }
     bool isClass() const { return kind == TypeKind::CLASS; }
+    bool isOptional() const { return kind == TypeKind::OPTIONAL; }
 
     std::string toString() const;
     int bitWidth() const;

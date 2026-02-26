@@ -153,6 +153,12 @@ TypeRef TypeInfo::makeSet(TypeRef element) {
     return type;
 }
 
+TypeRef TypeInfo::makeOptional(TypeRef inner) {
+    auto type = std::make_shared<TypeInfo>(TypeKind::OPTIONAL);
+    type->innerType = std::move(inner);
+    return type;
+}
+
 bool TypeInfo::isInteger() const {
     switch (kind) {
         case TypeKind::I8:
@@ -243,6 +249,9 @@ std::string TypeInfo::toString() const {
         case TypeKind::SET:
             return "Set<" + (elementType ? elementType->toString() : "any") +
                    ">";
+        case TypeKind::OPTIONAL:
+            return (innerType ? innerType->toString() : std::string("any")) +
+                   "?";
         default:
             return "<unknown>";
     }
@@ -277,6 +286,26 @@ bool isAssignable(const TypeRef& from, const TypeRef& to) {
 
     if (to->isAny() || from->isAny()) {
         return true;
+    }
+
+    if (to->kind == TypeKind::OPTIONAL) {
+        if (from->kind == TypeKind::NULL_TYPE) {
+            return true;
+        }
+
+        TypeRef optionalInner =
+            to->innerType ? to->innerType : TypeInfo::makeAny();
+        if (from->kind == TypeKind::OPTIONAL) {
+            TypeRef fromInner =
+                from->innerType ? from->innerType : TypeInfo::makeAny();
+            return isAssignable(fromInner, optionalInner);
+        }
+
+        return isAssignable(from, optionalInner);
+    }
+
+    if (from->kind == TypeKind::OPTIONAL) {
+        return false;
     }
 
     if (from->kind == to->kind) {
@@ -325,8 +354,12 @@ bool isAssignable(const TypeRef& from, const TypeRef& to) {
         }
     }
 
-    if (from->kind == TypeKind::NULL_TYPE || to->kind == TypeKind::NULL_TYPE) {
+    if (from->kind == TypeKind::NULL_TYPE) {
         return false;
+    }
+
+    if (to->kind == TypeKind::NULL_TYPE) {
+        return from->kind == TypeKind::NULL_TYPE;
     }
 
     if (from->isNumeric() && to->isNumeric()) {

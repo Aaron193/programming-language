@@ -34,6 +34,7 @@ enum TokenType {
     COMMA,
     COLON,
     DOT,
+    QUESTION,
     EQUAL,
     EQUAL_EQUAL,
 

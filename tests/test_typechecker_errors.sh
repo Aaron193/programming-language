@@ -69,6 +69,14 @@ run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/assign_dict_value_str_to_bool.expr" \
     "cannot assign 'Dict<str, str>' to variable 'flags' of type 'Dict<str, bool>'" || failed=1
 
+run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/assign_null_to_non_optional.expr" \
+    "cannot assign 'null' to variable 'name' of type 'str'" || failed=1
+
+run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/optional_member_access_without_check.expr" \
+    "cannot access members on optional value of type 'Dog?' without a null check" || failed=1
+
 if [[ $failed -ne 0 ]]; then
     exit 1
 fi

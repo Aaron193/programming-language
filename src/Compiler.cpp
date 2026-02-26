@@ -152,8 +152,21 @@ void Compiler::collectFunctionSignatures(std::string_view source) {
 
     std::function<TypeRef(const Token&)> parseTypeFromToken;
     parseTypeFromToken = [&](const Token& token) -> TypeRef {
+        auto applyOptionalSuffix = [&](TypeRef baseType) -> TypeRef {
+            if (!baseType) {
+                return nullptr;
+            }
+
+            while (peekToken().type() == TokenType::QUESTION) {
+                nextToken();
+                baseType = TypeInfo::makeOptional(baseType);
+            }
+
+            return baseType;
+        };
+
         if (isTypeToken(token.type())) {
-            return tokenToType(token);
+            return applyOptionalSuffix(tokenToType(token));
         }
 
         if (token.type() != TokenType::IDENTIFIER) {
@@ -173,7 +186,7 @@ void Compiler::collectFunctionSignatures(std::string_view source) {
                 if (!elementType || greaterToken.type() != TokenType::GREATER) {
                     return nullptr;
                 }
-                return TypeInfo::makeArray(elementType);
+                return applyOptionalSuffix(TypeInfo::makeArray(elementType));
             }
 
             if (name == "Set") {
@@ -182,7 +195,7 @@ void Compiler::collectFunctionSignatures(std::string_view source) {
                 if (!elementType || greaterToken.type() != TokenType::GREATER) {
                     return nullptr;
                 }
-                return TypeInfo::makeSet(elementType);
+                return applyOptionalSuffix(TypeInfo::makeSet(elementType));
             }
 
             TypeRef keyType = parseTypeFromToken(nextToken());
@@ -201,11 +214,11 @@ void Compiler::collectFunctionSignatures(std::string_view source) {
             if (greaterToken.type() != TokenType::GREATER) {
                 return nullptr;
             }
-            return TypeInfo::makeDict(keyType, valueType);
+            return applyOptionalSuffix(TypeInfo::makeDict(keyType, valueType));
         }
 
         if (m_classNames.find(name) != m_classNames.end()) {
-            return TypeInfo::makeClass(name);
+            return applyOptionalSuffix(TypeInfo::makeClass(name));
         }
 
         return nullptr;
@@ -768,17 +781,34 @@ bool Compiler::isTypedTypeAnnotationStart() {
     }
 
     std::string typeName(m_parser->current.start(), m_parser->current.length());
-    return m_classNames.find(typeName) != m_classNames.end() &&
-           next.type() == TokenType::IDENTIFIER;
+    if (m_classNames.find(typeName) == m_classNames.end()) {
+        return false;
+    }
+
+    return next.type() == TokenType::IDENTIFIER ||
+           next.type() == TokenType::QUESTION;
 }
 
 bool Compiler::parseTypeExpr() { return parseTypeExprType() != nullptr; }
 
 TypeRef Compiler::parseTypeExprType() {
+    auto applyOptionalSuffix = [this](TypeRef baseType) -> TypeRef {
+        if (!baseType) {
+            return nullptr;
+        }
+
+        while (m_parser->current.type() == TokenType::QUESTION) {
+            advance();
+            baseType = TypeInfo::makeOptional(baseType);
+        }
+
+        return baseType;
+    };
+
     if (isTypeToken(m_parser->current.type())) {
         TypeRef type = tokenToType(m_parser->current);
         advance();
-        return type;
+        return applyOptionalSuffix(type);
     }
 
     if (m_parser->current.type() == TokenType::IDENTIFIER) {
@@ -797,7 +827,7 @@ TypeRef Compiler::parseTypeExprType() {
                     return nullptr;
                 }
                 consume(TokenType::GREATER, "Expected '>' after Array type.");
-                return TypeInfo::makeArray(elementType);
+                return applyOptionalSuffix(TypeInfo::makeArray(elementType));
             }
 
             if (name == "Set") {
@@ -807,7 +837,7 @@ TypeRef Compiler::parseTypeExprType() {
                     return nullptr;
                 }
                 consume(TokenType::GREATER, "Expected '>' after Set type.");
-                return TypeInfo::makeSet(elementType);
+                return applyOptionalSuffix(TypeInfo::makeSet(elementType));
             }
 
             TypeRef keyType = parseTypeExprType();
@@ -822,13 +852,13 @@ TypeRef Compiler::parseTypeExprType() {
                 return nullptr;
             }
             consume(TokenType::GREATER, "Expected '>' after Dict type.");
-            return TypeInfo::makeDict(keyType, valueType);
+            return applyOptionalSuffix(TypeInfo::makeDict(keyType, valueType));
         }
 
         TypeRef type = tokenToType(identifierToken);
         if (!type) return nullptr;
         advance();
-        return type;
+        return applyOptionalSuffix(type);
     }
 
     return nullptr;
@@ -836,7 +866,9 @@ TypeRef Compiler::parseTypeExprType() {
 
 bool Compiler::isTypedVarDeclarationStart() {
     if (isTypeToken(m_parser->current.type())) {
-        return peekNextToken().type() == TokenType::IDENTIFIER;
+        const TokenType nextType = peekNextToken().type();
+        return nextType == TokenType::IDENTIFIER ||
+               nextType == TokenType::QUESTION;
     }
 
     if (m_parser->current.type() != TokenType::IDENTIFIER) {
@@ -849,8 +881,12 @@ bool Compiler::isTypedVarDeclarationStart() {
     }
 
     std::string typeName(m_parser->current.start(), m_parser->current.length());
-    return m_classNames.find(typeName) != m_classNames.end() &&
-           next.type() == TokenType::IDENTIFIER;
+    if (m_classNames.find(typeName) == m_classNames.end()) {
+        return false;
+    }
+
+    return next.type() == TokenType::IDENTIFIER ||
+           next.type() == TokenType::QUESTION;
 }
 
 void Compiler::advance() {
