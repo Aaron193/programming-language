@@ -1,0 +1,10 @@
+auto a = 10u32;
+auto b = 3u32;
+
+print a > b;
+print a >= b;
+print a < b;
+print a <= b;
+
+print (a + 2u32) > (b + 1u32);
+print (a - 7u32) <= (b * 2u32);

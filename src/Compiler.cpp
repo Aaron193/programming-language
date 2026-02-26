@@ -1,5 +1,7 @@
 #include "Compiler.hpp"
 
+#include <algorithm>
+#include <fstream>
 #include <functional>
 #include <iostream>
 #include <string>
@@ -448,6 +450,48 @@ void Compiler::collectFunctionSignatures(std::string_view source) {
         m_functionSignatures[functionNameText] =
             TypeInfo::makeFunction(params, returnType);
     }
+}
+
+bool Compiler::resolveModuleExportTypes(
+    const std::string& resolvedPath,
+    std::unordered_map<std::string, TypeRef>& outExportTypes,
+    std::string& outError) {
+    outExportTypes.clear();
+
+    std::ifstream file(resolvedPath);
+    if (!file) {
+        outError = "Failed to open module '" + resolvedPath + "'.";
+        return false;
+    }
+
+    std::string source((std::istreambuf_iterator<char>(file)),
+                       std::istreambuf_iterator<char>());
+
+    Chunk chunk;
+    Compiler moduleCompiler;
+    moduleCompiler.setGC(m_gc);
+    moduleCompiler.setStrictMode(m_strictMode);
+    if (!moduleCompiler.compile(source, chunk, resolvedPath)) {
+        outError =
+            "Failed to type-check imported module '" + resolvedPath + "'.";
+        return false;
+    }
+
+    std::unordered_map<std::string, TypeRef> moduleGlobals;
+    const auto& names = moduleCompiler.globalNames();
+    const auto& types = moduleCompiler.globalTypes();
+    for (size_t i = 0; i < names.size(); ++i) {
+        moduleGlobals[names[i]] =
+            i < types.size() && types[i] ? types[i] : TypeInfo::makeAny();
+    }
+
+    for (const auto& name : moduleCompiler.exportedNames()) {
+        auto it = moduleGlobals.find(name);
+        outExportTypes[name] =
+            it != moduleGlobals.end() ? it->second : TypeInfo::makeAny();
+    }
+
+    return true;
 }
 
 void Compiler::emitByte(uint8_t byte) {
@@ -1365,6 +1409,8 @@ void Compiler::importDeclaration() {
         struct NamedBinding {
             Token exportName;
             Token localName;
+            TypeRef expectedType;
+            TypeRef resolvedType;
         };
 
         advance();
@@ -1385,7 +1431,17 @@ void Compiler::importDeclaration() {
                     localName = m_parser->previous;
                 }
 
-                bindings.push_back(NamedBinding{exportName, localName});
+                TypeRef expectedType = nullptr;
+                if (m_parser->current.type() == TokenType::COLON) {
+                    advance();
+                    expectedType = parseTypeExprType();
+                    if (!expectedType) {
+                        errorAtCurrent("Expected type annotation after ':'.");
+                    }
+                }
+
+                bindings.push_back(
+                    NamedBinding{exportName, localName, expectedType, nullptr});
 
                 if (m_parser->current.type() != TokenType::COMMA) {
                     break;
@@ -1404,6 +1460,46 @@ void Compiler::importDeclaration() {
             return;
         }
 
+        const bool hasExpectedTypes = std::any_of(
+            bindings.begin(), bindings.end(), [](const NamedBinding& binding) {
+                return binding.expectedType != nullptr;
+            });
+
+        if (hasExpectedTypes) {
+            std::unordered_map<std::string, TypeRef> moduleExportTypes;
+            std::string moduleTypeError;
+            if (!resolveModuleExportTypes(resolvedPath, moduleExportTypes,
+                                          moduleTypeError)) {
+                errorAtCurrent(moduleTypeError);
+                return;
+            }
+
+            for (auto& binding : bindings) {
+                std::string exportName(binding.exportName.start(),
+                                       binding.exportName.length());
+                auto exportedTypeIt = moduleExportTypes.find(exportName);
+                TypeRef exportedType = exportedTypeIt != moduleExportTypes.end()
+                                           ? exportedTypeIt->second
+                                           : TypeInfo::makeAny();
+
+                if (binding.expectedType) {
+                    if (!isAssignable(exportedType, binding.expectedType)) {
+                        std::string localName(binding.localName.start(),
+                                              binding.localName.length());
+                        errorAt(binding.localName,
+                                "Type error: imported symbol '" + localName +
+                                    "' expects '" +
+                                    binding.expectedType->toString() +
+                                    "' but module exports '" + exportName +
+                                    "' as '" + exportedType->toString() + "'.");
+                    }
+                    binding.resolvedType = binding.expectedType;
+                } else {
+                    binding.resolvedType = exportedType;
+                }
+            }
+        }
+
         emitImportPath(resolvedPath);
         for (const auto& binding : bindings) {
             emitByte(OpCode::DUP);
@@ -1412,9 +1508,16 @@ void Compiler::importDeclaration() {
 
             uint8_t variable = 0;
             if (currentContext().scopeDepth > 0) {
-                addLocal(binding.localName);
+                addLocal(binding.localName, binding.resolvedType
+                                                ? binding.resolvedType
+                                                : TypeInfo::makeAny());
             } else {
                 variable = globalSlot(binding.localName);
+                if (variable < m_globalTypes.size()) {
+                    m_globalTypes[variable] = binding.resolvedType
+                                                  ? binding.resolvedType
+                                                  : TypeInfo::makeAny();
+                }
             }
             defineVariable(variable);
         }
@@ -2491,36 +2594,36 @@ void Compiler::binary(bool canAssign) {
             }
             break;
         case TokenType::GREATER:
-            if (promotedNumeric && promotedNumeric->isInteger() &&
-                promotedNumeric->isSigned()) {
-                emitByte(OpCode::IGREATER);
+            if (promotedNumeric && promotedNumeric->isInteger()) {
+                emitByte(promotedNumeric->isSigned() ? OpCode::IGREATER
+                                                     : OpCode::UGREATER);
             } else {
                 emitByte(OpCode::GREATER_THAN);
             }
             resultType = TypeInfo::makeBool();
             break;
         case TokenType::GREATER_EQUAL:
-            if (promotedNumeric && promotedNumeric->isInteger() &&
-                promotedNumeric->isSigned()) {
-                emitByte(OpCode::IGREATER_EQ);
+            if (promotedNumeric && promotedNumeric->isInteger()) {
+                emitByte(promotedNumeric->isSigned() ? OpCode::IGREATER_EQ
+                                                     : OpCode::UGREATER_EQ);
             } else {
                 emitByte(OpCode::GREATER_EQUAL_THAN);
             }
             resultType = TypeInfo::makeBool();
             break;
         case TokenType::LESS:
-            if (promotedNumeric && promotedNumeric->isInteger() &&
-                promotedNumeric->isSigned()) {
-                emitByte(OpCode::ILESS);
+            if (promotedNumeric && promotedNumeric->isInteger()) {
+                emitByte(promotedNumeric->isSigned() ? OpCode::ILESS
+                                                     : OpCode::ULESS);
             } else {
                 emitByte(OpCode::LESS_THAN);
             }
             resultType = TypeInfo::makeBool();
             break;
         case TokenType::LESS_EQUAL:
-            if (promotedNumeric && promotedNumeric->isInteger() &&
-                promotedNumeric->isSigned()) {
-                emitByte(OpCode::ILESS_EQ);
+            if (promotedNumeric && promotedNumeric->isInteger()) {
+                emitByte(promotedNumeric->isSigned() ? OpCode::ILESS_EQ
+                                                     : OpCode::ULESS_EQ);
             } else {
                 emitByte(OpCode::LESS_EQUAL_THAN);
             }

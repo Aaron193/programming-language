@@ -153,6 +153,10 @@ class Compiler {
     void declaration();
     void collectClassNames(std::string_view source);
     void collectFunctionSignatures(std::string_view source);
+    bool resolveModuleExportTypes(
+        const std::string& resolvedPath,
+        std::unordered_map<std::string, TypeRef>& outExportTypes,
+        std::string& outError);
     TypeRef tokenToType(const Token& token) const;
     void classDeclaration();
     void classMemberDeclaration();
