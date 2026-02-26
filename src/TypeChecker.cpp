@@ -1,6 +1,8 @@
 #include "TypeChecker.hpp"
 
 #include <algorithm>
+#include <cstdint>
+#include <limits>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -129,6 +131,30 @@ class CheckerImpl {
 
         return lookahead.type() == TokenType::IDENTIFIER ||
                lookahead.type() == TokenType::QUESTION;
+    }
+
+    TypeRef inferNumberLiteralType(const Token& token) {
+        std::string literal = tokenText(token);
+        if (literal.find('.') != std::string::npos) {
+            return TypeInfo::makeF64();
+        }
+
+        try {
+            long long value = std::stoll(literal);
+            if (value < std::numeric_limits<int32_t>::min() ||
+                value > std::numeric_limits<int32_t>::max()) {
+                addError(token.line(),
+                         "Type error: integer literal '" + literal +
+                             "' is out of range for default type 'i32'.");
+                return TypeInfo::makeAny();
+            }
+        } catch (...) {
+            addError(token.line(),
+                     "Type error: invalid numeric literal '" + literal + "'.");
+            return TypeInfo::makeAny();
+        }
+
+        return TypeInfo::makeI32();
     }
 
     TypeRef mergeInferredTypes(const TypeRef& lhs, const TypeRef& rhs) const {
@@ -808,8 +834,8 @@ class CheckerImpl {
 
     ExprInfo parsePrimary() {
         if (match(TokenType::NUMBER)) {
-            return ExprInfo{TypeInfo::makeAny(), false, false, "",
-                            m_previous.line()};
+            return ExprInfo{inferNumberLiteralType(m_previous), false, false,
+                            "", m_previous.line()};
         }
 
         if (match(TokenType::STRING)) {
@@ -972,7 +998,8 @@ class CheckerImpl {
         consume(TokenType::OPEN_PAREN, "Expected '(' after 'for'.");
 
         if (match(TokenType::SEMI_COLON)) {
-        } else if (match(TokenType::VAR)) {
+        } else if (match(TokenType::VAR) || match(TokenType::AUTO)) {
+            bool isAutoDeclaration = m_previous.type() == TokenType::AUTO;
             consume(TokenType::IDENTIFIER, "Expected variable name.");
             std::string variableName = tokenText(m_previous);
 
@@ -989,6 +1016,10 @@ class CheckerImpl {
             TypeRef declared = TypeInfo::makeAny();
             if (match(TokenType::EQUAL)) {
                 declared = parseExpression().type;
+            } else if (isAutoDeclaration) {
+                addError(
+                    m_previous.line(),
+                    "Type error: 'auto' declaration requires an initializer.");
             }
             consume(TokenType::SEMI_COLON,
                     "Expected ';' after loop initializer.");
@@ -1039,6 +1070,34 @@ class CheckerImpl {
         consume(TokenType::SEMI_COLON,
                 "Expected ';' after variable declaration.");
         defineSymbol(name, declared ? declared : TypeInfo::makeAny());
+    }
+
+    void parseAutoVarDeclaration() {
+        consume(TokenType::IDENTIFIER, "Expected variable name after 'auto'.");
+        Token nameToken = m_previous;
+        std::string name = tokenText(nameToken);
+
+        if (!match(TokenType::EQUAL)) {
+            addError(nameToken.line(),
+                     "Type error: 'auto' declaration requires an initializer.");
+            consume(TokenType::SEMI_COLON,
+                    "Expected ';' after auto variable declaration.");
+            defineSymbol(name, TypeInfo::makeAny());
+            return;
+        }
+
+        ExprInfo initializer = parseExpression();
+        if (initializer.type && initializer.type->kind == TypeKind::NULL_TYPE) {
+            addError(nameToken.line(),
+                     "Type error: cannot infer type for 'auto' from 'null'.");
+            defineSymbol(name, TypeInfo::makeAny());
+        } else {
+            defineSymbol(name, initializer.type ? initializer.type
+                                                : TypeInfo::makeAny());
+        }
+
+        consume(TokenType::SEMI_COLON,
+                "Expected ';' after auto variable declaration.");
     }
 
     void parseTypedVarDeclaration() {
@@ -1262,6 +1321,11 @@ class CheckerImpl {
             return;
         }
 
+        if (match(TokenType::AUTO)) {
+            parseAutoVarDeclaration();
+            return;
+        }
+
         if (match(TokenType::CLASS)) {
             parseClassDeclaration();
             return;
@@ -1330,6 +1394,11 @@ class CheckerImpl {
 
         if (match(TokenType::VAR)) {
             parseVarDeclaration();
+            return;
+        }
+
+        if (match(TokenType::AUTO)) {
+            parseAutoVarDeclaration();
             return;
         }
 
