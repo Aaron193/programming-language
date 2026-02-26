@@ -57,15 +57,55 @@ Token Scanner::nextToken() {
     const char c = advance();
 
     if (isDigit(c)) {
-        while (isdigit(peek())) {
+        while (isDigit(peek())) {
             advance();
         }
 
-        if (peek() == '.' && isdigit(peekNext())) {
+        bool hasDecimal = false;
+        if (peek() == '.' && isDigit(peekNext())) {
+            hasDecimal = true;
             advance();
 
-            while (isdigit(peek())) {
+            while (isDigit(peek())) {
                 advance();
+            }
+        }
+
+        auto isSuffixBoundary = [this](char ch) {
+            return !isAlpha(ch) && !isDigit(ch) && ch != '_';
+        };
+
+        auto tryConsumeSuffix = [this, &isSuffixBoundary](const char* suffix) {
+            size_t length = std::strlen(suffix);
+            if (std::strncmp(m_current, suffix, length) != 0) {
+                return false;
+            }
+
+            if (!isSuffixBoundary(*(m_current + length))) {
+                return false;
+            }
+
+            m_current += length;
+            return true;
+        };
+
+        if (isAlpha(peek())) {
+            bool matchedSuffix = false;
+            if (hasDecimal) {
+                matchedSuffix =
+                    tryConsumeSuffix("f32") || tryConsumeSuffix("f64");
+            } else {
+                matchedSuffix =
+                    tryConsumeSuffix("usize") || tryConsumeSuffix("i16") ||
+                    tryConsumeSuffix("i32") || tryConsumeSuffix("i64") ||
+                    tryConsumeSuffix("u16") || tryConsumeSuffix("u32") ||
+                    tryConsumeSuffix("u64") || tryConsumeSuffix("i8") ||
+                    tryConsumeSuffix("u8") || tryConsumeSuffix("f32") ||
+                    tryConsumeSuffix("f64") || tryConsumeSuffix("u");
+            }
+
+            if (!matchedSuffix) {
+                return createErrorToken("Invalid numeric literal suffix.");
             }
         }
 
@@ -258,6 +298,10 @@ TokenType Scanner::getIdentifier() {
             if (matchKeyword("u32", 3)) return TokenType::TYPE_U32;
             if (matchKeyword("u64", 3)) return TokenType::TYPE_U64;
             if (matchKeyword("usize", 5)) return TokenType::TYPE_USIZE;
+            break;
+
+        case 'v':
+            if (matchKeyword("void", 4)) return TokenType::TYPE_VOID;
             break;
 
         case 'w':

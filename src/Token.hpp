@@ -79,6 +79,7 @@ enum TokenType {
     TYPE_F64,
     TYPE_BOOL,
     TYPE_STR,
+    TYPE_VOID,
     TYPE_NULL_KW,
     AS_KW,
     ARROW,

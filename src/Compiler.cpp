@@ -15,6 +15,91 @@ namespace {
 bool isCollectionTypeNameText(std::string_view name) {
     return name == "Array" || name == "Dict" || name == "Set";
 }
+
+struct NumericLiteralInfo {
+    std::string core;
+    TypeRef type;
+    bool isUnsigned = false;
+    bool isFloat = false;
+    bool valid = false;
+};
+
+NumericLiteralInfo parseNumericLiteralInfo(const std::string& literal) {
+    NumericLiteralInfo info;
+    info.core = literal;
+    info.valid = true;
+
+    auto assignSuffix = [&](size_t suffixLength, const TypeRef& suffixType,
+                            bool isUnsigned, bool isFloat) {
+        info.type = suffixType;
+        info.isUnsigned = isUnsigned;
+        info.isFloat = isFloat;
+        info.core = literal.substr(0, literal.length() - suffixLength);
+    };
+
+    if (literal.size() >= 5 &&
+        literal.compare(literal.size() - 5, 5, "usize") == 0) {
+        assignSuffix(5, TypeInfo::makeUSize(), true, false);
+    } else if (literal.size() >= 3 &&
+               literal.compare(literal.size() - 3, 3, "i16") == 0) {
+        assignSuffix(3, TypeInfo::makeI16(), false, false);
+    } else if (literal.size() >= 3 &&
+               literal.compare(literal.size() - 3, 3, "i32") == 0) {
+        assignSuffix(3, TypeInfo::makeI32(), false, false);
+    } else if (literal.size() >= 3 &&
+               literal.compare(literal.size() - 3, 3, "i64") == 0) {
+        assignSuffix(3, TypeInfo::makeI64(), false, false);
+    } else if (literal.size() >= 3 &&
+               literal.compare(literal.size() - 3, 3, "u16") == 0) {
+        assignSuffix(3, TypeInfo::makeU16(), true, false);
+    } else if (literal.size() >= 3 &&
+               literal.compare(literal.size() - 3, 3, "u32") == 0) {
+        assignSuffix(3, TypeInfo::makeU32(), true, false);
+    } else if (literal.size() >= 3 &&
+               literal.compare(literal.size() - 3, 3, "u64") == 0) {
+        assignSuffix(3, TypeInfo::makeU64(), true, false);
+    } else if (literal.size() >= 3 &&
+               literal.compare(literal.size() - 3, 3, "f32") == 0) {
+        assignSuffix(3, TypeInfo::makeF32(), false, true);
+    } else if (literal.size() >= 3 &&
+               literal.compare(literal.size() - 3, 3, "f64") == 0) {
+        assignSuffix(3, TypeInfo::makeF64(), false, true);
+    } else if (literal.size() >= 2 &&
+               literal.compare(literal.size() - 2, 2, "i8") == 0) {
+        assignSuffix(2, TypeInfo::makeI8(), false, false);
+    } else if (literal.size() >= 2 &&
+               literal.compare(literal.size() - 2, 2, "u8") == 0) {
+        assignSuffix(2, TypeInfo::makeU8(), true, false);
+    } else if (!literal.empty() && literal.back() == 'u') {
+        assignSuffix(1, TypeInfo::makeU32(), true, false);
+    }
+
+    if (info.core.empty()) {
+        info.valid = false;
+        return info;
+    }
+
+    const bool hasDecimalPoint = info.core.find('.') != std::string::npos;
+
+    if (!info.type) {
+        if (hasDecimalPoint) {
+            info.type = TypeInfo::makeF64();
+            info.isFloat = true;
+        } else {
+            info.type = TypeInfo::makeI32();
+        }
+    }
+
+    if (info.type->isFloat()) {
+        info.isFloat = true;
+    }
+
+    if (info.type->isInteger() && hasDecimalPoint) {
+        info.valid = false;
+    }
+
+    return info;
+}
 }  // namespace
 
 bool Compiler::compile(std::string_view source, Chunk& chunk,
@@ -93,6 +178,8 @@ TypeRef Compiler::tokenToType(const Token& token) const {
             return TypeInfo::makeBool();
         case TokenType::TYPE_STR:
             return TypeInfo::makeStr();
+        case TokenType::TYPE_VOID:
+            return TypeInfo::makeVoid();
         case TokenType::TYPE_NULL_KW:
             return TypeInfo::makeNull();
         case TokenType::IDENTIFIER: {
@@ -475,18 +562,28 @@ TypeRef Compiler::inferVariableType(const Token& name) const {
     return TypeInfo::makeAny();
 }
 
-void Compiler::emitCoerceToType(const TypeRef& targetType) {
-    if (!targetType || targetType->isAny()) {
+void Compiler::emitCoerceToType(const TypeRef& sourceType,
+                                const TypeRef& targetType) {
+    if (!sourceType || !targetType || sourceType->isAny() ||
+        targetType->isAny()) {
         return;
     }
 
-    if (targetType->isInteger()) {
-        emitByte(OpCode::NARROW_INT);
-        emitByte(static_cast<uint8_t>(targetType->kind));
+    if (sourceType->kind == targetType->kind) {
         return;
     }
 
-    if (targetType->isFloat()) {
+    if (sourceType->isInteger() && targetType->isInteger()) {
+        const bool sameSignedness =
+            sourceType->isSigned() == targetType->isSigned();
+        if (sameSignedness && sourceType->bitWidth() < targetType->bitWidth()) {
+            emitByte(OpCode::WIDEN_INT);
+            emitByte(static_cast<uint8_t>(targetType->kind));
+        }
+        return;
+    }
+
+    if (sourceType->isInteger() && targetType->isFloat()) {
         emitByte(OpCode::INT_TO_FLOAT);
         return;
     }
@@ -584,7 +681,7 @@ void Compiler::namedVariable(const Token& name, bool canAssign) {
             advance();
             expression();
             TypeRef rhsType = popExprType();
-            emitCoerceToType(declaredType);
+            emitCoerceToType(rhsType, declaredType);
             emitCheckInstanceType(declaredType);
             emitBytes(setOp, arg);
             pushExprType(declaredType && !declaredType->isAny() ? declaredType
@@ -601,7 +698,7 @@ void Compiler::namedVariable(const Token& name, bool canAssign) {
                                           ? TokenType::PLUS
                                           : TokenType::MINUS,
                                       declaredType));
-            emitCoerceToType(declaredType);
+            emitCoerceToType(declaredType, declaredType);
             emitBytes(setOp, arg);
             pushExprType(declaredType);
             return;
@@ -618,7 +715,9 @@ void Compiler::namedVariable(const Token& name, bool canAssign) {
             expression();
             TypeRef rhsType = popExprType();
             emitCompoundBinary(assignmentType, declaredType, rhsType);
-            emitCoerceToType(declaredType);
+            TypeRef resultType = numericPromotion(declaredType, rhsType);
+            emitCoerceToType(resultType ? resultType : declaredType,
+                             declaredType);
             emitBytes(setOp, arg);
             pushExprType(declaredType);
             return;
@@ -784,6 +883,7 @@ bool Compiler::isTypeToken(TokenType type) const {
         case TokenType::TYPE_F64:
         case TokenType::TYPE_BOOL:
         case TokenType::TYPE_STR:
+        case TokenType::TYPE_VOID:
         case TokenType::TYPE_NULL_KW:
             return true;
         default:
@@ -860,6 +960,11 @@ TypeRef Compiler::parseTypeExprType() {
                     errorAtCurrent("Expected element type in Array<T>.");
                     return nullptr;
                 }
+                if (elementType->isVoid()) {
+                    errorAtCurrent(
+                        "'void' is not valid as an Array element type.");
+                    return nullptr;
+                }
                 consume(TokenType::GREATER, "Expected '>' after Array type.");
                 return applyOptionalSuffix(TypeInfo::makeArray(elementType));
             }
@@ -868,6 +973,11 @@ TypeRef Compiler::parseTypeExprType() {
                 TypeRef elementType = parseTypeExprType();
                 if (!elementType) {
                     errorAtCurrent("Expected element type in Set<T>.");
+                    return nullptr;
+                }
+                if (elementType->isVoid()) {
+                    errorAtCurrent(
+                        "'void' is not valid as a Set element type.");
                     return nullptr;
                 }
                 consume(TokenType::GREATER, "Expected '>' after Set type.");
@@ -879,10 +989,18 @@ TypeRef Compiler::parseTypeExprType() {
                 errorAtCurrent("Expected key type in Dict<K, V>.");
                 return nullptr;
             }
+            if (keyType->isVoid()) {
+                errorAtCurrent("'void' is not valid as a Dict key type.");
+                return nullptr;
+            }
             consume(TokenType::COMMA, "Expected ',' in Dict<K, V> type.");
             TypeRef valueType = parseTypeExprType();
             if (!valueType) {
                 errorAtCurrent("Expected value type in Dict<K, V>.");
+                return nullptr;
+            }
+            if (valueType->isVoid()) {
+                errorAtCurrent("'void' is not valid as a Dict value type.");
                 return nullptr;
             }
             consume(TokenType::GREATER, "Expected '>' after Dict type.");
@@ -981,6 +1099,7 @@ void Compiler::synchronize() {
             case TokenType::TYPE_F64:
             case TokenType::TYPE_BOOL:
             case TokenType::TYPE_STR:
+            case TokenType::TYPE_VOID:
             case TokenType::TYPE_NULL_KW:
             case TokenType::IMPORT:
             case TokenType::EXPORT:
@@ -1302,6 +1421,10 @@ void Compiler::typedClassMemberDeclaration() {
     std::string className = m_currentClass ? m_currentClass->className : "";
 
     if (m_parser->current.type() == TokenType::SEMI_COLON) {
+        if (declaredType->isVoid()) {
+            errorAt(memberName, "Class field '" + memberNameText +
+                                    "' cannot have type 'void'.");
+        }
         if (!className.empty()) {
             m_classFieldTypes[className][memberNameText] = declaredType;
         }
@@ -1620,7 +1743,14 @@ void Compiler::returnStatement() {
         errorAtCurrent("Cannot return from top-level code.");
     }
 
+    TypeRef expectedReturnType = currentContext().returnType;
+
     if (m_parser->current.type() == TokenType::SEMI_COLON) {
+        if (expectedReturnType && !expectedReturnType->isAny() &&
+            !expectedReturnType->isVoid()) {
+            errorAtCurrent("Return statement requires a value of type '" +
+                           expectedReturnType->toString() + "'.");
+        }
         advance();
         emitByte(OpCode::NIL);
         emitByte(OpCode::RETURN);
@@ -1628,9 +1758,14 @@ void Compiler::returnStatement() {
     }
 
     expression();
-    popExprType();
-    emitCoerceToType(currentContext().returnType);
-    emitCheckInstanceType(currentContext().returnType);
+    TypeRef expressionType = popExprType();
+    if (expectedReturnType && expectedReturnType->isVoid()) {
+        errorAtCurrent(
+            "Cannot return a value from a function returning "
+            "'void'.");
+    }
+    emitCoerceToType(expressionType, expectedReturnType);
+    emitCheckInstanceType(expectedReturnType);
     if (m_parser->current.type() == TokenType::SEMI_COLON) {
         advance();
     }
@@ -1684,14 +1819,18 @@ void Compiler::typedVarDeclaration() {
         return;
     }
 
+    if (declaredType->isVoid()) {
+        errorAtCurrent("Variables cannot be declared with type 'void'.");
+    }
+
     uint8_t global =
         parseVariable("Expected variable name after type.", declaredType);
     consume(TokenType::EQUAL,
             "Expected '=' in typed variable declaration (initializer is "
             "required).");
     expression();
-    popExprType();
-    emitCoerceToType(declaredType);
+    TypeRef initializerType = popExprType();
+    emitCoerceToType(initializerType, declaredType);
     emitCheckInstanceType(declaredType);
 
     consume(TokenType::SEMI_COLON,
@@ -1848,14 +1987,36 @@ void Compiler::number(bool canAssign) {
     (void)canAssign;
     std::string literal(m_parser->previous.start(),
                         m_parser->previous.length());
-    if (literal.find('.') != std::string::npos) {
-        emitConstant(std::stod(literal));
-        pushExprType(TypeInfo::makeF64());
+    NumericLiteralInfo literalInfo = parseNumericLiteralInfo(literal);
+    if (!literalInfo.valid) {
+        errorAt(m_parser->previous,
+                "Invalid numeric literal '" + literal + "'.");
+        pushExprType(TypeInfo::makeAny());
         return;
     }
 
-    emitConstant(static_cast<int64_t>(std::stoll(literal)));
-    pushExprType(TypeInfo::makeI32());
+    try {
+        if (literalInfo.isFloat) {
+            emitConstant(std::stod(literalInfo.core));
+            pushExprType(literalInfo.type ? literalInfo.type
+                                          : TypeInfo::makeF64());
+            return;
+        }
+
+        if (literalInfo.isUnsigned) {
+            emitConstant(static_cast<uint64_t>(std::stoull(literalInfo.core)));
+            pushExprType(literalInfo.type ? literalInfo.type
+                                          : TypeInfo::makeU32());
+            return;
+        }
+
+        emitConstant(static_cast<int64_t>(std::stoll(literalInfo.core)));
+        pushExprType(literalInfo.type ? literalInfo.type : TypeInfo::makeI32());
+    } catch (...) {
+        errorAt(m_parser->previous,
+                "Invalid numeric literal '" + literal + "'.");
+        pushExprType(TypeInfo::makeAny());
+    }
 }
 
 void Compiler::variable(bool canAssign) {
@@ -2132,7 +2293,7 @@ void Compiler::prefixUpdate(bool canAssign) {
         emitConstant(Value(static_cast<int64_t>(1)));
         emitByte(arithmeticOpcode(
             isIncrement ? TokenType::PLUS : TokenType::MINUS, declaredType));
-        emitCoerceToType(declaredType);
+        emitCoerceToType(declaredType, declaredType);
         emitBytes(setOp, arg);
         pushExprType(declaredType);
     };
@@ -2573,6 +2734,13 @@ Compiler::CompiledFunction Compiler::compileFunction(
 
                 consume(TokenType::IDENTIFIER, "Expected parameter name.");
                 parameterNameToken = m_parser->previous;
+            }
+
+            if (parameterType && parameterType->isVoid()) {
+                std::string parameterName(parameterNameToken.start(),
+                                          parameterNameToken.length());
+                errorAt(parameterNameToken, "Parameter '" + parameterName +
+                                                "' cannot have type 'void'.");
             }
 
             parameters.emplace_back(parameterNameToken.start(),
