@@ -1,13 +1,12 @@
-function makeCounter() {
-  var x = 0;
-  function inc() {
+function makeCounter() -> i32 {
+  i32 x = 0;
+  function inc() -> i32 {
     x = x + 1;
     return x;
   }
-  return inc;
+  print inc();
+  print inc();
+  return inc();
 }
 
-var counter = makeCounter();
-print counter();
-print counter();
-print counter();
+print makeCounter();

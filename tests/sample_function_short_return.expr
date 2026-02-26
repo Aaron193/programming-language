@@ -1,4 +1,4 @@
-function check(v) {
+function check(i32 v) -> str {
   if (v > 0) return "pos";
   return "non-pos";
 }

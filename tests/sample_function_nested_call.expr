@@ -1,5 +1,5 @@
-function inc(x) { return x + 1; }
-function sum3(a, b, c) {
+function inc(i32 x) -> i32 { return x + 1; }
+function sum3(i32 a, i32 b, i32 c) -> i32 {
   return inc(a) + inc(b) + inc(c);
 }
 print sum3(1, 2, 3);

@@ -1,15 +1,15 @@
 class Box {
-  get() {
+  get() -> i32 {
     return this.value;
   }
 
-  set(v) {
+  set(i32 v) -> i32 {
     this.value = v;
     return this.value;
   }
 }
 
-var b = Box();
+Box b = Box();
 b.value = 7;
 print b.get();
 print b.set(9);

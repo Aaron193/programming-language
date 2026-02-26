@@ -2241,19 +2241,35 @@ Compiler::CompiledFunction Compiler::compileFunction(
     std::vector<TypeRef> parameterTypes;
     if (m_parser->current.type() != TokenType::CLOSE_PAREN) {
         do {
-            TypeRef parameterType = TypeInfo::makeAny();
-            if (isTypedTypeAnnotationStart()) {
+            TypeRef parameterType = nullptr;
+            Token parameterNameToken;
+
+            if (!isTypedTypeAnnotationStart()) {
+                consume(TokenType::IDENTIFIER, "Expected parameter name.");
+                parameterNameToken = m_parser->previous;
+                std::string parameterName(parameterNameToken.start(),
+                                          parameterNameToken.length());
+                errorAt(parameterNameToken,
+                        "Parameter '" + parameterName +
+                            "' must have a type annotation.");
+                parameterType = TypeInfo::makeAny();
+            } else {
                 parameterType = parseTypeExprType();
                 if (!parameterType) {
                     errorAtCurrent("Expected parameter type annotation.");
+                    parameterType = TypeInfo::makeAny();
                 }
+
+                consume(TokenType::IDENTIFIER, "Expected parameter name.");
+                parameterNameToken = m_parser->previous;
             }
 
-            consume(TokenType::IDENTIFIER, "Expected parameter name.");
-            parameters.emplace_back(m_parser->previous.start(),
-                                    m_parser->previous.length());
-            parameterTypes.push_back(parameterType);
-            addLocal(m_parser->previous, parameterType);
+            parameters.emplace_back(parameterNameToken.start(),
+                                    parameterNameToken.length());
+            parameterTypes.push_back(parameterType ? parameterType
+                                                   : TypeInfo::makeAny());
+            addLocal(parameterNameToken,
+                     parameterType ? parameterType : TypeInfo::makeAny());
             markInitialized();
 
             if (m_parser->current.type() != TokenType::COMMA) {
@@ -2265,6 +2281,10 @@ Compiler::CompiledFunction Compiler::compileFunction(
 
     consume(TokenType::CLOSE_PAREN, "Expected ')' after parameters.");
 
+    const bool isInitializer = isMethod && name == "init";
+    const bool hasDeclaredReturnType =
+        declaredReturnType && !declaredReturnType->isAny();
+
     if (m_parser->current.type() == TokenType::ARROW) {
         advance();
         TypeRef parsedReturnType = parseTypeExprType();
@@ -2273,6 +2293,9 @@ Compiler::CompiledFunction Compiler::compileFunction(
         } else {
             currentContext().returnType = parsedReturnType;
         }
+    } else if (!isInitializer && !hasDeclaredReturnType) {
+        errorAtCurrent("Function '" + name +
+                       "' must declare a return type with '->'.");
     }
 
     consume(TokenType::OPEN_CURLY, "Expected '{' before function body.");

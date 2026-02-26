@@ -1,19 +1,19 @@
 class A {
-  greet() {
+  greet() -> str {
     return "A";
   }
 
-  id() {
+  id() -> str {
     return "idA";
   }
 }
 
 class B < A {
-  greet() {
+  greet() -> str {
     return super.greet() + "B";
   }
 }
 
-var b = B();
+B b = B();
 print b.greet();
 print b.id();
