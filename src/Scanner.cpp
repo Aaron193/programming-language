@@ -251,6 +251,7 @@ TokenType Scanner::getIdentifier() {
         case 'f':
             if (matchKeyword("f32", 3)) return TokenType::TYPE_F32;
             if (matchKeyword("f64", 3)) return TokenType::TYPE_F64;
+            if (matchKeyword("fn", 2)) return TokenType::TYPE_FN;
             if (matchKeyword("false", 5)) return TokenType::FALSE;
             if (matchKeyword("for", 3)) return TokenType::FOR;
             if (matchKeyword("from", 4)) return TokenType::FROM;

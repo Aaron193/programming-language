@@ -312,6 +312,7 @@ struct IteratorObject : GcObject {
 struct ModuleObject : GcObject {
     std::string path;
     std::unordered_map<std::string, Value> exports;
+    std::unordered_map<std::string, TypeRef> exportTypes;
 
     void trace(GC& gc) override;
 };

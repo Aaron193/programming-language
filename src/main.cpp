@@ -11,13 +11,15 @@ struct CliOptions {
     bool trace = false;
     bool showReturn = false;
     bool disassemble = false;
+    bool strict = false;
     std::string sourceFile;
 };
 
 static void printUsage(const char* executable) {
-    std::cout << "Usage: " << executable
-              << " [--trace] [--show-return] [--disassemble] [source file]"
-              << std::endl;
+    std::cout
+        << "Usage: " << executable
+        << " [--trace] [--show-return] [--disassemble] [--strict] [source file]"
+        << std::endl;
 }
 
 static bool parseArgs(int argc, char** argv, CliOptions& options) {
@@ -31,6 +33,8 @@ static bool parseArgs(int argc, char** argv, CliOptions& options) {
             options.showReturn = true;
         } else if (arg == "--disassemble") {
             options.disassemble = true;
+        } else if (arg == "--strict") {
+            options.strict = true;
         } else if (arg == "--help" || arg == "-h") {
             printUsage(argv[0]);
             return false;
@@ -78,8 +82,9 @@ static int runFile(const CliOptions& options) {
     }
 
     VirtualMachine vm;
-    Status status = vm.interpret(*source, options.showReturn, options.trace,
-                                 options.disassemble, absolutePath);
+    Status status =
+        vm.interpret(*source, options.showReturn, options.trace,
+                     options.disassemble, absolutePath, options.strict);
 
     if (status == Status::COMPILATION_ERROR) {
         std::cerr << "Compilation error in source file: " << options.sourceFile
@@ -115,7 +120,7 @@ static int runRepl(const CliOptions& options) {
         }
 
         Status status = vm.interpret(line, options.showReturn, options.trace,
-                                     options.disassemble);
+                                     options.disassemble, "", options.strict);
         if (status == Status::COMPILATION_ERROR) {
             std::cerr << "Compilation error." << std::endl;
             continue;

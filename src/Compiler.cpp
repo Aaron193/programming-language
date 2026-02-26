@@ -116,8 +116,8 @@ bool Compiler::compile(std::string_view source, Chunk& chunk,
 
     std::vector<TypeError> typeErrors;
     TypeChecker typeChecker;
-    if (!typeChecker.check(source, m_classNames, m_functionSignatures,
-                           typeErrors)) {
+    if (m_strictMode && !typeChecker.check(source, m_classNames,
+                                           m_functionSignatures, typeErrors)) {
         for (const auto& error : typeErrors) {
             std::cerr << "[error][compile][line " << error.line << "] "
                       << error.message << std::endl;
@@ -178,6 +178,8 @@ TypeRef Compiler::tokenToType(const Token& token) const {
             return TypeInfo::makeBool();
         case TokenType::TYPE_STR:
             return TypeInfo::makeStr();
+        case TokenType::TYPE_FN:
+            return nullptr;
         case TokenType::TYPE_VOID:
             return TypeInfo::makeVoid();
         case TokenType::TYPE_NULL_KW:
@@ -252,6 +254,48 @@ void Compiler::collectFunctionSignatures(std::string_view source) {
 
             return baseType;
         };
+
+        if (token.type() == TokenType::TYPE_FN) {
+            Token openParen = nextToken();
+            if (openParen.type() != TokenType::OPEN_PAREN) {
+                return nullptr;
+            }
+
+            std::vector<TypeRef> params;
+            Token cursor = nextToken();
+            if (cursor.type() != TokenType::CLOSE_PAREN) {
+                while (true) {
+                    TypeRef parameterType = parseTypeFromToken(cursor);
+                    if (!parameterType || parameterType->isVoid()) {
+                        return nullptr;
+                    }
+                    params.push_back(parameterType);
+
+                    Token delimiter = nextToken();
+                    if (delimiter.type() == TokenType::COMMA) {
+                        cursor = nextToken();
+                        continue;
+                    }
+                    if (delimiter.type() != TokenType::CLOSE_PAREN) {
+                        return nullptr;
+                    }
+                    break;
+                }
+            }
+
+            Token arrow = nextToken();
+            if (arrow.type() != TokenType::ARROW) {
+                return nullptr;
+            }
+
+            TypeRef returnType = parseTypeFromToken(nextToken());
+            if (!returnType) {
+                return nullptr;
+            }
+
+            return applyOptionalSuffix(
+                TypeInfo::makeFunction(params, returnType));
+        }
 
         if (isTypeToken(token.type())) {
             return applyOptionalSuffix(tokenToType(token));
@@ -883,6 +927,7 @@ bool Compiler::isTypeToken(TokenType type) const {
         case TokenType::TYPE_F64:
         case TokenType::TYPE_BOOL:
         case TokenType::TYPE_STR:
+        case TokenType::TYPE_FN:
         case TokenType::TYPE_VOID:
         case TokenType::TYPE_NULL_KW:
             return true;
@@ -901,6 +946,10 @@ bool Compiler::isCollectionTypeName(const Token& token) const {
 }
 
 bool Compiler::isTypedTypeAnnotationStart() {
+    if (m_parser->current.type() == TokenType::TYPE_FN) {
+        return peekNextToken().type() == TokenType::OPEN_PAREN;
+    }
+
     if (isTypeToken(m_parser->current.type())) {
         return true;
     }
@@ -938,6 +987,46 @@ TypeRef Compiler::parseTypeExprType() {
 
         return baseType;
     };
+
+    if (m_parser->current.type() == TokenType::TYPE_FN) {
+        advance();
+        consume(TokenType::OPEN_PAREN, "Expected '(' after 'fn'.");
+
+        std::vector<TypeRef> paramTypes;
+        if (m_parser->current.type() != TokenType::CLOSE_PAREN) {
+            while (true) {
+                TypeRef paramType = parseTypeExprType();
+                if (!paramType) {
+                    errorAtCurrent("Expected parameter type in function type.");
+                    return nullptr;
+                }
+                if (paramType->isVoid()) {
+                    errorAtCurrent("Function type parameter cannot be 'void'.");
+                    return nullptr;
+                }
+                paramTypes.push_back(paramType);
+
+                if (m_parser->current.type() == TokenType::COMMA) {
+                    advance();
+                    continue;
+                }
+                break;
+            }
+        }
+
+        consume(TokenType::CLOSE_PAREN,
+                "Expected ')' after function type parameters.");
+        consume(TokenType::ARROW,
+                "Expected '->' after function type parameters.");
+        TypeRef returnType = parseTypeExprType();
+        if (!returnType) {
+            errorAtCurrent("Expected function return type.");
+            return nullptr;
+        }
+
+        return applyOptionalSuffix(
+            TypeInfo::makeFunction(paramTypes, returnType));
+    }
 
     if (isTypeToken(m_parser->current.type())) {
         TypeRef type = tokenToType(m_parser->current);
@@ -1017,6 +1106,10 @@ TypeRef Compiler::parseTypeExprType() {
 }
 
 bool Compiler::isTypedVarDeclarationStart() {
+    if (m_parser->current.type() == TokenType::TYPE_FN) {
+        return peekNextToken().type() == TokenType::OPEN_PAREN;
+    }
+
     if (isTypeToken(m_parser->current.type())) {
         const TokenType nextType = peekNextToken().type();
         return nextType == TokenType::IDENTIFIER ||
@@ -1099,6 +1192,7 @@ void Compiler::synchronize() {
             case TokenType::TYPE_F64:
             case TokenType::TYPE_BOOL:
             case TokenType::TYPE_STR:
+            case TokenType::TYPE_FN:
             case TokenType::TYPE_VOID:
             case TokenType::TYPE_NULL_KW:
             case TokenType::IMPORT:

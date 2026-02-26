@@ -98,6 +98,7 @@ class Compiler {
     std::vector<std::string> m_globalNames;
     std::vector<std::string> m_exportedNames;
     std::string m_sourcePath;
+    bool m_strictMode = false;
     bool m_hasBufferedToken = false;
     Token m_bufferedToken;
 
@@ -209,6 +210,7 @@ class Compiler {
 
     void setGC(GC* gc) { m_gc = gc; }
     void setSourcePath(const std::string& path) { m_sourcePath = path; }
+    void setStrictMode(bool strictMode) { m_strictMode = strictMode; }
     const std::vector<std::string>& globalNames() const {
         return m_globalNames;
     }

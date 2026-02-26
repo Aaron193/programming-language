@@ -27,6 +27,7 @@ bool isTypeToken(TokenType type) {
         case TokenType::TYPE_F64:
         case TokenType::TYPE_BOOL:
         case TokenType::TYPE_STR:
+        case TokenType::TYPE_FN:
         case TokenType::TYPE_VOID:
         case TokenType::TYPE_NULL_KW:
             return true;
@@ -121,6 +122,10 @@ class CheckerImpl {
     }
 
     bool isTypedTypeAnnotationStart() {
+        if (check(TokenType::TYPE_FN)) {
+            return peekToken().type() == TokenType::OPEN_PAREN;
+        }
+
         if (isTypeToken(m_current.type())) {
             return true;
         }
@@ -658,6 +663,56 @@ class CheckerImpl {
             return baseType;
         };
 
+        if (check(TokenType::TYPE_FN)) {
+            advance();
+            consume(TokenType::OPEN_PAREN,
+                    "Type error: expected '(' after 'fn'.");
+
+            std::vector<TypeRef> paramTypes;
+            if (!check(TokenType::CLOSE_PAREN)) {
+                while (true) {
+                    TypeRef paramType = parseTypeExprType();
+                    if (!paramType) {
+                        addError(
+                            m_current.line(),
+                            "Type error: expected parameter type in function "
+                            "type.");
+                        return nullptr;
+                    }
+                    if (paramType->isVoid()) {
+                        addError(
+                            m_current.line(),
+                            "Type error: function type parameter cannot be "
+                            "'void'.");
+                        return nullptr;
+                    }
+                    paramTypes.push_back(paramType);
+
+                    if (match(TokenType::COMMA)) {
+                        continue;
+                    }
+                    break;
+                }
+            }
+
+            consume(TokenType::CLOSE_PAREN,
+                    "Type error: expected ')' after function type "
+                    "parameters.");
+            consume(TokenType::ARROW,
+                    "Type error: expected '->' after function type "
+                    "parameters.");
+
+            TypeRef returnType = parseTypeExprType();
+            if (!returnType) {
+                addError(m_current.line(),
+                         "Type error: expected function return type.");
+                return nullptr;
+            }
+
+            return applyOptionalSuffix(
+                TypeInfo::makeFunction(paramTypes, returnType));
+        }
+
         if (isTypeToken(m_current.type())) {
             Token token = m_current;
             advance();
@@ -688,6 +743,8 @@ class CheckerImpl {
                     return applyOptionalSuffix(TypeInfo::makeBool());
                 case TokenType::TYPE_STR:
                     return applyOptionalSuffix(TypeInfo::makeStr());
+                case TokenType::TYPE_FN:
+                    return nullptr;
                 case TokenType::TYPE_VOID:
                     return applyOptionalSuffix(TypeInfo::makeVoid());
                 case TokenType::TYPE_NULL_KW:
@@ -786,6 +843,10 @@ class CheckerImpl {
     }
 
     bool isTypedVarDeclarationStart() {
+        if (check(TokenType::TYPE_FN)) {
+            return peekToken().type() == TokenType::OPEN_PAREN;
+        }
+
         if (isTypeToken(m_current.type())) {
             TokenType lookahead = peekToken().type();
             return lookahead == TokenType::IDENTIFIER ||
