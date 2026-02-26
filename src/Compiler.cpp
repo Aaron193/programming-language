@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <fstream>
-#include <functional>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -114,13 +113,17 @@ bool Compiler::compile(std::string_view source, Chunk& chunk,
     m_classFieldTypes.clear();
     m_classMethodSignatures.clear();
     m_superclassOf.clear();
+    m_checkerTopLevelSymbolTypes.clear();
+    m_checkerDeclarationTypes.clear();
     registerStandardLibraryTypeSignatures(m_functionSignatures);
-    collectClassNames(source);
-    collectFunctionSignatures(source);
+    TypeChecker typeChecker;
+    if (!typeChecker.collectSymbols(source, m_classNames,
+                                    m_functionSignatures)) {
+        return false;
+    }
 
     std::vector<TypeError> typeErrors;
     TypeCheckerMetadata typeMetadata;
-    TypeChecker typeChecker;
     if (m_strictMode &&
         !typeChecker.check(source, m_classNames, m_functionSignatures,
                            typeErrors, &typeMetadata)) {
@@ -151,6 +154,9 @@ bool Compiler::compile(std::string_view source, Chunk& chunk,
         }
 
         m_superclassOf = std::move(typeMetadata.superclassOf);
+        m_checkerTopLevelSymbolTypes =
+            std::move(typeMetadata.topLevelSymbolTypes);
+        m_checkerDeclarationTypes = std::move(typeMetadata.declarationTypes);
     }
 
     m_scanner = std::make_unique<Scanner>(source);
@@ -221,260 +227,6 @@ TypeRef Compiler::tokenToType(const Token& token) const {
         }
         default:
             return nullptr;
-    }
-}
-
-void Compiler::collectClassNames(std::string_view source) {
-    Scanner scanner(source);
-    while (true) {
-        Token token = scanner.nextToken();
-        if (token.type() == TokenType::END_OF_FILE) {
-            return;
-        }
-
-        if (token.type() != TokenType::CLASS) {
-            continue;
-        }
-
-        Token name = scanner.nextToken();
-        while (name.type() == TokenType::ERROR) {
-            name = scanner.nextToken();
-        }
-
-        if (name.type() == TokenType::IDENTIFIER) {
-            m_classNames.emplace(name.start(), name.length());
-        }
-    }
-}
-
-void Compiler::collectFunctionSignatures(std::string_view source) {
-    Scanner scanner(source);
-    bool hasBufferedToken = false;
-    Token bufferedToken;
-
-    auto nextToken = [&]() -> Token {
-        if (hasBufferedToken) {
-            hasBufferedToken = false;
-            return bufferedToken;
-        }
-        return scanner.nextToken();
-    };
-
-    auto peekToken = [&]() -> Token {
-        if (!hasBufferedToken) {
-            bufferedToken = scanner.nextToken();
-            hasBufferedToken = true;
-        }
-        return bufferedToken;
-    };
-
-    std::function<TypeRef(const Token&)> parseTypeFromToken;
-    parseTypeFromToken = [&](const Token& token) -> TypeRef {
-        auto applyOptionalSuffix = [&](TypeRef baseType) -> TypeRef {
-            if (!baseType) {
-                return nullptr;
-            }
-
-            while (peekToken().type() == TokenType::QUESTION) {
-                nextToken();
-                baseType = TypeInfo::makeOptional(baseType);
-            }
-
-            return baseType;
-        };
-
-        if (token.type() == TokenType::TYPE_FN) {
-            Token openParen = nextToken();
-            if (openParen.type() != TokenType::OPEN_PAREN) {
-                return nullptr;
-            }
-
-            std::vector<TypeRef> params;
-            Token cursor = nextToken();
-            if (cursor.type() != TokenType::CLOSE_PAREN) {
-                while (true) {
-                    TypeRef parameterType = parseTypeFromToken(cursor);
-                    if (!parameterType || parameterType->isVoid()) {
-                        return nullptr;
-                    }
-                    params.push_back(parameterType);
-
-                    Token delimiter = nextToken();
-                    if (delimiter.type() == TokenType::COMMA) {
-                        cursor = nextToken();
-                        continue;
-                    }
-                    if (delimiter.type() != TokenType::CLOSE_PAREN) {
-                        return nullptr;
-                    }
-                    break;
-                }
-            }
-
-            Token arrow = nextToken();
-            if (arrow.type() != TokenType::ARROW) {
-                return nullptr;
-            }
-
-            TypeRef returnType = parseTypeFromToken(nextToken());
-            if (!returnType) {
-                return nullptr;
-            }
-
-            return applyOptionalSuffix(
-                TypeInfo::makeFunction(params, returnType));
-        }
-
-        if (isTypeToken(token.type())) {
-            return applyOptionalSuffix(tokenToType(token));
-        }
-
-        if (token.type() != TokenType::IDENTIFIER) {
-            return nullptr;
-        }
-
-        std::string name(token.start(), token.length());
-        if (isCollectionTypeNameText(name)) {
-            Token lessToken = nextToken();
-            if (lessToken.type() != TokenType::LESS) {
-                return nullptr;
-            }
-
-            if (name == "Array") {
-                TypeRef elementType = parseTypeFromToken(nextToken());
-                Token greaterToken = nextToken();
-                if (!elementType || greaterToken.type() != TokenType::GREATER) {
-                    return nullptr;
-                }
-                return applyOptionalSuffix(TypeInfo::makeArray(elementType));
-            }
-
-            if (name == "Set") {
-                TypeRef elementType = parseTypeFromToken(nextToken());
-                Token greaterToken = nextToken();
-                if (!elementType || greaterToken.type() != TokenType::GREATER) {
-                    return nullptr;
-                }
-                return applyOptionalSuffix(TypeInfo::makeSet(elementType));
-            }
-
-            TypeRef keyType = parseTypeFromToken(nextToken());
-            if (!keyType) {
-                return nullptr;
-            }
-            Token commaToken = nextToken();
-            if (commaToken.type() != TokenType::COMMA) {
-                return nullptr;
-            }
-            TypeRef valueType = parseTypeFromToken(nextToken());
-            if (!valueType) {
-                return nullptr;
-            }
-            Token greaterToken = nextToken();
-            if (greaterToken.type() != TokenType::GREATER) {
-                return nullptr;
-            }
-            return applyOptionalSuffix(TypeInfo::makeDict(keyType, valueType));
-        }
-
-        if (m_classNames.find(name) != m_classNames.end()) {
-            return applyOptionalSuffix(TypeInfo::makeClass(name));
-        }
-
-        return nullptr;
-    };
-
-    int classDepth = 0;
-
-    while (true) {
-        Token token = nextToken();
-        if (token.type() == TokenType::END_OF_FILE) {
-            return;
-        }
-
-        if (token.type() == TokenType::OPEN_CURLY) {
-            classDepth++;
-            continue;
-        }
-        if (token.type() == TokenType::CLOSE_CURLY) {
-            if (classDepth > 0) classDepth--;
-            continue;
-        }
-
-        if (classDepth != 0 || token.type() != TokenType::FUNCTION) {
-            continue;
-        }
-
-        Token functionName = nextToken();
-        if (functionName.type() != TokenType::IDENTIFIER) {
-            continue;
-        }
-
-        Token openParen = nextToken();
-        if (openParen.type() != TokenType::OPEN_PAREN) {
-            continue;
-        }
-
-        std::vector<TypeRef> params;
-        Token current = nextToken();
-        if (current.type() != TokenType::CLOSE_PAREN) {
-            while (true) {
-                TypeRef parameterType = TypeInfo::makeAny();
-
-                Token maybeName = current;
-                if (isTypeToken(current.type())) {
-                    parameterType = parseTypeFromToken(current);
-                    maybeName = nextToken();
-                } else if (current.type() == TokenType::IDENTIFIER) {
-                    std::string typeName(current.start(), current.length());
-                    if (isCollectionTypeNameText(typeName)) {
-                        if (peekToken().type() == TokenType::LESS) {
-                            parameterType = parseTypeFromToken(current);
-                            maybeName = nextToken();
-                        }
-                    } else {
-                        Token lookahead = peekToken();
-                        if (lookahead.type() == TokenType::IDENTIFIER &&
-                            m_classNames.find(typeName) != m_classNames.end()) {
-                            parameterType = TypeInfo::makeClass(typeName);
-                            maybeName = nextToken();
-                        }
-                    }
-                }
-
-                if (maybeName.type() != TokenType::IDENTIFIER) {
-                    break;
-                }
-
-                params.push_back(parameterType ? parameterType
-                                               : TypeInfo::makeAny());
-                current = nextToken();
-
-                if (current.type() == TokenType::COMMA) {
-                    current = nextToken();
-                    continue;
-                }
-                if (current.type() == TokenType::CLOSE_PAREN) {
-                    break;
-                }
-                break;
-            }
-        }
-
-        TypeRef returnType = TypeInfo::makeAny();
-        Token maybeArrow = nextToken();
-        if (maybeArrow.type() == TokenType::ARROW) {
-            Token returnToken = nextToken();
-            TypeRef typedReturn = parseTypeFromToken(returnToken);
-            if (typedReturn) {
-                returnType = typedReturn;
-            }
-        }
-
-        std::string functionNameText(functionName.start(),
-                                     functionName.length());
-        m_functionSignatures[functionNameText] =
-            TypeInfo::makeFunction(params, returnType);
     }
 }
 
@@ -655,6 +407,57 @@ uint8_t Compiler::arithmeticOpcode(TokenType operatorType,
     }
 }
 
+bool Compiler::shouldPreserveCheckerGlobalType(uint8_t slot,
+                                               const TypeRef& newType) const {
+    if (!m_strictMode) {
+        return false;
+    }
+
+    if (slot >= m_globalNames.size() || slot >= m_globalTypes.size()) {
+        return false;
+    }
+
+    auto checkerIt = m_checkerTopLevelSymbolTypes.find(m_globalNames[slot]);
+    if (checkerIt == m_checkerTopLevelSymbolTypes.end() || !checkerIt->second) {
+        return false;
+    }
+
+    if (!newType || newType->isAny()) {
+        return true;
+    }
+
+    TypeRef checkerType = checkerIt->second;
+    if (!checkerType || checkerType->isAny()) {
+        return false;
+    }
+
+    return checkerType->toString() != newType->toString();
+}
+
+TypeRef Compiler::lookupCheckerDeclarationType(const Token& nameToken) const {
+    if (!m_strictMode || m_checkerDeclarationTypes.empty()) {
+        return nullptr;
+    }
+
+    const std::string name(nameToken.start(), nameToken.length());
+    const size_t line = nameToken.line();
+    const size_t functionDepth =
+        m_contexts.empty() ? 0 : (m_contexts.size() - 1);
+    const size_t scopeDepth =
+        m_contexts.empty() ? 0
+                           : static_cast<size_t>(currentContext().scopeDepth);
+
+    for (auto it = m_checkerDeclarationTypes.rbegin();
+         it != m_checkerDeclarationTypes.rend(); ++it) {
+        if (it->line == line && it->functionDepth == functionDepth &&
+            it->scopeDepth == scopeDepth && it->name == name) {
+            return it->type;
+        }
+    }
+
+    return nullptr;
+}
+
 TypeRef Compiler::inferVariableType(const Token& name) const {
     const auto& locals = currentContext().locals;
     for (int index = static_cast<int>(locals.size()) - 1; index >= 0; --index) {
@@ -804,9 +607,14 @@ uint8_t Compiler::globalSlot(const Token& name) {
     }
 
     uint8_t slot = static_cast<uint8_t>(m_globalNames.size());
+    TypeRef checkerType = nullptr;
+    auto checkerTypeIt = m_checkerTopLevelSymbolTypes.find(globalName);
+    if (checkerTypeIt != m_checkerTopLevelSymbolTypes.end()) {
+        checkerType = checkerTypeIt->second;
+    }
     m_globalSlots.emplace(globalName, slot);
     m_globalNames.push_back(std::move(globalName));
-    m_globalTypes.push_back(nullptr);
+    m_globalTypes.push_back(checkerType);
     return slot;
 }
 
@@ -896,15 +704,22 @@ uint8_t Compiler::parseVariable(const std::string& message,
                                 const TypeRef& declaredType) {
     consume(TokenType::IDENTIFIER, message);
 
+    TypeRef normalized = declaredType ? declaredType : TypeInfo::makeAny();
+    TypeRef checkerType = lookupCheckerDeclarationType(m_parser->previous);
+    if (checkerType) {
+        normalized = checkerType;
+    }
+
     if (currentContext().scopeDepth > 0) {
-        addLocal(m_parser->previous,
-                 declaredType ? declaredType : TypeInfo::makeAny());
+        addLocal(m_parser->previous, normalized);
         return 0;
     }
 
     uint8_t slot = globalSlot(m_parser->previous);
     if (slot < m_globalTypes.size()) {
-        m_globalTypes[slot] = declaredType ? declaredType : TypeInfo::makeAny();
+        if (!shouldPreserveCheckerGlobalType(slot, normalized)) {
+            m_globalTypes[slot] = normalized;
+        }
     }
 
     return slot;
@@ -1891,11 +1706,13 @@ void Compiler::forStatement() {
 
         consume(TokenType::IDENTIFIER, "Expected variable name.");
         Token loopVariable = m_parser->previous;
+        TypeRef checkerLoopType = lookupCheckerDeclarationType(loopVariable);
 
         if (m_parser->current.type() == TokenType::COLON) {
             advance();
 
-            addLocal(loopVariable);
+            addLocal(loopVariable,
+                     checkerLoopType ? checkerLoopType : TypeInfo::makeAny());
             emitByte(OpCode::NIL);
             markInitialized();
             uint8_t loopVariableSlot =
@@ -1932,7 +1749,8 @@ void Compiler::forStatement() {
 
         uint8_t global = 0;
         if (currentContext().scopeDepth > 0) {
-            addLocal(loopVariable);
+            addLocal(loopVariable,
+                     checkerLoopType ? checkerLoopType : TypeInfo::makeAny());
         } else {
             global = globalSlot(loopVariable);
         }
@@ -1947,8 +1765,11 @@ void Compiler::forStatement() {
 
             if (currentContext().scopeDepth > 0 &&
                 !currentContext().locals.empty()) {
-                currentContext().locals.back().type = inferredType;
-            } else if (global < m_globalTypes.size()) {
+                if (!checkerLoopType) {
+                    currentContext().locals.back().type = inferredType;
+                }
+            } else if (global < m_globalTypes.size() &&
+                       !shouldPreserveCheckerGlobalType(global, inferredType)) {
                 m_globalTypes[global] = inferredType;
             }
         } else {
@@ -2080,7 +1901,8 @@ void Compiler::autoVarDeclaration() {
 
     if (currentContext().scopeDepth > 0 && !currentContext().locals.empty()) {
         currentContext().locals.back().type = inferredType;
-    } else if (global < m_globalTypes.size()) {
+    } else if (global < m_globalTypes.size() &&
+               !shouldPreserveCheckerGlobalType(global, inferredType)) {
         m_globalTypes[global] = inferredType;
     }
 

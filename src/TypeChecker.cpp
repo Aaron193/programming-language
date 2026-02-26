@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <string>
 #include <unordered_set>
@@ -102,6 +103,8 @@ class CheckerImpl {
     std::vector<TypeError>& m_errors;
 
     std::vector<std::unordered_map<std::string, TypeRef>> m_scopes;
+    std::unordered_set<std::string> m_declaredGlobalSymbols;
+    std::vector<TypeCheckerDeclarationType> m_declarationTypes;
     std::unordered_map<std::string, std::string> m_superclassOf;
     std::unordered_map<std::string, std::unordered_map<std::string, TypeRef>>
         m_classFieldTypes;
@@ -380,6 +383,20 @@ class CheckerImpl {
 
     void defineSymbol(const std::string& name, const TypeRef& type) {
         m_scopes.back()[name] = type ? type : TypeInfo::makeAny();
+        if (m_scopes.size() == 1) {
+            m_declaredGlobalSymbols.emplace(name);
+        }
+    }
+
+    void recordDeclarationType(const std::string& name, const TypeRef& type,
+                               size_t line) {
+        TypeCheckerDeclarationType declaration;
+        declaration.line = line;
+        declaration.functionDepth = m_functionContexts.size();
+        declaration.scopeDepth = m_scopes.empty() ? 0 : (m_scopes.size() - 1);
+        declaration.name = name;
+        declaration.type = type ? type : TypeInfo::makeAny();
+        m_declarationTypes.push_back(std::move(declaration));
     }
 
     TypeRef resolveSymbol(const std::string& name) const {
@@ -1723,6 +1740,7 @@ class CheckerImpl {
         } else if (match(TokenType::AUTO)) {
             consume(TokenType::IDENTIFIER, "Expected variable name.");
             std::string variableName = tokenText(m_previous);
+            size_t variableLine = m_previous.line();
 
             if (match(TokenType::COLON)) {
                 ExprInfo iterable = parseExpression();
@@ -1753,6 +1771,8 @@ class CheckerImpl {
                 }
 
                 defineSymbol(variableName, inferredLoopType);
+                recordDeclarationType(variableName, inferredLoopType,
+                                      variableLine);
                 statement();
                 endScope();
                 return;
@@ -1769,6 +1789,7 @@ class CheckerImpl {
             consume(TokenType::SEMI_COLON,
                     "Expected ';' after loop initializer.");
             defineSymbol(variableName, declared);
+            recordDeclarationType(variableName, declared, variableLine);
         } else {
             parseExpression();
             consume(TokenType::SEMI_COLON,
@@ -1822,9 +1843,13 @@ class CheckerImpl {
             addError(nameToken.line(),
                      "Type error: cannot infer type for 'auto' from 'null'.");
             defineSymbol(name, TypeInfo::makeAny());
+            recordDeclarationType(name, TypeInfo::makeAny(), nameToken.line());
         } else {
             defineSymbol(name, initializer.type ? initializer.type
                                                 : TypeInfo::makeAny());
+            recordDeclarationType(
+                name, initializer.type ? initializer.type : TypeInfo::makeAny(),
+                nameToken.line());
         }
 
         consume(TokenType::SEMI_COLON,
@@ -1872,6 +1897,7 @@ class CheckerImpl {
         consume(TokenType::SEMI_COLON,
                 "Expected ';' after typed variable declaration.");
         defineSymbol(name, declaredType);
+        recordDeclarationType(name, declaredType, nameToken.line());
     }
 
     void parseFunctionCommon(const std::string& functionName,
@@ -1967,6 +1993,7 @@ class CheckerImpl {
 
     void parseFunctionDeclaration() {
         consume(TokenType::IDENTIFIER, "Expected function name.");
+        size_t functionLine = m_previous.line();
         std::string name = tokenText(m_previous);
 
         TypeRef functionType = TypeInfo::makeAny();
@@ -1975,13 +2002,18 @@ class CheckerImpl {
             functionType = it->second;
         }
         defineSymbol(name, functionType);
+        recordDeclarationType(name, functionType, functionLine);
 
         parseFunctionCommon(name, functionType, false);
     }
 
     void parseClassDeclaration() {
         consume(TokenType::IDENTIFIER, "Expected class name.");
+        size_t classLine = m_previous.line();
         std::string className = tokenText(m_previous);
+        defineSymbol(className, TypeInfo::makeClass(className));
+        recordDeclarationType(className, TypeInfo::makeClass(className),
+                              classLine);
 
         m_classContexts.push_back(ClassCtx{className});
 
@@ -2201,11 +2233,321 @@ class CheckerImpl {
         out.classFieldTypes = m_classFieldTypes;
         out.classMethodSignatures = m_classMethodSignatures;
         out.superclassOf = m_superclassOf;
+        out.declarationTypes = m_declarationTypes;
+        for (const auto& symbolName : m_declaredGlobalSymbols) {
+            auto it = m_scopes.front().find(symbolName);
+            if (it != m_scopes.front().end()) {
+                out.topLevelSymbolTypes[symbolName] = it->second;
+            }
+        }
         return out;
     }
 };
 
 }  // namespace
+
+bool TypeChecker::collectSymbols(
+    std::string_view source, std::unordered_set<std::string>& outClassNames,
+    std::unordered_map<std::string, TypeRef>& outFunctionSignatures) {
+    outClassNames.clear();
+
+    {
+        Scanner scanner(source);
+        while (true) {
+            Token token = scanner.nextToken();
+            if (token.type() == TokenType::END_OF_FILE) {
+                break;
+            }
+
+            if (token.type() != TokenType::CLASS) {
+                continue;
+            }
+
+            Token name = scanner.nextToken();
+            while (name.type() == TokenType::ERROR) {
+                name = scanner.nextToken();
+            }
+
+            if (name.type() == TokenType::IDENTIFIER) {
+                outClassNames.emplace(name.start(), name.length());
+            }
+        }
+    }
+
+    Scanner scanner(source);
+    bool hasBufferedToken = false;
+    Token bufferedToken;
+
+    auto nextToken = [&]() -> Token {
+        if (hasBufferedToken) {
+            hasBufferedToken = false;
+            return bufferedToken;
+        }
+        return scanner.nextToken();
+    };
+
+    auto peekToken = [&]() -> Token {
+        if (!hasBufferedToken) {
+            bufferedToken = scanner.nextToken();
+            hasBufferedToken = true;
+        }
+        return bufferedToken;
+    };
+
+    auto tokenToType = [&](const Token& token) -> TypeRef {
+        switch (token.type()) {
+            case TokenType::TYPE_I8:
+                return TypeInfo::makeI8();
+            case TokenType::TYPE_I16:
+                return TypeInfo::makeI16();
+            case TokenType::TYPE_I32:
+                return TypeInfo::makeI32();
+            case TokenType::TYPE_I64:
+                return TypeInfo::makeI64();
+            case TokenType::TYPE_U8:
+                return TypeInfo::makeU8();
+            case TokenType::TYPE_U16:
+                return TypeInfo::makeU16();
+            case TokenType::TYPE_U32:
+                return TypeInfo::makeU32();
+            case TokenType::TYPE_U64:
+                return TypeInfo::makeU64();
+            case TokenType::TYPE_USIZE:
+                return TypeInfo::makeUSize();
+            case TokenType::TYPE_F32:
+                return TypeInfo::makeF32();
+            case TokenType::TYPE_F64:
+                return TypeInfo::makeF64();
+            case TokenType::TYPE_BOOL:
+                return TypeInfo::makeBool();
+            case TokenType::TYPE_STR:
+                return TypeInfo::makeStr();
+            case TokenType::TYPE_FN:
+                return nullptr;
+            case TokenType::TYPE_VOID:
+                return TypeInfo::makeVoid();
+            case TokenType::TYPE_NULL_KW:
+                return TypeInfo::makeNull();
+            case TokenType::IDENTIFIER: {
+                std::string className(token.start(), token.length());
+                if (outClassNames.find(className) != outClassNames.end()) {
+                    return TypeInfo::makeClass(className);
+                }
+                return nullptr;
+            }
+            default:
+                return nullptr;
+        }
+    };
+
+    std::function<TypeRef(const Token&)> parseTypeFromToken;
+    parseTypeFromToken = [&](const Token& token) -> TypeRef {
+        auto applyOptionalSuffix = [&](TypeRef baseType) -> TypeRef {
+            if (!baseType) {
+                return nullptr;
+            }
+
+            while (peekToken().type() == TokenType::QUESTION) {
+                nextToken();
+                baseType = TypeInfo::makeOptional(baseType);
+            }
+
+            return baseType;
+        };
+
+        if (token.type() == TokenType::TYPE_FN) {
+            Token openParen = nextToken();
+            if (openParen.type() != TokenType::OPEN_PAREN) {
+                return nullptr;
+            }
+
+            std::vector<TypeRef> params;
+            Token cursor = nextToken();
+            if (cursor.type() != TokenType::CLOSE_PAREN) {
+                while (true) {
+                    TypeRef parameterType = parseTypeFromToken(cursor);
+                    if (!parameterType || parameterType->isVoid()) {
+                        return nullptr;
+                    }
+                    params.push_back(parameterType);
+
+                    Token delimiter = nextToken();
+                    if (delimiter.type() == TokenType::COMMA) {
+                        cursor = nextToken();
+                        continue;
+                    }
+                    if (delimiter.type() != TokenType::CLOSE_PAREN) {
+                        return nullptr;
+                    }
+                    break;
+                }
+            }
+
+            Token arrow = nextToken();
+            if (arrow.type() != TokenType::ARROW) {
+                return nullptr;
+            }
+
+            TypeRef returnType = parseTypeFromToken(nextToken());
+            if (!returnType) {
+                return nullptr;
+            }
+
+            return applyOptionalSuffix(
+                TypeInfo::makeFunction(params, returnType));
+        }
+
+        if (isTypeToken(token.type())) {
+            return applyOptionalSuffix(tokenToType(token));
+        }
+
+        if (token.type() != TokenType::IDENTIFIER) {
+            return nullptr;
+        }
+
+        std::string name(token.start(), token.length());
+        if (isCollectionTypeNameText(name)) {
+            Token lessToken = nextToken();
+            if (lessToken.type() != TokenType::LESS) {
+                return nullptr;
+            }
+
+            if (name == "Array") {
+                TypeRef elementType = parseTypeFromToken(nextToken());
+                Token greaterToken = nextToken();
+                if (!elementType || greaterToken.type() != TokenType::GREATER) {
+                    return nullptr;
+                }
+                return applyOptionalSuffix(TypeInfo::makeArray(elementType));
+            }
+
+            if (name == "Set") {
+                TypeRef elementType = parseTypeFromToken(nextToken());
+                Token greaterToken = nextToken();
+                if (!elementType || greaterToken.type() != TokenType::GREATER) {
+                    return nullptr;
+                }
+                return applyOptionalSuffix(TypeInfo::makeSet(elementType));
+            }
+
+            TypeRef keyType = parseTypeFromToken(nextToken());
+            if (!keyType) {
+                return nullptr;
+            }
+            Token commaToken = nextToken();
+            if (commaToken.type() != TokenType::COMMA) {
+                return nullptr;
+            }
+            TypeRef valueType = parseTypeFromToken(nextToken());
+            if (!valueType) {
+                return nullptr;
+            }
+            Token greaterToken = nextToken();
+            if (greaterToken.type() != TokenType::GREATER) {
+                return nullptr;
+            }
+            return applyOptionalSuffix(TypeInfo::makeDict(keyType, valueType));
+        }
+
+        if (outClassNames.find(name) != outClassNames.end()) {
+            return applyOptionalSuffix(TypeInfo::makeClass(name));
+        }
+
+        return nullptr;
+    };
+
+    int classDepth = 0;
+
+    while (true) {
+        Token token = nextToken();
+        if (token.type() == TokenType::END_OF_FILE) {
+            return true;
+        }
+
+        if (token.type() == TokenType::OPEN_CURLY) {
+            classDepth++;
+            continue;
+        }
+        if (token.type() == TokenType::CLOSE_CURLY) {
+            if (classDepth > 0) {
+                classDepth--;
+            }
+            continue;
+        }
+
+        if (classDepth != 0 || token.type() != TokenType::FUNCTION) {
+            continue;
+        }
+
+        Token functionName = nextToken();
+        if (functionName.type() != TokenType::IDENTIFIER) {
+            continue;
+        }
+
+        Token openParen = nextToken();
+        if (openParen.type() != TokenType::OPEN_PAREN) {
+            continue;
+        }
+
+        std::vector<TypeRef> params;
+        Token current = nextToken();
+        if (current.type() != TokenType::CLOSE_PAREN) {
+            while (true) {
+                TypeRef parameterType = nullptr;
+
+                if (isTypeToken(current.type()) ||
+                    current.type() == TokenType::IDENTIFIER ||
+                    current.type() == TokenType::TYPE_FN) {
+                    parameterType = parseTypeFromToken(current);
+                    if (!parameterType) {
+                        parameterType = TypeInfo::makeAny();
+                    }
+
+                    Token nameToken = nextToken();
+                    if (nameToken.type() != TokenType::IDENTIFIER) {
+                        break;
+                    }
+                } else {
+                    Token nameToken = current;
+                    if (nameToken.type() != TokenType::IDENTIFIER) {
+                        break;
+                    }
+                    parameterType = TypeInfo::makeAny();
+                }
+
+                params.push_back(parameterType);
+
+                Token delimiter = nextToken();
+                if (delimiter.type() == TokenType::COMMA) {
+                    current = nextToken();
+                    continue;
+                }
+
+                if (delimiter.type() != TokenType::CLOSE_PAREN) {
+                    break;
+                }
+
+                current = delimiter;
+                break;
+            }
+        }
+
+        TypeRef returnType = TypeInfo::makeAny();
+        Token maybeArrow = nextToken();
+        if (maybeArrow.type() == TokenType::ARROW) {
+            Token returnToken = nextToken();
+            TypeRef typedReturn = parseTypeFromToken(returnToken);
+            if (typedReturn) {
+                returnType = typedReturn;
+            }
+        }
+
+        std::string functionNameText(functionName.start(),
+                                     functionName.length());
+        outFunctionSignatures[functionNameText] =
+            TypeInfo::makeFunction(params, returnType);
+    }
+}
 
 bool TypeChecker::check(
     std::string_view source, const std::unordered_set<std::string>& classNames,
