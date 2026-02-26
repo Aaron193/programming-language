@@ -1,14 +1,10 @@
-class Animal {}
-class Dog < Animal {}
-class Cat < Animal {}
-
-function id(x) {
-    return x;
-}
+class Dog {}
+class Cat {}
 
 function makeDog() -> Dog {
-    auto dynamic = id(Cat());
-    return dynamic;
+    auto dynamic = [];
+    dynamic.push(Cat());
+    return dynamic[0];
 }
 
 print makeDog();

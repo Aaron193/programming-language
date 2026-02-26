@@ -22,7 +22,7 @@ const std::vector<NativeDescriptor>& makeDescriptors() {
          {TypeInfo::makeF64(), TypeInfo::makeF64()},
          TypeInfo::makeF64(),
          2},
-        {"Set", {}, TypeInfo::makeAny(), -1},
+        {"Set", {}, TypeInfo::makeSet(TypeInfo::makeAny()), -1},
     };
 
     return descriptors;

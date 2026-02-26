@@ -7,7 +7,8 @@ d["self"] = d;
 print d["self"] == d;
 
 auto s = Set();
-s.add(1);
+auto seed = Set();
+s.add(seed);
 s.add(s);
 print s.has(s);
 

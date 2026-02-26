@@ -85,6 +85,10 @@ class CheckerImpl {
         TypeRef returnType;
     };
 
+    struct ClassCtx {
+        std::string className;
+    };
+
     Scanner m_scanner;
     Token m_current;
     Token m_previous;
@@ -97,7 +101,12 @@ class CheckerImpl {
 
     std::vector<std::unordered_map<std::string, TypeRef>> m_scopes;
     std::unordered_map<std::string, std::string> m_superclassOf;
+    std::unordered_map<std::string, std::unordered_map<std::string, TypeRef>>
+        m_classFieldTypes;
+    std::unordered_map<std::string, std::unordered_map<std::string, TypeRef>>
+        m_classMethodSignatures;
     std::vector<FunctionCtx> m_functionContexts;
+    std::vector<ClassCtx> m_classContexts;
 
     std::string tokenText(const Token& token) const {
         return std::string(token.start(), token.length());
@@ -318,6 +327,189 @@ class CheckerImpl {
         return false;
     }
 
+    TypeRef lookupClassFieldType(const std::string& className,
+                                 const std::string& fieldName) const {
+        std::string current = className;
+        std::unordered_set<std::string> visited;
+
+        while (!current.empty()) {
+            if (visited.find(current) != visited.end()) {
+                break;
+            }
+            visited.insert(current);
+
+            auto classIt = m_classFieldTypes.find(current);
+            if (classIt != m_classFieldTypes.end()) {
+                auto fieldIt = classIt->second.find(fieldName);
+                if (fieldIt != classIt->second.end()) {
+                    return fieldIt->second;
+                }
+            }
+
+            auto superIt = m_superclassOf.find(current);
+            if (superIt == m_superclassOf.end()) {
+                break;
+            }
+            current = superIt->second;
+        }
+
+        return nullptr;
+    }
+
+    TypeRef lookupClassMethodType(const std::string& className,
+                                  const std::string& methodName) const {
+        std::string current = className;
+        std::unordered_set<std::string> visited;
+
+        while (!current.empty()) {
+            if (visited.find(current) != visited.end()) {
+                break;
+            }
+            visited.insert(current);
+
+            auto classIt = m_classMethodSignatures.find(current);
+            if (classIt != m_classMethodSignatures.end()) {
+                auto methodIt = classIt->second.find(methodName);
+                if (methodIt != classIt->second.end()) {
+                    return methodIt->second;
+                }
+            }
+
+            auto superIt = m_superclassOf.find(current);
+            if (superIt == m_superclassOf.end()) {
+                break;
+            }
+            current = superIt->second;
+        }
+
+        return nullptr;
+    }
+
+    TypeRef collectionMemberType(const TypeRef& receiverType,
+                                 const std::string& memberName, size_t line) {
+        if (!receiverType) {
+            return TypeInfo::makeAny();
+        }
+
+        if (receiverType->kind == TypeKind::ARRAY) {
+            TypeRef element = receiverType->elementType
+                                  ? receiverType->elementType
+                                  : TypeInfo::makeAny();
+            if (memberName == "push") {
+                return TypeInfo::makeFunction({element}, TypeInfo::makeI64());
+            }
+            if (memberName == "pop") {
+                return TypeInfo::makeFunction({}, element);
+            }
+            if (memberName == "size") {
+                return TypeInfo::makeFunction({}, TypeInfo::makeI64());
+            }
+            if (memberName == "has") {
+                return TypeInfo::makeFunction({element}, TypeInfo::makeBool());
+            }
+            if (memberName == "insert") {
+                return TypeInfo::makeFunction({TypeInfo::makeI64(), element},
+                                              element);
+            }
+            if (memberName == "remove") {
+                return TypeInfo::makeFunction({TypeInfo::makeI64()}, element);
+            }
+            if (memberName == "clear") {
+                return TypeInfo::makeFunction({}, TypeInfo::makeI64());
+            }
+            if (memberName == "isEmpty") {
+                return TypeInfo::makeFunction({}, TypeInfo::makeBool());
+            }
+            if (memberName == "first" || memberName == "last") {
+                return TypeInfo::makeFunction({}, element);
+            }
+
+            addError(line,
+                     "Type error: array has no member '" + memberName + "'.");
+            return TypeInfo::makeAny();
+        }
+
+        if (receiverType->kind == TypeKind::DICT) {
+            TypeRef key = receiverType->keyType ? receiverType->keyType
+                                                : TypeInfo::makeAny();
+            TypeRef value = receiverType->valueType ? receiverType->valueType
+                                                    : TypeInfo::makeAny();
+            if (memberName == "get") {
+                return TypeInfo::makeFunction({key}, value);
+            }
+            if (memberName == "set") {
+                return TypeInfo::makeFunction({key, value}, value);
+            }
+            if (memberName == "has") {
+                return TypeInfo::makeFunction({key}, TypeInfo::makeBool());
+            }
+            if (memberName == "keys") {
+                return TypeInfo::makeFunction({}, TypeInfo::makeArray(key));
+            }
+            if (memberName == "values") {
+                return TypeInfo::makeFunction({}, TypeInfo::makeArray(value));
+            }
+            if (memberName == "size") {
+                return TypeInfo::makeFunction({}, TypeInfo::makeI64());
+            }
+            if (memberName == "remove") {
+                return TypeInfo::makeFunction({key}, value);
+            }
+            if (memberName == "clear") {
+                return TypeInfo::makeFunction({}, TypeInfo::makeI64());
+            }
+            if (memberName == "isEmpty") {
+                return TypeInfo::makeFunction({}, TypeInfo::makeBool());
+            }
+            if (memberName == "getOr") {
+                return TypeInfo::makeFunction({key, value}, value);
+            }
+
+            addError(line,
+                     "Type error: dict has no member '" + memberName + "'.");
+            return TypeInfo::makeAny();
+        }
+
+        if (receiverType->kind == TypeKind::SET) {
+            TypeRef element = receiverType->elementType
+                                  ? receiverType->elementType
+                                  : TypeInfo::makeAny();
+            TypeRef setType = TypeInfo::makeSet(element);
+
+            if (memberName == "add") {
+                return TypeInfo::makeFunction({element}, TypeInfo::makeBool());
+            }
+            if (memberName == "has") {
+                return TypeInfo::makeFunction({element}, TypeInfo::makeBool());
+            }
+            if (memberName == "remove") {
+                return TypeInfo::makeFunction({element}, TypeInfo::makeBool());
+            }
+            if (memberName == "size") {
+                return TypeInfo::makeFunction({}, TypeInfo::makeI64());
+            }
+            if (memberName == "toArray") {
+                return TypeInfo::makeFunction({}, TypeInfo::makeArray(element));
+            }
+            if (memberName == "clear") {
+                return TypeInfo::makeFunction({}, TypeInfo::makeI64());
+            }
+            if (memberName == "isEmpty") {
+                return TypeInfo::makeFunction({}, TypeInfo::makeBool());
+            }
+            if (memberName == "union" || memberName == "intersect" ||
+                memberName == "difference") {
+                return TypeInfo::makeFunction({setType}, setType);
+            }
+
+            addError(line,
+                     "Type error: set has no member '" + memberName + "'.");
+            return TypeInfo::makeAny();
+        }
+
+        return TypeInfo::makeAny();
+    }
+
     TypeRef parseTypeExprType() {
         auto applyOptionalSuffix = [this](TypeRef baseType) -> TypeRef {
             if (!baseType) {
@@ -472,11 +664,14 @@ class CheckerImpl {
 
         if (assignmentType == TokenType::PLUS_PLUS ||
             assignmentType == TokenType::MINUS_MINUS) {
-            if (!lhs.isAssignable || lhs.name.empty()) {
+            if (!lhs.isAssignable) {
                 return ExprInfo{TypeInfo::makeAny(), false, false, "", line};
             }
 
-            TypeRef targetType = resolveSymbol(lhs.name);
+            TypeRef targetType = lhs.type;
+            if ((!targetType || targetType->isAny()) && !lhs.name.empty()) {
+                targetType = resolveSymbol(lhs.name);
+            }
             if (!targetType) {
                 addError(line, "Type error: unknown assignment target '" +
                                    lhs.name + "'.");
@@ -500,11 +695,14 @@ class CheckerImpl {
 
         ExprInfo rhs = parseAssignment();
 
-        if (!lhs.isAssignable || lhs.name.empty()) {
+        if (!lhs.isAssignable) {
             return ExprInfo{TypeInfo::makeAny(), false, false, "", line};
         }
 
-        TypeRef targetType = resolveSymbol(lhs.name);
+        TypeRef targetType = lhs.type;
+        if ((!targetType || targetType->isAny()) && !lhs.name.empty()) {
+            targetType = resolveSymbol(lhs.name);
+        }
         if (!targetType) {
             addError(line, "Type error: unknown assignment target '" +
                                lhs.name + "'.");
@@ -816,6 +1014,7 @@ class CheckerImpl {
             }
 
             if (match(TokenType::DOT)) {
+                ExprInfo receiver = expr;
                 if (expr.type && expr.type->isOptional()) {
                     addError(m_previous.line(),
                              "Type error: cannot access members on optional "
@@ -825,15 +1024,119 @@ class CheckerImpl {
                 }
                 consume(TokenType::IDENTIFIER,
                         "Expected property name after '.'.");
+                std::string memberName = tokenText(m_previous);
+
+                if (receiver.type && receiver.type->kind == TypeKind::CLASS) {
+                    TypeRef fieldType = lookupClassFieldType(
+                        receiver.type->className, memberName);
+                    if (fieldType) {
+                        expr = ExprInfo{fieldType, true, false, "",
+                                        m_previous.line()};
+                        continue;
+                    }
+
+                    TypeRef methodType = lookupClassMethodType(
+                        receiver.type->className, memberName);
+                    if (methodType) {
+                        expr = ExprInfo{methodType, false, false, "",
+                                        m_previous.line()};
+                        continue;
+                    }
+
+                    addError(m_previous.line(),
+                             "Type error: class '" + receiver.type->className +
+                                 "' has no member '" + memberName + "'.");
+                    expr = ExprInfo{TypeInfo::makeAny(), false, false, "",
+                                    m_previous.line()};
+                    continue;
+                }
+
+                if (receiver.type && (receiver.type->kind == TypeKind::ARRAY ||
+                                      receiver.type->kind == TypeKind::DICT ||
+                                      receiver.type->kind == TypeKind::SET)) {
+                    TypeRef memberType = collectionMemberType(
+                        receiver.type, memberName, m_previous.line());
+                    expr =
+                        ExprInfo{memberType ? memberType : TypeInfo::makeAny(),
+                                 false, false, "", m_previous.line()};
+                    continue;
+                }
+
                 expr = ExprInfo{TypeInfo::makeAny(), false, false, "",
                                 m_previous.line()};
                 continue;
             }
 
             if (match(TokenType::OPEN_BRACKET)) {
-                parseExpression();
+                ExprInfo indexExpr = parseExpression();
                 consume(TokenType::CLOSE_BRACKET,
                         "Expected ']' after index expression.");
+
+                if (!expr.type) {
+                    expr = ExprInfo{TypeInfo::makeAny(), false, false, "",
+                                    m_previous.line()};
+                    continue;
+                }
+
+                if (expr.type->isAny()) {
+                    expr = ExprInfo{TypeInfo::makeAny(), false, false, "",
+                                    m_previous.line()};
+                    continue;
+                }
+
+                if (expr.type->kind == TypeKind::ARRAY) {
+                    if (!(indexExpr.type->isInteger() ||
+                          indexExpr.type->isAny())) {
+                        addError(
+                            indexExpr.line ? indexExpr.line : m_previous.line(),
+                            "Type error: array index must be an "
+                            "integer.");
+                    }
+                    TypeRef element = expr.type->elementType
+                                          ? expr.type->elementType
+                                          : TypeInfo::makeAny();
+                    expr =
+                        ExprInfo{element, true, false, "", m_previous.line()};
+                    continue;
+                }
+
+                if (expr.type->kind == TypeKind::DICT) {
+                    TypeRef keyType = expr.type->keyType ? expr.type->keyType
+                                                         : TypeInfo::makeAny();
+                    if (!isAssignableType(indexExpr.type, keyType)) {
+                        addError(
+                            indexExpr.line ? indexExpr.line : m_previous.line(),
+                            "Type error: dict key expects '" +
+                                keyType->toString() + "', got '" +
+                                indexExpr.type->toString() + "'.");
+                    }
+                    TypeRef valueType = expr.type->valueType
+                                            ? expr.type->valueType
+                                            : TypeInfo::makeAny();
+                    expr =
+                        ExprInfo{valueType, true, false, "", m_previous.line()};
+                    continue;
+                }
+
+                if (expr.type->kind == TypeKind::SET) {
+                    TypeRef elementType = expr.type->elementType
+                                              ? expr.type->elementType
+                                              : TypeInfo::makeAny();
+                    if (!isAssignableType(indexExpr.type, elementType)) {
+                        addError(
+                            indexExpr.line ? indexExpr.line : m_previous.line(),
+                            "Type error: set lookup expects '" +
+                                elementType->toString() + "', got '" +
+                                indexExpr.type->toString() + "'.");
+                    }
+                    expr = ExprInfo{TypeInfo::makeBool(), false, false, "",
+                                    m_previous.line()};
+                    continue;
+                }
+
+                addError(m_previous.line(),
+                         "Type error: indexing is only valid on Array, Dict, "
+                         "or Set.");
                 expr = ExprInfo{TypeInfo::makeAny(), false, false, "",
                                 m_previous.line()};
                 continue;
@@ -872,9 +1175,32 @@ class CheckerImpl {
             return ExprInfo{expr.type, false, false, "", m_previous.line()};
         }
 
-        if (match(TokenType::THIS) || match(TokenType::SUPER)) {
-            return ExprInfo{TypeInfo::makeAny(), false, false, "",
-                            m_previous.line()};
+        if (match(TokenType::THIS)) {
+            if (m_classContexts.empty()) {
+                return ExprInfo{TypeInfo::makeAny(), false, false, "",
+                                m_previous.line()};
+            }
+
+            return ExprInfo{
+                TypeInfo::makeClass(m_classContexts.back().className), false,
+                false, "", m_previous.line()};
+        }
+
+        if (match(TokenType::SUPER)) {
+            if (m_classContexts.empty()) {
+                return ExprInfo{TypeInfo::makeAny(), false, false, "",
+                                m_previous.line()};
+            }
+
+            std::string className = m_classContexts.back().className;
+            auto superIt = m_superclassOf.find(className);
+            if (superIt == m_superclassOf.end()) {
+                return ExprInfo{TypeInfo::makeAny(), false, false, "",
+                                m_previous.line()};
+            }
+
+            return ExprInfo{TypeInfo::makeClass(superIt->second), false, false,
+                            "", m_previous.line()};
         }
 
         if (match(TokenType::OPEN_BRACKET)) {
@@ -882,7 +1208,21 @@ class CheckerImpl {
             if (!check(TokenType::CLOSE_BRACKET)) {
                 do {
                     ExprInfo item = parseExpression();
-                    elementType = mergeInferredTypes(elementType, item.type);
+                    if (!elementType) {
+                        elementType = item.type;
+                        continue;
+                    }
+
+                    TypeRef merged = mergeInferredTypes(elementType, item.type);
+                    if (merged && merged->isAny() && !elementType->isAny() &&
+                        !item.type->isAny() &&
+                        !isAssignableType(item.type, elementType) &&
+                        !isAssignableType(elementType, item.type)) {
+                        addError(item.line ? item.line : m_previous.line(),
+                                 "Type error: array literal elements must "
+                                 "have a consistent type.");
+                    }
+                    elementType = merged;
                 } while (match(TokenType::COMMA));
             }
             consume(TokenType::CLOSE_BRACKET,
@@ -899,11 +1239,41 @@ class CheckerImpl {
             if (!check(TokenType::CLOSE_CURLY)) {
                 do {
                     ExprInfo keyExpr = parseExpression();
-                    keyType = mergeInferredTypes(keyType, keyExpr.type);
+                    if (!keyType) {
+                        keyType = keyExpr.type;
+                    } else {
+                        TypeRef mergedKey =
+                            mergeInferredTypes(keyType, keyExpr.type);
+                        if (mergedKey && mergedKey->isAny() &&
+                            !keyType->isAny() && !keyExpr.type->isAny() &&
+                            !isAssignableType(keyExpr.type, keyType) &&
+                            !isAssignableType(keyType, keyExpr.type)) {
+                            addError(
+                                keyExpr.line ? keyExpr.line : m_previous.line(),
+                                "Type error: dict literal keys must have "
+                                "a consistent type.");
+                        }
+                        keyType = mergedKey;
+                    }
                     consume(TokenType::COLON,
                             "Expected ':' between dictionary key and value.");
                     ExprInfo valueExpr = parseExpression();
-                    valueType = mergeInferredTypes(valueType, valueExpr.type);
+                    if (!valueType) {
+                        valueType = valueExpr.type;
+                    } else {
+                        TypeRef mergedValue =
+                            mergeInferredTypes(valueType, valueExpr.type);
+                        if (mergedValue && mergedValue->isAny() &&
+                            !valueType->isAny() && !valueExpr.type->isAny() &&
+                            !isAssignableType(valueExpr.type, valueType) &&
+                            !isAssignableType(valueType, valueExpr.type)) {
+                            addError(valueExpr.line ? valueExpr.line
+                                                    : m_previous.line(),
+                                     "Type error: dict literal values must "
+                                     "have a consistent type.");
+                        }
+                        valueType = mergedValue;
+                    }
                 } while (match(TokenType::COMMA));
             }
             consume(TokenType::CLOSE_CURLY,
@@ -1015,10 +1385,34 @@ class CheckerImpl {
             std::string variableName = tokenText(m_previous);
 
             if (match(TokenType::COLON)) {
-                parseExpression();
+                ExprInfo iterable = parseExpression();
                 consume(TokenType::CLOSE_PAREN,
                         "Expected ')' after foreach iterable expression.");
-                defineSymbol(variableName, TypeInfo::makeAny());
+
+                TypeRef inferredLoopType = TypeInfo::makeAny();
+                if (iterable.type && iterable.type->kind == TypeKind::ARRAY) {
+                    inferredLoopType = iterable.type->elementType
+                                           ? iterable.type->elementType
+                                           : TypeInfo::makeAny();
+                } else if (iterable.type &&
+                           iterable.type->kind == TypeKind::DICT) {
+                    inferredLoopType = iterable.type->keyType
+                                           ? iterable.type->keyType
+                                           : TypeInfo::makeAny();
+                } else if (iterable.type &&
+                           iterable.type->kind == TypeKind::SET) {
+                    inferredLoopType = iterable.type->elementType
+                                           ? iterable.type->elementType
+                                           : TypeInfo::makeAny();
+                } else if (iterable.type && iterable.type->isAny()) {
+                    inferredLoopType = TypeInfo::makeAny();
+                } else {
+                    addError(iterable.line ? iterable.line : m_previous.line(),
+                             "Type error: foreach expects Array<T>, Dict<K, "
+                             "V>, or Set<T>.");
+                }
+
+                defineSymbol(variableName, inferredLoopType);
                 statement();
                 endScope();
                 return;
@@ -1231,6 +1625,8 @@ class CheckerImpl {
         consume(TokenType::IDENTIFIER, "Expected class name.");
         std::string className = tokenText(m_previous);
 
+        m_classContexts.push_back(ClassCtx{className});
+
         if (match(TokenType::LESS)) {
             consume(TokenType::IDENTIFIER, "Expected superclass name.");
             std::string superclassName = tokenText(m_previous);
@@ -1250,6 +1646,8 @@ class CheckerImpl {
 
         consume(TokenType::OPEN_CURLY, "Expected '{' before class body.");
 
+        bool seenMethodBody = false;
+
         while (!check(TokenType::CLOSE_CURLY) &&
                !check(TokenType::END_OF_FILE)) {
             bool typedHead = false;
@@ -1262,15 +1660,24 @@ class CheckerImpl {
 
             if (typedHead) {
                 consume(TokenType::IDENTIFIER, "Expected class member name.");
+                std::string memberName = tokenText(m_previous);
 
                 if (match(TokenType::SEMI_COLON)) {
+                    if (seenMethodBody) {
+                        addError(m_previous.line(),
+                                 "Type error: class fields must be declared "
+                                 "before method declarations.");
+                    }
+                    m_classFieldTypes[className][memberName] =
+                        memberType ? memberType : TypeInfo::makeAny();
                     continue;
                 }
 
                 if (check(TokenType::OPEN_PAREN)) {
-                    std::string memberName = tokenText(m_previous);
+                    seenMethodBody = true;
                     TypeRef sig = TypeInfo::makeFunction(
                         {}, memberType ? memberType : TypeInfo::makeAny());
+                    m_classMethodSignatures[className][memberName] = sig;
                     parseFunctionCommon(memberName, sig, true);
                     continue;
                 }
@@ -1285,6 +1692,9 @@ class CheckerImpl {
                 peekToken().type() == TokenType::OPEN_PAREN) {
                 advance();
                 std::string memberName = tokenText(m_previous);
+                seenMethodBody = true;
+                m_classMethodSignatures[className][memberName] =
+                    TypeInfo::makeFunction({}, TypeInfo::makeAny());
                 parseFunctionCommon(
                     memberName, TypeInfo::makeFunction({}, TypeInfo::makeAny()),
                     true);
@@ -1295,6 +1705,7 @@ class CheckerImpl {
         }
 
         consume(TokenType::CLOSE_CURLY, "Expected '}' after class body.");
+        m_classContexts.pop_back();
     }
 
     void parseImportDeclaration() {

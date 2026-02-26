@@ -1,4 +1,7 @@
-class Bag {}
+class Bag {
+	i32 value;
+	str label;
+}
 
 auto bag = Bag();
 bag.value = 42;
