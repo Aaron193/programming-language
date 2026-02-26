@@ -1,14 +1,11 @@
-class Animal {}
-class Dog < Animal {}
-class Cat < Animal {}
+class Dog {}
+class Cat {}
 
-function id(x) {
-    return x;
-}
-
-function acceptDog(Dog dog) {
+function acceptDog(Dog dog) -> i32 {
     print dog;
+    return 0;
 }
 
-auto dynamic = id(Cat());
-acceptDog(dynamic);
+auto dynamic = [];
+dynamic.push(Cat());
+acceptDog(dynamic[0]);

@@ -203,6 +203,142 @@ static bool isInstanceOfClass(const InstanceObject* instance,
     return false;
 }
 
+static TypeRef inferRuntimeType(const Value& value) {
+    if (value.isSignedInt()) {
+        return TypeInfo::makeI64();
+    }
+    if (value.isUnsignedInt()) {
+        return TypeInfo::makeU64();
+    }
+    if (value.isNumber()) {
+        return TypeInfo::makeF64();
+    }
+    if (value.isBool()) {
+        return TypeInfo::makeBool();
+    }
+    if (value.isString()) {
+        return TypeInfo::makeStr();
+    }
+    if (value.isNil()) {
+        return TypeInfo::makeNull();
+    }
+    if (value.isInstance() && value.asInstance() && value.asInstance()->klass) {
+        return TypeInfo::makeClass(value.asInstance()->klass->name);
+    }
+    if (value.isArray()) {
+        auto array = value.asArray();
+        return TypeInfo::makeArray(array && array->elementType
+                                       ? array->elementType
+                                       : TypeInfo::makeAny());
+    }
+    if (value.isDict()) {
+        auto dict = value.asDict();
+        TypeRef key =
+            dict && dict->keyType ? dict->keyType : TypeInfo::makeAny();
+        TypeRef val =
+            dict && dict->valueType ? dict->valueType : TypeInfo::makeAny();
+        return TypeInfo::makeDict(key, val);
+    }
+    if (value.isSet()) {
+        auto set = value.asSet();
+        return TypeInfo::makeSet(set && set->elementType ? set->elementType
+                                                         : TypeInfo::makeAny());
+    }
+
+    return TypeInfo::makeAny();
+}
+
+static bool valueMatchesType(const Value& value, const TypeRef& expected) {
+    if (!expected || expected->isAny()) {
+        return true;
+    }
+
+    if (expected->kind == TypeKind::OPTIONAL) {
+        if (value.isNil()) {
+            return true;
+        }
+        return valueMatchesType(value, expected->innerType);
+    }
+
+    if (expected->kind == TypeKind::NULL_TYPE) {
+        return value.isNil();
+    }
+
+    if (expected->isInteger()) {
+        return value.isAnyNumeric();
+    }
+
+    if (expected->isFloat()) {
+        return value.isAnyNumeric();
+    }
+
+    if (expected->kind == TypeKind::BOOL) {
+        return value.isBool();
+    }
+
+    if (expected->kind == TypeKind::STR) {
+        return value.isString();
+    }
+
+    if (expected->kind == TypeKind::CLASS) {
+        if (!value.isInstance()) {
+            return false;
+        }
+        return isInstanceOfClass(value.asInstance(), expected->className);
+    }
+
+    if (expected->kind == TypeKind::ARRAY) {
+        if (!value.isArray()) {
+            return false;
+        }
+
+        auto array = value.asArray();
+        TypeRef elementType =
+            expected->elementType ? expected->elementType : TypeInfo::makeAny();
+        for (const auto& element : array->elements) {
+            if (!valueMatchesType(element, elementType)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    if (expected->kind == TypeKind::DICT) {
+        if (!value.isDict()) {
+            return false;
+        }
+
+        auto dict = value.asDict();
+        TypeRef valueType =
+            expected->valueType ? expected->valueType : TypeInfo::makeAny();
+        for (const auto& entry : dict->map) {
+            if (!valueMatchesType(entry.second, valueType)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    if (expected->kind == TypeKind::SET) {
+        if (!value.isSet()) {
+            return false;
+        }
+
+        auto set = value.asSet();
+        TypeRef elementType =
+            expected->elementType ? expected->elementType : TypeInfo::makeAny();
+        for (const auto& element : set->elements) {
+            if (!valueMatchesType(element, elementType)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    TypeRef actual = inferRuntimeType(value);
+    return isAssignable(actual, expected);
+}
+
 UpvalueObject* VirtualMachine::captureUpvalue(size_t stackIndex) {
     for (const auto& upvalue : m_openUpvalues) {
         if (!upvalue->isClosed && upvalue->stackIndex == stackIndex) {
@@ -1100,6 +1236,21 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 }
 
                 auto instance = receiver.asInstance();
+                auto fieldTypeIt = instance->klass->fieldTypes.find(name);
+                if (fieldTypeIt == instance->klass->fieldTypes.end()) {
+                    return runtimeError("Undefined field '" + name +
+                                        "' on class '" + instance->klass->name +
+                                        "'.");
+                }
+
+                if (!valueMatchesType(value, fieldTypeIt->second)) {
+                    return runtimeError(
+                        "Type error: field '" + name + "' on class '" +
+                        instance->klass->name + "' expects '" +
+                        fieldTypeIt->second->toString() + "', got '" +
+                        valueTypeName(value) + "'.");
+                }
+
                 instance->fields[name] = value;
 
                 m_stack.pop();
@@ -1344,6 +1495,15 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                     } else if (native->name == "Set") {
                         auto set = gcAlloc<SetObject>();
                         for (const auto& arg : args) {
+                            if (set->elementType->isAny()) {
+                                set->elementType = inferRuntimeType(arg);
+                            } else if (!valueMatchesType(arg,
+                                                         set->elementType)) {
+                                return runtimeError(
+                                    "Native function 'Set' expects all "
+                                    "elements to have a consistent type.");
+                            }
+
                             if (!containsValue(set->elements, arg)) {
                                 set->elements.push_back(arg);
                             }
@@ -1381,6 +1541,16 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                             if (argumentCount != 1) {
                                 return runtimeError(
                                     "Array method 'push' expects 1 argument.");
+                            }
+
+                            if (array->elementType->isAny()) {
+                                array->elementType = inferRuntimeType(args[0]);
+                            } else if (!valueMatchesType(args[0],
+                                                         array->elementType)) {
+                                return runtimeError(
+                                    "Array method 'push' expects value of "
+                                    "type '" +
+                                    array->elementType->toString() + "'.");
                             }
 
                             array->elements.push_back(args[0]);
@@ -1434,6 +1604,16 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                                 return runtimeError(
                                     "Array method 'insert' index out of "
                                     "bounds.");
+                            }
+
+                            if (array->elementType->isAny()) {
+                                array->elementType = inferRuntimeType(args[1]);
+                            } else if (!valueMatchesType(args[1],
+                                                         array->elementType)) {
+                                return runtimeError(
+                                    "Array method 'insert' expects value of "
+                                    "type '" +
+                                    array->elementType->toString() + "'.");
                             }
 
                             array->elements.insert(array->elements.begin() +
@@ -1547,6 +1727,24 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                                     "Dict keys must be strings or numbers.");
                             }
 
+                            if (dict->keyType->isAny()) {
+                                dict->keyType = inferRuntimeType(args[0]);
+                            } else if (!valueMatchesType(args[0],
+                                                         dict->keyType)) {
+                                return runtimeError(
+                                    "Dict method 'set' key expects type '" +
+                                    dict->keyType->toString() + "'.");
+                            }
+
+                            if (dict->valueType->isAny()) {
+                                dict->valueType = inferRuntimeType(args[1]);
+                            } else if (!valueMatchesType(args[1],
+                                                         dict->valueType)) {
+                                return runtimeError(
+                                    "Dict method 'set' value expects type '" +
+                                    dict->valueType->toString() + "'.");
+                            }
+
                             dict->map[key] = args[1];
                             result = args[1];
                         } else if (method == "has") {
@@ -1580,6 +1778,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                             for (const auto& key : orderedKeys) {
                                 keys->elements.push_back(Value(key));
                             }
+                            keys->elementType = TypeInfo::makeStr();
                             result = Value(keys);
                         } else if (method == "values") {
                             if (argumentCount != 0) {
@@ -1599,6 +1798,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                             for (const auto& key : orderedKeys) {
                                 values->elements.push_back(dict->map.at(key));
                             }
+                            values->elementType = dict->valueType;
                             result = Value(values);
                         } else if (method == "size") {
                             if (argumentCount != 0) {
@@ -1674,6 +1874,16 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                                     "Set method 'add' expects 1 argument.");
                             }
 
+                            if (set->elementType->isAny()) {
+                                set->elementType = inferRuntimeType(args[0]);
+                            } else if (!valueMatchesType(args[0],
+                                                         set->elementType)) {
+                                return runtimeError(
+                                    "Set method 'add' expects value of type "
+                                    "'" +
+                                    set->elementType->toString() + "'.");
+                            }
+
                             bool inserted = false;
                             if (!containsValue(set->elements, args[0])) {
                                 set->elements.push_back(args[0]);
@@ -1721,6 +1931,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
                             auto array = gcAlloc<ArrayObject>();
                             array->elements = set->elements;
+                            array->elementType = set->elementType;
                             result = Value(array);
                         } else if (method == "clear") {
                             if (argumentCount != 0) {
@@ -1753,7 +1964,20 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
                             auto out = gcAlloc<SetObject>();
                             out->elements = set->elements;
+                            out->elementType = set->elementType;
                             auto rhs = args[0].asSet();
+
+                            if (!set->elementType->isAny() &&
+                                !rhs->elementType->isAny() &&
+                                !isAssignable(rhs->elementType,
+                                              set->elementType) &&
+                                !isAssignable(set->elementType,
+                                              rhs->elementType)) {
+                                return runtimeError(
+                                    "Set method 'union' requires compatible "
+                                    "element types.");
+                            }
+
                             for (const auto& element : rhs->elements) {
                                 if (!containsValue(out->elements, element)) {
                                     out->elements.push_back(element);
@@ -1773,7 +1997,20 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                             }
 
                             auto out = gcAlloc<SetObject>();
+                            out->elementType = set->elementType;
                             auto rhs = args[0].asSet();
+
+                            if (!set->elementType->isAny() &&
+                                !rhs->elementType->isAny() &&
+                                !isAssignable(rhs->elementType,
+                                              set->elementType) &&
+                                !isAssignable(set->elementType,
+                                              rhs->elementType)) {
+                                return runtimeError(
+                                    "Set method 'intersect' requires "
+                                    "compatible element types.");
+                            }
+
                             for (const auto& element : set->elements) {
                                 if (containsValue(rhs->elements, element) &&
                                     !containsValue(out->elements, element)) {
@@ -1794,7 +2031,20 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                             }
 
                             auto out = gcAlloc<SetObject>();
+                            out->elementType = set->elementType;
                             auto rhs = args[0].asSet();
+
+                            if (!set->elementType->isAny() &&
+                                !rhs->elementType->isAny() &&
+                                !isAssignable(rhs->elementType,
+                                              set->elementType) &&
+                                !isAssignable(set->elementType,
+                                              rhs->elementType)) {
+                                return runtimeError(
+                                    "Set method 'difference' requires "
+                                    "compatible element types.");
+                            }
+
                             for (const auto& element : set->elements) {
                                 if (!containsValue(rhs->elements, element) &&
                                     !containsValue(out->elements, element)) {
@@ -1888,9 +2138,49 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 uint8_t count = readByte();
                 auto array = gcAlloc<ArrayObject>();
                 array->elements.resize(count);
+
+                auto mergeType = [&](const TypeRef& current,
+                                     const TypeRef& next) -> TypeRef {
+                    if (!current) {
+                        return next;
+                    }
+                    if (!next) {
+                        return current;
+                    }
+                    if (current->isAny() || next->isAny()) {
+                        return TypeInfo::makeAny();
+                    }
+                    if (isAssignable(next, current)) {
+                        return current;
+                    }
+                    if (isAssignable(current, next)) {
+                        return next;
+                    }
+                    if (current->isNumeric() && next->isNumeric()) {
+                        TypeRef promoted = numericPromotion(current, next);
+                        return promoted ? promoted : TypeInfo::makeAny();
+                    }
+                    return nullptr;
+                };
+
+                TypeRef inferredElementType = nullptr;
                 for (int i = static_cast<int>(count) - 1; i >= 0; --i) {
-                    array->elements[static_cast<size_t>(i)] = m_stack.pop();
+                    Value element = m_stack.pop();
+                    array->elements[static_cast<size_t>(i)] = element;
+
+                    TypeRef elementType = inferRuntimeType(element);
+                    TypeRef merged =
+                        mergeType(inferredElementType, elementType);
+                    if (!merged) {
+                        return runtimeError(
+                            "Array literal elements must have consistent "
+                            "types.");
+                    }
+                    inferredElementType = merged;
                 }
+
+                array->elementType = inferredElementType ? inferredElementType
+                                                         : TypeInfo::makeAny();
 
                 m_stack.push(Value(array));
                 break;
@@ -1899,9 +2189,55 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 uint8_t pairCount = readByte();
                 auto dict = gcAlloc<DictObject>();
 
+                auto mergeType = [&](const TypeRef& current,
+                                     const TypeRef& next) -> TypeRef {
+                    if (!current) {
+                        return next;
+                    }
+                    if (!next) {
+                        return current;
+                    }
+                    if (current->isAny() || next->isAny()) {
+                        return TypeInfo::makeAny();
+                    }
+                    if (isAssignable(next, current)) {
+                        return current;
+                    }
+                    if (isAssignable(current, next)) {
+                        return next;
+                    }
+                    if (current->isNumeric() && next->isNumeric()) {
+                        TypeRef promoted = numericPromotion(current, next);
+                        return promoted ? promoted : TypeInfo::makeAny();
+                    }
+                    return nullptr;
+                };
+
+                TypeRef keyType = nullptr;
+                TypeRef valueType = nullptr;
+
                 for (int i = 0; i < pairCount; ++i) {
                     Value value = m_stack.pop();
                     Value keyValue = m_stack.pop();
+
+                    TypeRef mergedKeyType =
+                        mergeType(keyType, inferRuntimeType(keyValue));
+                    if (!mergedKeyType) {
+                        return runtimeError(
+                            "Dictionary literal keys must have consistent "
+                            "types.");
+                    }
+                    keyType = mergedKeyType;
+
+                    TypeRef mergedValueType =
+                        mergeType(valueType, inferRuntimeType(value));
+                    if (!mergedValueType) {
+                        return runtimeError(
+                            "Dictionary literal values must have consistent "
+                            "types.");
+                    }
+                    valueType = mergedValueType;
+
                     std::string key;
                     if (!toDictKey(keyValue, key)) {
                         return runtimeError(
@@ -1910,6 +2246,9 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
                     dict->map[key] = value;
                 }
+
+                dict->keyType = keyType ? keyType : TypeInfo::makeAny();
+                dict->valueType = valueType ? valueType : TypeInfo::makeAny();
 
                 m_stack.push(Value(dict));
                 break;
@@ -1953,6 +2292,12 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
                 if (container.isSet()) {
                     auto set = container.asSet();
+                    if (!valueMatchesType(indexValue, set->elementType)) {
+                        return runtimeError(
+                            "Type error: set lookup expects element type '" +
+                            set->elementType->toString() + "', got '" +
+                            valueTypeName(indexValue) + "'.");
+                    }
                     m_stack.push(
                         Value(containsValue(set->elements, indexValue)));
                     break;
@@ -1978,6 +2323,14 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                         return runtimeError("Array index out of bounds.");
                     }
 
+                    if (!valueMatchesType(value, array->elementType)) {
+                        return runtimeError(
+                            "Type error: array assignment expects element "
+                            "type '" +
+                            array->elementType->toString() + "', got '" +
+                            valueTypeName(value) + "'.");
+                    }
+
                     array->elements[index] = value;
                     m_stack.push(value);
                     break;
@@ -1991,6 +2344,21 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                     }
 
                     auto dict = container.asDict();
+
+                    if (!valueMatchesType(indexValue, dict->keyType)) {
+                        return runtimeError(
+                            "Type error: dictionary key expects '" +
+                            dict->keyType->toString() + "', got '" +
+                            valueTypeName(indexValue) + "'.");
+                    }
+
+                    if (!valueMatchesType(value, dict->valueType)) {
+                        return runtimeError(
+                            "Type error: dictionary value expects '" +
+                            dict->valueType->toString() + "', got '" +
+                            valueTypeName(value) + "'.");
+                    }
+
                     dict->map[key] = value;
                     m_stack.push(value);
                     break;

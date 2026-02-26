@@ -1,12 +1,12 @@
-auto d = {"x": 1, 2: 3};
+auto d = {"x": 1, "2": 3};
 print d["x"];
-print d[2];
+print d["2"];
 
 d["x"] = 4;
 print d.get("x");
 
-d.set(5, 10);
-print d.has(5);
+d.set("5", 10);
+print d.has("5");
 print d.size();
-print d.remove(5);
-print d.has(5);
+print d.remove("5");
+print d.has("5");

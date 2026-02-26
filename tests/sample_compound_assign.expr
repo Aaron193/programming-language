@@ -29,7 +29,9 @@ print x;
 --x;
 print x;
 
-class Box {}
+class Box {
+	i32 value;
+}
 auto b = Box();
 b.value = 7;
 b.value += 5;

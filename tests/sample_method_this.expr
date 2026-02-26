@@ -1,4 +1,6 @@
 class Box {
+  i32 value;
+
   get() -> i32 {
     return this.value;
   }
