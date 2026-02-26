@@ -152,6 +152,9 @@ Token Scanner::nextToken() {
         case '.':
             return createToken(TokenType::DOT);
 
+        case '?':
+            return createToken(TokenType::QUESTION);
+
         case '"': {
             while (peek() != '"' && !isEOF()) {
                 if (peek() == '\n') {

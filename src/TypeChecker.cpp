@@ -123,8 +123,12 @@ class CheckerImpl {
         }
 
         std::string typeName = tokenText(m_current);
-        return m_classNames.find(typeName) != m_classNames.end() &&
-               lookahead.type() == TokenType::IDENTIFIER;
+        if (m_classNames.find(typeName) == m_classNames.end()) {
+            return false;
+        }
+
+        return lookahead.type() == TokenType::IDENTIFIER ||
+               lookahead.type() == TokenType::QUESTION;
     }
 
     TypeRef mergeInferredTypes(const TypeRef& lhs, const TypeRef& rhs) const {
@@ -285,38 +289,50 @@ class CheckerImpl {
     }
 
     TypeRef parseTypeExprType() {
+        auto applyOptionalSuffix = [this](TypeRef baseType) -> TypeRef {
+            if (!baseType) {
+                return nullptr;
+            }
+
+            while (match(TokenType::QUESTION)) {
+                baseType = TypeInfo::makeOptional(baseType);
+            }
+
+            return baseType;
+        };
+
         if (isTypeToken(m_current.type())) {
             Token token = m_current;
             advance();
             switch (token.type()) {
                 case TokenType::TYPE_I8:
-                    return TypeInfo::makeI8();
+                    return applyOptionalSuffix(TypeInfo::makeI8());
                 case TokenType::TYPE_I16:
-                    return TypeInfo::makeI16();
+                    return applyOptionalSuffix(TypeInfo::makeI16());
                 case TokenType::TYPE_I32:
-                    return TypeInfo::makeI32();
+                    return applyOptionalSuffix(TypeInfo::makeI32());
                 case TokenType::TYPE_I64:
-                    return TypeInfo::makeI64();
+                    return applyOptionalSuffix(TypeInfo::makeI64());
                 case TokenType::TYPE_U8:
-                    return TypeInfo::makeU8();
+                    return applyOptionalSuffix(TypeInfo::makeU8());
                 case TokenType::TYPE_U16:
-                    return TypeInfo::makeU16();
+                    return applyOptionalSuffix(TypeInfo::makeU16());
                 case TokenType::TYPE_U32:
-                    return TypeInfo::makeU32();
+                    return applyOptionalSuffix(TypeInfo::makeU32());
                 case TokenType::TYPE_U64:
-                    return TypeInfo::makeU64();
+                    return applyOptionalSuffix(TypeInfo::makeU64());
                 case TokenType::TYPE_USIZE:
-                    return TypeInfo::makeUSize();
+                    return applyOptionalSuffix(TypeInfo::makeUSize());
                 case TokenType::TYPE_F32:
-                    return TypeInfo::makeF32();
+                    return applyOptionalSuffix(TypeInfo::makeF32());
                 case TokenType::TYPE_F64:
-                    return TypeInfo::makeF64();
+                    return applyOptionalSuffix(TypeInfo::makeF64());
                 case TokenType::TYPE_BOOL:
-                    return TypeInfo::makeBool();
+                    return applyOptionalSuffix(TypeInfo::makeBool());
                 case TokenType::TYPE_STR:
-                    return TypeInfo::makeStr();
+                    return applyOptionalSuffix(TypeInfo::makeStr());
                 case TokenType::TYPE_NULL_KW:
-                    return TypeInfo::makeNull();
+                    return applyOptionalSuffix(TypeInfo::makeNull());
                 default:
                     return nullptr;
             }
@@ -340,7 +356,8 @@ class CheckerImpl {
                     }
                     consume(TokenType::GREATER,
                             "Type error: expected '>' after Array<T>.");
-                    return TypeInfo::makeArray(elementType);
+                    return applyOptionalSuffix(
+                        TypeInfo::makeArray(elementType));
                 }
 
                 if (className == "Set") {
@@ -353,7 +370,7 @@ class CheckerImpl {
                     }
                     consume(TokenType::GREATER,
                             "Type error: expected '>' after Set<T>.");
-                    return TypeInfo::makeSet(elementType);
+                    return applyOptionalSuffix(TypeInfo::makeSet(elementType));
                 }
 
                 TypeRef keyType = parseTypeExprType();
@@ -372,12 +389,13 @@ class CheckerImpl {
                 }
                 consume(TokenType::GREATER,
                         "Type error: expected '>' after Dict<K, V>.");
-                return TypeInfo::makeDict(keyType, valueType);
+                return applyOptionalSuffix(
+                    TypeInfo::makeDict(keyType, valueType));
             }
 
             if (m_classNames.find(className) != m_classNames.end()) {
                 advance();
-                return TypeInfo::makeClass(className);
+                return applyOptionalSuffix(TypeInfo::makeClass(className));
             }
         }
 
@@ -386,7 +404,9 @@ class CheckerImpl {
 
     bool isTypedVarDeclarationStart() {
         if (isTypeToken(m_current.type())) {
-            return peekToken().type() == TokenType::IDENTIFIER;
+            TokenType lookahead = peekToken().type();
+            return lookahead == TokenType::IDENTIFIER ||
+                   lookahead == TokenType::QUESTION;
         }
 
         if (!check(TokenType::IDENTIFIER)) {
@@ -399,8 +419,12 @@ class CheckerImpl {
         }
 
         std::string typeName = tokenText(m_current);
-        return m_classNames.find(typeName) != m_classNames.end() &&
-               lookahead.type() == TokenType::IDENTIFIER;
+        if (m_classNames.find(typeName) == m_classNames.end()) {
+            return false;
+        }
+
+        return lookahead.type() == TokenType::IDENTIFIER ||
+               lookahead.type() == TokenType::QUESTION;
     }
 
     ExprInfo parseExpression() { return parseAssignment(); }
@@ -692,6 +716,16 @@ class CheckerImpl {
                 consume(TokenType::CLOSE_PAREN,
                         "Expected ')' after call arguments.");
 
+                if (expr.type && expr.type->isOptional()) {
+                    addError(
+                        m_previous.line(),
+                        "Type error: cannot call optional value of type '" +
+                            expr.type->toString() + "' without a null check.");
+                    expr = ExprInfo{TypeInfo::makeAny(), false, false, "",
+                                    m_previous.line()};
+                    continue;
+                }
+
                 if (expr.isClassSymbol) {
                     expr = ExprInfo{TypeInfo::makeClass(expr.name), false,
                                     false, "", m_previous.line()};
@@ -743,6 +777,13 @@ class CheckerImpl {
             }
 
             if (match(TokenType::DOT)) {
+                if (expr.type && expr.type->isOptional()) {
+                    addError(m_previous.line(),
+                             "Type error: cannot access members on optional "
+                             "value of type '" +
+                                 expr.type->toString() +
+                                 "' without a null check.");
+                }
                 consume(TokenType::IDENTIFIER,
                         "Expected property name after '.'.");
                 expr = ExprInfo{TypeInfo::makeAny(), false, false, "",
