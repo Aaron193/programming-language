@@ -311,6 +311,27 @@ bool isAssignable(const TypeRef& from, const TypeRef& to) {
     }
 
     if (from->kind == to->kind) {
+        if (from->kind == TypeKind::FUNCTION) {
+            if (from->paramTypes.size() != to->paramTypes.size()) {
+                return false;
+            }
+
+            for (size_t i = 0; i < from->paramTypes.size(); ++i) {
+                if (!from->paramTypes[i] || !to->paramTypes[i]) {
+                    return false;
+                }
+                if (!isAssignable(to->paramTypes[i], from->paramTypes[i])) {
+                    return false;
+                }
+            }
+
+            if (!from->returnType || !to->returnType) {
+                return false;
+            }
+
+            return isAssignable(from->returnType, to->returnType);
+        }
+
         if (from->kind == TypeKind::ARRAY) {
             if (!from->elementType || !to->elementType) {
                 return false;

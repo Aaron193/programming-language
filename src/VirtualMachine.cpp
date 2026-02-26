@@ -1,6 +1,7 @@
 #include "VirtualMachine.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <chrono>
 #include <cmath>
 #include <fstream>
@@ -82,6 +83,33 @@ static int64_t wrapSignedSub(int64_t lhs, int64_t rhs) {
 static int64_t wrapSignedMul(int64_t lhs, int64_t rhs) {
     return static_cast<int64_t>(static_cast<uint64_t>(lhs) *
                                 static_cast<uint64_t>(rhs));
+}
+
+static int64_t requireSignedInt(const Value& value) {
+    assert(value.isSignedInt());
+    return value.asSignedInt();
+}
+
+static uint64_t requireUnsignedInt(const Value& value) {
+    assert(value.isUnsignedInt());
+    return value.asUnsignedInt();
+}
+
+static bool hasStrictDirective(std::string_view source) {
+    return source.rfind("#!strict", 0) == 0;
+}
+
+static std::string_view stripStrictDirectiveLine(std::string_view source) {
+    if (!hasStrictDirective(source)) {
+        return source;
+    }
+
+    size_t newlinePos = source.find('\n');
+    if (newlinePos == std::string_view::npos) {
+        return std::string_view();
+    }
+
+    return source.substr(newlinePos + 1);
 }
 
 static std::string valueToString(const Value& value) {
@@ -278,6 +306,11 @@ static bool valueMatchesType(const Value& value, const TypeRef& expected) {
 
     if (expected->kind == TypeKind::STR) {
         return value.isString();
+    }
+
+    if (expected->kind == TypeKind::FUNCTION) {
+        return value.isClosure() || value.isFunction() || value.isNative() ||
+               value.isBoundMethod() || value.isNativeBound();
     }
 
     if (expected->kind == TypeKind::CLASS) {
@@ -785,26 +818,26 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 break;
             }
             case OpCode::IADD: {
-                int64_t rhs = m_stack.pop().asSignedInt();
-                int64_t lhs = m_stack.pop().asSignedInt();
+                int64_t rhs = requireSignedInt(m_stack.pop());
+                int64_t lhs = requireSignedInt(m_stack.pop());
                 m_stack.push(Value(wrapSignedAdd(lhs, rhs)));
                 break;
             }
             case OpCode::ISUB: {
-                int64_t rhs = m_stack.pop().asSignedInt();
-                int64_t lhs = m_stack.pop().asSignedInt();
+                int64_t rhs = requireSignedInt(m_stack.pop());
+                int64_t lhs = requireSignedInt(m_stack.pop());
                 m_stack.push(Value(wrapSignedSub(lhs, rhs)));
                 break;
             }
             case OpCode::IMULT: {
-                int64_t rhs = m_stack.pop().asSignedInt();
-                int64_t lhs = m_stack.pop().asSignedInt();
+                int64_t rhs = requireSignedInt(m_stack.pop());
+                int64_t lhs = requireSignedInt(m_stack.pop());
                 m_stack.push(Value(wrapSignedMul(lhs, rhs)));
                 break;
             }
             case OpCode::IDIV: {
-                int64_t rhs = m_stack.pop().asSignedInt();
-                int64_t lhs = m_stack.pop().asSignedInt();
+                int64_t rhs = requireSignedInt(m_stack.pop());
+                int64_t lhs = requireSignedInt(m_stack.pop());
                 if (rhs == 0) {
                     return runtimeError("Division by zero.");
                 }
@@ -812,8 +845,8 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 break;
             }
             case OpCode::IMOD: {
-                int64_t rhs = m_stack.pop().asSignedInt();
-                int64_t lhs = m_stack.pop().asSignedInt();
+                int64_t rhs = requireSignedInt(m_stack.pop());
+                int64_t lhs = requireSignedInt(m_stack.pop());
                 if (rhs == 0) {
                     return runtimeError("Division by zero.");
                 }
@@ -821,26 +854,26 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 break;
             }
             case OpCode::UADD: {
-                uint64_t rhs = m_stack.pop().asUnsignedInt();
-                uint64_t lhs = m_stack.pop().asUnsignedInt();
+                uint64_t rhs = requireUnsignedInt(m_stack.pop());
+                uint64_t lhs = requireUnsignedInt(m_stack.pop());
                 m_stack.push(Value(lhs + rhs));
                 break;
             }
             case OpCode::USUB: {
-                uint64_t rhs = m_stack.pop().asUnsignedInt();
-                uint64_t lhs = m_stack.pop().asUnsignedInt();
+                uint64_t rhs = requireUnsignedInt(m_stack.pop());
+                uint64_t lhs = requireUnsignedInt(m_stack.pop());
                 m_stack.push(Value(lhs - rhs));
                 break;
             }
             case OpCode::UMULT: {
-                uint64_t rhs = m_stack.pop().asUnsignedInt();
-                uint64_t lhs = m_stack.pop().asUnsignedInt();
+                uint64_t rhs = requireUnsignedInt(m_stack.pop());
+                uint64_t lhs = requireUnsignedInt(m_stack.pop());
                 m_stack.push(Value(lhs * rhs));
                 break;
             }
             case OpCode::UDIV: {
-                uint64_t rhs = m_stack.pop().asUnsignedInt();
-                uint64_t lhs = m_stack.pop().asUnsignedInt();
+                uint64_t rhs = requireUnsignedInt(m_stack.pop());
+                uint64_t lhs = requireUnsignedInt(m_stack.pop());
                 if (rhs == 0) {
                     return runtimeError("Division by zero.");
                 }
@@ -848,8 +881,8 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 break;
             }
             case OpCode::UMOD: {
-                uint64_t rhs = m_stack.pop().asUnsignedInt();
-                uint64_t lhs = m_stack.pop().asUnsignedInt();
+                uint64_t rhs = requireUnsignedInt(m_stack.pop());
+                uint64_t lhs = requireUnsignedInt(m_stack.pop());
                 if (rhs == 0) {
                     return runtimeError("Division by zero.");
                 }
@@ -953,26 +986,26 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 break;
             }
             case OpCode::IGREATER: {
-                int64_t rhs = m_stack.pop().asSignedInt();
-                int64_t lhs = m_stack.pop().asSignedInt();
+                int64_t rhs = requireSignedInt(m_stack.pop());
+                int64_t lhs = requireSignedInt(m_stack.pop());
                 m_stack.push(Value(lhs > rhs));
                 break;
             }
             case OpCode::ILESS: {
-                int64_t rhs = m_stack.pop().asSignedInt();
-                int64_t lhs = m_stack.pop().asSignedInt();
+                int64_t rhs = requireSignedInt(m_stack.pop());
+                int64_t lhs = requireSignedInt(m_stack.pop());
                 m_stack.push(Value(lhs < rhs));
                 break;
             }
             case OpCode::IGREATER_EQ: {
-                int64_t rhs = m_stack.pop().asSignedInt();
-                int64_t lhs = m_stack.pop().asSignedInt();
+                int64_t rhs = requireSignedInt(m_stack.pop());
+                int64_t lhs = requireSignedInt(m_stack.pop());
                 m_stack.push(Value(lhs >= rhs));
                 break;
             }
             case OpCode::ILESS_EQ: {
-                int64_t rhs = m_stack.pop().asSignedInt();
-                int64_t lhs = m_stack.pop().asSignedInt();
+                int64_t rhs = requireSignedInt(m_stack.pop());
+                int64_t lhs = requireSignedInt(m_stack.pop());
                 m_stack.push(Value(lhs <= rhs));
                 break;
             }
@@ -1185,6 +1218,16 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                     if (it == module->exports.end()) {
                         return runtimeError("Module '" + module->path +
                                             "' has no export '" + name + "'.");
+                    }
+
+                    auto typeIt = module->exportTypes.find(name);
+                    if (typeIt != module->exportTypes.end() &&
+                        !valueMatchesType(it->second, typeIt->second)) {
+                        return runtimeError(
+                            "Type error: module export '" + name + "' from '" +
+                            module->path + "' expected '" +
+                            typeIt->second->toString() + "', got '" +
+                            valueTypeName(it->second) + "'.");
                     }
 
                     m_stack.pop();
@@ -2588,7 +2631,28 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
             case OpCode::EXPORT_NAME: {
                 const std::string& name = readConstant().asString();
                 if (m_currentModule != nullptr) {
-                    m_currentModule->exports[name] = m_stack.peek(0);
+                    Value value = m_stack.peek(0);
+                    TypeRef declaredType = TypeInfo::makeAny();
+                    for (size_t i = 0; i < m_globalNames.size(); ++i) {
+                        if (m_globalNames[i] == name) {
+                            if (i < m_globalTypes.size() && m_globalTypes[i]) {
+                                declaredType = m_globalTypes[i];
+                            }
+                            break;
+                        }
+                    }
+
+                    if (declaredType && !declaredType->isAny() &&
+                        !valueMatchesType(value, declaredType)) {
+                        return runtimeError(
+                            "Type error: cannot export '" + name + "' as '" +
+                            declaredType->toString() + "' from module '" +
+                            m_currentModule->path + "'; got '" +
+                            valueTypeName(value) + "'.");
+                    }
+
+                    m_currentModule->exports[name] = value;
+                    m_currentModule->exportTypes[name] = declaredType;
                 }
                 break;
             }
@@ -2833,12 +2897,8 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 break;
             }
             case OpCode::INT_NEGATE: {
-                Value value = m_stack.pop();
-                int64_t converted = 0;
-                if (!valueToSignedInt(value, converted)) {
-                    return runtimeError("Operand must be an integer.");
-                }
-                m_stack.push(Value(wrapSignedSub(0, converted)));
+                int64_t value = requireSignedInt(m_stack.pop());
+                m_stack.push(Value(wrapSignedSub(0, value)));
                 break;
             }
         }
@@ -2847,7 +2907,9 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
 Status VirtualMachine::interpret(std::string_view source, bool printReturnValue,
                                  bool traceEnabled, bool disassembleEnabled,
-                                 const std::string& sourcePath) {
+                                 const std::string& sourcePath,
+                                 bool strictMode) {
+    std::string_view compileSource = stripStrictDirectiveLine(source);
     Chunk chunk;
     m_stack.reset();
     m_frameCount = 0;
@@ -2858,10 +2920,11 @@ Status VirtualMachine::interpret(std::string_view source, bool printReturnValue,
     m_importStack.clear();
     m_currentModule = nullptr;
     m_compiler.setGC(&m_gc);
+    m_compiler.setStrictMode(strictMode || hasStrictDirective(source));
     m_traceEnabled = traceEnabled;
     m_disassembleEnabled = disassembleEnabled;
 
-    if (!m_compiler.compile(source, chunk, sourcePath)) {
+    if (!m_compiler.compile(compileSource, chunk, sourcePath)) {
         return Status::COMPILATION_ERROR;
     }
 
