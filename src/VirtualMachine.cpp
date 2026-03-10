@@ -467,33 +467,41 @@ static bool valueMatchesType(const Value& value, const TypeRef& expected) {
 }
 
 UpvalueObject* VirtualMachine::captureUpvalue(size_t stackIndex) {
-    for (const auto& upvalue : m_openUpvalues) {
-        if (!upvalue->isClosed && upvalue->stackIndex == stackIndex) {
-            return upvalue;
-        }
+    UpvalueObject* previous = nullptr;
+    UpvalueObject* current = m_openUpvaluesHead;
+
+    while (current != nullptr && current->stackIndex > stackIndex) {
+        previous = current;
+        current = current->nextOpen;
     }
 
-    auto upvalue = gcAlloc<UpvalueObject>();
-    upvalue->stackIndex = stackIndex;
-    upvalue->isClosed = false;
-    m_openUpvalues.push_back(upvalue);
-    return upvalue;
+    if (current != nullptr && current->stackIndex == stackIndex) {
+        return current;
+    }
+
+    auto* created = gcAlloc<UpvalueObject>();
+    created->stackIndex = stackIndex;
+    created->isClosed = false;
+    created->nextOpen = current;
+
+    if (previous == nullptr) {
+        m_openUpvaluesHead = created;
+    } else {
+        previous->nextOpen = created;
+    }
+
+    return created;
 }
 
 void VirtualMachine::closeUpvalues(size_t fromStackIndex) {
-    auto it = m_openUpvalues.begin();
-    while (it != m_openUpvalues.end()) {
-        UpvalueObject* upvalue = *it;
-        if (!upvalue->isClosed && upvalue->stackIndex >= fromStackIndex) {
-            upvalue->closed = m_stack.getAt(upvalue->stackIndex);
-            upvalue->isClosed = true;
-        }
+    while (m_openUpvaluesHead != nullptr &&
+           m_openUpvaluesHead->stackIndex >= fromStackIndex) {
+        UpvalueObject* upvalue = m_openUpvaluesHead;
+        upvalue->closed = m_stack.getAt(upvalue->stackIndex);
+        upvalue->isClosed = true;
 
-        if (upvalue->isClosed) {
-            it = m_openUpvalues.erase(it);
-        } else {
-            ++it;
-        }
+        m_openUpvaluesHead = upvalue->nextOpen;
+        upvalue->nextOpen = nullptr;
     }
 }
 
@@ -508,8 +516,10 @@ void VirtualMachine::markRoots() {
         }
     }
 
-    for (auto* upvalue : m_openUpvalues) {
+    UpvalueObject* upvalue = m_openUpvaluesHead;
+    while (upvalue != nullptr) {
         m_gc.markObject(upvalue);
+        upvalue = upvalue->nextOpen;
     }
 
     for (const auto& [path, module] : m_moduleCache) {
@@ -3084,7 +3094,7 @@ Status VirtualMachine::interpret(std::string_view source, bool printReturnValue,
     m_stack.reset();
     m_frameCount = 0;
     m_activeFrame = nullptr;
-    m_openUpvalues.clear();
+    m_openUpvaluesHead = nullptr;
     m_nativeGlobals.clear();
     m_moduleCache.clear();
     m_importStack.clear();

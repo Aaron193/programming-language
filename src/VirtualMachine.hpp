@@ -52,8 +52,8 @@ class VirtualMachine {
     std::unordered_set<std::string> m_importStack;
     ModuleObject* m_currentModule = nullptr;
     bool m_defaultStrictMode = false;
-    // open upvalues
-    std::vector<UpvalueObject*> m_openUpvalues;
+    // open upvalues, maintained in descending stack-index order
+    UpvalueObject* m_openUpvaluesHead = nullptr;
     bool m_traceEnabled = false;
     bool m_disassembleEnabled = false;
 

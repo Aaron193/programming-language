@@ -316,6 +316,7 @@ struct UpvalueObject : GcObject {
     size_t stackIndex = 0;
     bool isClosed = false;
     Value closed;
+    UpvalueObject* nextOpen = nullptr;
 
     void trace(GC& gc) override;
 };
