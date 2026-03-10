@@ -29,6 +29,20 @@ struct SetObject;
 struct IteratorObject;
 struct ModuleObject;
 
+enum class PropertyInlineCacheKind : uint8_t {
+    EMPTY,
+    FIELD,
+    METHOD,
+};
+
+struct PropertyInlineCache {
+    ClassObject* klass = nullptr;
+    PropertyInlineCacheKind kind = PropertyInlineCacheKind::EMPTY;
+    size_t slotIndex = 0;
+    ClosureObject* method = nullptr;
+    TypeRef fieldType;
+};
+
 struct FunctionObject : GcObject {
     std::string name;
     std::vector<std::string> parameters;
@@ -44,6 +58,8 @@ struct ClassObject : GcObject {
     std::unordered_map<std::string, ClosureObject*> methods;
     std::unordered_map<std::string, TypeRef> fieldTypes;
     std::unordered_map<std::string, TypeRef> methodTypes;
+    std::vector<std::string> fieldNames;
+    std::unordered_map<std::string, size_t> fieldIndexByName;
 
     void trace(GC& gc) override;
 };
@@ -450,7 +466,8 @@ struct ClosureObject : GcObject {
 
 struct InstanceObject : GcObject {
     ClassObject* klass = nullptr;
-    std::unordered_map<std::string, Value> fields;
+    std::vector<Value> fieldSlots;
+    std::vector<uint8_t> initializedFieldSlots;
 
     void trace(GC& gc) override;
 };
@@ -666,6 +683,8 @@ class Chunk {
     // dynamic array to hold line numbers
     std::unique_ptr<std::vector<int>> m_lines =
         std::make_unique<std::vector<int>>();
+    std::unique_ptr<std::vector<PropertyInlineCache>> m_propertyInlineCaches =
+        std::make_unique<std::vector<PropertyInlineCache>>();
 
     void disassemble(std::string label);
     int simpleInstruction(const std::string& label, int offset);
@@ -686,6 +705,12 @@ class Chunk {
     uint8_t byteAt(int index) const { return m_bytes->at(index); }
     int lineAt(int index) const { return m_lines->at(index); }
     void setByteAt(int index, uint8_t byte) { m_bytes->at(index) = byte; }
+    PropertyInlineCache& propertyInlineCacheAt(size_t index) {
+        return m_propertyInlineCaches->at(index);
+    }
+    const std::vector<PropertyInlineCache>& propertyInlineCaches() const {
+        return *m_propertyInlineCaches;
+    }
 
     // inlined methods
     uint8_t* getBytes() { return this->m_bytes->data(); }

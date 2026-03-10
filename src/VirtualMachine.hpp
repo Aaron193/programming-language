@@ -71,6 +71,10 @@ class VirtualMachine {
         return frame.chunk->getConstants()[readByte()];
     }
     const std::string& readNameConstant() { return readConstant().asString(); }
+    size_t currentInstructionOffset() {
+        CallFrame& frame = currentFrame();
+        return static_cast<size_t>(frame.ip - frame.chunk->getBytes() - 1);
+    }
 
     Status run(bool printReturnValue, Value& returnValue,
                size_t stopFrameCount = 0);

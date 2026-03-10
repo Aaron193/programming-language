@@ -333,6 +333,39 @@ static ClosureObject* findMethodClosure(ClassObject* klass,
     return nullptr;
 }
 
+static void rebuildFieldLayout(ClassObject* klass) {
+    if (!klass) {
+        return;
+    }
+
+    klass->fieldIndexByName.clear();
+
+    std::vector<std::string> orderedFieldNames;
+    if (klass->superclass) {
+        orderedFieldNames = klass->superclass->fieldNames;
+        for (size_t index = 0; index < orderedFieldNames.size(); ++index) {
+            klass->fieldIndexByName.emplace(orderedFieldNames[index], index);
+        }
+    }
+
+    std::vector<std::string> ownFieldNames;
+    ownFieldNames.reserve(klass->fieldTypes.size());
+    for (const auto& [name, type] : klass->fieldTypes) {
+        (void)type;
+        if (klass->fieldIndexByName.find(name) == klass->fieldIndexByName.end()) {
+            ownFieldNames.push_back(name);
+        }
+    }
+
+    std::sort(ownFieldNames.begin(), ownFieldNames.end());
+    for (const auto& name : ownFieldNames) {
+        klass->fieldIndexByName.emplace(name, orderedFieldNames.size());
+        orderedFieldNames.push_back(name);
+    }
+
+    klass->fieldNames = std::move(orderedFieldNames);
+}
+
 static bool isInstanceOfClass(const InstanceObject* instance,
                               const std::string& expectedClassName) {
     if (!instance || !instance->klass) {
@@ -1290,6 +1323,8 @@ dispatch:
                     klass->methodTypes = methodIt->second;
                 }
 
+                rebuildFieldLayout(klass);
+
                 m_stack.push(Value(klass));
                 break;
             }
@@ -1327,6 +1362,8 @@ dispatch:
                         subclass->methods[method.first] = method.second;
                     }
                 }
+
+                rebuildFieldLayout(subclass);
                 break;
             }
             VM_CASE(METHOD): {
@@ -1374,6 +1411,7 @@ dispatch:
                 break;
             }
             VM_CASE(GET_PROPERTY): {
+                size_t instructionOffset = currentInstructionOffset();
                 const std::string& name = readNameConstant();
                 Value receiver = m_stack.peek(0);
 
@@ -1451,17 +1489,62 @@ dispatch:
                 }
 
                 auto instance = receiver.asInstance();
-                auto it = instance->fields.find(name);
-                if (it != instance->fields.end()) {
-                    m_stack.pop();
-                    m_stack.push(it->second);
-                    break;
+                auto& cache =
+                    currentFrame().chunk->propertyInlineCacheAt(instructionOffset);
+                if (cache.klass == instance->klass) {
+                    if (cache.kind == PropertyInlineCacheKind::FIELD &&
+                        cache.slotIndex < instance->fieldSlots.size() &&
+                        cache.slotIndex < instance->initializedFieldSlots.size() &&
+                        instance->initializedFieldSlots[cache.slotIndex]) {
+                        m_stack.pop();
+                        m_stack.push(instance->fieldSlots[cache.slotIndex]);
+                        break;
+                    }
+
+                    if (cache.kind == PropertyInlineCacheKind::METHOD &&
+                        cache.method != nullptr) {
+                        auto bound = gcAlloc<BoundMethodObject>();
+                        bound->receiver = instance;
+                        bound->method = cache.method;
+
+                        m_stack.pop();
+                        m_stack.push(Value(bound));
+                        break;
+                    }
+                }
+
+                auto fieldSlotIt = instance->klass->fieldIndexByName.find(name);
+                if (fieldSlotIt != instance->klass->fieldIndexByName.end()) {
+                    cache.klass = instance->klass;
+                    cache.kind = PropertyInlineCacheKind::FIELD;
+                    cache.slotIndex = fieldSlotIt->second;
+                    cache.method = nullptr;
+                    cache.fieldType.reset();
+
+                    if (fieldSlotIt->second < instance->fieldSlots.size() &&
+                        fieldSlotIt->second < instance->initializedFieldSlots.size() &&
+                        instance->initializedFieldSlots[fieldSlotIt->second]) {
+                        m_stack.pop();
+                        m_stack.push(instance->fieldSlots[fieldSlotIt->second]);
+                        break;
+                    }
                 }
 
                 auto method = findMethodClosure(instance->klass, name);
                 if (!method) {
+                    cache.klass = nullptr;
+                    cache.kind = PropertyInlineCacheKind::EMPTY;
+                    cache.slotIndex = 0;
+                    cache.method = nullptr;
+                    cache.fieldType.reset();
                     return runtimeError("Undefined property '" + name + "'.");
                 }
+
+                cache.klass = instance->klass;
+                cache.kind = PropertyInlineCacheKind::METHOD;
+                cache.slotIndex = 0;
+                cache.method = method;
+                cache.fieldType.reset();
 
                 auto bound = gcAlloc<BoundMethodObject>();
                 bound->receiver = instance;
@@ -1472,6 +1555,7 @@ dispatch:
                 break;
             }
             VM_CASE(SET_PROPERTY): {
+                size_t instructionOffset = currentInstructionOffset();
                 const std::string& name = readNameConstant();
                 Value value = m_stack.peek(0);
                 Value receiver = m_stack.peek(1);
@@ -1480,6 +1564,42 @@ dispatch:
                 }
 
                 auto instance = receiver.asInstance();
+                auto& cache =
+                    currentFrame().chunk->propertyInlineCacheAt(instructionOffset);
+                if (cache.klass == instance->klass &&
+                    cache.kind == PropertyInlineCacheKind::FIELD &&
+                    cache.slotIndex < instance->fieldSlots.size() &&
+                    cache.slotIndex < instance->initializedFieldSlots.size() &&
+                    cache.fieldType) {
+                    if (!valueMatchesType(value, cache.fieldType)) {
+                        return runtimeError(
+                            "Type error: field '" + name + "' on class '" +
+                            instance->klass->name + "' expects '" +
+                            cache.fieldType->toString() + "', got '" +
+                            valueTypeName(value) + "'.");
+                    }
+
+                    instance->fieldSlots[cache.slotIndex] = value;
+                    instance->initializedFieldSlots[cache.slotIndex] = 1;
+
+                    m_stack.pop();
+                    m_stack.pop();
+                    m_stack.push(value);
+                    break;
+                }
+
+                auto fieldSlotIt = instance->klass->fieldIndexByName.find(name);
+                if (fieldSlotIt == instance->klass->fieldIndexByName.end()) {
+                    cache.klass = nullptr;
+                    cache.kind = PropertyInlineCacheKind::EMPTY;
+                    cache.slotIndex = 0;
+                    cache.method = nullptr;
+                    cache.fieldType.reset();
+                    return runtimeError("Undefined field '" + name +
+                                        "' on class '" + instance->klass->name +
+                                        "'.");
+                }
+
                 auto fieldTypeIt = instance->klass->fieldTypes.find(name);
                 if (fieldTypeIt == instance->klass->fieldTypes.end()) {
                     return runtimeError("Undefined field '" + name +
@@ -1495,7 +1615,14 @@ dispatch:
                         valueTypeName(value) + "'.");
                 }
 
-                instance->fields[name] = value;
+                cache.klass = instance->klass;
+                cache.kind = PropertyInlineCacheKind::FIELD;
+                cache.slotIndex = fieldSlotIt->second;
+                cache.method = nullptr;
+                cache.fieldType = fieldTypeIt->second;
+
+                instance->fieldSlots[fieldSlotIt->second] = value;
+                instance->initializedFieldSlots[fieldSlotIt->second] = 1;
 
                 m_stack.pop();
                 m_stack.pop();
@@ -1519,6 +1646,9 @@ dispatch:
 
                     auto instance = gcAlloc<InstanceObject>();
                     instance->klass = callee.asClass();
+                    instance->fieldSlots.resize(instance->klass->fieldNames.size());
+                    instance->initializedFieldSlots.assign(
+                        instance->klass->fieldNames.size(), 0);
                     m_stack.setAt(calleeIndex, Value(instance));
                     break;
                 }

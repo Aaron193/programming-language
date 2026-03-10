@@ -69,6 +69,7 @@ static int closureInstruction(const std::string& label, int offset,
 void Chunk::write(uint8_t byte, int line) {
     m_bytes->push_back(byte);
     m_lines->push_back(line);
+    m_propertyInlineCaches->emplace_back();
 }
 
 int Chunk::addConstant(Value value) {
@@ -281,6 +282,11 @@ void FunctionObject::trace(GC& gc) {
     for (const auto& value : chunk->getConstantsRange()) {
         gc.markValue(value);
     }
+
+    for (const auto& cache : chunk->propertyInlineCaches()) {
+        gc.markObject(cache.klass);
+        gc.markObject(cache.method);
+    }
 }
 
 void ClassObject::trace(GC& gc) {
@@ -313,9 +319,10 @@ void ClosureObject::trace(GC& gc) {
 
 void InstanceObject::trace(GC& gc) {
     gc.markObject(klass);
-    for (const auto& [name, value] : fields) {
-        (void)name;
-        gc.markValue(value);
+    for (size_t index = 0; index < fieldSlots.size(); ++index) {
+        if (index < initializedFieldSlots.size() && initializedFieldSlots[index]) {
+            gc.markValue(fieldSlots[index]);
+        }
     }
 }
 

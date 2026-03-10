@@ -1,0 +1,19 @@
+class Base {
+  i32 x;
+}
+
+class Derived < Base {
+  i32 y;
+
+  sum() -> i32 {
+    return this.x + this.y;
+  }
+}
+
+auto item = Derived();
+item.x = 3;
+item.y = 4;
+
+print(item.x);
+print(item.y);
+print(item.sum());
