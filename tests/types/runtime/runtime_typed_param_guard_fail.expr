@@ -2,7 +2,7 @@ class Dog {}
 class Cat {}
 
 function acceptDog(Dog dog) -> i32 {
-    print dog;
+    print(dog);
     return 0;
 }
 

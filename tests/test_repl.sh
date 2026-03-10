@@ -12,7 +12,7 @@ if [[ ! -x "$INTERPRETER" ]]; then
 fi
 
 set +e
-OUTPUT="$(printf 'print 1;\nprint 2;\nquit\n' | "$INTERPRETER" 2>&1)"
+OUTPUT="$(printf 'print(1);\nprint(2);\nquit\n' | "$INTERPRETER" 2>&1)"
 STATUS=$?
 set -e
 

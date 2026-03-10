@@ -20,5 +20,5 @@ for (auto i = 0; i < funcs.size(); i++) {
 
 auto elapsed = clock() - start;
 
-print sum;
-print elapsed;
+print(sum);
+print(elapsed);

@@ -10,5 +10,5 @@ auto timeB = clock();
 
 auto timeTaken = timeB - timeA;
 
-print timeTaken;
-print sum
+print(timeTaken);
+print(sum)

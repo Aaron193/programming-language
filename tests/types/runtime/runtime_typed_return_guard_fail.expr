@@ -7,4 +7,4 @@ function makeDog() -> Dog {
     return dynamic[0];
 }
 
-print makeDog();
+print(makeDog());

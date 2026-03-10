@@ -13,4 +13,4 @@ class Counter {
 
 Counter c = Counter();
 c.value = 0;
-print c.bump().bump().bump().get();
+print(c.bump().bump().bump().get());

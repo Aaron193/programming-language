@@ -32,5 +32,5 @@ for (auto idx = 0; idx < size; idx++) {
 
 auto elapsed = clock() - start;
 
-print checksum;
-print elapsed;
+print(checksum);
+print(elapsed);

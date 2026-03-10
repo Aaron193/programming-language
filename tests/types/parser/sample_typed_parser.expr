@@ -7,5 +7,5 @@ function inc(i32 value) -> i32 {
 class Dog {}
 Dog dog = Dog();
 
-print inc(count);
-print dog != null;
+print(inc(count));
+print(dog != null);

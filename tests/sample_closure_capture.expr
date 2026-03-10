@@ -6,4 +6,4 @@ function outer() -> i32 {
   return inner();
 }
 
-print outer();
+print(outer());

@@ -1,13 +1,13 @@
-function c() {
-  return "x" - 1;
+function c() -> f64 {
+  return num("x");
 }
 
-function b() {
+function b() -> f64 {
   return c();
 }
 
-function a() {
+function a() -> f64 {
   return b();
 }
 
-print a();
+print(a());

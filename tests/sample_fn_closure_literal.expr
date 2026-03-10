@@ -6,5 +6,5 @@ auto mul = function(i32 a, i32 b) -> i32 {
   return a * b;
 };
 
-print addOne(41);
-print mul(3, 4);
+print(addOne(41));
+print(mul(3, 4));

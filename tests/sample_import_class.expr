@@ -2,4 +2,4 @@ import classes from "./modules/class_mod.expr";
 
 auto c = classes.Counter();
 c.value = 1;
-print c.inc();
+print(c.inc());

@@ -1,33 +1,33 @@
 auto x = 10;
 x += 5;
-print x;
+print(x);
 
 x -= 3;
-print x;
+print(x);
 
 x *= 2;
-print x;
+print(x);
 
 x /= 4;
-print x;
+print(x);
 
 x <<= 3;
-print x;
+print(x);
 
 x >>= 2;
-print x;
+print(x);
 
 x++;
-print x;
+print(x);
 
 ++x;
-print x;
+print(x);
 
 x--;
-print x;
+print(x);
 
 --x;
-print x;
+print(x);
 
 class Box {
 	i32 value;
@@ -35,10 +35,10 @@ class Box {
 auto b = Box();
 b.value = 7;
 b.value += 5;
-print b.value;
+print(b.value);
 
 b.value--;
-print b.value;
+print(b.value);
 
 ++b.value;
-print b.value;
+print(b.value);

@@ -7,5 +7,5 @@ auto start = clock();
 auto result = fib(35);
 auto elapsed = clock() - start;
 
-print result;
-print elapsed;
+print(result);
+print(elapsed);

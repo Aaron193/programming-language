@@ -13,6 +13,6 @@ class Box {
 
 Box b = Box();
 b.value = 7;
-print b.get();
-print b.set(9);
-print b.value;
+print(b.get());
+print(b.set(9));
+print(b.value);

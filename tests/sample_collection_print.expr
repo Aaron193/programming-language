@@ -1,14 +1,14 @@
 auto a = [[1, 2], [3, 4]];
-print a;
+print(a);
 
 auto d = {"b": 2, "a": 1, "c": 9};
-print d;
-print d.keys();
-print d.values();
+print(d);
+print(d.keys());
+print(d.values());
 
 auto s = Set(3, 1, 2, 2);
-print s;
+print(s);
 
 auto r = [];
 r.push(r);
-print r;
+print(r);

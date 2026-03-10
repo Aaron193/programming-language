@@ -1,2 +1,2 @@
 auto y = true;
-print y;
+print(y);

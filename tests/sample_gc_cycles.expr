@@ -1,17 +1,17 @@
 auto a = [];
 a.push(a);
-print a[0] == a;
+print(a[0] == a);
 
 auto d = {};
 d["self"] = d;
-print d["self"] == d;
+print(d["self"] == d);
 
 auto s = Set();
 auto seed = Set();
 s.add(seed);
 s.add(s);
-print s.has(s);
+print(s.has(s));
 
-print a;
-print d;
-print s;
+print(a);
+print(d);
+print(s);

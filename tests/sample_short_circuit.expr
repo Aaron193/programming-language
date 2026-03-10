@@ -1,8 +1,8 @@
 auto a = false;
 auto b = false;
 a and (b = true);
-print b;
+print(b);
 auto c = true;
 auto d = false;
 c or (d = true);
-print d;
+print(d);

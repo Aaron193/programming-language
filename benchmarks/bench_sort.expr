@@ -28,6 +28,6 @@ while (i < arr.size()) {
 
 auto elapsed = clock() - start;
 
-print arr[0];
-print arr[n - 1];
-print elapsed;
+print(arr[0]);
+print(arr[n - 1]);
+print(elapsed);

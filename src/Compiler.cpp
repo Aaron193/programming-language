@@ -1828,7 +1828,9 @@ void Compiler::forStatement() {
 }
 
 void Compiler::printStatement() {
+    consume(TokenType::OPEN_PAREN, "Expected '(' after 'print'.");
     expression();
+    consume(TokenType::CLOSE_PAREN, "Expected ')' after print argument.");
     popExprType();
     if (m_parser->current.type() == TokenType::SEMI_COLON) {
         advance();

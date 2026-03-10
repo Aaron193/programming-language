@@ -1,1 +1,1 @@
-print num("abc");
+print(num("abc"));

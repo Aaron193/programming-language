@@ -5,7 +5,7 @@ class Bag {
 
 auto bag = Bag();
 bag.value = 42;
-print bag.value;
+print(bag.value);
 
 bag.label = "ok";
-print bag.label;
+print(bag.label);

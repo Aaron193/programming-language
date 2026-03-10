@@ -7,11 +7,11 @@ class Dog {
 Dog? maybeDog = Dog();
 
 if (maybeDog != null) {
-    print "dog present";
+    print("dog present");
 }
 
 maybeDog = null;
 
 if (maybeDog == null) {
-    print "dog missing";
+    print("dog missing");
 }

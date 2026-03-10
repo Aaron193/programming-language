@@ -3,4 +3,4 @@ function countDown(i32 n) -> i32 {
   return countDown(n - 1);
 }
 
-print countDown(120);
+print(countDown(120));

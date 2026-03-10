@@ -15,5 +15,5 @@ class B < A {
 }
 
 B b = B();
-print b.greet();
-print b.id();
+print(b.greet());
+print(b.id());

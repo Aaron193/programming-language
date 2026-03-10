@@ -1,15 +1,15 @@
 auto nums = [1, 2, 3];
 for (auto n : nums) {
-  print n;
+  print(n);
 }
 
 auto dict = {"b": 2, "a": 1};
 for (auto key : dict) {
-  print key;
-  print dict[key];
+  print(key);
+  print(dict[key]);
 }
 
 auto set = Set(4, 5, 4);
 for (auto item : set) {
-  print item;
+  print(item);
 }

@@ -19,7 +19,7 @@ auto base = 1;
                   auto a9 = a8 + 1;
                   {
                     auto a10 = a9 + 1;
-                    print a10;
+                    print(a10);
                   }
                 }
               }

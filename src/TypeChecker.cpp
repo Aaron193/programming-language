@@ -2134,7 +2134,10 @@ class CheckerImpl {
 
     void statement() {
         if (match(TokenType::PRINT)) {
+            consume(TokenType::OPEN_PAREN, "Expected '(' after 'print'.");
             parseExpression();
+            consume(TokenType::CLOSE_PAREN,
+                    "Expected ')' after print argument.");
             if (check(TokenType::SEMI_COLON)) {
                 advance();
             }

@@ -45,8 +45,8 @@ for (auto i = 0; i < keyList.size(); i++) {
 
 auto elapsed = clock() - start;
 
-print sumA;
-print sumB;
-print counter.value;
-print keys.size();
-print elapsed;
+print(sumA);
+print(sumB);
+print(counter.value);
+print(keys.size());
+print(elapsed);

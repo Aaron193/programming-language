@@ -88,8 +88,8 @@ Namespace import:
 
 ```expr
 import math from "./math.expr";
-print math.PI;
-print math.add(1, 2);
+print(math.PI);
+print(math.add(1, 2));
 ```
 
 Named import and aliasing:

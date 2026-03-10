@@ -28,5 +28,5 @@ while (n <= limit) {
 
 auto elapsed = clock() - start;
 
-print count;
-print elapsed;
+print(count);
+print(elapsed);

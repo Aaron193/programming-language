@@ -12,4 +12,4 @@ while (i < 40000) {
   i = i + 1;
 }
 
-print i;
+print(i);

@@ -5,4 +5,4 @@ class Dog {
 }
 
 Dog? d = Dog();
-print d.bark();
+print(d.bark());

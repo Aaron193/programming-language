@@ -15,6 +15,6 @@ for (auto i = 0; i < 30000; i++) {
 
 auto elapsed = clock() - start;
 
-print sum;
-print d.size();
-print elapsed;
+print(sum);
+print(d.size());
+print(elapsed);

@@ -28,6 +28,6 @@ for (auto round = 0; round < 10; round++) {
 
 auto elapsed = clock() - start;
 
-print checksum;
-print particles.size();
-print elapsed;
+print(checksum);
+print(particles.size());
+print(elapsed);
