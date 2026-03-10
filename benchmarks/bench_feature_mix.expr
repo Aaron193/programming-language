@@ -1,12 +1,14 @@
 class Counter {
-  inc() {
+  i32 value;
+
+  inc() -> i32 {
     this.value = this.value + 1;
     return this.value;
   }
 }
 
-function makeMultiplier(k) {
-  function multiply(x) {
+function makeMultiplier(i32 k) -> fn(i32) -> i32 {
+  function multiply(i32 x) -> i32 {
     return x * k;
   }
   return multiply;

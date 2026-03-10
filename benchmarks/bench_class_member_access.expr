@@ -1,5 +1,8 @@
 class Particle {
-  move(dx, dy) {
+  i32 x;
+  i32 y;
+
+  move(i32 dx, i32 dy) -> i32 {
     this.x = this.x + dx;
     this.y = this.y + dy;
     return this.x + this.y;

@@ -1,4 +1,7 @@
-class Node {}
+class Node {
+  i32 value;
+  Node next;
+}
 
 auto start = clock();
 

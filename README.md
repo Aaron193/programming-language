@@ -77,6 +77,32 @@ Run additional suites:
 ./tests/test_import.sh
 ```
 
+## Benchmarks
+
+Run each benchmark once:
+
+```bash
+./benchmarks/run_benchmarks.sh
+```
+
+Run repeated statistical benchmarking (mean/median/stddev):
+
+```bash
+./benchmarks/compare_benchmarks.sh --iterations 7 --warmup 1
+```
+
+Compare two interpreter binaries (A/B):
+
+```bash
+./benchmarks/compare_benchmarks.sh \
+  --interpreter-a /path/to/interpreter_a \
+  --interpreter-b /path/to/interpreter_b \
+  --label-a baseline \
+  --label-b candidate \
+  --iterations 7 \
+  --warmup 1
+```
+
 ## Modules
 
 Top-level exports:

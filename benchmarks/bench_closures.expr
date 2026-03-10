@@ -1,5 +1,5 @@
-function makeAdder(n) {
-  function addOne(x) {
+function makeAdder(i32 n) -> fn(i32) -> i32 {
+  function addOne(i32 x) -> i32 {
     return n + x;
   }
   return addOne;

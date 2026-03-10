@@ -1,4 +1,4 @@
-function fib(n) {
+function fib(i32 n) -> i32 {
   if (n <= 1) return n;
   return fib(n - 1) + fib(n - 2);
 }
