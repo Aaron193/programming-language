@@ -6,6 +6,11 @@ cmake_minimum_required(VERSION 3.10)
 
 project(interpreter VERSION 1.0)
 
+if(NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    message(FATAL_ERROR
+            "This project requires GCC or Clang (computed-goto VM dispatch relies on GNU labels-as-values).")
+endif()
+
 option(ENABLE_VM_TRACE "Enable VM stack and disassembly trace output" OFF)
 option(ENABLE_LTO "Enable link-time optimization for Release builds" OFF)
 option(ENABLE_PGO_GENERATE

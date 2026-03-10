@@ -692,20 +692,87 @@ Status VirtualMachine::callClosure(ClosureObject* closure,
 
 Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                            size_t stopFrameCount) {
+#define VM_OPCODE_LABEL(name) VM_LABEL_##name
+#define VM_OPCODE_ADDR(name) &&VM_OPCODE_LABEL(name)
+#define VM_CASE(name) VM_OPCODE_LABEL(name): case OpCode::name
+
+    static void* dispatchTable[] = {
+        VM_OPCODE_ADDR(RETURN),          VM_OPCODE_ADDR(CONSTANT),
+        VM_OPCODE_ADDR(NIL),             VM_OPCODE_ADDR(TRUE_LITERAL),
+        VM_OPCODE_ADDR(FALSE_LITERAL),   VM_OPCODE_ADDR(NEGATE),
+        VM_OPCODE_ADDR(NOT),             VM_OPCODE_ADDR(EQUAL_OP),
+        VM_OPCODE_ADDR(NOT_EQUAL_OP),    VM_OPCODE_ADDR(ADD),
+        VM_OPCODE_ADDR(SUB),             VM_OPCODE_ADDR(MULT),
+        VM_OPCODE_ADDR(DIV),             VM_OPCODE_ADDR(IADD),
+        VM_OPCODE_ADDR(ISUB),            VM_OPCODE_ADDR(IMULT),
+        VM_OPCODE_ADDR(IDIV),            VM_OPCODE_ADDR(IMOD),
+        VM_OPCODE_ADDR(UADD),            VM_OPCODE_ADDR(USUB),
+        VM_OPCODE_ADDR(UMULT),           VM_OPCODE_ADDR(UDIV),
+        VM_OPCODE_ADDR(UMOD),            VM_OPCODE_ADDR(GREATER_THAN),
+        VM_OPCODE_ADDR(LESS_THAN),       VM_OPCODE_ADDR(GREATER_EQUAL_THAN),
+        VM_OPCODE_ADDR(LESS_EQUAL_THAN), VM_OPCODE_ADDR(IGREATER),
+        VM_OPCODE_ADDR(ILESS),           VM_OPCODE_ADDR(IGREATER_EQ),
+        VM_OPCODE_ADDR(ILESS_EQ),        VM_OPCODE_ADDR(UGREATER),
+        VM_OPCODE_ADDR(ULESS),           VM_OPCODE_ADDR(UGREATER_EQ),
+        VM_OPCODE_ADDR(ULESS_EQ),        VM_OPCODE_ADDR(POP),
+        VM_OPCODE_ADDR(PRINT_OP),        VM_OPCODE_ADDR(DEFINE_GLOBAL),
+        VM_OPCODE_ADDR(GET_GLOBAL),      VM_OPCODE_ADDR(SET_GLOBAL),
+        VM_OPCODE_ADDR(DEFINE_GLOBAL_SLOT),
+        VM_OPCODE_ADDR(GET_GLOBAL_SLOT),
+        VM_OPCODE_ADDR(SET_GLOBAL_SLOT),
+        VM_OPCODE_ADDR(GET_LOCAL),       VM_OPCODE_ADDR(SET_LOCAL),
+        VM_OPCODE_ADDR(GET_UPVALUE),     VM_OPCODE_ADDR(SET_UPVALUE),
+        VM_OPCODE_ADDR(CLASS_OP),        VM_OPCODE_ADDR(INHERIT),
+        VM_OPCODE_ADDR(METHOD),          VM_OPCODE_ADDR(GET_THIS),
+        VM_OPCODE_ADDR(GET_SUPER),       VM_OPCODE_ADDR(GET_PROPERTY),
+        VM_OPCODE_ADDR(SET_PROPERTY),    VM_OPCODE_ADDR(CALL),
+        VM_OPCODE_ADDR(CLOSURE),         VM_OPCODE_ADDR(CLOSE_UPVALUE),
+        VM_OPCODE_ADDR(BUILD_ARRAY),     VM_OPCODE_ADDR(BUILD_DICT),
+        VM_OPCODE_ADDR(GET_INDEX),       VM_OPCODE_ADDR(SET_INDEX),
+        VM_OPCODE_ADDR(DUP),             VM_OPCODE_ADDR(DUP2),
+        VM_OPCODE_ADDR(JUMP),            VM_OPCODE_ADDR(JUMP_IF_FALSE),
+        VM_OPCODE_ADDR(LOOP),            VM_OPCODE_ADDR(SHIFT_LEFT),
+        VM_OPCODE_ADDR(SHIFT_RIGHT),     VM_OPCODE_ADDR(BITWISE_AND),
+        VM_OPCODE_ADDR(BITWISE_OR),      VM_OPCODE_ADDR(BITWISE_XOR),
+        VM_OPCODE_ADDR(BITWISE_NOT),     VM_OPCODE_ADDR(WIDEN_INT),
+        VM_OPCODE_ADDR(NARROW_INT),      VM_OPCODE_ADDR(INT_TO_FLOAT),
+        VM_OPCODE_ADDR(FLOAT_TO_INT),    VM_OPCODE_ADDR(INT_TO_STR),
+        VM_OPCODE_ADDR(CHECK_INSTANCE_TYPE),
+        VM_OPCODE_ADDR(INT_NEGATE),      VM_OPCODE_ADDR(ITER_INIT),
+        VM_OPCODE_ADDR(ITER_HAS_NEXT),   VM_OPCODE_ADDR(ITER_NEXT),
+        VM_OPCODE_ADDR(IMPORT_MODULE),   VM_OPCODE_ADDR(EXPORT_NAME),
+    };
+
+    constexpr size_t kDispatchTableSize =
+        static_cast<size_t>(OpCode::EXPORT_NAME) + 1;
+    static_assert(
+        sizeof(dispatchTable) / sizeof(dispatchTable[0]) == kDispatchTableSize,
+        "Dispatch table must stay aligned with OpCode enum.");
+
     while (true) {
         try {
-            CallFrame& frame = currentFrame();
-
+dispatch:
             if (m_traceEnabled) {
+                CallFrame& frame = currentFrame();
                 m_stack.print();
                 frame.chunk->disassembleInstruction(
                     static_cast<int>(frame.ip - frame.chunk->getBytes()));
             }
 
-            uint8_t instruction = readByte();
+            {
+                uint8_t instruction = readByte();
+                if (static_cast<size_t>(instruction) >= kDispatchTableSize) {
+                    return runtimeError("Invalid instruction opcode: " +
+                                        std::to_string(
+                                            static_cast<int>(instruction)) +
+                                        ".");
+                }
 
-            switch (instruction) {
-            case OpCode::RETURN: {
+                goto *dispatchTable[instruction];
+            }
+
+            switch (0) {
+            VM_CASE(RETURN): {
                 Value result = m_stack.pop();
                 CallFrame finishedFrame = currentFrame();
                 closeUpvalues(finishedFrame.slotBase);
@@ -728,24 +795,24 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.push(result);
                 break;
             }
-            case OpCode::CONSTANT: {
+            VM_CASE(CONSTANT): {
                 const Value& val = readConstant();
                 m_stack.push(val);
                 break;
             }
-            case OpCode::NIL: {
+            VM_CASE(NIL): {
                 m_stack.push(Value());
                 break;
             }
-            case OpCode::TRUE_LITERAL: {
+            VM_CASE(TRUE_LITERAL): {
                 m_stack.push(Value(true));
                 break;
             }
-            case OpCode::FALSE_LITERAL: {
+            VM_CASE(FALSE_LITERAL): {
                 m_stack.push(Value(false));
                 break;
             }
-            case OpCode::NEGATE: {
+            VM_CASE(NEGATE): {
                 Value value = m_stack.pop();
                 if (!value.isAnyNumeric()) {
                     return runtimeError(
@@ -762,24 +829,24 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 }
                 break;
             }
-            case OpCode::NOT: {
+            VM_CASE(NOT): {
                 Value value = m_stack.pop();
                 m_stack.push(Value(isFalsey(value)));
                 break;
             }
-            case OpCode::EQUAL_OP: {
+            VM_CASE(EQUAL_OP): {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
                 m_stack.push(Value(a == b));
                 break;
             }
-            case OpCode::NOT_EQUAL_OP: {
+            VM_CASE(NOT_EQUAL_OP): {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
                 m_stack.push(Value(a != b));
                 break;
             }
-            case OpCode::ADD: {
+            VM_CASE(ADD): {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
 
@@ -811,7 +878,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 return runtimeError(
                     "Operands must be two numbers or two strings for '+'.");
             }
-            case OpCode::SUB: {
+            VM_CASE(SUB): {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
                 if (!isNumberPair(a, b)) {
@@ -836,7 +903,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.push(Value(lhs - rhs));
                 break;
             }
-            case OpCode::MULT: {
+            VM_CASE(MULT): {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
                 if (!isNumberPair(a, b)) {
@@ -861,7 +928,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.push(Value(lhs * rhs));
                 break;
             }
-            case OpCode::DIV: {
+            VM_CASE(DIV): {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
                 if (!isNumberPair(a, b)) {
@@ -891,25 +958,25 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.push(Value(lhs / rhs));
                 break;
             }
-            case OpCode::IADD: {
+            VM_CASE(IADD): {
                 int64_t rhs = requireSignedInt(m_stack.pop());
                 int64_t lhs = requireSignedInt(m_stack.pop());
                 m_stack.push(Value(wrapSignedAdd(lhs, rhs)));
                 break;
             }
-            case OpCode::ISUB: {
+            VM_CASE(ISUB): {
                 int64_t rhs = requireSignedInt(m_stack.pop());
                 int64_t lhs = requireSignedInt(m_stack.pop());
                 m_stack.push(Value(wrapSignedSub(lhs, rhs)));
                 break;
             }
-            case OpCode::IMULT: {
+            VM_CASE(IMULT): {
                 int64_t rhs = requireSignedInt(m_stack.pop());
                 int64_t lhs = requireSignedInt(m_stack.pop());
                 m_stack.push(Value(wrapSignedMul(lhs, rhs)));
                 break;
             }
-            case OpCode::IDIV: {
+            VM_CASE(IDIV): {
                 int64_t rhs = requireSignedInt(m_stack.pop());
                 int64_t lhs = requireSignedInt(m_stack.pop());
                 if (rhs == 0) {
@@ -918,7 +985,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.push(Value(lhs / rhs));
                 break;
             }
-            case OpCode::IMOD: {
+            VM_CASE(IMOD): {
                 int64_t rhs = requireSignedInt(m_stack.pop());
                 int64_t lhs = requireSignedInt(m_stack.pop());
                 if (rhs == 0) {
@@ -927,25 +994,25 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.push(Value(lhs % rhs));
                 break;
             }
-            case OpCode::UADD: {
+            VM_CASE(UADD): {
                 uint64_t rhs = requireUnsignedInt(m_stack.pop());
                 uint64_t lhs = requireUnsignedInt(m_stack.pop());
                 m_stack.push(Value(lhs + rhs));
                 break;
             }
-            case OpCode::USUB: {
+            VM_CASE(USUB): {
                 uint64_t rhs = requireUnsignedInt(m_stack.pop());
                 uint64_t lhs = requireUnsignedInt(m_stack.pop());
                 m_stack.push(Value(lhs - rhs));
                 break;
             }
-            case OpCode::UMULT: {
+            VM_CASE(UMULT): {
                 uint64_t rhs = requireUnsignedInt(m_stack.pop());
                 uint64_t lhs = requireUnsignedInt(m_stack.pop());
                 m_stack.push(Value(lhs * rhs));
                 break;
             }
-            case OpCode::UDIV: {
+            VM_CASE(UDIV): {
                 uint64_t rhs = requireUnsignedInt(m_stack.pop());
                 uint64_t lhs = requireUnsignedInt(m_stack.pop());
                 if (rhs == 0) {
@@ -954,7 +1021,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.push(Value(lhs / rhs));
                 break;
             }
-            case OpCode::UMOD: {
+            VM_CASE(UMOD): {
                 uint64_t rhs = requireUnsignedInt(m_stack.pop());
                 uint64_t lhs = requireUnsignedInt(m_stack.pop());
                 if (rhs == 0) {
@@ -963,7 +1030,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.push(Value(lhs % rhs));
                 break;
             }
-            case OpCode::GREATER_THAN: {
+            VM_CASE(GREATER_THAN): {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
                 if (!isNumberPair(a, b)) {
@@ -987,7 +1054,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.push(Value(lhs > rhs));
                 break;
             }
-            case OpCode::LESS_THAN: {
+            VM_CASE(LESS_THAN): {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
                 if (!isNumberPair(a, b)) {
@@ -1011,7 +1078,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.push(Value(lhs < rhs));
                 break;
             }
-            case OpCode::GREATER_EQUAL_THAN: {
+            VM_CASE(GREATER_EQUAL_THAN): {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
                 if (!isNumberPair(a, b)) {
@@ -1035,7 +1102,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.push(Value(lhs >= rhs));
                 break;
             }
-            case OpCode::LESS_EQUAL_THAN: {
+            VM_CASE(LESS_EQUAL_THAN): {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
                 if (!isNumberPair(a, b)) {
@@ -1059,70 +1126,70 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.push(Value(lhs <= rhs));
                 break;
             }
-            case OpCode::IGREATER: {
+            VM_CASE(IGREATER): {
                 int64_t rhs = requireSignedInt(m_stack.pop());
                 int64_t lhs = requireSignedInt(m_stack.pop());
                 m_stack.push(Value(lhs > rhs));
                 break;
             }
-            case OpCode::ILESS: {
+            VM_CASE(ILESS): {
                 int64_t rhs = requireSignedInt(m_stack.pop());
                 int64_t lhs = requireSignedInt(m_stack.pop());
                 m_stack.push(Value(lhs < rhs));
                 break;
             }
-            case OpCode::IGREATER_EQ: {
+            VM_CASE(IGREATER_EQ): {
                 int64_t rhs = requireSignedInt(m_stack.pop());
                 int64_t lhs = requireSignedInt(m_stack.pop());
                 m_stack.push(Value(lhs >= rhs));
                 break;
             }
-            case OpCode::ILESS_EQ: {
+            VM_CASE(ILESS_EQ): {
                 int64_t rhs = requireSignedInt(m_stack.pop());
                 int64_t lhs = requireSignedInt(m_stack.pop());
                 m_stack.push(Value(lhs <= rhs));
                 break;
             }
-            case OpCode::UGREATER: {
+            VM_CASE(UGREATER): {
                 uint64_t rhs = requireUnsignedInt(m_stack.pop());
                 uint64_t lhs = requireUnsignedInt(m_stack.pop());
                 m_stack.push(Value(lhs > rhs));
                 break;
             }
-            case OpCode::ULESS: {
+            VM_CASE(ULESS): {
                 uint64_t rhs = requireUnsignedInt(m_stack.pop());
                 uint64_t lhs = requireUnsignedInt(m_stack.pop());
                 m_stack.push(Value(lhs < rhs));
                 break;
             }
-            case OpCode::UGREATER_EQ: {
+            VM_CASE(UGREATER_EQ): {
                 uint64_t rhs = requireUnsignedInt(m_stack.pop());
                 uint64_t lhs = requireUnsignedInt(m_stack.pop());
                 m_stack.push(Value(lhs >= rhs));
                 break;
             }
-            case OpCode::ULESS_EQ: {
+            VM_CASE(ULESS_EQ): {
                 uint64_t rhs = requireUnsignedInt(m_stack.pop());
                 uint64_t lhs = requireUnsignedInt(m_stack.pop());
                 m_stack.push(Value(lhs <= rhs));
                 break;
             }
-            case OpCode::POP: {
+            VM_CASE(POP): {
                 m_stack.pop();
                 break;
             }
-            case OpCode::PRINT_OP: {
+            VM_CASE(PRINT_OP): {
                 Value value = m_stack.pop();
                 std::cout << value << std::endl;
                 break;
             }
-            case OpCode::DEFINE_GLOBAL: {
+            VM_CASE(DEFINE_GLOBAL): {
                 const std::string& name = readNameConstant();
                 Value value = m_stack.pop();
                 m_nativeGlobals[name] = value;
                 break;
             }
-            case OpCode::GET_GLOBAL: {
+            VM_CASE(GET_GLOBAL): {
                 const std::string& name = readNameConstant();
                 auto it = m_nativeGlobals.find(name);
                 if (it == m_nativeGlobals.end()) {
@@ -1132,7 +1199,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.push(it->second);
                 break;
             }
-            case OpCode::SET_GLOBAL: {
+            VM_CASE(SET_GLOBAL): {
                 const std::string& name = readNameConstant();
                 auto it = m_nativeGlobals.find(name);
                 if (it == m_nativeGlobals.end()) {
@@ -1142,7 +1209,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 it->second = m_stack.peek(0);
                 break;
             }
-            case OpCode::DEFINE_GLOBAL_SLOT: {
+            VM_CASE(DEFINE_GLOBAL_SLOT): {
                 uint8_t slot = readByte();
                 if (slot >= m_globalValues.size()) {
                     return runtimeError("Invalid global slot.");
@@ -1151,7 +1218,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_globalDefined[slot] = true;
                 break;
             }
-            case OpCode::GET_GLOBAL_SLOT: {
+            VM_CASE(GET_GLOBAL_SLOT): {
                 uint8_t slot = readByte();
                 if (slot >= m_globalValues.size() || !m_globalDefined[slot]) {
                     std::string name = slot < m_globalNames.size()
@@ -1163,7 +1230,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.push(m_globalValues[slot]);
                 break;
             }
-            case OpCode::SET_GLOBAL_SLOT: {
+            VM_CASE(SET_GLOBAL_SLOT): {
                 uint8_t slot = readByte();
                 if (slot >= m_globalValues.size() || !m_globalDefined[slot]) {
                     std::string name = slot < m_globalNames.size()
@@ -1175,17 +1242,17 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_globalValues[slot] = m_stack.peek(0);
                 break;
             }
-            case OpCode::GET_LOCAL: {
+            VM_CASE(GET_LOCAL): {
                 uint8_t slot = readByte();
                 m_stack.push(m_stack.getAt(currentFrame().slotBase + slot));
                 break;
             }
-            case OpCode::SET_LOCAL: {
+            VM_CASE(SET_LOCAL): {
                 uint8_t slot = readByte();
                 m_stack.setAt(currentFrame().slotBase + slot, m_stack.peek(0));
                 break;
             }
-            case OpCode::GET_UPVALUE: {
+            VM_CASE(GET_UPVALUE): {
                 uint8_t slot = readByte();
                 auto upvalue = currentFrame().closure->upvalues[slot];
                 if (upvalue->isClosed) {
@@ -1195,7 +1262,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 }
                 break;
             }
-            case OpCode::SET_UPVALUE: {
+            VM_CASE(SET_UPVALUE): {
                 uint8_t slot = readByte();
                 auto upvalue = currentFrame().closure->upvalues[slot];
                 if (upvalue->isClosed) {
@@ -1205,7 +1272,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 }
                 break;
             }
-            case OpCode::CLASS_OP: {
+            VM_CASE(CLASS_OP): {
                 const std::string& name = readNameConstant();
                 auto klass = gcAlloc<ClassObject>();
                 klass->name = name;
@@ -1226,7 +1293,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.push(Value(klass));
                 break;
             }
-            case OpCode::INHERIT: {
+            VM_CASE(INHERIT): {
                 Value superclassValue = m_stack.pop();
                 Value subclassValue = m_stack.peek(0);
 
@@ -1262,7 +1329,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 }
                 break;
             }
-            case OpCode::METHOD: {
+            VM_CASE(METHOD): {
                 const std::string& name = readNameConstant();
                 Value method = m_stack.peek(0);
                 Value klass = m_stack.peek(1);
@@ -1275,7 +1342,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.pop();
                 break;
             }
-            case OpCode::GET_THIS: {
+            VM_CASE(GET_THIS): {
                 auto receiver = currentFrame().receiver;
                 if (!receiver) {
                     return runtimeError(
@@ -1285,7 +1352,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.push(Value(receiver));
                 break;
             }
-            case OpCode::GET_SUPER: {
+            VM_CASE(GET_SUPER): {
                 const std::string& name = readNameConstant();
                 auto receiver = currentFrame().receiver;
                 if (!receiver || !receiver->klass ||
@@ -1306,7 +1373,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.push(Value(bound));
                 break;
             }
-            case OpCode::GET_PROPERTY: {
+            VM_CASE(GET_PROPERTY): {
                 const std::string& name = readNameConstant();
                 Value receiver = m_stack.peek(0);
 
@@ -1404,7 +1471,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.push(Value(bound));
                 break;
             }
-            case OpCode::SET_PROPERTY: {
+            VM_CASE(SET_PROPERTY): {
                 const std::string& name = readNameConstant();
                 Value value = m_stack.peek(0);
                 Value receiver = m_stack.peek(1);
@@ -1435,7 +1502,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.push(value);
                 break;
             }
-            case OpCode::CALL: {
+            VM_CASE(CALL): {
                 uint8_t argumentCount = readByte();
                 Value callee = m_stack.peek(argumentCount);
                 size_t calleeIndex =
@@ -2266,7 +2333,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 }
                 break;
             }
-            case OpCode::CLOSURE: {
+            VM_CASE(CLOSURE): {
                 Value constant = readConstant();
                 if (!constant.isFunction()) {
                     return runtimeError("CLOSURE expects a function constant.");
@@ -2292,12 +2359,12 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 }
                 break;
             }
-            case OpCode::CLOSE_UPVALUE: {
+            VM_CASE(CLOSE_UPVALUE): {
                 closeUpvalues(m_stack.size() - 1);
                 m_stack.pop();
                 break;
             }
-            case OpCode::BUILD_ARRAY: {
+            VM_CASE(BUILD_ARRAY): {
                 uint8_t count = readByte();
                 auto array = gcAlloc<ArrayObject>();
                 array->elements.resize(count);
@@ -2348,7 +2415,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.push(Value(array));
                 break;
             }
-            case OpCode::BUILD_DICT: {
+            VM_CASE(BUILD_DICT): {
                 uint8_t pairCount = readByte();
                 auto dict = gcAlloc<DictObject>();
 
@@ -2410,7 +2477,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.push(Value(dict));
                 break;
             }
-            case OpCode::GET_INDEX: {
+            VM_CASE(GET_INDEX): {
                 Value indexValue = m_stack.pop();
                 Value container = m_stack.pop();
 
@@ -2456,7 +2523,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 return runtimeError(
                     "Indexing is only supported on array, dict, and set.");
             }
-            case OpCode::SET_INDEX: {
+            VM_CASE(SET_INDEX): {
                 Value value = m_stack.pop();
                 Value indexValue = m_stack.pop();
                 Value container = m_stack.pop();
@@ -2511,18 +2578,18 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 return runtimeError(
                     "Indexed assignment is only supported on array and dict.");
             }
-            case OpCode::DUP: {
+            VM_CASE(DUP): {
                 m_stack.push(m_stack.peek(0));
                 break;
             }
-            case OpCode::DUP2: {
+            VM_CASE(DUP2): {
                 Value second = m_stack.peek(1);
                 Value top = m_stack.peek(0);
                 m_stack.push(second);
                 m_stack.push(top);
                 break;
             }
-            case OpCode::ITER_INIT: {
+            VM_CASE(ITER_INIT): {
                 Value iterable = m_stack.pop();
                 auto iterator = gcAlloc<IteratorObject>();
 
@@ -2545,7 +2612,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.push(Value(iterator));
                 break;
             }
-            case OpCode::ITER_HAS_NEXT: {
+            VM_CASE(ITER_HAS_NEXT): {
                 Value iteratorValue = m_stack.pop();
                 if (!iteratorValue.isIterator()) {
                     return runtimeError("Internal error: iterator expected.");
@@ -2574,7 +2641,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.push(Value(hasNext));
                 break;
             }
-            case OpCode::ITER_NEXT: {
+            VM_CASE(ITER_NEXT): {
                 Value iteratorValue = m_stack.pop();
                 if (!iteratorValue.isIterator()) {
                     return runtimeError("Internal error: iterator expected.");
@@ -2615,7 +2682,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.push(nextValue);
                 break;
             }
-            case OpCode::IMPORT_MODULE: {
+            VM_CASE(IMPORT_MODULE): {
                 const std::string& path = readConstant().asString();
 
                 auto cached = m_moduleCache.find(path);
@@ -2727,7 +2794,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.push(Value(module));
                 break;
             }
-            case OpCode::EXPORT_NAME: {
+            VM_CASE(EXPORT_NAME): {
                 const std::string& name = readConstant().asString();
                 if (m_currentModule != nullptr) {
                     Value value = m_stack.peek(0);
@@ -2755,12 +2822,12 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 }
                 break;
             }
-            case OpCode::JUMP: {
+            VM_CASE(JUMP): {
                 uint16_t offset = readShort();
                 currentFrame().ip += offset;
                 break;
             }
-            case OpCode::JUMP_IF_FALSE: {
+            VM_CASE(JUMP_IF_FALSE): {
                 uint16_t offset = readShort();
                 Value condition = m_stack.peek(0);
                 if (isFalsey(condition)) {
@@ -2768,12 +2835,12 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 }
                 break;
             }
-            case OpCode::LOOP: {
+            VM_CASE(LOOP): {
                 uint16_t offset = readShort();
                 currentFrame().ip -= offset;
                 break;
             }
-            case OpCode::SHIFT_LEFT: {
+            VM_CASE(SHIFT_LEFT): {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
                 int64_t shift = 0;
@@ -2795,7 +2862,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 }
                 break;
             }
-            case OpCode::SHIFT_RIGHT: {
+            VM_CASE(SHIFT_RIGHT): {
                 Value b = m_stack.pop();
                 Value a = m_stack.pop();
                 int64_t shift = 0;
@@ -2816,7 +2883,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 }
                 break;
             }
-            case OpCode::BITWISE_AND: {
+            VM_CASE(BITWISE_AND): {
                 uint64_t rhs = 0;
                 uint64_t lhs = 0;
                 if (!valueToBitwiseUnsignedInt(m_stack.pop(), rhs) ||
@@ -2826,7 +2893,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.push(Value(lhs & rhs));
                 break;
             }
-            case OpCode::BITWISE_OR: {
+            VM_CASE(BITWISE_OR): {
                 uint64_t rhs = 0;
                 uint64_t lhs = 0;
                 if (!valueToBitwiseUnsignedInt(m_stack.pop(), rhs) ||
@@ -2836,7 +2903,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.push(Value(lhs | rhs));
                 break;
             }
-            case OpCode::BITWISE_XOR: {
+            VM_CASE(BITWISE_XOR): {
                 uint64_t rhs = 0;
                 uint64_t lhs = 0;
                 if (!valueToBitwiseUnsignedInt(m_stack.pop(), rhs) ||
@@ -2846,7 +2913,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.push(Value(lhs ^ rhs));
                 break;
             }
-            case OpCode::BITWISE_NOT: {
+            VM_CASE(BITWISE_NOT): {
                 uint64_t value = 0;
                 if (!valueToBitwiseUnsignedInt(m_stack.pop(), value)) {
                     return runtimeError("Operand must be an integer for '~'.");
@@ -2854,11 +2921,11 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.push(Value(~value));
                 break;
             }
-            case OpCode::WIDEN_INT: {
+            VM_CASE(WIDEN_INT): {
                 readByte();
                 break;
             }
-            case OpCode::NARROW_INT: {
+            VM_CASE(NARROW_INT): {
                 uint8_t kind = readByte();
                 Value value = m_stack.pop();
 
@@ -2940,7 +3007,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 }
                 break;
             }
-            case OpCode::INT_TO_FLOAT: {
+            VM_CASE(INT_TO_FLOAT): {
                 Value value = m_stack.pop();
                 double converted = 0.0;
                 if (!valueToDouble(value, converted)) {
@@ -2949,7 +3016,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.push(Value(converted));
                 break;
             }
-            case OpCode::FLOAT_TO_INT: {
+            VM_CASE(FLOAT_TO_INT): {
                 Value value = m_stack.pop();
                 int64_t converted = 0;
                 if (!valueToSignedInt(value, converted)) {
@@ -2958,7 +3025,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.push(Value(converted));
                 break;
             }
-            case OpCode::INT_TO_STR: {
+            VM_CASE(INT_TO_STR): {
                 Value value = m_stack.pop();
                 if (value.isSignedInt()) {
                     m_stack.push(Value(std::to_string(value.asSignedInt())));
@@ -2974,7 +3041,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 }
                 return runtimeError("Cannot cast value to str.");
             }
-            case OpCode::CHECK_INSTANCE_TYPE: {
+            VM_CASE(CHECK_INSTANCE_TYPE): {
                 const std::string& expectedClass = readNameConstant();
                 Value value = m_stack.peek(0);
 
@@ -2995,17 +3062,24 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 }
                 break;
             }
-            case OpCode::INT_NEGATE: {
+            VM_CASE(INT_NEGATE): {
                 int64_t value = requireSignedInt(m_stack.pop());
                 m_stack.push(Value(wrapSignedSub(0, value)));
                 break;
             }
+            default:
+                return runtimeError("Invalid instruction opcode.");
             }
+            goto dispatch;
         } catch (const std::exception& error) {
             return runtimeError(error.what());
         }
     }
 }
+
+#undef VM_OPCODE_LABEL
+#undef VM_OPCODE_ADDR
+#undef VM_CASE
 
 Status VirtualMachine::interpret(std::string_view source, bool printReturnValue,
                                  bool traceEnabled, bool disassembleEnabled,

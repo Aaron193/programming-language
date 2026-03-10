@@ -43,6 +43,9 @@ This project is a bytecode-compiled, stack-based interpreter implemented in C++.
 ./build.sh
 ```
 
+Direct-threaded VM dispatch via computed-goto is enabled by default.
+GCC or Clang is required to build the project.
+
 ## Run
 
 ```bash
