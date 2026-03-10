@@ -43,6 +43,12 @@ This project is a bytecode-compiled, stack-based interpreter implemented in C++.
 ./build.sh
 ```
 
+Build a profiler-friendly optimized binary:
+
+```bash
+./build.sh --release --profiling
+```
+
 Direct-threaded VM dispatch via computed-goto is enabled by default.
 GCC or Clang is required to build the project.
 
@@ -101,6 +107,54 @@ Compare two interpreter binaries (A/B):
   --label-b candidate \
   --iterations 7 \
   --warmup 1
+```
+
+## Profiling
+
+The recommended profiling workflow is Valgrind Callgrind. It gives you
+function-level hotspots and callgraph information without adding manual timing
+logs to the interpreter.
+
+Build an optimized binary with debug symbols and frame pointers:
+
+```bash
+./build.sh --release --profiling
+```
+
+Profile a program or benchmark:
+
+```bash
+./scripts/profile_callgrind.sh benchmarks/bench_feature_mix.expr
+./scripts/profile_callgrind.sh --inclusive --tree benchmarks/bench_fibonacci.expr
+```
+
+Re-annotate an existing Callgrind output without rerunning the program:
+
+```bash
+./scripts/profile_callgrind.sh --annotate-only build/callgrind/bench_feature_mix-20260310-120000.out
+```
+
+For source-level expansion of a saved profile:
+
+```bash
+callgrind_annotate --auto=yes build/callgrind/<profile>.out
+```
+
+Recommended profiling targets:
+
+- `benchmarks/bench_fibonacci.expr` for call overhead and dispatch-heavy recursion
+- `benchmarks/bench_sort.expr` and `benchmarks/bench_matrix.expr` for arithmetic and container traffic
+- `benchmarks/bench_feature_mix.expr` for a broader mixed workload
+
+Notes:
+
+- Callgrind is much slower than native execution. Prefer profiling one benchmark at a time.
+- Hotspots in `VirtualMachine::run(...)`, stack push/pop, and `Value` copies are good candidates for further investigation.
+- Linux `perf` is lower overhead, but it only works on machines where perf events are enabled. On such a machine, use:
+
+```bash
+perf record -g -- ./build/interpreter benchmarks/bench_feature_mix.expr
+perf report
 ```
 
 ## Modules

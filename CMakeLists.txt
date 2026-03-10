@@ -17,6 +17,8 @@ option(ENABLE_PGO_GENERATE
        "Build with profile generation instrumentation for Release builds" OFF)
 option(ENABLE_PGO_USE
        "Build with profile-use optimization for Release builds" OFF)
+option(ENABLE_PROFILING
+       "Build with profiler-friendly symbols and frame pointers" OFF)
 set(PGO_PROFILE_PATH "" CACHE STRING
     "Profile output/input path used by PGO flags")
 
@@ -43,10 +45,22 @@ if(ENABLE_PGO_GENERATE AND ENABLE_PGO_USE)
     message(FATAL_ERROR "ENABLE_PGO_GENERATE and ENABLE_PGO_USE are mutually exclusive.")
 endif()
 
+if(ENABLE_PROFILING AND (ENABLE_PGO_GENERATE OR ENABLE_PGO_USE))
+    message(FATAL_ERROR
+            "ENABLE_PROFILING cannot be combined with PGO generation/use.")
+endif()
+
 if((ENABLE_PGO_GENERATE OR ENABLE_PGO_USE) AND
    CMAKE_BUILD_TYPE AND
    NOT CMAKE_BUILD_TYPE STREQUAL "Release")
     message(WARNING "PGO flags are typically intended for Release builds.")
+endif()
+
+if(ENABLE_PROFILING AND
+   CMAKE_BUILD_TYPE AND
+   CMAKE_BUILD_TYPE STREQUAL "Debug")
+    message(WARNING
+            "ENABLE_PROFILING is intended for optimized builds; consider Release.")
 endif()
 
 set(EXTRA_RELEASE_COMPILE_FLAGS "")
@@ -85,6 +99,14 @@ if(ENABLE_PGO_USE)
     endif()
 endif()
 
+if(ENABLE_PROFILING)
+    list(APPEND EXTRA_RELEASE_COMPILE_FLAGS
+         "-g"
+         "-O2"
+         "-fno-omit-frame-pointer"
+         "-fno-inline-functions-called-once")
+endif()
+
 # If using Microsoft Visual Studio, set specific compile options
 if(MSVC)
     target_compile_options(interpreter PRIVATE
@@ -93,7 +115,7 @@ if(MSVC)
     )
 else()
     target_compile_options(interpreter PRIVATE
-        $<$<CONFIG:Release>:-O3 -DNDEBUG>
+        $<$<CONFIG:Release>:-DNDEBUG>
         $<$<CONFIG:Debug>:-g -O0>
     )
 endif()

@@ -8,6 +8,7 @@ RUN_FILE=""
 ENABLE_LTO=0
 ENABLE_PGO_GENERATE=0
 ENABLE_PGO_USE=0
+ENABLE_PROFILING=0
 PGO_PROFILE_PATH=""
 
 for arg in "$@"; do
@@ -32,13 +33,16 @@ for arg in "$@"; do
             ENABLE_PGO_USE=1
             PGO_PROFILE_PATH="${arg#*=}"
             ;;
+        --profiling)
+            ENABLE_PROFILING=1
+            ;;
         --runfile=*)
             RUN_AFTER_BUILD=1
             RUN_FILE="${arg#*=}"
             ;;
         *)
             echo "Unknown option: $arg"
-            echo "Usage: $0 [--debug|--release] [--lto] [--pgo-generate[=PATH]|--pgo-use=PATH] [--runfile=FILENAME]"
+            echo "Usage: $0 [--debug|--release] [--lto] [--profiling] [--pgo-generate[=PATH]|--pgo-use=PATH] [--runfile=FILENAME]"
             exit 1
             ;;
     esac
@@ -46,6 +50,11 @@ done
 
 if [[ $ENABLE_PGO_GENERATE -eq 1 && $ENABLE_PGO_USE -eq 1 ]]; then
     echo "Error: --pgo-generate and --pgo-use cannot be used together."
+    exit 1
+fi
+
+if [[ $ENABLE_PROFILING -eq 1 && ($ENABLE_PGO_GENERATE -eq 1 || $ENABLE_PGO_USE -eq 1) ]]; then
+    echo "Error: --profiling cannot be combined with --pgo-generate or --pgo-use."
     exit 1
 fi
 
@@ -65,6 +74,7 @@ cmake_args=(
     "-DENABLE_LTO=OFF"
     "-DENABLE_PGO_GENERATE=OFF"
     "-DENABLE_PGO_USE=OFF"
+    "-DENABLE_PROFILING=OFF"
 )
 
 if [[ $ENABLE_LTO -eq 1 ]]; then
@@ -77,6 +87,10 @@ fi
 
 if [[ $ENABLE_PGO_USE -eq 1 ]]; then
     cmake_args+=("-DENABLE_PGO_USE=ON" "-DPGO_PROFILE_PATH=$PGO_PROFILE_PATH")
+fi
+
+if [[ $ENABLE_PROFILING -eq 1 ]]; then
+    cmake_args+=("-DENABLE_PROFILING=ON")
 fi
 
 cmake "${cmake_args[@]}" ..
@@ -96,6 +110,7 @@ fi
 # ./build.sh --release :                      builds in Release mode
 # ./build.sh --debug :                        builds in Debug mode
 # ./build.sh --release --lto :                builds with LTO enabled
+# ./build.sh --release --profiling :          builds a profiler-friendly optimized binary
 # ./build.sh --release --pgo-generate :       builds with PGO instrumentation (default profile path build/pgo-data)
 # ./build.sh --release --pgo-use=/tmp/pgo :   builds using collected PGO profile data
 # ./build.sh --release --runfile=test.txt :   builds in Release mode and runs with test.txt
