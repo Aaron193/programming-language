@@ -1,6 +1,7 @@
 #pragma once
 #include <cstddef>
 #include <iostream>
+#include <stdexcept>
 
 #define STACK_SIZE 256
 
@@ -18,17 +19,17 @@ class Stack {
     ~Stack() = default;
 
     void push(const T& value) {
-        if (m_top < (int)m_capacity - 1) {
-            m_data[++m_top] = value;
+        if (m_top >= static_cast<int>(m_capacity) - 1) {
+            throw std::overflow_error("Stack overflow.");
         }
+        m_data[++m_top] = value;
     }
 
     T pop() {
-        if (m_top >= 0) {
-            return m_data[m_top--];
+        if (m_top < 0) {
+            throw std::underflow_error("Stack underflow.");
         }
-        // underflow
-        return T();
+        return m_data[m_top--];
     }
 
     const T& peek(size_t distance) const {
@@ -56,10 +57,10 @@ class Stack {
     }
 
     void popN(size_t count) {
-        while (count > 0 && m_top >= 0) {
-            m_top--;
-            count--;
+        if (count > size()) {
+            throw std::underflow_error("Stack underflow.");
         }
+        m_top -= static_cast<int>(count);
     }
 
     void reset() { m_top = -1; }

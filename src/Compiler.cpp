@@ -18,6 +18,23 @@ bool isCollectionTypeNameText(std::string_view name) {
     return name == "Array" || name == "Dict" || name == "Set";
 }
 
+bool hasStrictDirective(std::string_view source) {
+    return source.rfind("#!strict", 0) == 0;
+}
+
+std::string_view stripStrictDirectiveLine(std::string_view source) {
+    if (!hasStrictDirective(source)) {
+        return source;
+    }
+
+    size_t newlinePos = source.find('\n');
+    if (newlinePos == std::string_view::npos) {
+        return std::string_view();
+    }
+
+    return source.substr(newlinePos + 1);
+}
+
 struct NumericLiteralInfo {
     std::string core;
     TypeRef type;
@@ -248,8 +265,10 @@ bool Compiler::resolveModuleExportTypes(
     Chunk chunk;
     Compiler moduleCompiler;
     moduleCompiler.setGC(m_gc);
-    moduleCompiler.setStrictMode(m_strictMode);
-    if (!moduleCompiler.compile(source, chunk, resolvedPath)) {
+    bool moduleStrict = m_strictMode || hasStrictDirective(source);
+    std::string_view compileSource = stripStrictDirectiveLine(source);
+    moduleCompiler.setStrictMode(moduleStrict);
+    if (!moduleCompiler.compile(compileSource, chunk, resolvedPath)) {
         outError =
             "Failed to type-check imported module '" + resolvedPath + "'.";
         return false;
@@ -281,7 +300,10 @@ void Compiler::emitBytes(uint8_t byte1, uint8_t byte2) {
     emitByte(byte2);
 }
 
-void Compiler::emitReturn() { emitByte(OpCode::RETURN); }
+void Compiler::emitReturn() {
+    emitByte(OpCode::NIL);
+    emitByte(OpCode::RETURN);
+}
 
 uint8_t Compiler::makeConstant(Value value) {
     int constant = currentChunk()->addConstant(value);
@@ -369,7 +391,7 @@ TypeRef Compiler::peekExprType() const {
 
 uint8_t Compiler::arithmeticOpcode(TokenType operatorType,
                                    const TypeRef& numericType) const {
-    if (numericType && numericType->isInteger()) {
+    if (m_strictMode && numericType && numericType->isInteger()) {
         const bool isSigned = numericType->isSigned();
         switch (operatorType) {
             case TokenType::PLUS:
@@ -1664,18 +1686,15 @@ void Compiler::ifStatement() {
     int thenJump = emitJump(OpCode::JUMP_IF_FALSE);
     emitByte(OpCode::POP);
     statement();
+    int endJump = emitJump(OpCode::JUMP);
 
+    patchJump(thenJump);
+    emitByte(OpCode::POP);
     if (m_parser->current.type() == TokenType::ELSE) {
-        int elseJump = emitJump(OpCode::JUMP);
-        patchJump(thenJump);
-        emitByte(OpCode::POP);
         advance();
         statement();
-        patchJump(elseJump);
-    } else {
-        patchJump(thenJump);
-        emitByte(OpCode::POP);
     }
+    patchJump(endJump);
 }
 
 void Compiler::whileStatement() {
@@ -2352,7 +2371,7 @@ void Compiler::unary(bool canAssign) {
             resultType = TypeInfo::makeBool();
             break;
         case TokenType::MINUS:
-            if (operandType && operandType->isInteger()) {
+            if (m_strictMode && operandType && operandType->isInteger()) {
                 emitByte(OpCode::INT_NEGATE);
                 resultType = operandType;
             } else {
@@ -2509,7 +2528,7 @@ void Compiler::binary(bool canAssign) {
             }
             break;
         case TokenType::GREATER:
-            if (promotedNumeric && promotedNumeric->isInteger()) {
+            if (m_strictMode && promotedNumeric && promotedNumeric->isInteger()) {
                 emitByte(promotedNumeric->isSigned() ? OpCode::IGREATER
                                                      : OpCode::UGREATER);
             } else {
@@ -2518,7 +2537,7 @@ void Compiler::binary(bool canAssign) {
             resultType = TypeInfo::makeBool();
             break;
         case TokenType::GREATER_EQUAL:
-            if (promotedNumeric && promotedNumeric->isInteger()) {
+            if (m_strictMode && promotedNumeric && promotedNumeric->isInteger()) {
                 emitByte(promotedNumeric->isSigned() ? OpCode::IGREATER_EQ
                                                      : OpCode::UGREATER_EQ);
             } else {
@@ -2527,7 +2546,7 @@ void Compiler::binary(bool canAssign) {
             resultType = TypeInfo::makeBool();
             break;
         case TokenType::LESS:
-            if (promotedNumeric && promotedNumeric->isInteger()) {
+            if (m_strictMode && promotedNumeric && promotedNumeric->isInteger()) {
                 emitByte(promotedNumeric->isSigned() ? OpCode::ILESS
                                                      : OpCode::ULESS);
             } else {
@@ -2536,7 +2555,7 @@ void Compiler::binary(bool canAssign) {
             resultType = TypeInfo::makeBool();
             break;
         case TokenType::LESS_EQUAL:
-            if (promotedNumeric && promotedNumeric->isInteger()) {
+            if (m_strictMode && promotedNumeric && promotedNumeric->isInteger()) {
                 emitByte(promotedNumeric->isSigned() ? OpCode::ILESS_EQ
                                                      : OpCode::ULESS_EQ);
             } else {

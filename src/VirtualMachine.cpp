@@ -1,12 +1,13 @@
 #include "VirtualMachine.hpp"
 
 #include <algorithm>
-#include <cassert>
 #include <chrono>
 #include <cmath>
+#include <exception>
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -54,6 +55,18 @@ static bool valueToUnsignedInt(const Value& value, uint64_t& out) {
     return false;
 }
 
+static bool valueToBitwiseUnsignedInt(const Value& value, uint64_t& out) {
+    if (value.isUnsignedInt()) {
+        out = value.asUnsignedInt();
+        return true;
+    }
+    if (value.isSignedInt()) {
+        out = static_cast<uint64_t>(value.asSignedInt());
+        return true;
+    }
+    return false;
+}
+
 static bool valueToDouble(const Value& value, double& out) {
     if (value.isNumber()) {
         out = value.asNumber();
@@ -86,12 +99,17 @@ static int64_t wrapSignedMul(int64_t lhs, int64_t rhs) {
 }
 
 static int64_t requireSignedInt(const Value& value) {
-    assert(value.isSignedInt());
+    if (!value.isSignedInt()) {
+        throw std::runtime_error("Type error: expected signed integer operand.");
+    }
     return value.asSignedInt();
 }
 
 static uint64_t requireUnsignedInt(const Value& value) {
-    assert(value.isUnsignedInt());
+    if (!value.isUnsignedInt()) {
+        throw std::runtime_error(
+            "Type error: expected unsigned integer operand.");
+    }
     return value.asUnsignedInt();
 }
 
@@ -387,10 +405,18 @@ UpvalueObject* VirtualMachine::captureUpvalue(size_t stackIndex) {
 }
 
 void VirtualMachine::closeUpvalues(size_t fromStackIndex) {
-    for (const auto& upvalue : m_openUpvalues) {
+    auto it = m_openUpvalues.begin();
+    while (it != m_openUpvalues.end()) {
+        UpvalueObject* upvalue = *it;
         if (!upvalue->isClosed && upvalue->stackIndex >= fromStackIndex) {
             upvalue->closed = m_stack.getAt(upvalue->stackIndex);
             upvalue->isClosed = true;
+        }
+
+        if (upvalue->isClosed) {
+            it = m_openUpvalues.erase(it);
+        } else {
+            ++it;
         }
     }
 }
@@ -505,132 +531,137 @@ Status VirtualMachine::callClosure(ClosureObject* closure,
 Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                            size_t stopFrameCount) {
     while (true) {
-        CallFrame& frame = currentFrame();
+        try {
+            CallFrame& frame = currentFrame();
 
-        if (m_traceEnabled) {
-            m_stack.print();
-            frame.chunk->disassembleInstruction(
-                static_cast<int>(frame.ip - frame.chunk->getBytes()));
-        }
-
-        uint8_t instruction = readByte();
-
-        if (!m_traceEnabled) {
-            if (instruction == OpCode::GET_LOCAL) {
-                uint8_t slot = readByte();
-                m_stack.push(m_stack.getAt(currentFrame().slotBase + slot));
-                continue;
+            if (m_traceEnabled) {
+                m_stack.print();
+                frame.chunk->disassembleInstruction(
+                    static_cast<int>(frame.ip - frame.chunk->getBytes()));
             }
-            if (instruction == OpCode::SET_LOCAL) {
-                uint8_t slot = readByte();
-                m_stack.setAt(currentFrame().slotBase + slot, m_stack.peek(0));
-                continue;
-            }
-            if (instruction == OpCode::GET_GLOBAL_SLOT) {
-                uint8_t slot = readByte();
-                if (slot >= m_globalValues.size() || !m_globalDefined[slot]) {
-                    std::string name = slot < m_globalNames.size()
-                                           ? m_globalNames[slot]
-                                           : "<unknown>";
-                    return runtimeError("Undefined variable '" + name + "'.");
-                }
 
-                m_stack.push(m_globalValues[slot]);
-                continue;
-            }
-            if (instruction == OpCode::SET_GLOBAL_SLOT) {
-                uint8_t slot = readByte();
-                if (slot >= m_globalValues.size() || !m_globalDefined[slot]) {
-                    std::string name = slot < m_globalNames.size()
-                                           ? m_globalNames[slot]
-                                           : "<unknown>";
-                    return runtimeError("Undefined variable '" + name + "'.");
-                }
+            uint8_t instruction = readByte();
 
-                m_globalValues[slot] = m_stack.peek(0);
-                continue;
-            }
-            if (instruction == OpCode::CONSTANT) {
-                const Value& val = readConstant();
-                m_stack.push(val);
-                continue;
-            }
-            if (instruction == OpCode::ADD) {
-                Value b = m_stack.pop();
-                Value a = m_stack.pop();
-
-                if (a.isSignedInt() && b.isSignedInt()) {
-                    m_stack.push(
-                        Value(wrapSignedAdd(a.asSignedInt(), b.asSignedInt())));
+            if (!m_traceEnabled) {
+                if (instruction == OpCode::GET_LOCAL) {
+                    uint8_t slot = readByte();
+                    m_stack.push(m_stack.getAt(currentFrame().slotBase + slot));
                     continue;
                 }
-
-                if (a.isUnsignedInt() && b.isUnsignedInt()) {
-                    m_stack.push(Value(a.asUnsignedInt() + b.asUnsignedInt()));
+                if (instruction == OpCode::SET_LOCAL) {
+                    uint8_t slot = readByte();
+                    m_stack.setAt(currentFrame().slotBase + slot,
+                                  m_stack.peek(0));
                     continue;
                 }
+                if (instruction == OpCode::GET_GLOBAL_SLOT) {
+                    uint8_t slot = readByte();
+                    if (slot >= m_globalValues.size() || !m_globalDefined[slot]) {
+                        std::string name = slot < m_globalNames.size()
+                                               ? m_globalNames[slot]
+                                               : "<unknown>";
+                        return runtimeError("Undefined variable '" + name +
+                                            "'.");
+                    }
 
-                if (a.isAnyNumeric() && b.isAnyNumeric()) {
+                    m_stack.push(m_globalValues[slot]);
+                    continue;
+                }
+                if (instruction == OpCode::SET_GLOBAL_SLOT) {
+                    uint8_t slot = readByte();
+                    if (slot >= m_globalValues.size() ||
+                        !m_globalDefined[slot]) {
+                        std::string name = slot < m_globalNames.size()
+                                               ? m_globalNames[slot]
+                                               : "<unknown>";
+                        return runtimeError("Undefined variable '" + name +
+                                            "'.");
+                    }
+
+                    m_globalValues[slot] = m_stack.peek(0);
+                    continue;
+                }
+                if (instruction == OpCode::CONSTANT) {
+                    const Value& val = readConstant();
+                    m_stack.push(val);
+                    continue;
+                }
+                if (instruction == OpCode::ADD) {
+                    Value b = m_stack.pop();
+                    Value a = m_stack.pop();
+
+                    if (a.isSignedInt() && b.isSignedInt()) {
+                        m_stack.push(Value(
+                            wrapSignedAdd(a.asSignedInt(), b.asSignedInt())));
+                        continue;
+                    }
+
+                    if (a.isUnsignedInt() && b.isUnsignedInt()) {
+                        m_stack.push(Value(a.asUnsignedInt() + b.asUnsignedInt()));
+                        continue;
+                    }
+
+                    if (a.isAnyNumeric() && b.isAnyNumeric()) {
+                        double lhs = 0.0;
+                        double rhs = 0.0;
+                        valueToDouble(a, lhs);
+                        valueToDouble(b, rhs);
+                        m_stack.push(Value(lhs + rhs));
+                        continue;
+                    }
+
+                    if (a.isString() && b.isString()) {
+                        m_stack.push(Value(a.asString() + b.asString()));
+                        continue;
+                    }
+
+                    return runtimeError(
+                        "Operands must be two numbers or two strings for '+'.");
+                }
+                if (instruction == OpCode::LESS_THAN) {
+                    Value b = m_stack.pop();
+                    Value a = m_stack.pop();
+                    if (!isNumberPair(a, b)) {
+                        return runtimeError("Operands must be numbers for '<'.");
+                    }
+
+                    if (a.isSignedInt() && b.isSignedInt()) {
+                        m_stack.push(Value(a.asSignedInt() < b.asSignedInt()));
+                        continue;
+                    }
+
+                    if (a.isUnsignedInt() && b.isUnsignedInt()) {
+                        m_stack.push(Value(a.asUnsignedInt() < b.asUnsignedInt()));
+                        continue;
+                    }
+
                     double lhs = 0.0;
                     double rhs = 0.0;
                     valueToDouble(a, lhs);
                     valueToDouble(b, rhs);
-                    m_stack.push(Value(lhs + rhs));
+                    m_stack.push(Value(lhs < rhs));
                     continue;
                 }
-
-                if (a.isString() && b.isString()) {
-                    m_stack.push(Value(a.asString() + b.asString()));
+                if (instruction == OpCode::JUMP_IF_FALSE) {
+                    uint16_t offset = readShort();
+                    const Value& condition = m_stack.peek(0);
+                    if (isFalsey(condition)) {
+                        currentFrame().ip += offset;
+                    }
                     continue;
                 }
-
-                return runtimeError(
-                    "Operands must be two numbers or two strings for '+'.");
-            }
-            if (instruction == OpCode::LESS_THAN) {
-                Value b = m_stack.pop();
-                Value a = m_stack.pop();
-                if (!isNumberPair(a, b)) {
-                    return runtimeError("Operands must be numbers for '<'.");
-                }
-
-                if (a.isSignedInt() && b.isSignedInt()) {
-                    m_stack.push(Value(a.asSignedInt() < b.asSignedInt()));
+                if (instruction == OpCode::LOOP) {
+                    uint16_t offset = readShort();
+                    currentFrame().ip -= offset;
                     continue;
                 }
-
-                if (a.isUnsignedInt() && b.isUnsignedInt()) {
-                    m_stack.push(Value(a.asUnsignedInt() < b.asUnsignedInt()));
+                if (instruction == OpCode::POP) {
+                    m_stack.pop();
                     continue;
                 }
+            }
 
-                double lhs = 0.0;
-                double rhs = 0.0;
-                valueToDouble(a, lhs);
-                valueToDouble(b, rhs);
-                m_stack.push(Value(lhs < rhs));
-                continue;
-            }
-            if (instruction == OpCode::JUMP_IF_FALSE) {
-                uint16_t offset = readShort();
-                const Value& condition = m_stack.peek(0);
-                if (isFalsey(condition)) {
-                    currentFrame().ip += offset;
-                }
-                continue;
-            }
-            if (instruction == OpCode::LOOP) {
-                uint16_t offset = readShort();
-                currentFrame().ip -= offset;
-                continue;
-            }
-            if (instruction == OpCode::POP) {
-                m_stack.pop();
-                continue;
-            }
-        }
-
-        switch (instruction) {
+            switch (instruction) {
             case OpCode::RETURN: {
                 Value result = m_stack.pop();
                 CallFrame finishedFrame = currentFrame();
@@ -2566,11 +2597,15 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
                 std::string source((std::istreambuf_iterator<char>(file)),
                                    std::istreambuf_iterator<char>());
+                std::string_view compileSource = stripStrictDirectiveLine(source);
+                bool importStrict =
+                    m_defaultStrictMode || hasStrictDirective(source);
 
                 m_importStack.insert(path);
 
                 Chunk importedChunk;
-                if (!m_compiler.compile(source, importedChunk, path)) {
+                m_compiler.setStrictMode(importStrict);
+                if (!m_compiler.compile(compileSource, importedChunk, path)) {
                     m_importStack.erase(path);
                     return Status::COMPILATION_ERROR;
                 }
@@ -2744,8 +2779,8 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
             case OpCode::BITWISE_AND: {
                 uint64_t rhs = 0;
                 uint64_t lhs = 0;
-                if (!valueToUnsignedInt(m_stack.pop(), rhs) ||
-                    !valueToUnsignedInt(m_stack.pop(), lhs)) {
+                if (!valueToBitwiseUnsignedInt(m_stack.pop(), rhs) ||
+                    !valueToBitwiseUnsignedInt(m_stack.pop(), lhs)) {
                     return runtimeError("Operands must be integers for '&'.");
                 }
                 m_stack.push(Value(lhs & rhs));
@@ -2754,8 +2789,8 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
             case OpCode::BITWISE_OR: {
                 uint64_t rhs = 0;
                 uint64_t lhs = 0;
-                if (!valueToUnsignedInt(m_stack.pop(), rhs) ||
-                    !valueToUnsignedInt(m_stack.pop(), lhs)) {
+                if (!valueToBitwiseUnsignedInt(m_stack.pop(), rhs) ||
+                    !valueToBitwiseUnsignedInt(m_stack.pop(), lhs)) {
                     return runtimeError("Operands must be integers for '|'.");
                 }
                 m_stack.push(Value(lhs | rhs));
@@ -2764,8 +2799,8 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
             case OpCode::BITWISE_XOR: {
                 uint64_t rhs = 0;
                 uint64_t lhs = 0;
-                if (!valueToUnsignedInt(m_stack.pop(), rhs) ||
-                    !valueToUnsignedInt(m_stack.pop(), lhs)) {
+                if (!valueToBitwiseUnsignedInt(m_stack.pop(), rhs) ||
+                    !valueToBitwiseUnsignedInt(m_stack.pop(), lhs)) {
                     return runtimeError("Operands must be integers for '^'.");
                 }
                 m_stack.push(Value(lhs ^ rhs));
@@ -2773,7 +2808,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
             }
             case OpCode::BITWISE_NOT: {
                 uint64_t value = 0;
-                if (!valueToUnsignedInt(m_stack.pop(), value)) {
+                if (!valueToBitwiseUnsignedInt(m_stack.pop(), value)) {
                     return runtimeError("Operand must be an integer for '~'.");
                 }
                 m_stack.push(Value(~value));
@@ -2925,6 +2960,9 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 m_stack.push(Value(wrapSignedSub(0, value)));
                 break;
             }
+            }
+        } catch (const std::exception& error) {
+            return runtimeError(error.what());
         }
     }
 }
@@ -2943,8 +2981,9 @@ Status VirtualMachine::interpret(std::string_view source, bool printReturnValue,
     m_moduleCache.clear();
     m_importStack.clear();
     m_currentModule = nullptr;
+    m_defaultStrictMode = strictMode || hasStrictDirective(source);
     m_compiler.setGC(&m_gc);
-    m_compiler.setStrictMode(strictMode || hasStrictDirective(source));
+    m_compiler.setStrictMode(m_defaultStrictMode);
     m_traceEnabled = traceEnabled;
     m_disassembleEnabled = disassembleEnabled;
 

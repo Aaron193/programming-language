@@ -51,6 +51,7 @@ class VirtualMachine {
     std::unordered_map<std::string, ModuleObject*> m_moduleCache;
     std::unordered_set<std::string> m_importStack;
     ModuleObject* m_currentModule = nullptr;
+    bool m_defaultStrictMode = false;
     // open upvalues
     std::vector<UpvalueObject*> m_openUpvalues;
     bool m_traceEnabled = false;

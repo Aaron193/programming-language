@@ -17,7 +17,7 @@ run_expect_compile_error() {
 
     set +e
     local output
-    output="$($INTERPRETER "$file" 2>&1)"
+    output="$($INTERPRETER --strict "$file" 2>&1)"
     local status=$?
     set -e
 
