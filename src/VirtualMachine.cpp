@@ -628,125 +628,6 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
             uint8_t instruction = readByte();
 
-            if (!m_traceEnabled) {
-                if (instruction == OpCode::GET_LOCAL) {
-                    uint8_t slot = readByte();
-                    m_stack.push(m_stack.getAt(currentFrame().slotBase + slot));
-                    continue;
-                }
-                if (instruction == OpCode::SET_LOCAL) {
-                    uint8_t slot = readByte();
-                    m_stack.setAt(currentFrame().slotBase + slot,
-                                  m_stack.peek(0));
-                    continue;
-                }
-                if (instruction == OpCode::GET_GLOBAL_SLOT) {
-                    uint8_t slot = readByte();
-                    if (slot >= m_globalValues.size() || !m_globalDefined[slot]) {
-                        std::string name = slot < m_globalNames.size()
-                                               ? m_globalNames[slot]
-                                               : "<unknown>";
-                        return runtimeError("Undefined variable '" + name +
-                                            "'.");
-                    }
-
-                    m_stack.push(m_globalValues[slot]);
-                    continue;
-                }
-                if (instruction == OpCode::SET_GLOBAL_SLOT) {
-                    uint8_t slot = readByte();
-                    if (slot >= m_globalValues.size() ||
-                        !m_globalDefined[slot]) {
-                        std::string name = slot < m_globalNames.size()
-                                               ? m_globalNames[slot]
-                                               : "<unknown>";
-                        return runtimeError("Undefined variable '" + name +
-                                            "'.");
-                    }
-
-                    m_globalValues[slot] = m_stack.peek(0);
-                    continue;
-                }
-                if (instruction == OpCode::CONSTANT) {
-                    const Value& val = readConstant();
-                    m_stack.push(val);
-                    continue;
-                }
-                if (instruction == OpCode::ADD) {
-                    Value b = m_stack.pop();
-                    Value a = m_stack.pop();
-
-                    if (a.isSignedInt() && b.isSignedInt()) {
-                        m_stack.push(Value(
-                            wrapSignedAdd(a.asSignedInt(), b.asSignedInt())));
-                        continue;
-                    }
-
-                    if (a.isUnsignedInt() && b.isUnsignedInt()) {
-                        m_stack.push(Value(a.asUnsignedInt() + b.asUnsignedInt()));
-                        continue;
-                    }
-
-                    if (a.isAnyNumeric() && b.isAnyNumeric()) {
-                        double lhs = 0.0;
-                        double rhs = 0.0;
-                        valueToDouble(a, lhs);
-                        valueToDouble(b, rhs);
-                        m_stack.push(Value(lhs + rhs));
-                        continue;
-                    }
-
-                    if (a.isString() && b.isString()) {
-                        m_stack.push(Value(a.asString() + b.asString()));
-                        continue;
-                    }
-
-                    return runtimeError(
-                        "Operands must be two numbers or two strings for '+'.");
-                }
-                if (instruction == OpCode::LESS_THAN) {
-                    Value b = m_stack.pop();
-                    Value a = m_stack.pop();
-                    if (!isNumberPair(a, b)) {
-                        return runtimeError("Operands must be numbers for '<'.");
-                    }
-
-                    if (a.isSignedInt() && b.isSignedInt()) {
-                        m_stack.push(Value(a.asSignedInt() < b.asSignedInt()));
-                        continue;
-                    }
-
-                    if (a.isUnsignedInt() && b.isUnsignedInt()) {
-                        m_stack.push(Value(a.asUnsignedInt() < b.asUnsignedInt()));
-                        continue;
-                    }
-
-                    double lhs = 0.0;
-                    double rhs = 0.0;
-                    valueToDouble(a, lhs);
-                    valueToDouble(b, rhs);
-                    m_stack.push(Value(lhs < rhs));
-                    continue;
-                }
-                if (instruction == OpCode::JUMP_IF_FALSE) {
-                    uint16_t offset = readShort();
-                    const Value& condition = m_stack.peek(0);
-                    if (isFalsey(condition)) {
-                        currentFrame().ip += offset;
-                    }
-                    continue;
-                }
-                if (instruction == OpCode::LOOP) {
-                    uint16_t offset = readShort();
-                    currentFrame().ip -= offset;
-                    continue;
-                }
-                if (instruction == OpCode::POP) {
-                    m_stack.pop();
-                    continue;
-                }
-            }
-
             switch (instruction) {
             case OpCode::RETURN: {
                 Value result = m_stack.pop();
@@ -1378,10 +1259,45 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
                 if (receiver.isArray() || receiver.isDict() ||
                     receiver.isSet()) {
-                    auto bound = gcAlloc<NativeBoundMethodObject>();
-                    bound->name = name;
-                    bound->id = resolveNativeMethodId(receiver, name);
-                    bound->receiver = receiver;
+                    NativeBoundMethodObject* bound = nullptr;
+                    if (receiver.isArray()) {
+                        auto* array = receiver.asArray();
+                        auto cacheIt = array->methodCache.find(name);
+                        if (cacheIt != array->methodCache.end()) {
+                            bound = cacheIt->second;
+                        } else {
+                            bound = gcAlloc<NativeBoundMethodObject>();
+                            bound->name = name;
+                            bound->id = resolveNativeMethodId(receiver, name);
+                            bound->receiver = receiver;
+                            array->methodCache.emplace(name, bound);
+                        }
+                    } else if (receiver.isDict()) {
+                        auto* dict = receiver.asDict();
+                        auto cacheIt = dict->methodCache.find(name);
+                        if (cacheIt != dict->methodCache.end()) {
+                            bound = cacheIt->second;
+                        } else {
+                            bound = gcAlloc<NativeBoundMethodObject>();
+                            bound->name = name;
+                            bound->id = resolveNativeMethodId(receiver, name);
+                            bound->receiver = receiver;
+                            dict->methodCache.emplace(name, bound);
+                        }
+                    } else {
+                        auto* set = receiver.asSet();
+                        auto cacheIt = set->methodCache.find(name);
+                        if (cacheIt != set->methodCache.end()) {
+                            bound = cacheIt->second;
+                        } else {
+                            bound = gcAlloc<NativeBoundMethodObject>();
+                            bound->name = name;
+                            bound->id = resolveNativeMethodId(receiver, name);
+                            bound->receiver = receiver;
+                            set->methodCache.emplace(name, bound);
+                        }
+                    }
+
                     m_stack.pop();
                     m_stack.push(Value(bound));
                     break;

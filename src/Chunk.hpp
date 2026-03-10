@@ -338,6 +338,7 @@ struct InstanceObject : GcObject {
 struct ArrayObject : GcObject {
     TypeRef elementType = TypeInfo::makeAny();
     std::vector<Value> elements;
+    std::unordered_map<std::string, NativeBoundMethodObject*> methodCache;
 
     void trace(GC& gc) override;
 };
@@ -346,6 +347,7 @@ struct DictObject : GcObject {
     TypeRef keyType = TypeInfo::makeAny();
     TypeRef valueType = TypeInfo::makeAny();
     std::unordered_map<std::string, Value> map;
+    std::unordered_map<std::string, NativeBoundMethodObject*> methodCache;
 
     void trace(GC& gc) override;
 };
@@ -353,6 +355,7 @@ struct DictObject : GcObject {
 struct SetObject : GcObject {
     TypeRef elementType = TypeInfo::makeAny();
     std::vector<Value> elements;
+    std::unordered_map<std::string, NativeBoundMethodObject*> methodCache;
 
     void trace(GC& gc) override;
 };

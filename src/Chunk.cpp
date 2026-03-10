@@ -323,6 +323,11 @@ void ArrayObject::trace(GC& gc) {
     for (const auto& value : elements) {
         gc.markValue(value);
     }
+
+    for (const auto& [name, method] : methodCache) {
+        (void)name;
+        gc.markObject(method);
+    }
 }
 
 void DictObject::trace(GC& gc) {
@@ -330,11 +335,21 @@ void DictObject::trace(GC& gc) {
         (void)key;
         gc.markValue(value);
     }
+
+    for (const auto& [name, method] : methodCache) {
+        (void)name;
+        gc.markObject(method);
+    }
 }
 
 void SetObject::trace(GC& gc) {
     for (const auto& value : elements) {
         gc.markValue(value);
+    }
+
+    for (const auto& [name, method] : methodCache) {
+        (void)name;
+        gc.markObject(method);
     }
 }
 
