@@ -1,0 +1,15 @@
+auto key = [1, 2];
+
+auto d = {};
+d[key] = 42;
+print(d[key]);
+print(d.has(key));
+print(d.keys().size());
+print(d.values().size());
+
+auto s = Set();
+print(s.add(key));
+print(s.has(key));
+print(s.add(key));
+print(s.remove(key));
+print(s.has(key));

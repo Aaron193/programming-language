@@ -332,7 +332,7 @@ void ArrayObject::trace(GC& gc) {
 
 void DictObject::trace(GC& gc) {
     for (const auto& [key, value] : map) {
-        (void)key;
+        gc.markValue(key);
         gc.markValue(value);
     }
 
@@ -347,6 +347,11 @@ void SetObject::trace(GC& gc) {
         gc.markValue(value);
     }
 
+    for (const auto& [value, index] : indexByValue) {
+        (void)index;
+        gc.markValue(value);
+    }
+
     for (const auto& [name, method] : methodCache) {
         (void)name;
         gc.markObject(method);
@@ -357,6 +362,9 @@ void IteratorObject::trace(GC& gc) {
     gc.markObject(array);
     gc.markObject(dict);
     gc.markObject(set);
+    for (const auto& key : dictKeys) {
+        gc.markValue(key);
+    }
 }
 
 void ModuleObject::trace(GC& gc) {

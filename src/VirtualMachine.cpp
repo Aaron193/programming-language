@@ -156,28 +156,6 @@ static std::string valueTypeName(const Value& value) {
     return "unknown";
 }
 
-static bool toDictKey(const Value& value, std::string& key) {
-    if (value.isString()) {
-        key = value.asString();
-        return true;
-    }
-
-    if (value.isAnyNumeric()) {
-        std::ostringstream stream;
-        if (value.isNumber()) {
-            stream << value.asNumber();
-        } else if (value.isSignedInt()) {
-            stream << value.asSignedInt();
-        } else {
-            stream << value.asUnsignedInt();
-        }
-        key = stream.str();
-        return true;
-    }
-
-    return false;
-}
-
 static bool toArrayIndex(const Value& value, size_t& index) {
     if (!value.isAnyNumeric()) {
         return false;
@@ -216,6 +194,53 @@ static bool containsValue(const std::vector<Value>& elements,
     }
 
     return false;
+}
+
+static bool setContainsValue(SetObject* set, const Value& needle) {
+    return set->indexByValue.find(needle) != set->indexByValue.end();
+}
+
+static bool setInsertValue(SetObject* set, const Value& element) {
+    if (set->indexByValue.find(element) != set->indexByValue.end()) {
+        return false;
+    }
+
+    set->elements.push_back(element);
+    set->indexByValue.emplace(element, set->elements.size() - 1);
+    return true;
+}
+
+static bool setRemoveValue(SetObject* set, const Value& element) {
+    auto indexIt = set->indexByValue.find(element);
+    if (indexIt == set->indexByValue.end()) {
+        return false;
+    }
+
+    size_t removeIndex = indexIt->second;
+    size_t lastIndex = set->elements.size() - 1;
+
+    if (removeIndex != lastIndex) {
+        Value moved = set->elements[lastIndex];
+        set->elements[removeIndex] = moved;
+        auto movedIt = set->indexByValue.find(moved);
+        if (movedIt != set->indexByValue.end()) {
+            movedIt->second = removeIndex;
+        }
+    }
+
+    set->elements.pop_back();
+    set->indexByValue.erase(indexIt);
+    return true;
+}
+
+static std::vector<Value> sortedDictKeys(const DictObject* dict) {
+    std::vector<Value> orderedKeys;
+    orderedKeys.reserve(dict->map.size());
+    for (const auto& entry : dict->map) {
+        orderedKeys.push_back(entry.first);
+    }
+    std::sort(orderedKeys.begin(), orderedKeys.end(), valueSortLess);
+    return orderedKeys;
 }
 
 static NativeFunctionId resolveNativeFunctionId(const std::string& name) {
@@ -422,6 +447,16 @@ static bool valueMatchesType(const Value& value, const TypeRef& expected) {
         auto array = value.asArray();
         TypeRef elementType =
             expected->elementType ? expected->elementType : TypeInfo::makeAny();
+        if (elementType->isAny()) {
+            return true;
+        }
+
+        TypeRef runtimeElementType =
+            array->elementType ? array->elementType : TypeInfo::makeAny();
+        if (!runtimeElementType->isAny()) {
+            return isAssignable(runtimeElementType, elementType);
+        }
+
         for (const auto& element : array->elements) {
             if (!valueMatchesType(element, elementType)) {
                 return false;
@@ -438,6 +473,16 @@ static bool valueMatchesType(const Value& value, const TypeRef& expected) {
         auto dict = value.asDict();
         TypeRef valueType =
             expected->valueType ? expected->valueType : TypeInfo::makeAny();
+        if (valueType->isAny()) {
+            return true;
+        }
+
+        TypeRef runtimeValueType =
+            dict->valueType ? dict->valueType : TypeInfo::makeAny();
+        if (!runtimeValueType->isAny()) {
+            return isAssignable(runtimeValueType, valueType);
+        }
+
         for (const auto& entry : dict->map) {
             if (!valueMatchesType(entry.second, valueType)) {
                 return false;
@@ -454,6 +499,16 @@ static bool valueMatchesType(const Value& value, const TypeRef& expected) {
         auto set = value.asSet();
         TypeRef elementType =
             expected->elementType ? expected->elementType : TypeInfo::makeAny();
+        if (elementType->isAny()) {
+            return true;
+        }
+
+        TypeRef runtimeElementType =
+            set->elementType ? set->elementType : TypeInfo::makeAny();
+        if (!runtimeElementType->isAny()) {
+            return isAssignable(runtimeElementType, elementType);
+        }
+
         for (const auto& element : set->elements) {
             if (!valueMatchesType(element, elementType)) {
                 return false;
@@ -529,12 +584,33 @@ void VirtualMachine::markRoots() {
 
     m_gc.markObject(m_currentModule);
 
+    std::array<const Chunk*, MAX_FRAMES> visitedRootChunks{};
+    size_t visitedRootChunkCount = 0;
     for (size_t i = 0; i < m_frameCount; ++i) {
         const auto& frame = m_frames[i];
         m_gc.markObject(frame.receiver);
         m_gc.markObject(frame.closure);
 
-        if (frame.chunk != nullptr) {
+        // Constants for closure-backed frames are already reached via
+        // frame.closure -> function -> chunk trace.
+        if (frame.chunk != nullptr && frame.closure == nullptr) {
+            bool seen = false;
+            for (size_t chunkIndex = 0; chunkIndex < visitedRootChunkCount;
+                 ++chunkIndex) {
+                if (visitedRootChunks[chunkIndex] == frame.chunk) {
+                    seen = true;
+                    break;
+                }
+            }
+
+            if (seen) {
+                continue;
+            }
+
+            if (visitedRootChunkCount < visitedRootChunks.size()) {
+                visitedRootChunks[visitedRootChunkCount++] = frame.chunk;
+            }
+
             for (const auto& constant : frame.chunk->getConstantsRange()) {
                 m_gc.markValue(constant);
             }
@@ -1631,9 +1707,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                                         "elements to have a consistent type.");
                                 }
 
-                                if (!containsValue(set->elements, arg)) {
-                                    set->elements.push_back(arg);
-                                }
+                                setInsertValue(set, arg);
                             }
 
                             result = Value(set);
@@ -1831,12 +1905,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                                     "Dict method 'get' expects 1 argument.");
                             }
 
-                            std::string key;
-                            if (!toDictKey(argAt(0), key)) {
-                                return runtimeError(
-                                    "Dict keys must be strings or numbers.");
-                            }
-
+                            const Value& key = argAt(0);
                             auto it = dict->map.find(key);
                             if (it == dict->map.end()) {
                                 return runtimeError(
@@ -1850,16 +1919,11 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                                     "Dict method 'set' expects 2 arguments.");
                             }
 
-                            std::string key;
-                            if (!toDictKey(argAt(0), key)) {
-                                return runtimeError(
-                                    "Dict keys must be strings or numbers.");
-                            }
+                            const Value& key = argAt(0);
 
                             if (dict->keyType->isAny()) {
-                                dict->keyType = inferRuntimeType(argAt(0));
-                            } else if (!valueMatchesType(argAt(0),
-                                                         dict->keyType)) {
+                                dict->keyType = inferRuntimeType(key);
+                            } else if (!valueMatchesType(key, dict->keyType)) {
                                 return runtimeError(
                                     "Dict method 'set' key expects type '" +
                                     dict->keyType->toString() + "'.");
@@ -1882,12 +1946,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                                     "Dict method 'has' expects 1 argument.");
                             }
 
-                            std::string key;
-                            if (!toDictKey(argAt(0), key)) {
-                                return runtimeError(
-                                    "Dict keys must be strings or numbers.");
-                            }
-
+                            const Value& key = argAt(0);
                             result =
                                 Value(dict->map.find(key) != dict->map.end());
                         } else if (bound->id == NativeMethodId::DICT_KEYS) {
@@ -1897,17 +1956,14 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                             }
 
                             auto keys = gcAlloc<ArrayObject>();
-                            std::vector<std::string> orderedKeys;
-                            orderedKeys.reserve(dict->map.size());
-                            for (const auto& entry : dict->map) {
-                                orderedKeys.push_back(entry.first);
-                            }
-                            std::sort(orderedKeys.begin(), orderedKeys.end());
+                            std::vector<Value> orderedKeys =
+                                sortedDictKeys(dict);
 
                             for (const auto& key : orderedKeys) {
-                                keys->elements.push_back(Value(key));
+                                keys->elements.push_back(key);
                             }
-                            keys->elementType = TypeInfo::makeStr();
+                            keys->elementType =
+                                dict->keyType ? dict->keyType : TypeInfo::makeAny();
                             result = Value(keys);
                         } else if (bound->id == NativeMethodId::DICT_VALUES) {
                             if (argumentCount != 0) {
@@ -1917,15 +1973,14 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                             }
 
                             auto values = gcAlloc<ArrayObject>();
-                            std::vector<std::string> orderedKeys;
-                            orderedKeys.reserve(dict->map.size());
-                            for (const auto& entry : dict->map) {
-                                orderedKeys.push_back(entry.first);
-                            }
-                            std::sort(orderedKeys.begin(), orderedKeys.end());
+                            std::vector<Value> orderedKeys =
+                                sortedDictKeys(dict);
 
                             for (const auto& key : orderedKeys) {
-                                values->elements.push_back(dict->map.at(key));
+                                auto it = dict->map.find(key);
+                                if (it != dict->map.end()) {
+                                    values->elements.push_back(it->second);
+                                }
                             }
                             values->elementType = dict->valueType;
                             result = Value(values);
@@ -1943,12 +1998,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                                     "Dict method 'remove' expects 1 argument.");
                             }
 
-                            std::string key;
-                            if (!toDictKey(argAt(0), key)) {
-                                return runtimeError(
-                                    "Dict keys must be strings or numbers.");
-                            }
-
+                            const Value& key = argAt(0);
                             auto it = dict->map.find(key);
                             if (it == dict->map.end()) {
                                 return runtimeError(
@@ -1982,12 +2032,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                                     "Dict method 'getOr' expects 2 arguments.");
                             }
 
-                            std::string key;
-                            if (!toDictKey(argAt(0), key)) {
-                                return runtimeError(
-                                    "Dict keys must be strings or numbers.");
-                            }
-
+                            const Value& key = argAt(0);
                             auto it = dict->map.find(key);
                             result =
                                 (it != dict->map.end()) ? it->second : argAt(1);
@@ -2014,11 +2059,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                                     set->elementType->toString() + "'.");
                             }
 
-                            bool inserted = false;
-                            if (!containsValue(set->elements, argAt(0))) {
-                                set->elements.push_back(argAt(0));
-                                inserted = true;
-                            }
+                            bool inserted = setInsertValue(set, argAt(0));
                             result = Value(inserted);
                         } else if (bound->id == NativeMethodId::SET_HAS) {
                             if (argumentCount != 1) {
@@ -2026,23 +2067,14 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                                     "Set method 'has' expects 1 argument.");
                             }
 
-                            result =
-                                Value(containsValue(set->elements, argAt(0)));
+                            result = Value(setContainsValue(set, argAt(0)));
                         } else if (bound->id == NativeMethodId::SET_REMOVE) {
                             if (argumentCount != 1) {
                                 return runtimeError(
                                     "Set method 'remove' expects 1 argument.");
                             }
 
-                            bool removed = false;
-                            for (size_t i = 0; i < set->elements.size(); ++i) {
-                                if (set->elements[i] == argAt(0)) {
-                                    set->elements.erase(set->elements.begin() +
-                                                        static_cast<long>(i));
-                                    removed = true;
-                                    break;
-                                }
-                            }
+                            bool removed = setRemoveValue(set, argAt(0));
                             result = Value(removed);
                         } else if (bound->id == NativeMethodId::SET_SIZE) {
                             if (argumentCount != 0) {
@@ -2072,6 +2104,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                             double removed =
                                 static_cast<double>(set->elements.size());
                             set->elements.clear();
+                            set->indexByValue.clear();
                             result = Value(removed);
                         } else if (bound->id == NativeMethodId::SET_IS_EMPTY) {
                             if (argumentCount != 0) {
@@ -2093,8 +2126,10 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                             }
 
                             auto out = gcAlloc<SetObject>();
-                            out->elements = set->elements;
                             out->elementType = set->elementType;
+                            for (const auto& element : set->elements) {
+                                setInsertValue(out, element);
+                            }
                             auto rhs = argAt(0).asSet();
 
                             if (!set->elementType->isAny() &&
@@ -2109,9 +2144,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                             }
 
                             for (const auto& element : rhs->elements) {
-                                if (!containsValue(out->elements, element)) {
-                                    out->elements.push_back(element);
-                                }
+                                setInsertValue(out, element);
                             }
                             result = Value(out);
                         } else if (bound->id ==
@@ -2143,9 +2176,8 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                             }
 
                             for (const auto& element : set->elements) {
-                                if (containsValue(rhs->elements, element) &&
-                                    !containsValue(out->elements, element)) {
-                                    out->elements.push_back(element);
+                                if (setContainsValue(rhs, element)) {
+                                    setInsertValue(out, element);
                                 }
                             }
                             result = Value(out);
@@ -2178,9 +2210,8 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                             }
 
                             for (const auto& element : set->elements) {
-                                if (!containsValue(rhs->elements, element) &&
-                                    !containsValue(out->elements, element)) {
-                                    out->elements.push_back(element);
+                                if (!setContainsValue(rhs, element)) {
+                                    setInsertValue(out, element);
                                 }
                             }
                             result = Value(out);
@@ -2370,13 +2401,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                     }
                     valueType = mergedValueType;
 
-                    std::string key;
-                    if (!toDictKey(keyValue, key)) {
-                        return runtimeError(
-                            "Dictionary keys must be strings or numbers.");
-                    }
-
-                    dict->map[key] = value;
+                    dict->map[keyValue] = value;
                 }
 
                 dict->keyType = keyType ? keyType : TypeInfo::makeAny();
@@ -2406,14 +2431,8 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 }
 
                 if (container.isDict()) {
-                    std::string key;
-                    if (!toDictKey(indexValue, key)) {
-                        return runtimeError(
-                            "Dictionary keys must be strings or numbers.");
-                    }
-
                     auto dict = container.asDict();
-                    auto it = dict->map.find(key);
+                    auto it = dict->map.find(indexValue);
                     if (it == dict->map.end()) {
                         return runtimeError("Dictionary key not found.");
                     }
@@ -2430,8 +2449,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                             set->elementType->toString() + "', got '" +
                             valueTypeName(indexValue) + "'.");
                     }
-                    m_stack.push(
-                        Value(containsValue(set->elements, indexValue)));
+                    m_stack.push(Value(setContainsValue(set, indexValue)));
                     break;
                 }
 
@@ -2469,12 +2487,6 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 }
 
                 if (container.isDict()) {
-                    std::string key;
-                    if (!toDictKey(indexValue, key)) {
-                        return runtimeError(
-                            "Dictionary keys must be strings or numbers.");
-                    }
-
                     auto dict = container.asDict();
 
                     if (!valueMatchesType(indexValue, dict->keyType)) {
@@ -2491,7 +2503,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                             valueTypeName(value) + "'.");
                     }
 
-                    dict->map[key] = value;
+                    dict->map[indexValue] = value;
                     m_stack.push(value);
                     break;
                 }
@@ -2521,12 +2533,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                     iterator->kind = IteratorObject::DICT_ITER;
                     iterator->dict = iterable.asDict();
 
-                    iterator->dictKeys.reserve(iterator->dict->map.size());
-                    for (const auto& entry : iterator->dict->map) {
-                        iterator->dictKeys.push_back(entry.first);
-                    }
-                    std::sort(iterator->dictKeys.begin(),
-                              iterator->dictKeys.end());
+                    iterator->dictKeys = sortedDictKeys(iterator->dict);
                 } else if (iterable.isSet()) {
                     iterator->kind = IteratorObject::SET_ITER;
                     iterator->set = iterable.asSet();
@@ -2593,8 +2600,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                             return runtimeError(
                                 "Foreach iterator exhausted unexpectedly.");
                         }
-                        nextValue =
-                            Value(iterator->dictKeys[iterator->index++]);
+                        nextValue = iterator->dictKeys[iterator->index++];
                         break;
                     case IteratorObject::SET_ITER:
                         if (!iterator->set ||

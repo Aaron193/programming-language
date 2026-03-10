@@ -1,8 +1,10 @@
 #pragma once
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <iostream>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -214,12 +216,34 @@ enum ValueType {
 };
 
 struct Value {
-    std::variant<double, int64_t, uint64_t, bool, std::monostate, std::string,
-                 FunctionObject*, ClassObject*, InstanceObject*,
-                 BoundMethodObject*, NativeFunctionObject*,
-                 NativeBoundMethodObject*, ClosureObject*, ArrayObject*,
-                 DictObject*, SetObject*, IteratorObject*, ModuleObject*>
-        data;
+    using Storage =
+        std::variant<double, int64_t, uint64_t, bool, std::monostate,
+                     std::string, FunctionObject*, ClassObject*,
+                     InstanceObject*, BoundMethodObject*,
+                     NativeFunctionObject*, NativeBoundMethodObject*,
+                     ClosureObject*, ArrayObject*, DictObject*, SetObject*,
+                     IteratorObject*, ModuleObject*>;
+
+    static constexpr size_t NUMBER_INDEX = 0;
+    static constexpr size_t SIGNED_INT_INDEX = 1;
+    static constexpr size_t UNSIGNED_INT_INDEX = 2;
+    static constexpr size_t BOOL_INDEX = 3;
+    static constexpr size_t NIL_INDEX = 4;
+    static constexpr size_t STRING_INDEX = 5;
+    static constexpr size_t FUNCTION_INDEX = 6;
+    static constexpr size_t CLASS_INDEX = 7;
+    static constexpr size_t INSTANCE_INDEX = 8;
+    static constexpr size_t BOUND_METHOD_INDEX = 9;
+    static constexpr size_t NATIVE_INDEX = 10;
+    static constexpr size_t NATIVE_BOUND_INDEX = 11;
+    static constexpr size_t CLOSURE_INDEX = 12;
+    static constexpr size_t ARRAY_INDEX = 13;
+    static constexpr size_t DICT_INDEX = 14;
+    static constexpr size_t SET_INDEX = 15;
+    static constexpr size_t ITERATOR_INDEX = 16;
+    static constexpr size_t MODULE_INDEX = 17;
+
+    Storage data;
 
     Value() : data(std::monostate{}) {}
     Value(double value) : data(value) {}
@@ -241,45 +265,27 @@ struct Value {
     Value(IteratorObject* value) : data(value) {}
     Value(ModuleObject* value) : data(value) {}
 
-    bool isNumber() const { return std::holds_alternative<double>(data); }
-    bool isSignedInt() const { return std::holds_alternative<int64_t>(data); }
-    bool isUnsignedInt() const {
-        return std::holds_alternative<uint64_t>(data);
-    }
+    bool isNumber() const { return data.index() == NUMBER_INDEX; }
+    bool isSignedInt() const { return data.index() == SIGNED_INT_INDEX; }
+    bool isUnsignedInt() const { return data.index() == UNSIGNED_INT_INDEX; }
     bool isAnyNumeric() const {
         return isNumber() || isSignedInt() || isUnsignedInt();
     }
-    bool isBool() const { return std::holds_alternative<bool>(data); }
-    bool isNil() const { return std::holds_alternative<std::monostate>(data); }
-    bool isString() const { return std::holds_alternative<std::string>(data); }
-    bool isFunction() const {
-        return std::holds_alternative<FunctionObject*>(data);
-    }
-    bool isClass() const { return std::holds_alternative<ClassObject*>(data); }
-    bool isInstance() const {
-        return std::holds_alternative<InstanceObject*>(data);
-    }
-    bool isBoundMethod() const {
-        return std::holds_alternative<BoundMethodObject*>(data);
-    }
-    bool isNative() const {
-        return std::holds_alternative<NativeFunctionObject*>(data);
-    }
-    bool isNativeBound() const {
-        return std::holds_alternative<NativeBoundMethodObject*>(data);
-    }
-    bool isClosure() const {
-        return std::holds_alternative<ClosureObject*>(data);
-    }
-    bool isArray() const { return std::holds_alternative<ArrayObject*>(data); }
-    bool isDict() const { return std::holds_alternative<DictObject*>(data); }
-    bool isSet() const { return std::holds_alternative<SetObject*>(data); }
-    bool isIterator() const {
-        return std::holds_alternative<IteratorObject*>(data);
-    }
-    bool isModule() const {
-        return std::holds_alternative<ModuleObject*>(data);
-    }
+    bool isBool() const { return data.index() == BOOL_INDEX; }
+    bool isNil() const { return data.index() == NIL_INDEX; }
+    bool isString() const { return data.index() == STRING_INDEX; }
+    bool isFunction() const { return data.index() == FUNCTION_INDEX; }
+    bool isClass() const { return data.index() == CLASS_INDEX; }
+    bool isInstance() const { return data.index() == INSTANCE_INDEX; }
+    bool isBoundMethod() const { return data.index() == BOUND_METHOD_INDEX; }
+    bool isNative() const { return data.index() == NATIVE_INDEX; }
+    bool isNativeBound() const { return data.index() == NATIVE_BOUND_INDEX; }
+    bool isClosure() const { return data.index() == CLOSURE_INDEX; }
+    bool isArray() const { return data.index() == ARRAY_INDEX; }
+    bool isDict() const { return data.index() == DICT_INDEX; }
+    bool isSet() const { return data.index() == SET_INDEX; }
+    bool isIterator() const { return data.index() == ITERATOR_INDEX; }
+    bool isModule() const { return data.index() == MODULE_INDEX; }
 
     double asNumber() const { return std::get<double>(data); }
     int64_t asSignedInt() const { return std::get<int64_t>(data); }
@@ -310,6 +316,120 @@ struct Value {
         return std::get<IteratorObject*>(data);
     }
     ModuleObject* asModule() const { return std::get<ModuleObject*>(data); }
+};
+
+inline uint64_t normalizeDoubleBits(double number) {
+    if (number == 0.0) {
+        return 0;
+    }
+
+    uint64_t bits = 0;
+    std::memcpy(&bits, &number, sizeof(bits));
+    constexpr uint64_t kExponentMask = 0x7ff0000000000000ULL;
+    constexpr uint64_t kMantissaMask = 0x000fffffffffffffULL;
+    if ((bits & kExponentMask) == kExponentMask &&
+        (bits & kMantissaMask) != 0) {
+        // Canonicalize NaN payloads for stable hashing/ordering.
+        return 0x7ff8000000000000ULL;
+    }
+
+    return bits;
+}
+
+inline uintptr_t valuePointerBits(const Value& value) {
+    switch (value.data.index()) {
+        case Value::FUNCTION_INDEX:
+            return reinterpret_cast<uintptr_t>(value.asFunction());
+        case Value::CLASS_INDEX:
+            return reinterpret_cast<uintptr_t>(value.asClass());
+        case Value::INSTANCE_INDEX:
+            return reinterpret_cast<uintptr_t>(value.asInstance());
+        case Value::BOUND_METHOD_INDEX:
+            return reinterpret_cast<uintptr_t>(value.asBoundMethod());
+        case Value::NATIVE_INDEX:
+            return reinterpret_cast<uintptr_t>(value.asNative());
+        case Value::NATIVE_BOUND_INDEX:
+            return reinterpret_cast<uintptr_t>(value.asNativeBound());
+        case Value::CLOSURE_INDEX:
+            return reinterpret_cast<uintptr_t>(value.asClosure());
+        case Value::ARRAY_INDEX:
+            return reinterpret_cast<uintptr_t>(value.asArray());
+        case Value::DICT_INDEX:
+            return reinterpret_cast<uintptr_t>(value.asDict());
+        case Value::SET_INDEX:
+            return reinterpret_cast<uintptr_t>(value.asSet());
+        case Value::ITERATOR_INDEX:
+            return reinterpret_cast<uintptr_t>(value.asIterator());
+        case Value::MODULE_INDEX:
+            return reinterpret_cast<uintptr_t>(value.asModule());
+        default:
+            return 0;
+    }
+}
+
+inline bool valueSortLess(const Value& lhs, const Value& rhs) {
+    if (lhs.data.index() != rhs.data.index()) {
+        return lhs.data.index() < rhs.data.index();
+    }
+
+    switch (lhs.data.index()) {
+        case Value::NUMBER_INDEX:
+            return normalizeDoubleBits(lhs.asNumber()) <
+                   normalizeDoubleBits(rhs.asNumber());
+        case Value::SIGNED_INT_INDEX:
+            return lhs.asSignedInt() < rhs.asSignedInt();
+        case Value::UNSIGNED_INT_INDEX:
+            return lhs.asUnsignedInt() < rhs.asUnsignedInt();
+        case Value::BOOL_INDEX:
+            return lhs.asBool() < rhs.asBool();
+        case Value::NIL_INDEX:
+            return false;
+        case Value::STRING_INDEX:
+            return lhs.asString() < rhs.asString();
+        default:
+            return valuePointerBits(lhs) < valuePointerBits(rhs);
+    }
+}
+
+struct ValueHash {
+    size_t operator()(const Value& value) const noexcept {
+        const size_t indexHash = std::hash<size_t>{}(value.data.index());
+        size_t payloadHash = 0;
+
+        switch (value.data.index()) {
+            case Value::NUMBER_INDEX:
+                payloadHash = std::hash<uint64_t>{}(
+                    normalizeDoubleBits(value.asNumber()));
+                break;
+            case Value::SIGNED_INT_INDEX:
+                payloadHash = std::hash<int64_t>{}(value.asSignedInt());
+                break;
+            case Value::UNSIGNED_INT_INDEX:
+                payloadHash = std::hash<uint64_t>{}(value.asUnsignedInt());
+                break;
+            case Value::BOOL_INDEX:
+                payloadHash = std::hash<bool>{}(value.asBool());
+                break;
+            case Value::NIL_INDEX:
+                payloadHash = 0;
+                break;
+            case Value::STRING_INDEX:
+                payloadHash = std::hash<std::string>{}(value.asString());
+                break;
+            default:
+                payloadHash = std::hash<uintptr_t>{}(valuePointerBits(value));
+                break;
+        }
+
+        return indexHash ^ (payloadHash + 0x9e3779b97f4a7c15ULL +
+                            (indexHash << 6) + (indexHash >> 2));
+    }
+};
+
+struct ValueEqual {
+    bool operator()(const Value& lhs, const Value& rhs) const {
+        return lhs.data == rhs.data;
+    }
 };
 
 struct UpvalueObject : GcObject {
@@ -346,7 +466,7 @@ struct ArrayObject : GcObject {
 struct DictObject : GcObject {
     TypeRef keyType = TypeInfo::makeAny();
     TypeRef valueType = TypeInfo::makeAny();
-    std::unordered_map<std::string, Value> map;
+    std::unordered_map<Value, Value, ValueHash, ValueEqual> map;
     std::unordered_map<std::string, NativeBoundMethodObject*> methodCache;
 
     void trace(GC& gc) override;
@@ -355,6 +475,7 @@ struct DictObject : GcObject {
 struct SetObject : GcObject {
     TypeRef elementType = TypeInfo::makeAny();
     std::vector<Value> elements;
+    std::unordered_map<Value, size_t, ValueHash, ValueEqual> indexByValue;
     std::unordered_map<std::string, NativeBoundMethodObject*> methodCache;
 
     void trace(GC& gc) override;
@@ -366,7 +487,7 @@ struct IteratorObject : GcObject {
     ArrayObject* array = nullptr;
     DictObject* dict = nullptr;
     SetObject* set = nullptr;
-    std::vector<std::string> dictKeys;
+    std::vector<Value> dictKeys;
     size_t index = 0;
 
     void trace(GC& gc) override;
@@ -389,6 +510,9 @@ struct NativeBoundMethodObject : GcObject {
 };
 
 inline bool operator==(const Value& lhs, const Value& rhs) {
+    if (lhs.data.index() != rhs.data.index()) {
+        return false;
+    }
     return lhs.data == rhs.data;
 }
 
@@ -464,12 +588,12 @@ inline void printValueInternal(std::ostream& stream, const Value& value,
         }
 
         active.insert(identity);
-        std::vector<std::string> keys;
+        std::vector<Value> keys;
         keys.reserve(dict->map.size());
         for (const auto& entry : dict->map) {
             keys.push_back(entry.first);
         }
-        std::sort(keys.begin(), keys.end());
+        std::sort(keys.begin(), keys.end(), valueSortLess);
 
         stream << "{";
         for (size_t index = 0; index < keys.size(); ++index) {
@@ -477,9 +601,20 @@ inline void printValueInternal(std::ostream& stream, const Value& value,
                 stream << ", ";
             }
 
-            const std::string& key = keys[index];
-            stream << '"' << key << '"' << ": ";
-            printValueInternal(stream, dict->map.at(key), active, depth + 1);
+            const Value& key = keys[index];
+            if (key.isString()) {
+                stream << '"' << key.asString() << '"';
+            } else {
+                printValueInternal(stream, key, active, depth + 1);
+            }
+            stream << ": ";
+
+            auto valueIt = dict->map.find(key);
+            if (valueIt != dict->map.end()) {
+                printValueInternal(stream, valueIt->second, active, depth + 1);
+            } else {
+                stream << "null";
+            }
         }
         stream << "}";
         active.erase(identity);
