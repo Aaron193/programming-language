@@ -53,9 +53,64 @@ struct BoundMethodObject : GcObject {
     void trace(GC& gc) override;
 };
 
+enum class NativeFunctionId : uint8_t {
+    CLOCK,
+    SQRT,
+    LEN,
+    TYPE,
+    STR,
+    TO_STRING,
+    NUM,
+    PARSE_INT,
+    PARSE_UINT,
+    PARSE_FLOAT,
+    ABS,
+    FLOOR,
+    CEIL,
+    POW,
+    ERROR,
+    SET,
+    UNKNOWN,
+};
+
+enum class NativeMethodId : uint8_t {
+    ARRAY_PUSH,
+    ARRAY_POP,
+    ARRAY_SIZE,
+    ARRAY_HAS,
+    ARRAY_INSERT,
+    ARRAY_REMOVE,
+    ARRAY_CLEAR,
+    ARRAY_IS_EMPTY,
+    ARRAY_FIRST,
+    ARRAY_LAST,
+    DICT_GET,
+    DICT_SET,
+    DICT_HAS,
+    DICT_KEYS,
+    DICT_VALUES,
+    DICT_SIZE,
+    DICT_REMOVE,
+    DICT_CLEAR,
+    DICT_IS_EMPTY,
+    DICT_GET_OR,
+    SET_ADD,
+    SET_HAS,
+    SET_REMOVE,
+    SET_SIZE,
+    SET_TO_ARRAY,
+    SET_CLEAR,
+    SET_IS_EMPTY,
+    SET_UNION,
+    SET_INTERSECT,
+    SET_DIFFERENCE,
+    INVALID,
+};
+
 struct NativeFunctionObject : GcObject {
     std::string name;
     int arity;
+    NativeFunctionId id = NativeFunctionId::UNKNOWN;
 
     void trace(GC& gc) override;
 };
@@ -323,6 +378,7 @@ struct ModuleObject : GcObject {
 
 struct NativeBoundMethodObject : GcObject {
     std::string name;
+    NativeMethodId id = NativeMethodId::INVALID;
     Value receiver;
 
     void trace(GC& gc) override;
