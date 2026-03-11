@@ -101,7 +101,8 @@ static int64_t wrapSignedMul(int64_t lhs, int64_t rhs) {
 
 static int64_t requireSignedInt(const Value& value) {
     if (!value.isSignedInt()) {
-        throw std::runtime_error("Type error: expected signed integer operand.");
+        throw std::runtime_error(
+            "Type error: expected signed integer operand.");
     }
     return value.asSignedInt();
 }
@@ -375,7 +376,8 @@ static void rebuildFieldLayout(ClassObject* klass) {
     ownFieldNames.reserve(klass->fieldTypes.size());
     for (const auto& [name, type] : klass->fieldTypes) {
         (void)type;
-        if (klass->fieldIndexByName.find(name) == klass->fieldIndexByName.end()) {
+        if (klass->fieldIndexByName.find(name) ==
+            klass->fieldIndexByName.end()) {
             ownFieldNames.push_back(name);
         }
     }
@@ -750,53 +752,93 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                            size_t stopFrameCount) {
 #define VM_OPCODE_LABEL(name) VM_LABEL_##name
 #define VM_OPCODE_ADDR(name) &&VM_OPCODE_LABEL(name)
-#define VM_CASE(name) VM_OPCODE_LABEL(name): case OpCode::name
+#define VM_CASE(name) VM_OPCODE_LABEL(name):
 
     static void* dispatchTable[] = {
-        VM_OPCODE_ADDR(RETURN),          VM_OPCODE_ADDR(CONSTANT),
-        VM_OPCODE_ADDR(NIL),             VM_OPCODE_ADDR(TRUE_LITERAL),
-        VM_OPCODE_ADDR(FALSE_LITERAL),   VM_OPCODE_ADDR(NEGATE),
-        VM_OPCODE_ADDR(NOT),             VM_OPCODE_ADDR(EQUAL_OP),
-        VM_OPCODE_ADDR(NOT_EQUAL_OP),    VM_OPCODE_ADDR(ADD),
-        VM_OPCODE_ADDR(SUB),             VM_OPCODE_ADDR(MULT),
-        VM_OPCODE_ADDR(DIV),             VM_OPCODE_ADDR(IADD),
-        VM_OPCODE_ADDR(ISUB),            VM_OPCODE_ADDR(IMULT),
-        VM_OPCODE_ADDR(IDIV),            VM_OPCODE_ADDR(IMOD),
-        VM_OPCODE_ADDR(UADD),            VM_OPCODE_ADDR(USUB),
-        VM_OPCODE_ADDR(UMULT),           VM_OPCODE_ADDR(UDIV),
-        VM_OPCODE_ADDR(UMOD),            VM_OPCODE_ADDR(GREATER_THAN),
-        VM_OPCODE_ADDR(LESS_THAN),       VM_OPCODE_ADDR(GREATER_EQUAL_THAN),
-        VM_OPCODE_ADDR(LESS_EQUAL_THAN), VM_OPCODE_ADDR(IGREATER),
-        VM_OPCODE_ADDR(ILESS),           VM_OPCODE_ADDR(IGREATER_EQ),
-        VM_OPCODE_ADDR(ILESS_EQ),        VM_OPCODE_ADDR(UGREATER),
-        VM_OPCODE_ADDR(ULESS),           VM_OPCODE_ADDR(UGREATER_EQ),
-        VM_OPCODE_ADDR(ULESS_EQ),        VM_OPCODE_ADDR(POP),
-        VM_OPCODE_ADDR(PRINT_OP),        VM_OPCODE_ADDR(DEFINE_GLOBAL),
-        VM_OPCODE_ADDR(GET_GLOBAL),      VM_OPCODE_ADDR(SET_GLOBAL),
+        VM_OPCODE_ADDR(RETURN),
+        VM_OPCODE_ADDR(CONSTANT),
+        VM_OPCODE_ADDR(NIL),
+        VM_OPCODE_ADDR(TRUE_LITERAL),
+        VM_OPCODE_ADDR(FALSE_LITERAL),
+        VM_OPCODE_ADDR(NEGATE),
+        VM_OPCODE_ADDR(NOT),
+        VM_OPCODE_ADDR(EQUAL_OP),
+        VM_OPCODE_ADDR(NOT_EQUAL_OP),
+        VM_OPCODE_ADDR(ADD),
+        VM_OPCODE_ADDR(SUB),
+        VM_OPCODE_ADDR(MULT),
+        VM_OPCODE_ADDR(DIV),
+        VM_OPCODE_ADDR(IADD),
+        VM_OPCODE_ADDR(ISUB),
+        VM_OPCODE_ADDR(IMULT),
+        VM_OPCODE_ADDR(IDIV),
+        VM_OPCODE_ADDR(IMOD),
+        VM_OPCODE_ADDR(UADD),
+        VM_OPCODE_ADDR(USUB),
+        VM_OPCODE_ADDR(UMULT),
+        VM_OPCODE_ADDR(UDIV),
+        VM_OPCODE_ADDR(UMOD),
+        VM_OPCODE_ADDR(GREATER_THAN),
+        VM_OPCODE_ADDR(LESS_THAN),
+        VM_OPCODE_ADDR(GREATER_EQUAL_THAN),
+        VM_OPCODE_ADDR(LESS_EQUAL_THAN),
+        VM_OPCODE_ADDR(IGREATER),
+        VM_OPCODE_ADDR(ILESS),
+        VM_OPCODE_ADDR(IGREATER_EQ),
+        VM_OPCODE_ADDR(ILESS_EQ),
+        VM_OPCODE_ADDR(UGREATER),
+        VM_OPCODE_ADDR(ULESS),
+        VM_OPCODE_ADDR(UGREATER_EQ),
+        VM_OPCODE_ADDR(ULESS_EQ),
+        VM_OPCODE_ADDR(POP),
+        VM_OPCODE_ADDR(PRINT_OP),
+        VM_OPCODE_ADDR(DEFINE_GLOBAL),
+        VM_OPCODE_ADDR(GET_GLOBAL),
+        VM_OPCODE_ADDR(SET_GLOBAL),
         VM_OPCODE_ADDR(DEFINE_GLOBAL_SLOT),
         VM_OPCODE_ADDR(GET_GLOBAL_SLOT),
         VM_OPCODE_ADDR(SET_GLOBAL_SLOT),
-        VM_OPCODE_ADDR(GET_LOCAL),       VM_OPCODE_ADDR(SET_LOCAL),
-        VM_OPCODE_ADDR(GET_UPVALUE),     VM_OPCODE_ADDR(SET_UPVALUE),
-        VM_OPCODE_ADDR(CLASS_OP),        VM_OPCODE_ADDR(INHERIT),
-        VM_OPCODE_ADDR(METHOD),          VM_OPCODE_ADDR(GET_THIS),
-        VM_OPCODE_ADDR(GET_SUPER),       VM_OPCODE_ADDR(GET_PROPERTY),
-        VM_OPCODE_ADDR(SET_PROPERTY),    VM_OPCODE_ADDR(CALL),
-        VM_OPCODE_ADDR(CLOSURE),         VM_OPCODE_ADDR(CLOSE_UPVALUE),
-        VM_OPCODE_ADDR(BUILD_ARRAY),     VM_OPCODE_ADDR(BUILD_DICT),
-        VM_OPCODE_ADDR(GET_INDEX),       VM_OPCODE_ADDR(SET_INDEX),
-        VM_OPCODE_ADDR(DUP),             VM_OPCODE_ADDR(DUP2),
-        VM_OPCODE_ADDR(JUMP),            VM_OPCODE_ADDR(JUMP_IF_FALSE),
-        VM_OPCODE_ADDR(LOOP),            VM_OPCODE_ADDR(SHIFT_LEFT),
-        VM_OPCODE_ADDR(SHIFT_RIGHT),     VM_OPCODE_ADDR(BITWISE_AND),
-        VM_OPCODE_ADDR(BITWISE_OR),      VM_OPCODE_ADDR(BITWISE_XOR),
-        VM_OPCODE_ADDR(BITWISE_NOT),     VM_OPCODE_ADDR(WIDEN_INT),
-        VM_OPCODE_ADDR(NARROW_INT),      VM_OPCODE_ADDR(INT_TO_FLOAT),
-        VM_OPCODE_ADDR(FLOAT_TO_INT),    VM_OPCODE_ADDR(INT_TO_STR),
+        VM_OPCODE_ADDR(GET_LOCAL),
+        VM_OPCODE_ADDR(SET_LOCAL),
+        VM_OPCODE_ADDR(GET_UPVALUE),
+        VM_OPCODE_ADDR(SET_UPVALUE),
+        VM_OPCODE_ADDR(CLASS_OP),
+        VM_OPCODE_ADDR(INHERIT),
+        VM_OPCODE_ADDR(METHOD),
+        VM_OPCODE_ADDR(GET_THIS),
+        VM_OPCODE_ADDR(GET_SUPER),
+        VM_OPCODE_ADDR(GET_PROPERTY),
+        VM_OPCODE_ADDR(SET_PROPERTY),
+        VM_OPCODE_ADDR(CALL),
+        VM_OPCODE_ADDR(CLOSURE),
+        VM_OPCODE_ADDR(CLOSE_UPVALUE),
+        VM_OPCODE_ADDR(BUILD_ARRAY),
+        VM_OPCODE_ADDR(BUILD_DICT),
+        VM_OPCODE_ADDR(GET_INDEX),
+        VM_OPCODE_ADDR(SET_INDEX),
+        VM_OPCODE_ADDR(DUP),
+        VM_OPCODE_ADDR(DUP2),
+        VM_OPCODE_ADDR(JUMP),
+        VM_OPCODE_ADDR(JUMP_IF_FALSE),
+        VM_OPCODE_ADDR(LOOP),
+        VM_OPCODE_ADDR(SHIFT_LEFT),
+        VM_OPCODE_ADDR(SHIFT_RIGHT),
+        VM_OPCODE_ADDR(BITWISE_AND),
+        VM_OPCODE_ADDR(BITWISE_OR),
+        VM_OPCODE_ADDR(BITWISE_XOR),
+        VM_OPCODE_ADDR(BITWISE_NOT),
+        VM_OPCODE_ADDR(WIDEN_INT),
+        VM_OPCODE_ADDR(NARROW_INT),
+        VM_OPCODE_ADDR(INT_TO_FLOAT),
+        VM_OPCODE_ADDR(FLOAT_TO_INT),
+        VM_OPCODE_ADDR(INT_TO_STR),
         VM_OPCODE_ADDR(CHECK_INSTANCE_TYPE),
-        VM_OPCODE_ADDR(INT_NEGATE),      VM_OPCODE_ADDR(ITER_INIT),
-        VM_OPCODE_ADDR(ITER_HAS_NEXT),   VM_OPCODE_ADDR(ITER_NEXT),
-        VM_OPCODE_ADDR(IMPORT_MODULE),   VM_OPCODE_ADDR(EXPORT_NAME),
+        VM_OPCODE_ADDR(INT_NEGATE),
+        VM_OPCODE_ADDR(ITER_INIT),
+        VM_OPCODE_ADDR(ITER_HAS_NEXT),
+        VM_OPCODE_ADDR(ITER_NEXT),
+        VM_OPCODE_ADDR(IMPORT_MODULE),
+        VM_OPCODE_ADDR(EXPORT_NAME),
     };
 
     constexpr size_t kDispatchTableSize =
@@ -805,2488 +847,2530 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
         sizeof(dispatchTable) / sizeof(dispatchTable[0]) == kDispatchTableSize,
         "Dispatch table must stay aligned with OpCode enum.");
 
-    while (true) {
-        try {
-dispatch:
-            if (m_traceEnabled) {
-                CallFrame& frame = currentFrame();
-                m_stack.print();
-                frame.chunk->disassembleInstruction(
-                    static_cast<int>(frame.ip - frame.chunk->getBytes()));
+#define DISPATCH_INSTRUCTION()                                         \
+    do {                                                               \
+        if (m_traceEnabled) {                                          \
+            CallFrame& frame = currentFrame();                         \
+            m_stack.print();                                           \
+            frame.chunk->disassembleInstruction(                       \
+                static_cast<int>(frame.ip - frame.chunk->getBytes())); \
+        }                                                              \
+                                                                       \
+        uint8_t instruction = readByte();                              \
+        if (static_cast<size_t>(instruction) >= kDispatchTableSize) {  \
+            return runtimeError(                                       \
+                "Invalid instruction opcode: " +                       \
+                std::to_string(static_cast<int>(instruction)) + ".");  \
+        }                                                              \
+                                                                       \
+        goto* dispatchTable[instruction];                              \
+    } while (0)
+
+// Use a regular goto between opcode handlers so scoped temporaries are
+// destroyed before the next indirect jump. This keeps Clang's protected
+// scope analysis satisfied without changing the dispatch table semantics.
+#define DISPATCH() goto dispatch
+
+    try {
+    dispatch:
+        DISPATCH_INSTRUCTION();
+
+        VM_CASE(RETURN) {
+            Value result = m_stack.popMove();
+            CallFrame finishedFrame = currentFrame();
+            closeUpvalues(finishedFrame.slotBase);
+            m_frameCount--;
+
+            if (m_frameCount == stopFrameCount) {
+                m_activeFrame =
+                    (m_frameCount == 0) ? nullptr : &m_frames[m_frameCount - 1];
+                returnValue = result;
+                if (printReturnValue) {
+                    std::cout << "Return constant: " << result << std::endl;
+                }
+                return Status::OK;
             }
 
-            {
-                uint8_t instruction = readByte();
-                if (static_cast<size_t>(instruction) >= kDispatchTableSize) {
-                    return runtimeError("Invalid instruction opcode: " +
-                                        std::to_string(
-                                            static_cast<int>(instruction)) +
-                                        ".");
+            m_activeFrame = &m_frames[m_frameCount - 1];
+
+            m_stack.popN(m_stack.size() - finishedFrame.calleeIndex);
+            m_stack.push(std::move(result));
+            DISPATCH();
+        }
+
+        VM_CASE(CONSTANT) {
+            const Value& val = readConstant();
+            m_stack.push(val);
+            DISPATCH();
+        }
+
+        VM_CASE(NIL) {
+            m_stack.push(Value());
+            DISPATCH();
+        }
+
+        VM_CASE(TRUE_LITERAL) {
+            m_stack.push(Value(true));
+            DISPATCH();
+        }
+
+        VM_CASE(FALSE_LITERAL) {
+            m_stack.push(Value(false));
+            DISPATCH();
+        }
+
+        VM_CASE(NEGATE) {
+            const Value& value = m_stack.top();
+            if (!value.isAnyNumeric()) {
+                return runtimeError("Operand must be a number for unary '-'.");
+            }
+
+            Value result;
+            if (value.isSignedInt()) {
+                result = Value(wrapSignedSub(0, value.asSignedInt()));
+            } else if (value.isUnsignedInt()) {
+                uint64_t asUnsigned = value.asUnsignedInt();
+                result = Value(static_cast<int64_t>(0u - asUnsigned));
+            } else {
+                result = Value(-value.asNumber());
+            }
+            m_stack.replaceTop(std::move(result));
+            DISPATCH();
+        }
+
+        VM_CASE(NOT) {
+            m_stack.replaceTop(Value(isFalsey(m_stack.top())));
+            DISPATCH();
+        }
+
+        VM_CASE(EQUAL_OP) {
+            m_stack.replaceTopPair(Value(m_stack.second() == m_stack.top()));
+            DISPATCH();
+        }
+
+        VM_CASE(NOT_EQUAL_OP) {
+            m_stack.replaceTopPair(Value(m_stack.second() != m_stack.top()));
+            DISPATCH();
+        }
+
+        VM_CASE(ADD) {
+            const Value& b = m_stack.top();
+            const Value& a = m_stack.second();
+
+            if (a.isSignedInt() && b.isSignedInt()) {
+                Value result(wrapSignedAdd(a.asSignedInt(), b.asSignedInt()));
+                m_stack.replaceTopPair(std::move(result));
+                DISPATCH();
+            }
+
+            if (a.isUnsignedInt() && b.isUnsignedInt()) {
+                Value result(a.asUnsignedInt() + b.asUnsignedInt());
+                m_stack.replaceTopPair(std::move(result));
+                DISPATCH();
+            }
+
+            if (a.isAnyNumeric() && b.isAnyNumeric()) {
+                double lhs = 0.0;
+                double rhs = 0.0;
+                valueToDouble(a, lhs);
+                valueToDouble(b, rhs);
+                Value result(lhs + rhs);
+                m_stack.replaceTopPair(std::move(result));
+                DISPATCH();
+            }
+
+            if (a.isString() && b.isString()) {
+                std::string result = a.asString() + b.asString();
+                m_stack.replaceTopPair(Value(std::move(result)));
+                DISPATCH();
+            }
+
+            return runtimeError(
+                "Operands must be two numbers or two strings for '+'.");
+        }
+
+        VM_CASE(SUB) {
+            const Value& b = m_stack.top();
+            const Value& a = m_stack.second();
+            if (!isNumberPair(a, b)) {
+                return runtimeError("Operands must be numbers for '-'.");
+            }
+
+            if (a.isSignedInt() && b.isSignedInt()) {
+                Value result(wrapSignedSub(a.asSignedInt(), b.asSignedInt()));
+                m_stack.replaceTopPair(std::move(result));
+                DISPATCH();
+            }
+
+            if (a.isUnsignedInt() && b.isUnsignedInt()) {
+                Value result(a.asUnsignedInt() - b.asUnsignedInt());
+                m_stack.replaceTopPair(std::move(result));
+                DISPATCH();
+            }
+
+            double lhs = 0.0;
+            double rhs = 0.0;
+            valueToDouble(a, lhs);
+            valueToDouble(b, rhs);
+            Value result(lhs - rhs);
+            m_stack.replaceTopPair(std::move(result));
+            DISPATCH();
+        }
+
+        VM_CASE(MULT) {
+            const Value& b = m_stack.top();
+            const Value& a = m_stack.second();
+            if (!isNumberPair(a, b)) {
+                return runtimeError("Operands must be numbers for '*'.");
+            }
+
+            if (a.isSignedInt() && b.isSignedInt()) {
+                Value result(wrapSignedMul(a.asSignedInt(), b.asSignedInt()));
+                m_stack.replaceTopPair(std::move(result));
+                DISPATCH();
+            }
+
+            if (a.isUnsignedInt() && b.isUnsignedInt()) {
+                Value result(a.asUnsignedInt() * b.asUnsignedInt());
+                m_stack.replaceTopPair(std::move(result));
+                DISPATCH();
+            }
+
+            double lhs = 0.0;
+            double rhs = 0.0;
+            valueToDouble(a, lhs);
+            valueToDouble(b, rhs);
+            Value result(lhs * rhs);
+            m_stack.replaceTopPair(std::move(result));
+            DISPATCH();
+        }
+
+        VM_CASE(DIV) {
+            const Value& b = m_stack.top();
+            const Value& a = m_stack.second();
+            if (!isNumberPair(a, b)) {
+                return runtimeError("Operands must be numbers for '/'.");
+            }
+
+            if (a.isSignedInt() && b.isSignedInt()) {
+                if (b.asSignedInt() == 0) {
+                    return runtimeError("Division by zero.");
+                }
+                Value result(a.asSignedInt() / b.asSignedInt());
+                m_stack.replaceTopPair(std::move(result));
+                DISPATCH();
+            }
+
+            if (a.isUnsignedInt() && b.isUnsignedInt()) {
+                if (b.asUnsignedInt() == 0) {
+                    return runtimeError("Division by zero.");
+                }
+                Value result(a.asUnsignedInt() / b.asUnsignedInt());
+                m_stack.replaceTopPair(std::move(result));
+                DISPATCH();
+            }
+
+            double lhs = 0.0;
+            double rhs = 0.0;
+            valueToDouble(a, lhs);
+            valueToDouble(b, rhs);
+            Value result(lhs / rhs);
+            m_stack.replaceTopPair(std::move(result));
+            DISPATCH();
+        }
+
+        VM_CASE(IADD) {
+            int64_t rhs = requireSignedInt(m_stack.top());
+            int64_t lhs = requireSignedInt(m_stack.second());
+            m_stack.replaceTopPair(Value(wrapSignedAdd(lhs, rhs)));
+            DISPATCH();
+        }
+
+        VM_CASE(ISUB) {
+            int64_t rhs = requireSignedInt(m_stack.top());
+            int64_t lhs = requireSignedInt(m_stack.second());
+            m_stack.replaceTopPair(Value(wrapSignedSub(lhs, rhs)));
+            DISPATCH();
+        }
+
+        VM_CASE(IMULT) {
+            int64_t rhs = requireSignedInt(m_stack.top());
+            int64_t lhs = requireSignedInt(m_stack.second());
+            m_stack.replaceTopPair(Value(wrapSignedMul(lhs, rhs)));
+            DISPATCH();
+        }
+
+        VM_CASE(IDIV) {
+            int64_t rhs = requireSignedInt(m_stack.top());
+            int64_t lhs = requireSignedInt(m_stack.second());
+            if (rhs == 0) {
+                return runtimeError("Division by zero.");
+            }
+            m_stack.replaceTopPair(Value(lhs / rhs));
+            DISPATCH();
+        }
+
+        VM_CASE(IMOD) {
+            int64_t rhs = requireSignedInt(m_stack.top());
+            int64_t lhs = requireSignedInt(m_stack.second());
+            if (rhs == 0) {
+                return runtimeError("Division by zero.");
+            }
+            m_stack.replaceTopPair(Value(lhs % rhs));
+            DISPATCH();
+        }
+
+        VM_CASE(UADD) {
+            uint64_t rhs = requireUnsignedInt(m_stack.top());
+            uint64_t lhs = requireUnsignedInt(m_stack.second());
+            m_stack.replaceTopPair(Value(lhs + rhs));
+            DISPATCH();
+        }
+
+        VM_CASE(USUB) {
+            uint64_t rhs = requireUnsignedInt(m_stack.top());
+            uint64_t lhs = requireUnsignedInt(m_stack.second());
+            m_stack.replaceTopPair(Value(lhs - rhs));
+            DISPATCH();
+        }
+
+        VM_CASE(UMULT) {
+            uint64_t rhs = requireUnsignedInt(m_stack.top());
+            uint64_t lhs = requireUnsignedInt(m_stack.second());
+            m_stack.replaceTopPair(Value(lhs * rhs));
+            DISPATCH();
+        }
+
+        VM_CASE(UDIV) {
+            uint64_t rhs = requireUnsignedInt(m_stack.top());
+            uint64_t lhs = requireUnsignedInt(m_stack.second());
+            if (rhs == 0) {
+                return runtimeError("Division by zero.");
+            }
+            m_stack.replaceTopPair(Value(lhs / rhs));
+            DISPATCH();
+        }
+
+        VM_CASE(UMOD) {
+            uint64_t rhs = requireUnsignedInt(m_stack.top());
+            uint64_t lhs = requireUnsignedInt(m_stack.second());
+            if (rhs == 0) {
+                return runtimeError("Division by zero.");
+            }
+            m_stack.replaceTopPair(Value(lhs % rhs));
+            DISPATCH();
+        }
+
+        VM_CASE(GREATER_THAN) {
+            const Value& b = m_stack.top();
+            const Value& a = m_stack.second();
+            if (!isNumberPair(a, b)) {
+                return runtimeError("Operands must be numbers for '>'.");
+            }
+
+            if (a.isSignedInt() && b.isSignedInt()) {
+                m_stack.replaceTopPair(
+                    Value(a.asSignedInt() > b.asSignedInt()));
+                DISPATCH();
+            }
+
+            if (a.isUnsignedInt() && b.isUnsignedInt()) {
+                m_stack.replaceTopPair(
+                    Value(a.asUnsignedInt() > b.asUnsignedInt()));
+                DISPATCH();
+            }
+
+            double lhs = 0.0;
+            double rhs = 0.0;
+            valueToDouble(a, lhs);
+            valueToDouble(b, rhs);
+            m_stack.replaceTopPair(Value(lhs > rhs));
+            DISPATCH();
+        }
+
+        VM_CASE(LESS_THAN) {
+            const Value& b = m_stack.top();
+            const Value& a = m_stack.second();
+            if (!isNumberPair(a, b)) {
+                return runtimeError("Operands must be numbers for '<'.");
+            }
+
+            if (a.isSignedInt() && b.isSignedInt()) {
+                m_stack.replaceTopPair(
+                    Value(a.asSignedInt() < b.asSignedInt()));
+                DISPATCH();
+            }
+
+            if (a.isUnsignedInt() && b.isUnsignedInt()) {
+                m_stack.replaceTopPair(
+                    Value(a.asUnsignedInt() < b.asUnsignedInt()));
+                DISPATCH();
+            }
+
+            double lhs = 0.0;
+            double rhs = 0.0;
+            valueToDouble(a, lhs);
+            valueToDouble(b, rhs);
+            m_stack.replaceTopPair(Value(lhs < rhs));
+            DISPATCH();
+        }
+
+        VM_CASE(GREATER_EQUAL_THAN) {
+            const Value& b = m_stack.top();
+            const Value& a = m_stack.second();
+            if (!isNumberPair(a, b)) {
+                return runtimeError("Operands must be numbers for '>='.");
+            }
+
+            if (a.isSignedInt() && b.isSignedInt()) {
+                m_stack.replaceTopPair(
+                    Value(a.asSignedInt() >= b.asSignedInt()));
+                DISPATCH();
+            }
+
+            if (a.isUnsignedInt() && b.isUnsignedInt()) {
+                m_stack.replaceTopPair(
+                    Value(a.asUnsignedInt() >= b.asUnsignedInt()));
+                DISPATCH();
+            }
+
+            double lhs = 0.0;
+            double rhs = 0.0;
+            valueToDouble(a, lhs);
+            valueToDouble(b, rhs);
+            m_stack.replaceTopPair(Value(lhs >= rhs));
+            DISPATCH();
+        }
+
+        VM_CASE(LESS_EQUAL_THAN) {
+            const Value& b = m_stack.top();
+            const Value& a = m_stack.second();
+            if (!isNumberPair(a, b)) {
+                return runtimeError("Operands must be numbers for '<='.");
+            }
+
+            if (a.isSignedInt() && b.isSignedInt()) {
+                m_stack.replaceTopPair(
+                    Value(a.asSignedInt() <= b.asSignedInt()));
+                DISPATCH();
+            }
+
+            if (a.isUnsignedInt() && b.isUnsignedInt()) {
+                m_stack.replaceTopPair(
+                    Value(a.asUnsignedInt() <= b.asUnsignedInt()));
+                DISPATCH();
+            }
+
+            double lhs = 0.0;
+            double rhs = 0.0;
+            valueToDouble(a, lhs);
+            valueToDouble(b, rhs);
+            m_stack.replaceTopPair(Value(lhs <= rhs));
+            DISPATCH();
+        }
+
+        VM_CASE(IGREATER) {
+            int64_t rhs = requireSignedInt(m_stack.top());
+            int64_t lhs = requireSignedInt(m_stack.second());
+            m_stack.replaceTopPair(Value(lhs > rhs));
+            DISPATCH();
+        }
+
+        VM_CASE(ILESS) {
+            int64_t rhs = requireSignedInt(m_stack.top());
+            int64_t lhs = requireSignedInt(m_stack.second());
+            m_stack.replaceTopPair(Value(lhs < rhs));
+            DISPATCH();
+        }
+
+        VM_CASE(IGREATER_EQ) {
+            int64_t rhs = requireSignedInt(m_stack.top());
+            int64_t lhs = requireSignedInt(m_stack.second());
+            m_stack.replaceTopPair(Value(lhs >= rhs));
+            DISPATCH();
+        }
+
+        VM_CASE(ILESS_EQ) {
+            int64_t rhs = requireSignedInt(m_stack.top());
+            int64_t lhs = requireSignedInt(m_stack.second());
+            m_stack.replaceTopPair(Value(lhs <= rhs));
+            DISPATCH();
+        }
+
+        VM_CASE(UGREATER) {
+            uint64_t rhs = requireUnsignedInt(m_stack.top());
+            uint64_t lhs = requireUnsignedInt(m_stack.second());
+            m_stack.replaceTopPair(Value(lhs > rhs));
+            DISPATCH();
+        }
+
+        VM_CASE(ULESS) {
+            uint64_t rhs = requireUnsignedInt(m_stack.top());
+            uint64_t lhs = requireUnsignedInt(m_stack.second());
+            m_stack.replaceTopPair(Value(lhs < rhs));
+            DISPATCH();
+        }
+
+        VM_CASE(UGREATER_EQ) {
+            uint64_t rhs = requireUnsignedInt(m_stack.top());
+            uint64_t lhs = requireUnsignedInt(m_stack.second());
+            m_stack.replaceTopPair(Value(lhs >= rhs));
+            DISPATCH();
+        }
+
+        VM_CASE(ULESS_EQ) {
+            uint64_t rhs = requireUnsignedInt(m_stack.top());
+            uint64_t lhs = requireUnsignedInt(m_stack.second());
+            m_stack.replaceTopPair(Value(lhs <= rhs));
+            DISPATCH();
+        }
+
+        VM_CASE(POP) {
+            m_stack.pop();
+            DISPATCH();
+        }
+
+        VM_CASE(PRINT_OP) {
+            Value value = m_stack.pop();
+            std::cout << value << std::endl;
+            DISPATCH();
+        }
+
+        VM_CASE(DEFINE_GLOBAL) {
+            const std::string& name = readNameConstant();
+            Value value = m_stack.pop();
+            m_nativeGlobals[name] = value;
+            DISPATCH();
+        }
+
+        VM_CASE(GET_GLOBAL) {
+            const std::string& name = readNameConstant();
+            auto it = m_nativeGlobals.find(name);
+            if (it == m_nativeGlobals.end()) {
+                return runtimeError("Undefined variable '" + name + "'.");
+            }
+
+            m_stack.push(it->second);
+            DISPATCH();
+        }
+
+        VM_CASE(SET_GLOBAL) {
+            const std::string& name = readNameConstant();
+            auto it = m_nativeGlobals.find(name);
+            if (it == m_nativeGlobals.end()) {
+                return runtimeError("Undefined variable '" + name + "'.");
+            }
+
+            it->second = m_stack.peek(0);
+            DISPATCH();
+        }
+
+        VM_CASE(DEFINE_GLOBAL_SLOT) {
+            uint8_t slot = readByte();
+            if (slot >= m_globalValues.size()) {
+                return runtimeError("Invalid global slot.");
+            }
+            m_globalValues[slot] = m_stack.pop();
+            m_globalDefined[slot] = true;
+            DISPATCH();
+        }
+
+        VM_CASE(GET_GLOBAL_SLOT) {
+            uint8_t slot = readByte();
+            if (slot >= m_globalValues.size() || !m_globalDefined[slot]) {
+                std::string name = slot < m_globalNames.size()
+                                       ? m_globalNames[slot]
+                                       : "<unknown>";
+                return runtimeError("Undefined variable '" + name + "'.");
+            }
+
+            m_stack.push(m_globalValues[slot]);
+            DISPATCH();
+        }
+
+        VM_CASE(SET_GLOBAL_SLOT) {
+            uint8_t slot = readByte();
+            if (slot >= m_globalValues.size() || !m_globalDefined[slot]) {
+                std::string name = slot < m_globalNames.size()
+                                       ? m_globalNames[slot]
+                                       : "<unknown>";
+                return runtimeError("Undefined variable '" + name + "'.");
+            }
+
+            m_globalValues[slot] = m_stack.peek(0);
+            DISPATCH();
+        }
+
+        VM_CASE(GET_LOCAL) {
+            uint8_t slot = readByte();
+            m_stack.push(m_stack.getAt(currentFrame().slotBase + slot));
+            DISPATCH();
+        }
+
+        VM_CASE(SET_LOCAL) {
+            uint8_t slot = readByte();
+            m_stack.setAt(currentFrame().slotBase + slot, m_stack.peek(0));
+            DISPATCH();
+        }
+
+        VM_CASE(GET_UPVALUE) {
+            uint8_t slot = readByte();
+            auto upvalue = currentFrame().closure->upvalues[slot];
+            if (upvalue->isClosed) {
+                m_stack.push(upvalue->closed);
+            } else {
+                m_stack.push(m_stack.getAt(upvalue->stackIndex));
+            }
+            DISPATCH();
+        }
+
+        VM_CASE(SET_UPVALUE) {
+            uint8_t slot = readByte();
+            auto upvalue = currentFrame().closure->upvalues[slot];
+            if (upvalue->isClosed) {
+                upvalue->closed = m_stack.peek(0);
+            } else {
+                m_stack.setAt(upvalue->stackIndex, m_stack.peek(0));
+            }
+            DISPATCH();
+        }
+
+        VM_CASE(CLASS_OP) {
+            const std::string& name = readNameConstant();
+            auto klass = gcAlloc<ClassObject>();
+            klass->name = name;
+
+            const auto& compilerFieldTypes = m_compiler.classFieldTypes();
+            auto fieldIt = compilerFieldTypes.find(name);
+            if (fieldIt != compilerFieldTypes.end()) {
+                klass->fieldTypes = fieldIt->second;
+            }
+
+            const auto& compilerMethodTypes =
+                m_compiler.classMethodSignatures();
+            auto methodIt = compilerMethodTypes.find(name);
+            if (methodIt != compilerMethodTypes.end()) {
+                klass->methodTypes = methodIt->second;
+            }
+
+            rebuildFieldLayout(klass);
+
+            m_stack.push(Value(klass));
+            DISPATCH();
+        }
+
+        VM_CASE(INHERIT) {
+            Value superclassValue = m_stack.pop();
+            Value subclassValue = m_stack.peek(0);
+
+            if (!superclassValue.isClass() || !subclassValue.isClass()) {
+                return runtimeError("Inheritance requires classes.");
+            }
+
+            auto superclass = superclassValue.asClass();
+            auto subclass = subclassValue.asClass();
+            subclass->superclass = superclass;
+
+            for (const auto& fieldType : superclass->fieldTypes) {
+                if (subclass->fieldTypes.find(fieldType.first) ==
+                    subclass->fieldTypes.end()) {
+                    subclass->fieldTypes[fieldType.first] = fieldType.second;
+                }
+            }
+
+            for (const auto& methodType : superclass->methodTypes) {
+                if (subclass->methodTypes.find(methodType.first) ==
+                    subclass->methodTypes.end()) {
+                    subclass->methodTypes[methodType.first] = methodType.second;
+                }
+            }
+
+            for (const auto& method : superclass->methods) {
+                if (subclass->methods.find(method.first) ==
+                    subclass->methods.end()) {
+                    subclass->methods[method.first] = method.second;
+                }
+            }
+
+            rebuildFieldLayout(subclass);
+            DISPATCH();
+        }
+
+        VM_CASE(METHOD) {
+            const std::string& name = readNameConstant();
+            Value method = m_stack.peek(0);
+            Value klass = m_stack.peek(1);
+
+            if (!klass.isClass() || !method.isClosure()) {
+                return runtimeError("Invalid method declaration.");
+            }
+
+            klass.asClass()->methods[name] = method.asClosure();
+            m_stack.pop();
+            DISPATCH();
+        }
+
+        VM_CASE(GET_THIS) {
+            auto receiver = currentFrame().receiver;
+            if (!receiver) {
+                return runtimeError("Cannot use 'this' outside of a method.");
+            }
+
+            m_stack.push(Value(receiver));
+            DISPATCH();
+        }
+
+        VM_CASE(GET_SUPER) {
+            const std::string& name = readNameConstant();
+            auto receiver = currentFrame().receiver;
+            if (!receiver || !receiver->klass || !receiver->klass->superclass) {
+                return runtimeError("Invalid super lookup.");
+            }
+
+            auto method = findMethodClosure(receiver->klass->superclass, name);
+            if (!method) {
+                return runtimeError("Undefined superclass method '" + name +
+                                    "'.");
+            }
+
+            auto bound = gcAlloc<BoundMethodObject>();
+            bound->receiver = receiver;
+            bound->method = method;
+            m_stack.push(Value(bound));
+            DISPATCH();
+        }
+
+        VM_CASE(GET_PROPERTY) {
+            size_t instructionOffset = currentInstructionOffset();
+            const std::string& name = readNameConstant();
+            Value receiver = m_stack.peek(0);
+
+            if (receiver.isModule()) {
+                auto module = receiver.asModule();
+                auto it = module->exports.find(name);
+                if (it == module->exports.end()) {
+                    return runtimeError("Module '" + module->path +
+                                        "' has no export '" + name + "'.");
                 }
 
-                goto *dispatchTable[instruction];
-            }
-
-            switch (0) {
-            VM_CASE(RETURN): {
-                Value result = m_stack.popMove();
-                CallFrame finishedFrame = currentFrame();
-                closeUpvalues(finishedFrame.slotBase);
-                m_frameCount--;
-
-                if (m_frameCount == stopFrameCount) {
-                    m_activeFrame = (m_frameCount == 0)
-                                        ? nullptr
-                                        : &m_frames[m_frameCount - 1];
-                    returnValue = result;
-                    if (printReturnValue) {
-                        std::cout << "Return constant: " << result << std::endl;
-                    }
-                    return Status::OK;
-                }
-
-                m_activeFrame = &m_frames[m_frameCount - 1];
-
-                m_stack.popN(m_stack.size() - finishedFrame.calleeIndex);
-                m_stack.push(std::move(result));
-                break;
-            }
-            VM_CASE(CONSTANT): {
-                const Value& val = readConstant();
-                m_stack.push(val);
-                break;
-            }
-            VM_CASE(NIL): {
-                m_stack.push(Value());
-                break;
-            }
-            VM_CASE(TRUE_LITERAL): {
-                m_stack.push(Value(true));
-                break;
-            }
-            VM_CASE(FALSE_LITERAL): {
-                m_stack.push(Value(false));
-                break;
-            }
-            VM_CASE(NEGATE): {
-                const Value& value = m_stack.top();
-                if (!value.isAnyNumeric()) {
+                auto typeIt = module->exportTypes.find(name);
+                if (typeIt != module->exportTypes.end() &&
+                    !valueMatchesType(it->second, typeIt->second)) {
                     return runtimeError(
-                        "Operand must be a number for unary '-'.");
+                        "Type error: module export '" + name + "' from '" +
+                        module->path + "' expected '" +
+                        typeIt->second->toString() + "', got '" +
+                        valueTypeName(it->second) + "'.");
                 }
 
-                Value result;
-                if (value.isSignedInt()) {
-                    result = Value(wrapSignedSub(0, value.asSignedInt()));
-                } else if (value.isUnsignedInt()) {
-                    uint64_t asUnsigned = value.asUnsignedInt();
-                    result = Value(static_cast<int64_t>(0u - asUnsigned));
-                } else {
-                    result = Value(-value.asNumber());
-                }
-                m_stack.replaceTop(std::move(result));
-                break;
-            }
-            VM_CASE(NOT): {
-                m_stack.replaceTop(Value(isFalsey(m_stack.top())));
-                break;
-            }
-            VM_CASE(EQUAL_OP): {
-                m_stack.replaceTopPair(Value(m_stack.second() == m_stack.top()));
-                break;
-            }
-            VM_CASE(NOT_EQUAL_OP): {
-                m_stack.replaceTopPair(Value(m_stack.second() != m_stack.top()));
-                break;
-            }
-            VM_CASE(ADD): {
-                const Value& b = m_stack.top();
-                const Value& a = m_stack.second();
-
-                if (a.isSignedInt() && b.isSignedInt()) {
-                    Value result(
-                        wrapSignedAdd(a.asSignedInt(), b.asSignedInt()));
-                    m_stack.replaceTopPair(std::move(result));
-                    break;
-                }
-
-                if (a.isUnsignedInt() && b.isUnsignedInt()) {
-                    Value result(a.asUnsignedInt() + b.asUnsignedInt());
-                    m_stack.replaceTopPair(std::move(result));
-                    break;
-                }
-
-                if (a.isAnyNumeric() && b.isAnyNumeric()) {
-                    double lhs = 0.0;
-                    double rhs = 0.0;
-                    valueToDouble(a, lhs);
-                    valueToDouble(b, rhs);
-                    Value result(lhs + rhs);
-                    m_stack.replaceTopPair(std::move(result));
-                    break;
-                }
-
-                if (a.isString() && b.isString()) {
-                    std::string result = a.asString() + b.asString();
-                    m_stack.replaceTopPair(Value(std::move(result)));
-                    break;
-                }
-
-                return runtimeError(
-                    "Operands must be two numbers or two strings for '+'.");
-            }
-            VM_CASE(SUB): {
-                const Value& b = m_stack.top();
-                const Value& a = m_stack.second();
-                if (!isNumberPair(a, b)) {
-                    return runtimeError("Operands must be numbers for '-'.");
-                }
-
-                if (a.isSignedInt() && b.isSignedInt()) {
-                    Value result(
-                        wrapSignedSub(a.asSignedInt(), b.asSignedInt()));
-                    m_stack.replaceTopPair(std::move(result));
-                    break;
-                }
-
-                if (a.isUnsignedInt() && b.isUnsignedInt()) {
-                    Value result(a.asUnsignedInt() - b.asUnsignedInt());
-                    m_stack.replaceTopPair(std::move(result));
-                    break;
-                }
-
-                double lhs = 0.0;
-                double rhs = 0.0;
-                valueToDouble(a, lhs);
-                valueToDouble(b, rhs);
-                Value result(lhs - rhs);
-                m_stack.replaceTopPair(std::move(result));
-                break;
-            }
-            VM_CASE(MULT): {
-                const Value& b = m_stack.top();
-                const Value& a = m_stack.second();
-                if (!isNumberPair(a, b)) {
-                    return runtimeError("Operands must be numbers for '*'.");
-                }
-
-                if (a.isSignedInt() && b.isSignedInt()) {
-                    Value result(
-                        wrapSignedMul(a.asSignedInt(), b.asSignedInt()));
-                    m_stack.replaceTopPair(std::move(result));
-                    break;
-                }
-
-                if (a.isUnsignedInt() && b.isUnsignedInt()) {
-                    Value result(a.asUnsignedInt() * b.asUnsignedInt());
-                    m_stack.replaceTopPair(std::move(result));
-                    break;
-                }
-
-                double lhs = 0.0;
-                double rhs = 0.0;
-                valueToDouble(a, lhs);
-                valueToDouble(b, rhs);
-                Value result(lhs * rhs);
-                m_stack.replaceTopPair(std::move(result));
-                break;
-            }
-            VM_CASE(DIV): {
-                const Value& b = m_stack.top();
-                const Value& a = m_stack.second();
-                if (!isNumberPair(a, b)) {
-                    return runtimeError("Operands must be numbers for '/'.");
-                }
-
-                if (a.isSignedInt() && b.isSignedInt()) {
-                    if (b.asSignedInt() == 0) {
-                        return runtimeError("Division by zero.");
-                    }
-                    Value result(a.asSignedInt() / b.asSignedInt());
-                    m_stack.replaceTopPair(std::move(result));
-                    break;
-                }
-
-                if (a.isUnsignedInt() && b.isUnsignedInt()) {
-                    if (b.asUnsignedInt() == 0) {
-                        return runtimeError("Division by zero.");
-                    }
-                    Value result(a.asUnsignedInt() / b.asUnsignedInt());
-                    m_stack.replaceTopPair(std::move(result));
-                    break;
-                }
-
-                double lhs = 0.0;
-                double rhs = 0.0;
-                valueToDouble(a, lhs);
-                valueToDouble(b, rhs);
-                Value result(lhs / rhs);
-                m_stack.replaceTopPair(std::move(result));
-                break;
-            }
-            VM_CASE(IADD): {
-                int64_t rhs = requireSignedInt(m_stack.top());
-                int64_t lhs = requireSignedInt(m_stack.second());
-                m_stack.replaceTopPair(Value(wrapSignedAdd(lhs, rhs)));
-                break;
-            }
-            VM_CASE(ISUB): {
-                int64_t rhs = requireSignedInt(m_stack.top());
-                int64_t lhs = requireSignedInt(m_stack.second());
-                m_stack.replaceTopPair(Value(wrapSignedSub(lhs, rhs)));
-                break;
-            }
-            VM_CASE(IMULT): {
-                int64_t rhs = requireSignedInt(m_stack.top());
-                int64_t lhs = requireSignedInt(m_stack.second());
-                m_stack.replaceTopPair(Value(wrapSignedMul(lhs, rhs)));
-                break;
-            }
-            VM_CASE(IDIV): {
-                int64_t rhs = requireSignedInt(m_stack.top());
-                int64_t lhs = requireSignedInt(m_stack.second());
-                if (rhs == 0) {
-                    return runtimeError("Division by zero.");
-                }
-                m_stack.replaceTopPair(Value(lhs / rhs));
-                break;
-            }
-            VM_CASE(IMOD): {
-                int64_t rhs = requireSignedInt(m_stack.top());
-                int64_t lhs = requireSignedInt(m_stack.second());
-                if (rhs == 0) {
-                    return runtimeError("Division by zero.");
-                }
-                m_stack.replaceTopPair(Value(lhs % rhs));
-                break;
-            }
-            VM_CASE(UADD): {
-                uint64_t rhs = requireUnsignedInt(m_stack.top());
-                uint64_t lhs = requireUnsignedInt(m_stack.second());
-                m_stack.replaceTopPair(Value(lhs + rhs));
-                break;
-            }
-            VM_CASE(USUB): {
-                uint64_t rhs = requireUnsignedInt(m_stack.top());
-                uint64_t lhs = requireUnsignedInt(m_stack.second());
-                m_stack.replaceTopPair(Value(lhs - rhs));
-                break;
-            }
-            VM_CASE(UMULT): {
-                uint64_t rhs = requireUnsignedInt(m_stack.top());
-                uint64_t lhs = requireUnsignedInt(m_stack.second());
-                m_stack.replaceTopPair(Value(lhs * rhs));
-                break;
-            }
-            VM_CASE(UDIV): {
-                uint64_t rhs = requireUnsignedInt(m_stack.top());
-                uint64_t lhs = requireUnsignedInt(m_stack.second());
-                if (rhs == 0) {
-                    return runtimeError("Division by zero.");
-                }
-                m_stack.replaceTopPair(Value(lhs / rhs));
-                break;
-            }
-            VM_CASE(UMOD): {
-                uint64_t rhs = requireUnsignedInt(m_stack.top());
-                uint64_t lhs = requireUnsignedInt(m_stack.second());
-                if (rhs == 0) {
-                    return runtimeError("Division by zero.");
-                }
-                m_stack.replaceTopPair(Value(lhs % rhs));
-                break;
-            }
-            VM_CASE(GREATER_THAN): {
-                const Value& b = m_stack.top();
-                const Value& a = m_stack.second();
-                if (!isNumberPair(a, b)) {
-                    return runtimeError("Operands must be numbers for '>'.");
-                }
-
-                if (a.isSignedInt() && b.isSignedInt()) {
-                    m_stack.replaceTopPair(
-                        Value(a.asSignedInt() > b.asSignedInt()));
-                    break;
-                }
-
-                if (a.isUnsignedInt() && b.isUnsignedInt()) {
-                    m_stack.replaceTopPair(
-                        Value(a.asUnsignedInt() > b.asUnsignedInt()));
-                    break;
-                }
-
-                double lhs = 0.0;
-                double rhs = 0.0;
-                valueToDouble(a, lhs);
-                valueToDouble(b, rhs);
-                m_stack.replaceTopPair(Value(lhs > rhs));
-                break;
-            }
-            VM_CASE(LESS_THAN): {
-                const Value& b = m_stack.top();
-                const Value& a = m_stack.second();
-                if (!isNumberPair(a, b)) {
-                    return runtimeError("Operands must be numbers for '<'.");
-                }
-
-                if (a.isSignedInt() && b.isSignedInt()) {
-                    m_stack.replaceTopPair(
-                        Value(a.asSignedInt() < b.asSignedInt()));
-                    break;
-                }
-
-                if (a.isUnsignedInt() && b.isUnsignedInt()) {
-                    m_stack.replaceTopPair(
-                        Value(a.asUnsignedInt() < b.asUnsignedInt()));
-                    break;
-                }
-
-                double lhs = 0.0;
-                double rhs = 0.0;
-                valueToDouble(a, lhs);
-                valueToDouble(b, rhs);
-                m_stack.replaceTopPair(Value(lhs < rhs));
-                break;
-            }
-            VM_CASE(GREATER_EQUAL_THAN): {
-                const Value& b = m_stack.top();
-                const Value& a = m_stack.second();
-                if (!isNumberPair(a, b)) {
-                    return runtimeError("Operands must be numbers for '>='.");
-                }
-
-                if (a.isSignedInt() && b.isSignedInt()) {
-                    m_stack.replaceTopPair(
-                        Value(a.asSignedInt() >= b.asSignedInt()));
-                    break;
-                }
-
-                if (a.isUnsignedInt() && b.isUnsignedInt()) {
-                    m_stack.replaceTopPair(
-                        Value(a.asUnsignedInt() >= b.asUnsignedInt()));
-                    break;
-                }
-
-                double lhs = 0.0;
-                double rhs = 0.0;
-                valueToDouble(a, lhs);
-                valueToDouble(b, rhs);
-                m_stack.replaceTopPair(Value(lhs >= rhs));
-                break;
-            }
-            VM_CASE(LESS_EQUAL_THAN): {
-                const Value& b = m_stack.top();
-                const Value& a = m_stack.second();
-                if (!isNumberPair(a, b)) {
-                    return runtimeError("Operands must be numbers for '<='.");
-                }
-
-                if (a.isSignedInt() && b.isSignedInt()) {
-                    m_stack.replaceTopPair(
-                        Value(a.asSignedInt() <= b.asSignedInt()));
-                    break;
-                }
-
-                if (a.isUnsignedInt() && b.isUnsignedInt()) {
-                    m_stack.replaceTopPair(
-                        Value(a.asUnsignedInt() <= b.asUnsignedInt()));
-                    break;
-                }
-
-                double lhs = 0.0;
-                double rhs = 0.0;
-                valueToDouble(a, lhs);
-                valueToDouble(b, rhs);
-                m_stack.replaceTopPair(Value(lhs <= rhs));
-                break;
-            }
-            VM_CASE(IGREATER): {
-                int64_t rhs = requireSignedInt(m_stack.top());
-                int64_t lhs = requireSignedInt(m_stack.second());
-                m_stack.replaceTopPair(Value(lhs > rhs));
-                break;
-            }
-            VM_CASE(ILESS): {
-                int64_t rhs = requireSignedInt(m_stack.top());
-                int64_t lhs = requireSignedInt(m_stack.second());
-                m_stack.replaceTopPair(Value(lhs < rhs));
-                break;
-            }
-            VM_CASE(IGREATER_EQ): {
-                int64_t rhs = requireSignedInt(m_stack.top());
-                int64_t lhs = requireSignedInt(m_stack.second());
-                m_stack.replaceTopPair(Value(lhs >= rhs));
-                break;
-            }
-            VM_CASE(ILESS_EQ): {
-                int64_t rhs = requireSignedInt(m_stack.top());
-                int64_t lhs = requireSignedInt(m_stack.second());
-                m_stack.replaceTopPair(Value(lhs <= rhs));
-                break;
-            }
-            VM_CASE(UGREATER): {
-                uint64_t rhs = requireUnsignedInt(m_stack.top());
-                uint64_t lhs = requireUnsignedInt(m_stack.second());
-                m_stack.replaceTopPair(Value(lhs > rhs));
-                break;
-            }
-            VM_CASE(ULESS): {
-                uint64_t rhs = requireUnsignedInt(m_stack.top());
-                uint64_t lhs = requireUnsignedInt(m_stack.second());
-                m_stack.replaceTopPair(Value(lhs < rhs));
-                break;
-            }
-            VM_CASE(UGREATER_EQ): {
-                uint64_t rhs = requireUnsignedInt(m_stack.top());
-                uint64_t lhs = requireUnsignedInt(m_stack.second());
-                m_stack.replaceTopPair(Value(lhs >= rhs));
-                break;
-            }
-            VM_CASE(ULESS_EQ): {
-                uint64_t rhs = requireUnsignedInt(m_stack.top());
-                uint64_t lhs = requireUnsignedInt(m_stack.second());
-                m_stack.replaceTopPair(Value(lhs <= rhs));
-                break;
-            }
-            VM_CASE(POP): {
                 m_stack.pop();
-                break;
-            }
-            VM_CASE(PRINT_OP): {
-                Value value = m_stack.pop();
-                std::cout << value << std::endl;
-                break;
-            }
-            VM_CASE(DEFINE_GLOBAL): {
-                const std::string& name = readNameConstant();
-                Value value = m_stack.pop();
-                m_nativeGlobals[name] = value;
-                break;
-            }
-            VM_CASE(GET_GLOBAL): {
-                const std::string& name = readNameConstant();
-                auto it = m_nativeGlobals.find(name);
-                if (it == m_nativeGlobals.end()) {
-                    return runtimeError("Undefined variable '" + name + "'.");
-                }
-
                 m_stack.push(it->second);
-                break;
+                DISPATCH();
             }
-            VM_CASE(SET_GLOBAL): {
-                const std::string& name = readNameConstant();
-                auto it = m_nativeGlobals.find(name);
-                if (it == m_nativeGlobals.end()) {
-                    return runtimeError("Undefined variable '" + name + "'.");
-                }
 
-                it->second = m_stack.peek(0);
-                break;
-            }
-            VM_CASE(DEFINE_GLOBAL_SLOT): {
-                uint8_t slot = readByte();
-                if (slot >= m_globalValues.size()) {
-                    return runtimeError("Invalid global slot.");
-                }
-                m_globalValues[slot] = m_stack.pop();
-                m_globalDefined[slot] = true;
-                break;
-            }
-            VM_CASE(GET_GLOBAL_SLOT): {
-                uint8_t slot = readByte();
-                if (slot >= m_globalValues.size() || !m_globalDefined[slot]) {
-                    std::string name = slot < m_globalNames.size()
-                                           ? m_globalNames[slot]
-                                           : "<unknown>";
-                    return runtimeError("Undefined variable '" + name + "'.");
-                }
-
-                m_stack.push(m_globalValues[slot]);
-                break;
-            }
-            VM_CASE(SET_GLOBAL_SLOT): {
-                uint8_t slot = readByte();
-                if (slot >= m_globalValues.size() || !m_globalDefined[slot]) {
-                    std::string name = slot < m_globalNames.size()
-                                           ? m_globalNames[slot]
-                                           : "<unknown>";
-                    return runtimeError("Undefined variable '" + name + "'.");
-                }
-
-                m_globalValues[slot] = m_stack.peek(0);
-                break;
-            }
-            VM_CASE(GET_LOCAL): {
-                uint8_t slot = readByte();
-                m_stack.push(m_stack.getAt(currentFrame().slotBase + slot));
-                break;
-            }
-            VM_CASE(SET_LOCAL): {
-                uint8_t slot = readByte();
-                m_stack.setAt(currentFrame().slotBase + slot, m_stack.peek(0));
-                break;
-            }
-            VM_CASE(GET_UPVALUE): {
-                uint8_t slot = readByte();
-                auto upvalue = currentFrame().closure->upvalues[slot];
-                if (upvalue->isClosed) {
-                    m_stack.push(upvalue->closed);
-                } else {
-                    m_stack.push(m_stack.getAt(upvalue->stackIndex));
-                }
-                break;
-            }
-            VM_CASE(SET_UPVALUE): {
-                uint8_t slot = readByte();
-                auto upvalue = currentFrame().closure->upvalues[slot];
-                if (upvalue->isClosed) {
-                    upvalue->closed = m_stack.peek(0);
-                } else {
-                    m_stack.setAt(upvalue->stackIndex, m_stack.peek(0));
-                }
-                break;
-            }
-            VM_CASE(CLASS_OP): {
-                const std::string& name = readNameConstant();
-                auto klass = gcAlloc<ClassObject>();
-                klass->name = name;
-
-                const auto& compilerFieldTypes = m_compiler.classFieldTypes();
-                auto fieldIt = compilerFieldTypes.find(name);
-                if (fieldIt != compilerFieldTypes.end()) {
-                    klass->fieldTypes = fieldIt->second;
-                }
-
-                const auto& compilerMethodTypes =
-                    m_compiler.classMethodSignatures();
-                auto methodIt = compilerMethodTypes.find(name);
-                if (methodIt != compilerMethodTypes.end()) {
-                    klass->methodTypes = methodIt->second;
-                }
-
-                rebuildFieldLayout(klass);
-
-                m_stack.push(Value(klass));
-                break;
-            }
-            VM_CASE(INHERIT): {
-                Value superclassValue = m_stack.pop();
-                Value subclassValue = m_stack.peek(0);
-
-                if (!superclassValue.isClass() || !subclassValue.isClass()) {
-                    return runtimeError("Inheritance requires classes.");
-                }
-
-                auto superclass = superclassValue.asClass();
-                auto subclass = subclassValue.asClass();
-                subclass->superclass = superclass;
-
-                for (const auto& fieldType : superclass->fieldTypes) {
-                    if (subclass->fieldTypes.find(fieldType.first) ==
-                        subclass->fieldTypes.end()) {
-                        subclass->fieldTypes[fieldType.first] =
-                            fieldType.second;
-                    }
-                }
-
-                for (const auto& methodType : superclass->methodTypes) {
-                    if (subclass->methodTypes.find(methodType.first) ==
-                        subclass->methodTypes.end()) {
-                        subclass->methodTypes[methodType.first] =
-                            methodType.second;
-                    }
-                }
-
-                for (const auto& method : superclass->methods) {
-                    if (subclass->methods.find(method.first) ==
-                        subclass->methods.end()) {
-                        subclass->methods[method.first] = method.second;
-                    }
-                }
-
-                rebuildFieldLayout(subclass);
-                break;
-            }
-            VM_CASE(METHOD): {
-                const std::string& name = readNameConstant();
-                Value method = m_stack.peek(0);
-                Value klass = m_stack.peek(1);
-
-                if (!klass.isClass() || !method.isClosure()) {
-                    return runtimeError("Invalid method declaration.");
-                }
-
-                klass.asClass()->methods[name] = method.asClosure();
-                m_stack.pop();
-                break;
-            }
-            VM_CASE(GET_THIS): {
-                auto receiver = currentFrame().receiver;
-                if (!receiver) {
-                    return runtimeError(
-                        "Cannot use 'this' outside of a method.");
-                }
-
-                m_stack.push(Value(receiver));
-                break;
-            }
-            VM_CASE(GET_SUPER): {
-                const std::string& name = readNameConstant();
-                auto receiver = currentFrame().receiver;
-                if (!receiver || !receiver->klass ||
-                    !receiver->klass->superclass) {
-                    return runtimeError("Invalid super lookup.");
-                }
-
-                auto method =
-                    findMethodClosure(receiver->klass->superclass, name);
-                if (!method) {
-                    return runtimeError("Undefined superclass method '" + name +
-                                        "'.");
-                }
-
-                auto bound = gcAlloc<BoundMethodObject>();
-                bound->receiver = receiver;
-                bound->method = method;
-                m_stack.push(Value(bound));
-                break;
-            }
-            VM_CASE(GET_PROPERTY): {
-                size_t instructionOffset = currentInstructionOffset();
-                const std::string& name = readNameConstant();
-                Value receiver = m_stack.peek(0);
-
-                if (receiver.isModule()) {
-                    auto module = receiver.asModule();
-                    auto it = module->exports.find(name);
-                    if (it == module->exports.end()) {
-                        return runtimeError("Module '" + module->path +
-                                            "' has no export '" + name + "'.");
-                    }
-
-                    auto typeIt = module->exportTypes.find(name);
-                    if (typeIt != module->exportTypes.end() &&
-                        !valueMatchesType(it->second, typeIt->second)) {
-                        return runtimeError(
-                            "Type error: module export '" + name + "' from '" +
-                            module->path + "' expected '" +
-                            typeIt->second->toString() + "', got '" +
-                            valueTypeName(it->second) + "'.");
-                    }
-
-                    m_stack.pop();
-                    m_stack.push(it->second);
-                    break;
-                }
-
-                if (receiver.isArray() || receiver.isDict() ||
-                    receiver.isSet()) {
-                    NativeBoundMethodObject* bound = nullptr;
-                    if (receiver.isArray()) {
-                        auto* array = receiver.asArray();
-                        auto cacheIt = array->methodCache.find(name);
-                        if (cacheIt != array->methodCache.end()) {
-                            bound = cacheIt->second;
-                        } else {
-                            bound = gcAlloc<NativeBoundMethodObject>();
-                            bound->name = name;
-                            bound->id = resolveNativeMethodId(receiver, name);
-                            bound->receiver = receiver;
-                            array->methodCache.emplace(name, bound);
-                        }
-                    } else if (receiver.isDict()) {
-                        auto* dict = receiver.asDict();
-                        auto cacheIt = dict->methodCache.find(name);
-                        if (cacheIt != dict->methodCache.end()) {
-                            bound = cacheIt->second;
-                        } else {
-                            bound = gcAlloc<NativeBoundMethodObject>();
-                            bound->name = name;
-                            bound->id = resolveNativeMethodId(receiver, name);
-                            bound->receiver = receiver;
-                            dict->methodCache.emplace(name, bound);
-                        }
+            if (receiver.isArray() || receiver.isDict() || receiver.isSet()) {
+                NativeBoundMethodObject* bound = nullptr;
+                if (receiver.isArray()) {
+                    auto* array = receiver.asArray();
+                    auto cacheIt = array->methodCache.find(name);
+                    if (cacheIt != array->methodCache.end()) {
+                        bound = cacheIt->second;
                     } else {
-                        auto* set = receiver.asSet();
-                        auto cacheIt = set->methodCache.find(name);
-                        if (cacheIt != set->methodCache.end()) {
-                            bound = cacheIt->second;
-                        } else {
-                            bound = gcAlloc<NativeBoundMethodObject>();
-                            bound->name = name;
-                            bound->id = resolveNativeMethodId(receiver, name);
-                            bound->receiver = receiver;
-                            set->methodCache.emplace(name, bound);
-                        }
+                        bound = gcAlloc<NativeBoundMethodObject>();
+                        bound->name = name;
+                        bound->id = resolveNativeMethodId(receiver, name);
+                        bound->receiver = receiver;
+                        array->methodCache.emplace(name, bound);
                     }
+                } else if (receiver.isDict()) {
+                    auto* dict = receiver.asDict();
+                    auto cacheIt = dict->methodCache.find(name);
+                    if (cacheIt != dict->methodCache.end()) {
+                        bound = cacheIt->second;
+                    } else {
+                        bound = gcAlloc<NativeBoundMethodObject>();
+                        bound->name = name;
+                        bound->id = resolveNativeMethodId(receiver, name);
+                        bound->receiver = receiver;
+                        dict->methodCache.emplace(name, bound);
+                    }
+                } else {
+                    auto* set = receiver.asSet();
+                    auto cacheIt = set->methodCache.find(name);
+                    if (cacheIt != set->methodCache.end()) {
+                        bound = cacheIt->second;
+                    } else {
+                        bound = gcAlloc<NativeBoundMethodObject>();
+                        bound->name = name;
+                        bound->id = resolveNativeMethodId(receiver, name);
+                        bound->receiver = receiver;
+                        set->methodCache.emplace(name, bound);
+                    }
+                }
+
+                m_stack.pop();
+                m_stack.push(Value(bound));
+                DISPATCH();
+            }
+
+            if (!receiver.isInstance()) {
+                return runtimeError("Only instances have properties.");
+            }
+
+            auto instance = receiver.asInstance();
+            auto& cache =
+                currentFrame().chunk->propertyInlineCacheAt(instructionOffset);
+            if (cache.klass == instance->klass) {
+                if (cache.kind == PropertyInlineCacheKind::FIELD &&
+                    cache.slotIndex < instance->fieldSlots.size() &&
+                    cache.slotIndex < instance->initializedFieldSlots.size() &&
+                    instance->initializedFieldSlots[cache.slotIndex]) {
+                    m_stack.pop();
+                    m_stack.push(instance->fieldSlots[cache.slotIndex]);
+                    DISPATCH();
+                }
+
+                if (cache.kind == PropertyInlineCacheKind::METHOD &&
+                    cache.method != nullptr) {
+                    auto bound = gcAlloc<BoundMethodObject>();
+                    bound->receiver = instance;
+                    bound->method = cache.method;
 
                     m_stack.pop();
                     m_stack.push(Value(bound));
-                    break;
+                    DISPATCH();
                 }
-
-                if (!receiver.isInstance()) {
-                    return runtimeError("Only instances have properties.");
-                }
-
-                auto instance = receiver.asInstance();
-                auto& cache =
-                    currentFrame().chunk->propertyInlineCacheAt(instructionOffset);
-                if (cache.klass == instance->klass) {
-                    if (cache.kind == PropertyInlineCacheKind::FIELD &&
-                        cache.slotIndex < instance->fieldSlots.size() &&
-                        cache.slotIndex < instance->initializedFieldSlots.size() &&
-                        instance->initializedFieldSlots[cache.slotIndex]) {
-                        m_stack.pop();
-                        m_stack.push(instance->fieldSlots[cache.slotIndex]);
-                        break;
-                    }
-
-                    if (cache.kind == PropertyInlineCacheKind::METHOD &&
-                        cache.method != nullptr) {
-                        auto bound = gcAlloc<BoundMethodObject>();
-                        bound->receiver = instance;
-                        bound->method = cache.method;
-
-                        m_stack.pop();
-                        m_stack.push(Value(bound));
-                        break;
-                    }
-                }
-
-                auto fieldSlotIt = instance->klass->fieldIndexByName.find(name);
-                if (fieldSlotIt != instance->klass->fieldIndexByName.end()) {
-                    cache.klass = instance->klass;
-                    cache.kind = PropertyInlineCacheKind::FIELD;
-                    cache.slotIndex = fieldSlotIt->second;
-                    cache.method = nullptr;
-                    cache.fieldType.reset();
-
-                    if (fieldSlotIt->second < instance->fieldSlots.size() &&
-                        fieldSlotIt->second < instance->initializedFieldSlots.size() &&
-                        instance->initializedFieldSlots[fieldSlotIt->second]) {
-                        m_stack.pop();
-                        m_stack.push(instance->fieldSlots[fieldSlotIt->second]);
-                        break;
-                    }
-                }
-
-                auto method = findMethodClosure(instance->klass, name);
-                if (!method) {
-                    cache.klass = nullptr;
-                    cache.kind = PropertyInlineCacheKind::EMPTY;
-                    cache.slotIndex = 0;
-                    cache.method = nullptr;
-                    cache.fieldType.reset();
-                    return runtimeError("Undefined property '" + name + "'.");
-                }
-
-                cache.klass = instance->klass;
-                cache.kind = PropertyInlineCacheKind::METHOD;
-                cache.slotIndex = 0;
-                cache.method = method;
-                cache.fieldType.reset();
-
-                auto bound = gcAlloc<BoundMethodObject>();
-                bound->receiver = instance;
-                bound->method = method;
-
-                m_stack.pop();
-                m_stack.push(Value(bound));
-                break;
             }
-            VM_CASE(SET_PROPERTY): {
-                size_t instructionOffset = currentInstructionOffset();
-                const std::string& name = readNameConstant();
-                Value value = m_stack.peek(0);
-                Value receiver = m_stack.peek(1);
-                if (!receiver.isInstance()) {
-                    return runtimeError("Only instances have fields.");
-                }
 
-                auto instance = receiver.asInstance();
-                auto& cache =
-                    currentFrame().chunk->propertyInlineCacheAt(instructionOffset);
-                if (cache.klass == instance->klass &&
-                    cache.kind == PropertyInlineCacheKind::FIELD &&
-                    cache.slotIndex < instance->fieldSlots.size() &&
-                    cache.slotIndex < instance->initializedFieldSlots.size() &&
-                    cache.fieldType) {
-                    if (!valueMatchesType(value, cache.fieldType)) {
-                        return runtimeError(
-                            "Type error: field '" + name + "' on class '" +
-                            instance->klass->name + "' expects '" +
-                            cache.fieldType->toString() + "', got '" +
-                            valueTypeName(value) + "'.");
-                    }
-
-                    instance->fieldSlots[cache.slotIndex] = value;
-                    instance->initializedFieldSlots[cache.slotIndex] = 1;
-
-                    m_stack.pop();
-                    m_stack.pop();
-                    m_stack.push(value);
-                    break;
-                }
-
-                auto fieldSlotIt = instance->klass->fieldIndexByName.find(name);
-                if (fieldSlotIt == instance->klass->fieldIndexByName.end()) {
-                    cache.klass = nullptr;
-                    cache.kind = PropertyInlineCacheKind::EMPTY;
-                    cache.slotIndex = 0;
-                    cache.method = nullptr;
-                    cache.fieldType.reset();
-                    return runtimeError("Undefined field '" + name +
-                                        "' on class '" + instance->klass->name +
-                                        "'.");
-                }
-
-                auto fieldTypeIt = instance->klass->fieldTypes.find(name);
-                if (fieldTypeIt == instance->klass->fieldTypes.end()) {
-                    return runtimeError("Undefined field '" + name +
-                                        "' on class '" + instance->klass->name +
-                                        "'.");
-                }
-
-                if (!valueMatchesType(value, fieldTypeIt->second)) {
-                    return runtimeError(
-                        "Type error: field '" + name + "' on class '" +
-                        instance->klass->name + "' expects '" +
-                        fieldTypeIt->second->toString() + "', got '" +
-                        valueTypeName(value) + "'.");
-                }
-
+            auto fieldSlotIt = instance->klass->fieldIndexByName.find(name);
+            if (fieldSlotIt != instance->klass->fieldIndexByName.end()) {
                 cache.klass = instance->klass;
                 cache.kind = PropertyInlineCacheKind::FIELD;
                 cache.slotIndex = fieldSlotIt->second;
                 cache.method = nullptr;
-                cache.fieldType = fieldTypeIt->second;
+                cache.fieldType.reset();
 
-                instance->fieldSlots[fieldSlotIt->second] = value;
-                instance->initializedFieldSlots[fieldSlotIt->second] = 1;
+                if (fieldSlotIt->second < instance->fieldSlots.size() &&
+                    fieldSlotIt->second <
+                        instance->initializedFieldSlots.size() &&
+                    instance->initializedFieldSlots[fieldSlotIt->second]) {
+                    m_stack.pop();
+                    m_stack.push(instance->fieldSlots[fieldSlotIt->second]);
+                    DISPATCH();
+                }
+            }
+
+            auto method = findMethodClosure(instance->klass, name);
+            if (!method) {
+                cache.klass = nullptr;
+                cache.kind = PropertyInlineCacheKind::EMPTY;
+                cache.slotIndex = 0;
+                cache.method = nullptr;
+                cache.fieldType.reset();
+                return runtimeError("Undefined property '" + name + "'.");
+            }
+
+            cache.klass = instance->klass;
+            cache.kind = PropertyInlineCacheKind::METHOD;
+            cache.slotIndex = 0;
+            cache.method = method;
+            cache.fieldType.reset();
+
+            auto bound = gcAlloc<BoundMethodObject>();
+            bound->receiver = instance;
+            bound->method = method;
+
+            m_stack.pop();
+            m_stack.push(Value(bound));
+            DISPATCH();
+        }
+
+        VM_CASE(SET_PROPERTY) {
+            size_t instructionOffset = currentInstructionOffset();
+            const std::string& name = readNameConstant();
+            Value value = m_stack.peek(0);
+            Value receiver = m_stack.peek(1);
+            if (!receiver.isInstance()) {
+                return runtimeError("Only instances have fields.");
+            }
+
+            auto instance = receiver.asInstance();
+            auto& cache =
+                currentFrame().chunk->propertyInlineCacheAt(instructionOffset);
+            if (cache.klass == instance->klass &&
+                cache.kind == PropertyInlineCacheKind::FIELD &&
+                cache.slotIndex < instance->fieldSlots.size() &&
+                cache.slotIndex < instance->initializedFieldSlots.size() &&
+                cache.fieldType) {
+                if (!valueMatchesType(value, cache.fieldType)) {
+                    return runtimeError(
+                        "Type error: field '" + name + "' on class '" +
+                        instance->klass->name + "' expects '" +
+                        cache.fieldType->toString() + "', got '" +
+                        valueTypeName(value) + "'.");
+                }
+
+                instance->fieldSlots[cache.slotIndex] = value;
+                instance->initializedFieldSlots[cache.slotIndex] = 1;
 
                 m_stack.pop();
                 m_stack.pop();
                 m_stack.push(value);
-                break;
+                DISPATCH();
             }
-            VM_CASE(CALL): {
-                uint8_t argumentCount = readByte();
-                Value callee = m_stack.peek(argumentCount);
-                size_t calleeIndex =
-                    m_stack.size() - static_cast<size_t>(argumentCount) - 1;
 
-                if (callee.isClass()) {
-                    if (argumentCount != 0) {
-                        return runtimeError(
-                            "Class '" + callee.asClass()->name +
-                            "' expected 0 arguments but got " +
-                            std::to_string(static_cast<int>(argumentCount)) +
-                            ".");
-                    }
+            auto fieldSlotIt = instance->klass->fieldIndexByName.find(name);
+            if (fieldSlotIt == instance->klass->fieldIndexByName.end()) {
+                cache.klass = nullptr;
+                cache.kind = PropertyInlineCacheKind::EMPTY;
+                cache.slotIndex = 0;
+                cache.method = nullptr;
+                cache.fieldType.reset();
+                return runtimeError("Undefined field '" + name +
+                                    "' on class '" + instance->klass->name +
+                                    "'.");
+            }
 
-                    auto instance = gcAlloc<InstanceObject>();
-                    instance->klass = callee.asClass();
-                    instance->fieldSlots.resize(instance->klass->fieldNames.size());
-                    instance->initializedFieldSlots.assign(
-                        instance->klass->fieldNames.size(), 0);
-                    m_stack.setAt(calleeIndex, Value(instance));
-                    break;
+            auto fieldTypeIt = instance->klass->fieldTypes.find(name);
+            if (fieldTypeIt == instance->klass->fieldTypes.end()) {
+                return runtimeError("Undefined field '" + name +
+                                    "' on class '" + instance->klass->name +
+                                    "'.");
+            }
+
+            if (!valueMatchesType(value, fieldTypeIt->second)) {
+                return runtimeError("Type error: field '" + name +
+                                    "' on class '" + instance->klass->name +
+                                    "' expects '" +
+                                    fieldTypeIt->second->toString() +
+                                    "', got '" + valueTypeName(value) + "'.");
+            }
+
+            cache.klass = instance->klass;
+            cache.kind = PropertyInlineCacheKind::FIELD;
+            cache.slotIndex = fieldSlotIt->second;
+            cache.method = nullptr;
+            cache.fieldType = fieldTypeIt->second;
+
+            instance->fieldSlots[fieldSlotIt->second] = value;
+            instance->initializedFieldSlots[fieldSlotIt->second] = 1;
+
+            m_stack.pop();
+            m_stack.pop();
+            m_stack.push(value);
+            DISPATCH();
+        }
+
+        VM_CASE(CALL) {
+            uint8_t argumentCount = readByte();
+            Value callee = m_stack.peek(argumentCount);
+            size_t calleeIndex =
+                m_stack.size() - static_cast<size_t>(argumentCount) - 1;
+
+            if (callee.isClass()) {
+                if (argumentCount != 0) {
+                    return runtimeError(
+                        "Class '" + callee.asClass()->name +
+                        "' expected 0 arguments but got " +
+                        std::to_string(static_cast<int>(argumentCount)) + ".");
                 }
 
-                if (callee.isNative()) {
-                    auto native = callee.asNative();
-                    if (native->arity >= 0 && native->arity != argumentCount) {
-                        return runtimeError(
-                            "Native function '" + native->name + "' expected " +
-                            std::to_string(native->arity) +
-                            " arguments but got " +
-                            std::to_string(static_cast<int>(argumentCount)) +
-                            ".");
+                auto instance = gcAlloc<InstanceObject>();
+                instance->klass = callee.asClass();
+                instance->fieldSlots.resize(instance->klass->fieldNames.size());
+                instance->initializedFieldSlots.assign(
+                    instance->klass->fieldNames.size(), 0);
+                m_stack.setAt(calleeIndex, Value(instance));
+                DISPATCH();
+            }
+
+            if (callee.isNative()) {
+                auto native = callee.asNative();
+                if (native->arity >= 0 && native->arity != argumentCount) {
+                    return runtimeError(
+                        "Native function '" + native->name + "' expected " +
+                        std::to_string(native->arity) + " arguments but got " +
+                        std::to_string(static_cast<int>(argumentCount)) + ".");
+                }
+
+                const size_t argBase = calleeIndex + 1;
+                auto argAt = [&](uint8_t index) -> const Value& {
+                    return m_stack.getAt(argBase + static_cast<size_t>(index));
+                };
+                auto argAtRef = [&](uint8_t index) -> Value& {
+                    return m_stack.getAtRef(argBase +
+                                            static_cast<size_t>(index));
+                };
+
+                Value result;
+                switch (native->id) {
+                    case NativeFunctionId::CLOCK: {
+                        auto now = std::chrono::duration<double>(
+                                       std::chrono::system_clock::now()
+                                           .time_since_epoch())
+                                       .count();
+                        result = Value(now);
+                        break;
                     }
-
-                    const size_t argBase = calleeIndex + 1;
-                    auto argAt = [&](uint8_t index) -> const Value& {
-                        return m_stack.getAt(argBase +
-                                             static_cast<size_t>(index));
-                    };
-                    auto argAtRef = [&](uint8_t index) -> Value& {
-                        return m_stack.getAtRef(argBase +
-                                                static_cast<size_t>(index));
-                    };
-
-                    Value result;
-                    switch (native->id) {
-                        case NativeFunctionId::CLOCK: {
-                            auto now = std::chrono::duration<double>(
-                                           std::chrono::system_clock::now()
-                                               .time_since_epoch())
-                                           .count();
-                            result = Value(now);
-                            break;
+                    case NativeFunctionId::SQRT: {
+                        const Value& arg = argAt(0);
+                        if (!arg.isAnyNumeric()) {
+                            return runtimeError(
+                                "Native function 'sqrt' expects a number.");
                         }
-                        case NativeFunctionId::SQRT: {
-                            const Value& arg = argAt(0);
-                            if (!arg.isAnyNumeric()) {
-                                return runtimeError(
-                                    "Native function 'sqrt' expects a number.");
-                            }
 
+                        double number = 0.0;
+                        valueToDouble(arg, number);
+                        if (number < 0.0) {
+                            return runtimeError(
+                                "Native function 'sqrt' cannot take "
+                                "negative numbers.");
+                        }
+
+                        result = Value(std::sqrt(number));
+                        break;
+                    }
+                    case NativeFunctionId::LEN: {
+                        const Value& arg = argAt(0);
+                        if (arg.isString()) {
+                            result = Value(
+                                static_cast<int64_t>(arg.asString().length()));
+                        } else if (arg.isArray()) {
+                            result = Value(static_cast<int64_t>(
+                                arg.asArray()->elements.size()));
+                        } else if (arg.isDict()) {
+                            result = Value(
+                                static_cast<int64_t>(arg.asDict()->map.size()));
+                        } else if (arg.isSet()) {
+                            result = Value(static_cast<int64_t>(
+                                arg.asSet()->elements.size()));
+                        } else {
+                            return runtimeError(
+                                "Native function 'len' expects a string, "
+                                "array, dict, or set.");
+                        }
+                        break;
+                    }
+                    case NativeFunctionId::TYPE:
+                        result = Value(valueTypeName(argAt(0)));
+                        break;
+                    case NativeFunctionId::STR:
+                    case NativeFunctionId::TO_STRING: {
+                        const Value& arg = argAt(0);
+                        if (arg.isString()) {
+                            result = arg;
+                        } else {
+                            result = Value(valueToString(arg));
+                        }
+                        break;
+                    }
+                    case NativeFunctionId::NUM: {
+                        const Value& arg = argAt(0);
+                        if (arg.isNumber()) {
+                            result = arg;
+                        } else if (arg.isSignedInt() || arg.isUnsignedInt()) {
                             double number = 0.0;
                             valueToDouble(arg, number);
-                            if (number < 0.0) {
-                                return runtimeError(
-                                    "Native function 'sqrt' cannot take "
-                                    "negative numbers.");
-                            }
-
-                            result = Value(std::sqrt(number));
-                            break;
-                        }
-                        case NativeFunctionId::LEN: {
-                            const Value& arg = argAt(0);
-                            if (arg.isString()) {
-                                result = Value(static_cast<int64_t>(
-                                    arg.asString().length()));
-                            } else if (arg.isArray()) {
-                                result = Value(static_cast<int64_t>(
-                                    arg.asArray()->elements.size()));
-                            } else if (arg.isDict()) {
-                                result = Value(static_cast<int64_t>(
-                                    arg.asDict()->map.size()));
-                            } else if (arg.isSet()) {
-                                result = Value(static_cast<int64_t>(
-                                    arg.asSet()->elements.size()));
-                            } else {
-                                return runtimeError(
-                                    "Native function 'len' expects a string, "
-                                    "array, dict, or set.");
-                            }
-                            break;
-                        }
-                        case NativeFunctionId::TYPE:
-                            result = Value(valueTypeName(argAt(0)));
-                            break;
-                        case NativeFunctionId::STR:
-                        case NativeFunctionId::TO_STRING: {
-                            const Value& arg = argAt(0);
-                            if (arg.isString()) {
-                                result = arg;
-                            } else {
-                                result = Value(valueToString(arg));
-                            }
-                            break;
-                        }
-                        case NativeFunctionId::NUM: {
-                            const Value& arg = argAt(0);
-                            if (arg.isNumber()) {
-                                result = arg;
-                            } else if (arg.isSignedInt() ||
-                                       arg.isUnsignedInt()) {
-                                double number = 0.0;
-                                valueToDouble(arg, number);
-                                result = Value(number);
-                            } else if (arg.isString()) {
-                                const std::string& text = arg.asString();
-                                size_t parseIndex = 0;
-                                try {
-                                    double number = std::stod(text, &parseIndex);
-                                    if (parseIndex != text.size()) {
-                                        return runtimeError(
-                                            "Native function 'num' expects a "
-                                            "numeric string.");
-                                    }
-                                    result = Value(number);
-                                } catch (const std::exception&) {
+                            result = Value(number);
+                        } else if (arg.isString()) {
+                            const std::string& text = arg.asString();
+                            size_t parseIndex = 0;
+                            try {
+                                double number = std::stod(text, &parseIndex);
+                                if (parseIndex != text.size()) {
                                     return runtimeError(
                                         "Native function 'num' expects a "
                                         "numeric string.");
                                 }
-                            } else {
-                                return runtimeError(
-                                    "Native function 'num' expects a number or "
-                                    "string.");
-                            }
-                            break;
-                        }
-                        case NativeFunctionId::PARSE_INT: {
-                            const Value& arg = argAt(0);
-                            if (!arg.isString()) {
-                                return runtimeError(
-                                    "Native function 'parseInt' expects a "
-                                    "string.");
-                            }
-
-                            size_t parseIndex = 0;
-                            try {
-                                int64_t parsed =
-                                    std::stoll(arg.asString(), &parseIndex, 10);
-                                if (parseIndex != arg.asString().size()) {
-                                    return runtimeError(
-                                        "Native function 'parseInt' expects an "
-                                        "integer string.");
-                                }
-                                result = Value(parsed);
+                                result = Value(number);
                             } catch (const std::exception&) {
+                                return runtimeError(
+                                    "Native function 'num' expects a "
+                                    "numeric string.");
+                            }
+                        } else {
+                            return runtimeError(
+                                "Native function 'num' expects a number or "
+                                "string.");
+                        }
+                        break;
+                    }
+                    case NativeFunctionId::PARSE_INT: {
+                        const Value& arg = argAt(0);
+                        if (!arg.isString()) {
+                            return runtimeError(
+                                "Native function 'parseInt' expects a "
+                                "string.");
+                        }
+
+                        size_t parseIndex = 0;
+                        try {
+                            int64_t parsed =
+                                std::stoll(arg.asString(), &parseIndex, 10);
+                            if (parseIndex != arg.asString().size()) {
                                 return runtimeError(
                                     "Native function 'parseInt' expects an "
                                     "integer string.");
                             }
-                            break;
+                            result = Value(parsed);
+                        } catch (const std::exception&) {
+                            return runtimeError(
+                                "Native function 'parseInt' expects an "
+                                "integer string.");
                         }
-                        case NativeFunctionId::PARSE_UINT: {
-                            const Value& arg = argAt(0);
-                            if (!arg.isString()) {
-                                return runtimeError(
-                                    "Native function 'parseUInt' expects a "
-                                    "string.");
-                            }
+                        break;
+                    }
+                    case NativeFunctionId::PARSE_UINT: {
+                        const Value& arg = argAt(0);
+                        if (!arg.isString()) {
+                            return runtimeError(
+                                "Native function 'parseUInt' expects a "
+                                "string.");
+                        }
 
-                            size_t parseIndex = 0;
-                            try {
-                                uint64_t parsed =
-                                    std::stoull(arg.asString(), &parseIndex, 10);
-                                if (parseIndex != arg.asString().size()) {
-                                    return runtimeError(
-                                        "Native function 'parseUInt' expects an "
-                                        "unsigned integer string.");
-                                }
-                                result = Value(parsed);
-                            } catch (const std::exception&) {
+                        size_t parseIndex = 0;
+                        try {
+                            uint64_t parsed =
+                                std::stoull(arg.asString(), &parseIndex, 10);
+                            if (parseIndex != arg.asString().size()) {
                                 return runtimeError(
                                     "Native function 'parseUInt' expects an "
                                     "unsigned integer string.");
                             }
-                            break;
+                            result = Value(parsed);
+                        } catch (const std::exception&) {
+                            return runtimeError(
+                                "Native function 'parseUInt' expects an "
+                                "unsigned integer string.");
                         }
-                        case NativeFunctionId::PARSE_FLOAT: {
-                            const Value& arg = argAt(0);
-                            if (!arg.isString()) {
-                                return runtimeError(
-                                    "Native function 'parseFloat' expects a "
-                                    "string.");
-                            }
+                        break;
+                    }
+                    case NativeFunctionId::PARSE_FLOAT: {
+                        const Value& arg = argAt(0);
+                        if (!arg.isString()) {
+                            return runtimeError(
+                                "Native function 'parseFloat' expects a "
+                                "string.");
+                        }
 
-                            size_t parseIndex = 0;
-                            try {
-                                double parsed =
-                                    std::stod(arg.asString(), &parseIndex);
-                                if (parseIndex != arg.asString().size()) {
-                                    return runtimeError(
-                                        "Native function 'parseFloat' expects a "
-                                        "numeric string.");
-                                }
-                                result = Value(parsed);
-                            } catch (const std::exception&) {
+                        size_t parseIndex = 0;
+                        try {
+                            double parsed =
+                                std::stod(arg.asString(), &parseIndex);
+                            if (parseIndex != arg.asString().size()) {
                                 return runtimeError(
                                     "Native function 'parseFloat' expects a "
                                     "numeric string.");
                             }
-                            break;
+                            result = Value(parsed);
+                        } catch (const std::exception&) {
+                            return runtimeError(
+                                "Native function 'parseFloat' expects a "
+                                "numeric string.");
                         }
-                        case NativeFunctionId::ABS: {
-                            const Value& arg = argAt(0);
-                            if (!arg.isAnyNumeric()) {
-                                return runtimeError(
-                                    "Native function 'abs' expects a number.");
-                            }
-
-                            double number = 0.0;
-                            valueToDouble(arg, number);
-                            result = Value(std::fabs(number));
-                            break;
-                        }
-                        case NativeFunctionId::FLOOR: {
-                            const Value& arg = argAt(0);
-                            if (!arg.isAnyNumeric()) {
-                                return runtimeError(
-                                    "Native function 'floor' expects a number.");
-                            }
-
-                            double number = 0.0;
-                            valueToDouble(arg, number);
-                            result = Value(std::floor(number));
-                            break;
-                        }
-                        case NativeFunctionId::CEIL: {
-                            const Value& arg = argAt(0);
-                            if (!arg.isAnyNumeric()) {
-                                return runtimeError(
-                                    "Native function 'ceil' expects a number.");
-                            }
-
-                            double number = 0.0;
-                            valueToDouble(arg, number);
-                            result = Value(std::ceil(number));
-                            break;
-                        }
-                        case NativeFunctionId::POW: {
-                            double base = 0.0;
-                            double exponent = 0.0;
-                            if (!valueToDouble(argAt(0), base) ||
-                                !valueToDouble(argAt(1), exponent)) {
-                                return runtimeError(
-                                    "Native function 'pow' expects numeric "
-                                    "arguments.");
-                            }
-
-                            result = Value(std::pow(base, exponent));
-                            break;
-                        }
-                        case NativeFunctionId::ERROR: {
-                            const Value& arg = argAt(0);
-                            if (!arg.isString()) {
-                                return runtimeError(
-                                    "Native function 'error' expects a string.");
-                            }
-
-                            return runtimeError(arg.asString());
-                        }
-                        case NativeFunctionId::SET: {
-                            auto set = gcAlloc<SetObject>();
-                            set->elements.reserve(argumentCount);
-                            set->indexByValue.reserve(argumentCount);
-                            for (uint8_t i = 0; i < argumentCount; ++i) {
-                                Value& arg = argAtRef(i);
-                                if (set->elementType->isAny()) {
-                                    set->elementType = inferRuntimeType(arg);
-                                } else if (!valueMatchesType(
-                                               arg, set->elementType)) {
-                                    return runtimeError(
-                                        "Native function 'Set' expects all "
-                                        "elements to have a consistent type.");
-                                }
-
-                                setInsertValue(set, std::move(arg));
-                            }
-
-                            result = Value(set);
-                            break;
-                        }
-                        case NativeFunctionId::UNKNOWN:
-                        default:
-                            return runtimeError("Unknown native function '" +
-                                                native->name + "'.");
+                        break;
                     }
-
-                    m_stack.popN(m_stack.size() - calleeIndex);
-                    m_stack.push(std::move(result));
-                    break;
-                }
-
-                if (callee.isNativeBound()) {
-                    auto bound = callee.asNativeBound();
-
-                    const size_t argBase = calleeIndex + 1;
-                    auto argAt = [&](uint8_t index) -> const Value& {
-                        return m_stack.getAt(argBase +
-                                             static_cast<size_t>(index));
-                    };
-                    auto argAtRef = [&](uint8_t index) -> Value& {
-                        return m_stack.getAtRef(argBase +
-                                                static_cast<size_t>(index));
-                    };
-
-                    Value result;
-                    const Value& receiver = bound->receiver;
-
-                    if (receiver.isArray()) {
-                        auto array = receiver.asArray();
-
-                        if (bound->id == NativeMethodId::ARRAY_PUSH) {
-                            if (argumentCount != 1) {
-                                return runtimeError(
-                                    "Array method 'push' expects 1 argument.");
-                            }
-
-                            if (array->elementType->isAny()) {
-                                array->elementType = inferRuntimeType(argAt(0));
-                            } else if (!valueMatchesType(argAt(0),
-                                                         array->elementType)) {
-                                return runtimeError(
-                                    "Array method 'push' expects value of "
-                                    "type '" +
-                                    array->elementType->toString() + "'.");
-                            }
-
-                            array->elements.push_back(std::move(argAtRef(0)));
-                            result = Value(
-                                static_cast<double>(array->elements.size()));
-                        } else if (bound->id == NativeMethodId::ARRAY_POP) {
-                            if (argumentCount != 0) {
-                                return runtimeError(
-                                    "Array method 'pop' expects 0 arguments.");
-                            }
-
-                            if (array->elements.empty()) {
-                                return runtimeError(
-                                    "Array method 'pop' called on empty "
-                                    "array.");
-                            }
-
-                            result = array->elements.back();
-                            array->elements.pop_back();
-                        } else if (bound->id == NativeMethodId::ARRAY_SIZE) {
-                            if (argumentCount != 0) {
-                                return runtimeError(
-                                    "Array method 'size' expects 0 arguments.");
-                            }
-
-                            result = Value(
-                                static_cast<double>(array->elements.size()));
-                        } else if (bound->id == NativeMethodId::ARRAY_HAS) {
-                            if (argumentCount != 1) {
-                                return runtimeError(
-                                    "Array method 'has' expects 1 argument.");
-                            }
-
-                            result =
-                                Value(containsValue(array->elements, argAt(0)));
-                        } else if (bound->id == NativeMethodId::ARRAY_INSERT) {
-                            if (argumentCount != 2) {
-                                return runtimeError(
-                                    "Array method 'insert' expects 2 "
-                                    "arguments.");
-                            }
-
-                            size_t index = 0;
-                            if (!toArrayIndex(argAt(0), index)) {
-                                return runtimeError(
-                                    "Array method 'insert' expects a "
-                                    "non-negative integer index.");
-                            }
-
-                            if (index > array->elements.size()) {
-                                return runtimeError(
-                                    "Array method 'insert' index out of "
-                                    "bounds.");
-                            }
-
-                            if (array->elementType->isAny()) {
-                                array->elementType = inferRuntimeType(argAt(1));
-                            } else if (!valueMatchesType(argAt(1),
-                                                         array->elementType)) {
-                                return runtimeError(
-                                    "Array method 'insert' expects value of "
-                                    "type '" +
-                                    array->elementType->toString() + "'.");
-                            }
-
-                            array->elements.insert(array->elements.begin() +
-                                                       static_cast<long>(index),
-                                                   std::move(argAtRef(1)));
-                            result = array->elements[index];
-                        } else if (bound->id == NativeMethodId::ARRAY_REMOVE) {
-                            if (argumentCount != 1) {
-                                return runtimeError(
-                                    "Array method 'remove' expects 1 "
-                                    "argument.");
-                            }
-
-                            size_t index = 0;
-                            if (!toArrayIndex(argAt(0), index)) {
-                                return runtimeError(
-                                    "Array method 'remove' expects a "
-                                    "non-negative integer index.");
-                            }
-
-                            if (index >= array->elements.size()) {
-                                return runtimeError(
-                                    "Array method 'remove' index out of "
-                                    "bounds.");
-                            }
-
-                            result = array->elements[index];
-                            array->elements.erase(array->elements.begin() +
-                                                  static_cast<long>(index));
-                        } else if (bound->id == NativeMethodId::ARRAY_CLEAR) {
-                            if (argumentCount != 0) {
-                                return runtimeError(
-                                    "Array method 'clear' expects 0 "
-                                    "arguments.");
-                            }
-
-                            double removed =
-                                static_cast<double>(array->elements.size());
-                            array->elements.clear();
-                            result = Value(removed);
-                        } else if (bound->id ==
-                                   NativeMethodId::ARRAY_IS_EMPTY) {
-                            if (argumentCount != 0) {
-                                return runtimeError(
-                                    "Array method 'isEmpty' expects 0 "
-                                    "arguments.");
-                            }
-
-                            result = Value(array->elements.empty());
-                        } else if (bound->id == NativeMethodId::ARRAY_FIRST) {
-                            if (argumentCount != 0) {
-                                return runtimeError(
-                                    "Array method 'first' expects 0 "
-                                    "arguments.");
-                            }
-
-                            if (array->elements.empty()) {
-                                return runtimeError(
-                                    "Array method 'first' called on empty "
-                                    "array.");
-                            }
-
-                            result = array->elements.front();
-                        } else if (bound->id == NativeMethodId::ARRAY_LAST) {
-                            if (argumentCount != 0) {
-                                return runtimeError(
-                                    "Array method 'last' expects 0 arguments.");
-                            }
-
-                            if (array->elements.empty()) {
-                                return runtimeError(
-                                    "Array method 'last' called on empty "
-                                    "array.");
-                            }
-
-                            result = array->elements.back();
-                        } else {
-                            return runtimeError("Undefined array method '" +
-                                                bound->name + "'.");
+                    case NativeFunctionId::ABS: {
+                        const Value& arg = argAt(0);
+                        if (!arg.isAnyNumeric()) {
+                            return runtimeError(
+                                "Native function 'abs' expects a number.");
                         }
-                    } else if (receiver.isDict()) {
-                        auto dict = receiver.asDict();
 
-                        if (bound->id == NativeMethodId::DICT_GET) {
-                            if (argumentCount != 1) {
-                                return runtimeError(
-                                    "Dict method 'get' expects 1 argument.");
-                            }
-
-                            Value& key = argAtRef(0);
-                            auto it = dict->map.find(key);
-                            if (it == dict->map.end()) {
-                                return runtimeError(
-                                    "Dict method 'get' key not found.");
-                            }
-
-                            result = it->second;
-                        } else if (bound->id == NativeMethodId::DICT_SET) {
-                            if (argumentCount != 2) {
-                                return runtimeError(
-                                    "Dict method 'set' expects 2 arguments.");
-                            }
-
-                            const Value& key = argAt(0);
-
-                            if (dict->keyType->isAny()) {
-                                dict->keyType = inferRuntimeType(key);
-                            } else if (!valueMatchesType(key, dict->keyType)) {
-                                return runtimeError(
-                                    "Dict method 'set' key expects type '" +
-                                    dict->keyType->toString() + "'.");
-                            }
-
-                            Value& storedValue = argAtRef(1);
-                            if (dict->valueType->isAny()) {
-                                dict->valueType = inferRuntimeType(storedValue);
-                            } else if (!valueMatchesType(storedValue,
-                                                         dict->valueType)) {
-                                return runtimeError(
-                                    "Dict method 'set' value expects type '" +
-                                    dict->valueType->toString() + "'.");
-                            }
-
-                            auto [it, inserted] = dict->map.insert_or_assign(
-                                std::move(key), std::move(storedValue));
-                            (void)inserted;
-                            result = it->second;
-                        } else if (bound->id == NativeMethodId::DICT_HAS) {
-                            if (argumentCount != 1) {
-                                return runtimeError(
-                                    "Dict method 'has' expects 1 argument.");
-                            }
-
-                            const Value& key = argAt(0);
-                            result =
-                                Value(dict->map.find(key) != dict->map.end());
-                        } else if (bound->id == NativeMethodId::DICT_KEYS) {
-                            if (argumentCount != 0) {
-                                return runtimeError(
-                                    "Dict method 'keys' expects 0 arguments.");
-                            }
-
-                            auto keys = gcAlloc<ArrayObject>();
-                            std::vector<Value> orderedKeys =
-                                sortedDictKeys(dict);
-                            keys->elements.reserve(orderedKeys.size());
-
-                            for (const auto& key : orderedKeys) {
-                                keys->elements.push_back(key);
-                            }
-                            keys->elementType =
-                                dict->keyType ? dict->keyType : TypeInfo::makeAny();
-                            result = Value(keys);
-                        } else if (bound->id == NativeMethodId::DICT_VALUES) {
-                            if (argumentCount != 0) {
-                                return runtimeError(
-                                    "Dict method 'values' expects 0 "
-                                    "arguments.");
-                            }
-
-                            auto values = gcAlloc<ArrayObject>();
-                            std::vector<Value> orderedKeys =
-                                sortedDictKeys(dict);
-                            values->elements.reserve(orderedKeys.size());
-
-                            for (const auto& key : orderedKeys) {
-                                auto it = dict->map.find(key);
-                                if (it != dict->map.end()) {
-                                    values->elements.push_back(it->second);
-                                }
-                            }
-                            values->elementType = dict->valueType;
-                            result = Value(values);
-                        } else if (bound->id == NativeMethodId::DICT_SIZE) {
-                            if (argumentCount != 0) {
-                                return runtimeError(
-                                    "Dict method 'size' expects 0 arguments.");
-                            }
-
-                            result =
-                                Value(static_cast<double>(dict->map.size()));
-                        } else if (bound->id == NativeMethodId::DICT_REMOVE) {
-                            if (argumentCount != 1) {
-                                return runtimeError(
-                                    "Dict method 'remove' expects 1 argument.");
-                            }
-
-                            const Value& key = argAt(0);
-                            auto it = dict->map.find(key);
-                            if (it == dict->map.end()) {
-                                return runtimeError(
-                                    "Dict method 'remove' key not found.");
-                            }
-
-                            result = it->second;
-                            dict->map.erase(it);
-                        } else if (bound->id == NativeMethodId::DICT_CLEAR) {
-                            if (argumentCount != 0) {
-                                return runtimeError(
-                                    "Dict method 'clear' expects 0 arguments.");
-                            }
-
-                            double removed =
-                                static_cast<double>(dict->map.size());
-                            dict->map.clear();
-                            result = Value(removed);
-                        } else if (bound->id ==
-                                   NativeMethodId::DICT_IS_EMPTY) {
-                            if (argumentCount != 0) {
-                                return runtimeError(
-                                    "Dict method 'isEmpty' expects 0 "
-                                    "arguments.");
-                            }
-
-                            result = Value(dict->map.empty());
-                        } else if (bound->id == NativeMethodId::DICT_GET_OR) {
-                            if (argumentCount != 2) {
-                                return runtimeError(
-                                    "Dict method 'getOr' expects 2 arguments.");
-                            }
-
-                            const Value& key = argAt(0);
-                            auto it = dict->map.find(key);
-                            result =
-                                (it != dict->map.end()) ? it->second : argAt(1);
-                        } else {
-                            return runtimeError("Undefined dict method '" +
-                                                bound->name + "'.");
+                        double number = 0.0;
+                        valueToDouble(arg, number);
+                        result = Value(std::fabs(number));
+                        break;
+                    }
+                    case NativeFunctionId::FLOOR: {
+                        const Value& arg = argAt(0);
+                        if (!arg.isAnyNumeric()) {
+                            return runtimeError(
+                                "Native function 'floor' expects a number.");
                         }
-                    } else if (receiver.isSet()) {
-                        auto set = receiver.asSet();
 
-                        if (bound->id == NativeMethodId::SET_ADD) {
-                            if (argumentCount != 1) {
-                                return runtimeError(
-                                    "Set method 'add' expects 1 argument.");
-                            }
+                        double number = 0.0;
+                        valueToDouble(arg, number);
+                        result = Value(std::floor(number));
+                        break;
+                    }
+                    case NativeFunctionId::CEIL: {
+                        const Value& arg = argAt(0);
+                        if (!arg.isAnyNumeric()) {
+                            return runtimeError(
+                                "Native function 'ceil' expects a number.");
+                        }
 
-                            Value& element = argAtRef(0);
+                        double number = 0.0;
+                        valueToDouble(arg, number);
+                        result = Value(std::ceil(number));
+                        break;
+                    }
+                    case NativeFunctionId::POW: {
+                        double base = 0.0;
+                        double exponent = 0.0;
+                        if (!valueToDouble(argAt(0), base) ||
+                            !valueToDouble(argAt(1), exponent)) {
+                            return runtimeError(
+                                "Native function 'pow' expects numeric "
+                                "arguments.");
+                        }
+
+                        result = Value(std::pow(base, exponent));
+                        break;
+                    }
+                    case NativeFunctionId::ERROR: {
+                        const Value& arg = argAt(0);
+                        if (!arg.isString()) {
+                            return runtimeError(
+                                "Native function 'error' expects a string.");
+                        }
+
+                        return runtimeError(arg.asString());
+                    }
+                    case NativeFunctionId::SET: {
+                        auto set = gcAlloc<SetObject>();
+                        set->elements.reserve(argumentCount);
+                        set->indexByValue.reserve(argumentCount);
+                        for (uint8_t i = 0; i < argumentCount; ++i) {
+                            Value& arg = argAtRef(i);
                             if (set->elementType->isAny()) {
-                                set->elementType = inferRuntimeType(element);
-                            } else if (!valueMatchesType(element,
+                                set->elementType = inferRuntimeType(arg);
+                            } else if (!valueMatchesType(arg,
                                                          set->elementType)) {
                                 return runtimeError(
-                                    "Set method 'add' expects value of type "
-                                    "'" +
-                                    set->elementType->toString() + "'.");
+                                    "Native function 'Set' expects all "
+                                    "elements to have a consistent type.");
                             }
 
-                            bool inserted = setInsertValue(set,
-                                                           std::move(element));
-                            result = Value(inserted);
-                        } else if (bound->id == NativeMethodId::SET_HAS) {
-                            if (argumentCount != 1) {
-                                return runtimeError(
-                                    "Set method 'has' expects 1 argument.");
-                            }
-
-                            result = Value(setContainsValue(set, argAt(0)));
-                        } else if (bound->id == NativeMethodId::SET_REMOVE) {
-                            if (argumentCount != 1) {
-                                return runtimeError(
-                                    "Set method 'remove' expects 1 argument.");
-                            }
-
-                            bool removed = setRemoveValue(set, argAt(0));
-                            result = Value(removed);
-                        } else if (bound->id == NativeMethodId::SET_SIZE) {
-                            if (argumentCount != 0) {
-                                return runtimeError(
-                                    "Set method 'size' expects 0 arguments.");
-                            }
-
-                            result = Value(
-                                static_cast<double>(set->elements.size()));
-                        } else if (bound->id == NativeMethodId::SET_TO_ARRAY) {
-                            if (argumentCount != 0) {
-                                return runtimeError(
-                                    "Set method 'toArray' expects 0 "
-                                    "arguments.");
-                            }
-
-                            auto array = gcAlloc<ArrayObject>();
-                            array->elements.reserve(set->elements.size());
-                            array->elements.insert(array->elements.end(),
-                                                   set->elements.begin(),
-                                                   set->elements.end());
-                            array->elementType = set->elementType;
-                            result = Value(array);
-                        } else if (bound->id == NativeMethodId::SET_CLEAR) {
-                            if (argumentCount != 0) {
-                                return runtimeError(
-                                    "Set method 'clear' expects 0 arguments.");
-                            }
-
-                            double removed =
-                                static_cast<double>(set->elements.size());
-                            set->elements.clear();
-                            set->indexByValue.clear();
-                            result = Value(removed);
-                        } else if (bound->id == NativeMethodId::SET_IS_EMPTY) {
-                            if (argumentCount != 0) {
-                                return runtimeError(
-                                    "Set method 'isEmpty' expects 0 "
-                                    "arguments.");
-                            }
-
-                            result = Value(set->elements.empty());
-                        } else if (bound->id == NativeMethodId::SET_UNION) {
-                            if (argumentCount != 1) {
-                                return runtimeError(
-                                    "Set method 'union' expects 1 argument.");
-                            }
-                            if (!argAt(0).isSet()) {
-                                return runtimeError(
-                                    "Set method 'union' expects a set "
-                                    "argument.");
-                            }
-
-                            auto out = gcAlloc<SetObject>();
-                            out->elementType = set->elementType;
-                            auto rhs = argAt(0).asSet();
-                            out->elements.reserve(set->elements.size() +
-                                                  rhs->elements.size());
-                            out->indexByValue.reserve(set->elements.size() +
-                                                      rhs->elements.size());
-                            for (const auto& element : set->elements) {
-                                setInsertValue(out, element);
-                            }
-
-                            if (!set->elementType->isAny() &&
-                                !rhs->elementType->isAny() &&
-                                !isAssignable(rhs->elementType,
-                                              set->elementType) &&
-                                !isAssignable(set->elementType,
-                                              rhs->elementType)) {
-                                return runtimeError(
-                                    "Set method 'union' requires compatible "
-                                    "element types.");
-                            }
-
-                            for (const auto& element : rhs->elements) {
-                                setInsertValue(out, element);
-                            }
-                            result = Value(out);
-                        } else if (bound->id ==
-                                   NativeMethodId::SET_INTERSECT) {
-                            if (argumentCount != 1) {
-                                return runtimeError(
-                                    "Set method 'intersect' expects 1 "
-                                    "argument.");
-                            }
-                            if (!argAt(0).isSet()) {
-                                return runtimeError(
-                                    "Set method 'intersect' expects a set "
-                                    "argument.");
-                            }
-
-                            auto out = gcAlloc<SetObject>();
-                            out->elementType = set->elementType;
-                            auto rhs = argAt(0).asSet();
-                            out->elements.reserve(
-                                std::min(set->elements.size(),
-                                         rhs->elements.size()));
-                            out->indexByValue.reserve(
-                                std::min(set->elements.size(),
-                                         rhs->elements.size()));
-
-                            if (!set->elementType->isAny() &&
-                                !rhs->elementType->isAny() &&
-                                !isAssignable(rhs->elementType,
-                                              set->elementType) &&
-                                !isAssignable(set->elementType,
-                                              rhs->elementType)) {
-                                return runtimeError(
-                                    "Set method 'intersect' requires "
-                                    "compatible element types.");
-                            }
-
-                            for (const auto& element : set->elements) {
-                                if (setContainsValue(rhs, element)) {
-                                    setInsertValue(out, element);
-                                }
-                            }
-                            result = Value(out);
-                        } else if (bound->id ==
-                                   NativeMethodId::SET_DIFFERENCE) {
-                            if (argumentCount != 1) {
-                                return runtimeError(
-                                    "Set method 'difference' expects 1 "
-                                    "argument.");
-                            }
-                            if (!argAt(0).isSet()) {
-                                return runtimeError(
-                                    "Set method 'difference' expects a set "
-                                    "argument.");
-                            }
-
-                            auto out = gcAlloc<SetObject>();
-                            out->elementType = set->elementType;
-                            auto rhs = argAt(0).asSet();
-                            out->elements.reserve(set->elements.size());
-                            out->indexByValue.reserve(set->elements.size());
-
-                            if (!set->elementType->isAny() &&
-                                !rhs->elementType->isAny() &&
-                                !isAssignable(rhs->elementType,
-                                              set->elementType) &&
-                                !isAssignable(set->elementType,
-                                              rhs->elementType)) {
-                                return runtimeError(
-                                    "Set method 'difference' requires "
-                                    "compatible element types.");
-                            }
-
-                            for (const auto& element : set->elements) {
-                                if (!setContainsValue(rhs, element)) {
-                                    setInsertValue(out, element);
-                                }
-                            }
-                            result = Value(out);
-                        } else {
-                            return runtimeError("Undefined set method '" +
-                                                bound->name + "'.");
+                            setInsertValue(set, std::move(arg));
                         }
-                    } else {
-                        return runtimeError(
-                            "Native bound method receiver is invalid.");
+
+                        result = Value(set);
+                        break;
                     }
-
-                    m_stack.popN(m_stack.size() - calleeIndex);
-                    m_stack.push(std::move(result));
-                    break;
+                    case NativeFunctionId::UNKNOWN:
+                    default:
+                        return runtimeError("Unknown native function '" +
+                                            native->name + "'.");
                 }
 
-                if (callee.isBoundMethod()) {
-                    auto bound = callee.asBoundMethod();
-                    Status status = callClosure(bound->method, argumentCount,
-                                                bound->receiver);
-                    if (status != Status::OK) {
-                        return status;
-                    }
-                    break;
-                }
-
-                if (callee.isClosure()) {
-                    Status status =
-                        callClosure(callee.asClosure(), argumentCount);
-                    if (status != Status::OK) {
-                        return status;
-                    }
-                    break;
-                }
-
-                if (callee.isFunction()) {
-                    auto closure = gcAlloc<ClosureObject>();
-                    closure->function = callee.asFunction();
-                    closure->upvalues = {};
-                    Status status = callClosure(closure, argumentCount);
-                    if (status != Status::OK) {
-                        return status;
-                    }
-                    break;
-                }
-
-                if (!callee.isFunction()) {
-                    return runtimeError(
-                        "Can only call functions, classes, methods, and "
-                        "natives.");
-                }
-                break;
+                m_stack.popN(m_stack.size() - calleeIndex);
+                m_stack.push(std::move(result));
+                DISPATCH();
             }
-            VM_CASE(CLOSURE): {
-                Value constant = readConstant();
-                if (!constant.isFunction()) {
-                    return runtimeError("CLOSURE expects a function constant.");
-                }
 
-                auto function = constant.asFunction();
-                auto closure = gcAlloc<ClosureObject>();
-                closure->function = function;
-                closure->upvalues.reserve(function->upvalueCount);
-                m_stack.push(Value(closure));
+            if (callee.isNativeBound()) {
+                auto bound = callee.asNativeBound();
 
-                for (uint8_t i = 0; i < function->upvalueCount; ++i) {
-                    uint8_t isLocal = readByte();
-                    uint8_t index = readByte();
-
-                    if (isLocal) {
-                        size_t stackIndex = currentFrame().slotBase + index;
-                        closure->upvalues.push_back(captureUpvalue(stackIndex));
-                    } else {
-                        closure->upvalues.push_back(
-                            currentFrame().closure->upvalues[index]);
-                    }
-                }
-                break;
-            }
-            VM_CASE(CLOSE_UPVALUE): {
-                closeUpvalues(m_stack.size() - 1);
-                m_stack.pop();
-                break;
-            }
-            VM_CASE(BUILD_ARRAY): {
-                uint8_t count = readByte();
-                auto array = gcAlloc<ArrayObject>();
-                array->elements.resize(count);
-
-                auto mergeType = [&](const TypeRef& current,
-                                     const TypeRef& next) -> TypeRef {
-                    if (!current) {
-                        return next;
-                    }
-                    if (!next) {
-                        return current;
-                    }
-                    if (current->isAny() || next->isAny()) {
-                        return TypeInfo::makeAny();
-                    }
-                    if (isAssignable(next, current)) {
-                        return current;
-                    }
-                    if (isAssignable(current, next)) {
-                        return next;
-                    }
-                    if (current->isNumeric() && next->isNumeric()) {
-                        TypeRef promoted = numericPromotion(current, next);
-                        return promoted ? promoted : TypeInfo::makeAny();
-                    }
-                    return nullptr;
+                const size_t argBase = calleeIndex + 1;
+                auto argAt = [&](uint8_t index) -> const Value& {
+                    return m_stack.getAt(argBase + static_cast<size_t>(index));
+                };
+                auto argAtRef = [&](uint8_t index) -> Value& {
+                    return m_stack.getAtRef(argBase +
+                                            static_cast<size_t>(index));
                 };
 
-                TypeRef inferredElementType = nullptr;
-                for (int i = static_cast<int>(count) - 1; i >= 0; --i) {
-                    Value element = m_stack.popMove();
-                    TypeRef elementType = inferRuntimeType(element);
-                    TypeRef merged =
-                        mergeType(inferredElementType, elementType);
-                    if (!merged) {
-                        return runtimeError(
-                            "Array literal elements must have consistent "
-                            "types.");
+                Value result;
+                const Value& receiver = bound->receiver;
+
+                if (receiver.isArray()) {
+                    auto array = receiver.asArray();
+
+                    if (bound->id == NativeMethodId::ARRAY_PUSH) {
+                        if (argumentCount != 1) {
+                            return runtimeError(
+                                "Array method 'push' expects 1 argument.");
+                        }
+
+                        if (array->elementType->isAny()) {
+                            array->elementType = inferRuntimeType(argAt(0));
+                        } else if (!valueMatchesType(argAt(0),
+                                                     array->elementType)) {
+                            return runtimeError(
+                                "Array method 'push' expects value of "
+                                "type '" +
+                                array->elementType->toString() + "'.");
+                        }
+
+                        array->elements.push_back(std::move(argAtRef(0)));
+                        result =
+                            Value(static_cast<double>(array->elements.size()));
+                    } else if (bound->id == NativeMethodId::ARRAY_POP) {
+                        if (argumentCount != 0) {
+                            return runtimeError(
+                                "Array method 'pop' expects 0 arguments.");
+                        }
+
+                        if (array->elements.empty()) {
+                            return runtimeError(
+                                "Array method 'pop' called on empty "
+                                "array.");
+                        }
+
+                        result = array->elements.back();
+                        array->elements.pop_back();
+                    } else if (bound->id == NativeMethodId::ARRAY_SIZE) {
+                        if (argumentCount != 0) {
+                            return runtimeError(
+                                "Array method 'size' expects 0 arguments.");
+                        }
+
+                        result =
+                            Value(static_cast<double>(array->elements.size()));
+                    } else if (bound->id == NativeMethodId::ARRAY_HAS) {
+                        if (argumentCount != 1) {
+                            return runtimeError(
+                                "Array method 'has' expects 1 argument.");
+                        }
+
+                        result =
+                            Value(containsValue(array->elements, argAt(0)));
+                    } else if (bound->id == NativeMethodId::ARRAY_INSERT) {
+                        if (argumentCount != 2) {
+                            return runtimeError(
+                                "Array method 'insert' expects 2 "
+                                "arguments.");
+                        }
+
+                        size_t index = 0;
+                        if (!toArrayIndex(argAt(0), index)) {
+                            return runtimeError(
+                                "Array method 'insert' expects a "
+                                "non-negative integer index.");
+                        }
+
+                        if (index > array->elements.size()) {
+                            return runtimeError(
+                                "Array method 'insert' index out of "
+                                "bounds.");
+                        }
+
+                        if (array->elementType->isAny()) {
+                            array->elementType = inferRuntimeType(argAt(1));
+                        } else if (!valueMatchesType(argAt(1),
+                                                     array->elementType)) {
+                            return runtimeError(
+                                "Array method 'insert' expects value of "
+                                "type '" +
+                                array->elementType->toString() + "'.");
+                        }
+
+                        array->elements.insert(
+                            array->elements.begin() + static_cast<long>(index),
+                            std::move(argAtRef(1)));
+                        result = array->elements[index];
+                    } else if (bound->id == NativeMethodId::ARRAY_REMOVE) {
+                        if (argumentCount != 1) {
+                            return runtimeError(
+                                "Array method 'remove' expects 1 "
+                                "argument.");
+                        }
+
+                        size_t index = 0;
+                        if (!toArrayIndex(argAt(0), index)) {
+                            return runtimeError(
+                                "Array method 'remove' expects a "
+                                "non-negative integer index.");
+                        }
+
+                        if (index >= array->elements.size()) {
+                            return runtimeError(
+                                "Array method 'remove' index out of "
+                                "bounds.");
+                        }
+
+                        result = array->elements[index];
+                        array->elements.erase(array->elements.begin() +
+                                              static_cast<long>(index));
+                    } else if (bound->id == NativeMethodId::ARRAY_CLEAR) {
+                        if (argumentCount != 0) {
+                            return runtimeError(
+                                "Array method 'clear' expects 0 "
+                                "arguments.");
+                        }
+
+                        double removed =
+                            static_cast<double>(array->elements.size());
+                        array->elements.clear();
+                        result = Value(removed);
+                    } else if (bound->id == NativeMethodId::ARRAY_IS_EMPTY) {
+                        if (argumentCount != 0) {
+                            return runtimeError(
+                                "Array method 'isEmpty' expects 0 "
+                                "arguments.");
+                        }
+
+                        result = Value(array->elements.empty());
+                    } else if (bound->id == NativeMethodId::ARRAY_FIRST) {
+                        if (argumentCount != 0) {
+                            return runtimeError(
+                                "Array method 'first' expects 0 "
+                                "arguments.");
+                        }
+
+                        if (array->elements.empty()) {
+                            return runtimeError(
+                                "Array method 'first' called on empty "
+                                "array.");
+                        }
+
+                        result = array->elements.front();
+                    } else if (bound->id == NativeMethodId::ARRAY_LAST) {
+                        if (argumentCount != 0) {
+                            return runtimeError(
+                                "Array method 'last' expects 0 arguments.");
+                        }
+
+                        if (array->elements.empty()) {
+                            return runtimeError(
+                                "Array method 'last' called on empty "
+                                "array.");
+                        }
+
+                        result = array->elements.back();
+                    } else {
+                        return runtimeError("Undefined array method '" +
+                                            bound->name + "'.");
                     }
-                    inferredElementType = merged;
-                    array->elements[static_cast<size_t>(i)] = std::move(element);
-                }
+                } else if (receiver.isDict()) {
+                    auto dict = receiver.asDict();
 
-                array->elementType = inferredElementType ? inferredElementType
-                                                         : TypeInfo::makeAny();
+                    if (bound->id == NativeMethodId::DICT_GET) {
+                        if (argumentCount != 1) {
+                            return runtimeError(
+                                "Dict method 'get' expects 1 argument.");
+                        }
 
-                m_stack.push(Value(array));
-                break;
-            }
-            VM_CASE(BUILD_DICT): {
-                uint8_t pairCount = readByte();
-                auto dict = gcAlloc<DictObject>();
-                dict->map.reserve(pairCount);
+                        Value& key = argAtRef(0);
+                        auto it = dict->map.find(key);
+                        if (it == dict->map.end()) {
+                            return runtimeError(
+                                "Dict method 'get' key not found.");
+                        }
 
-                auto mergeType = [&](const TypeRef& current,
-                                     const TypeRef& next) -> TypeRef {
-                    if (!current) {
-                        return next;
+                        result = it->second;
+                    } else if (bound->id == NativeMethodId::DICT_SET) {
+                        if (argumentCount != 2) {
+                            return runtimeError(
+                                "Dict method 'set' expects 2 arguments.");
+                        }
+
+                        const Value& key = argAt(0);
+
+                        if (dict->keyType->isAny()) {
+                            dict->keyType = inferRuntimeType(key);
+                        } else if (!valueMatchesType(key, dict->keyType)) {
+                            return runtimeError(
+                                "Dict method 'set' key expects type '" +
+                                dict->keyType->toString() + "'.");
+                        }
+
+                        Value& storedValue = argAtRef(1);
+                        if (dict->valueType->isAny()) {
+                            dict->valueType = inferRuntimeType(storedValue);
+                        } else if (!valueMatchesType(storedValue,
+                                                     dict->valueType)) {
+                            return runtimeError(
+                                "Dict method 'set' value expects type '" +
+                                dict->valueType->toString() + "'.");
+                        }
+
+                        auto [it, inserted] = dict->map.insert_or_assign(
+                            std::move(key), std::move(storedValue));
+                        (void)inserted;
+                        result = it->second;
+                    } else if (bound->id == NativeMethodId::DICT_HAS) {
+                        if (argumentCount != 1) {
+                            return runtimeError(
+                                "Dict method 'has' expects 1 argument.");
+                        }
+
+                        const Value& key = argAt(0);
+                        result = Value(dict->map.find(key) != dict->map.end());
+                    } else if (bound->id == NativeMethodId::DICT_KEYS) {
+                        if (argumentCount != 0) {
+                            return runtimeError(
+                                "Dict method 'keys' expects 0 arguments.");
+                        }
+
+                        auto keys = gcAlloc<ArrayObject>();
+                        std::vector<Value> orderedKeys = sortedDictKeys(dict);
+                        keys->elements.reserve(orderedKeys.size());
+
+                        for (const auto& key : orderedKeys) {
+                            keys->elements.push_back(key);
+                        }
+                        keys->elementType =
+                            dict->keyType ? dict->keyType : TypeInfo::makeAny();
+                        result = Value(keys);
+                    } else if (bound->id == NativeMethodId::DICT_VALUES) {
+                        if (argumentCount != 0) {
+                            return runtimeError(
+                                "Dict method 'values' expects 0 "
+                                "arguments.");
+                        }
+
+                        auto values = gcAlloc<ArrayObject>();
+                        std::vector<Value> orderedKeys = sortedDictKeys(dict);
+                        values->elements.reserve(orderedKeys.size());
+
+                        for (const auto& key : orderedKeys) {
+                            auto it = dict->map.find(key);
+                            if (it != dict->map.end()) {
+                                values->elements.push_back(it->second);
+                            }
+                        }
+                        values->elementType = dict->valueType;
+                        result = Value(values);
+                    } else if (bound->id == NativeMethodId::DICT_SIZE) {
+                        if (argumentCount != 0) {
+                            return runtimeError(
+                                "Dict method 'size' expects 0 arguments.");
+                        }
+
+                        result = Value(static_cast<double>(dict->map.size()));
+                    } else if (bound->id == NativeMethodId::DICT_REMOVE) {
+                        if (argumentCount != 1) {
+                            return runtimeError(
+                                "Dict method 'remove' expects 1 argument.");
+                        }
+
+                        const Value& key = argAt(0);
+                        auto it = dict->map.find(key);
+                        if (it == dict->map.end()) {
+                            return runtimeError(
+                                "Dict method 'remove' key not found.");
+                        }
+
+                        result = it->second;
+                        dict->map.erase(it);
+                    } else if (bound->id == NativeMethodId::DICT_CLEAR) {
+                        if (argumentCount != 0) {
+                            return runtimeError(
+                                "Dict method 'clear' expects 0 arguments.");
+                        }
+
+                        double removed = static_cast<double>(dict->map.size());
+                        dict->map.clear();
+                        result = Value(removed);
+                    } else if (bound->id == NativeMethodId::DICT_IS_EMPTY) {
+                        if (argumentCount != 0) {
+                            return runtimeError(
+                                "Dict method 'isEmpty' expects 0 "
+                                "arguments.");
+                        }
+
+                        result = Value(dict->map.empty());
+                    } else if (bound->id == NativeMethodId::DICT_GET_OR) {
+                        if (argumentCount != 2) {
+                            return runtimeError(
+                                "Dict method 'getOr' expects 2 arguments.");
+                        }
+
+                        const Value& key = argAt(0);
+                        auto it = dict->map.find(key);
+                        result =
+                            (it != dict->map.end()) ? it->second : argAt(1);
+                    } else {
+                        return runtimeError("Undefined dict method '" +
+                                            bound->name + "'.");
                     }
-                    if (!next) {
-                        return current;
+                } else if (receiver.isSet()) {
+                    auto set = receiver.asSet();
+
+                    if (bound->id == NativeMethodId::SET_ADD) {
+                        if (argumentCount != 1) {
+                            return runtimeError(
+                                "Set method 'add' expects 1 argument.");
+                        }
+
+                        Value& element = argAtRef(0);
+                        if (set->elementType->isAny()) {
+                            set->elementType = inferRuntimeType(element);
+                        } else if (!valueMatchesType(element,
+                                                     set->elementType)) {
+                            return runtimeError(
+                                "Set method 'add' expects value of type "
+                                "'" +
+                                set->elementType->toString() + "'.");
+                        }
+
+                        bool inserted = setInsertValue(set, std::move(element));
+                        result = Value(inserted);
+                    } else if (bound->id == NativeMethodId::SET_HAS) {
+                        if (argumentCount != 1) {
+                            return runtimeError(
+                                "Set method 'has' expects 1 argument.");
+                        }
+
+                        result = Value(setContainsValue(set, argAt(0)));
+                    } else if (bound->id == NativeMethodId::SET_REMOVE) {
+                        if (argumentCount != 1) {
+                            return runtimeError(
+                                "Set method 'remove' expects 1 argument.");
+                        }
+
+                        bool removed = setRemoveValue(set, argAt(0));
+                        result = Value(removed);
+                    } else if (bound->id == NativeMethodId::SET_SIZE) {
+                        if (argumentCount != 0) {
+                            return runtimeError(
+                                "Set method 'size' expects 0 arguments.");
+                        }
+
+                        result =
+                            Value(static_cast<double>(set->elements.size()));
+                    } else if (bound->id == NativeMethodId::SET_TO_ARRAY) {
+                        if (argumentCount != 0) {
+                            return runtimeError(
+                                "Set method 'toArray' expects 0 "
+                                "arguments.");
+                        }
+
+                        auto array = gcAlloc<ArrayObject>();
+                        array->elements.reserve(set->elements.size());
+                        array->elements.insert(array->elements.end(),
+                                               set->elements.begin(),
+                                               set->elements.end());
+                        array->elementType = set->elementType;
+                        result = Value(array);
+                    } else if (bound->id == NativeMethodId::SET_CLEAR) {
+                        if (argumentCount != 0) {
+                            return runtimeError(
+                                "Set method 'clear' expects 0 arguments.");
+                        }
+
+                        double removed =
+                            static_cast<double>(set->elements.size());
+                        set->elements.clear();
+                        set->indexByValue.clear();
+                        result = Value(removed);
+                    } else if (bound->id == NativeMethodId::SET_IS_EMPTY) {
+                        if (argumentCount != 0) {
+                            return runtimeError(
+                                "Set method 'isEmpty' expects 0 "
+                                "arguments.");
+                        }
+
+                        result = Value(set->elements.empty());
+                    } else if (bound->id == NativeMethodId::SET_UNION) {
+                        if (argumentCount != 1) {
+                            return runtimeError(
+                                "Set method 'union' expects 1 argument.");
+                        }
+                        if (!argAt(0).isSet()) {
+                            return runtimeError(
+                                "Set method 'union' expects a set "
+                                "argument.");
+                        }
+
+                        auto out = gcAlloc<SetObject>();
+                        out->elementType = set->elementType;
+                        auto rhs = argAt(0).asSet();
+                        out->elements.reserve(set->elements.size() +
+                                              rhs->elements.size());
+                        out->indexByValue.reserve(set->elements.size() +
+                                                  rhs->elements.size());
+                        for (const auto& element : set->elements) {
+                            setInsertValue(out, element);
+                        }
+
+                        if (!set->elementType->isAny() &&
+                            !rhs->elementType->isAny() &&
+                            !isAssignable(rhs->elementType, set->elementType) &&
+                            !isAssignable(set->elementType, rhs->elementType)) {
+                            return runtimeError(
+                                "Set method 'union' requires compatible "
+                                "element types.");
+                        }
+
+                        for (const auto& element : rhs->elements) {
+                            setInsertValue(out, element);
+                        }
+                        result = Value(out);
+                    } else if (bound->id == NativeMethodId::SET_INTERSECT) {
+                        if (argumentCount != 1) {
+                            return runtimeError(
+                                "Set method 'intersect' expects 1 "
+                                "argument.");
+                        }
+                        if (!argAt(0).isSet()) {
+                            return runtimeError(
+                                "Set method 'intersect' expects a set "
+                                "argument.");
+                        }
+
+                        auto out = gcAlloc<SetObject>();
+                        out->elementType = set->elementType;
+                        auto rhs = argAt(0).asSet();
+                        out->elements.reserve(std::min(set->elements.size(),
+                                                       rhs->elements.size()));
+                        out->indexByValue.reserve(std::min(
+                            set->elements.size(), rhs->elements.size()));
+
+                        if (!set->elementType->isAny() &&
+                            !rhs->elementType->isAny() &&
+                            !isAssignable(rhs->elementType, set->elementType) &&
+                            !isAssignable(set->elementType, rhs->elementType)) {
+                            return runtimeError(
+                                "Set method 'intersect' requires "
+                                "compatible element types.");
+                        }
+
+                        for (const auto& element : set->elements) {
+                            if (setContainsValue(rhs, element)) {
+                                setInsertValue(out, element);
+                            }
+                        }
+                        result = Value(out);
+                    } else if (bound->id == NativeMethodId::SET_DIFFERENCE) {
+                        if (argumentCount != 1) {
+                            return runtimeError(
+                                "Set method 'difference' expects 1 "
+                                "argument.");
+                        }
+                        if (!argAt(0).isSet()) {
+                            return runtimeError(
+                                "Set method 'difference' expects a set "
+                                "argument.");
+                        }
+
+                        auto out = gcAlloc<SetObject>();
+                        out->elementType = set->elementType;
+                        auto rhs = argAt(0).asSet();
+                        out->elements.reserve(set->elements.size());
+                        out->indexByValue.reserve(set->elements.size());
+
+                        if (!set->elementType->isAny() &&
+                            !rhs->elementType->isAny() &&
+                            !isAssignable(rhs->elementType, set->elementType) &&
+                            !isAssignable(set->elementType, rhs->elementType)) {
+                            return runtimeError(
+                                "Set method 'difference' requires "
+                                "compatible element types.");
+                        }
+
+                        for (const auto& element : set->elements) {
+                            if (!setContainsValue(rhs, element)) {
+                                setInsertValue(out, element);
+                            }
+                        }
+                        result = Value(out);
+                    } else {
+                        return runtimeError("Undefined set method '" +
+                                            bound->name + "'.");
                     }
-                    if (current->isAny() || next->isAny()) {
-                        return TypeInfo::makeAny();
-                    }
-                    if (isAssignable(next, current)) {
-                        return current;
-                    }
-                    if (isAssignable(current, next)) {
-                        return next;
-                    }
-                    if (current->isNumeric() && next->isNumeric()) {
-                        TypeRef promoted = numericPromotion(current, next);
-                        return promoted ? promoted : TypeInfo::makeAny();
-                    }
-                    return nullptr;
-                };
-
-                TypeRef keyType = nullptr;
-                TypeRef valueType = nullptr;
-
-                for (int i = 0; i < pairCount; ++i) {
-                    Value value = m_stack.popMove();
-                    Value keyValue = m_stack.popMove();
-
-                    TypeRef mergedKeyType =
-                        mergeType(keyType, inferRuntimeType(keyValue));
-                    if (!mergedKeyType) {
-                        return runtimeError(
-                            "Dictionary literal keys must have consistent "
-                            "types.");
-                    }
-                    keyType = mergedKeyType;
-
-                    TypeRef mergedValueType =
-                        mergeType(valueType, inferRuntimeType(value));
-                    if (!mergedValueType) {
-                        return runtimeError(
-                            "Dictionary literal values must have consistent "
-                            "types.");
-                    }
-                    valueType = mergedValueType;
-
-                    dict->map.insert_or_assign(std::move(keyValue),
-                                               std::move(value));
-                }
-
-                dict->keyType = keyType ? keyType : TypeInfo::makeAny();
-                dict->valueType = valueType ? valueType : TypeInfo::makeAny();
-
-                m_stack.push(Value(dict));
-                break;
-            }
-            VM_CASE(GET_INDEX): {
-                const Value& indexValue = m_stack.top();
-                const Value& container = m_stack.second();
-
-                if (container.isArray()) {
-                    size_t index = 0;
-                    if (!toArrayIndex(indexValue, index)) {
-                        return runtimeError(
-                            "Array index must be a non-negative integer.");
-                    }
-
-                    auto array = container.asArray();
-                    if (index >= array->elements.size()) {
-                        return runtimeError("Array index out of bounds.");
-                    }
-
-                    m_stack.replaceTopPair(array->elements[index]);
-                    break;
-                }
-
-                if (container.isDict()) {
-                    auto dict = container.asDict();
-                    auto it = dict->map.find(indexValue);
-                    if (it == dict->map.end()) {
-                        return runtimeError("Dictionary key not found.");
-                    }
-
-                    m_stack.replaceTopPair(it->second);
-                    break;
-                }
-
-                if (container.isSet()) {
-                    auto set = container.asSet();
-                    if (!valueMatchesType(indexValue, set->elementType)) {
-                        return runtimeError(
-                            "Type error: set lookup expects element type '" +
-                            set->elementType->toString() + "', got '" +
-                            valueTypeName(indexValue) + "'.");
-                    }
-                    m_stack.replaceTopPair(
-                        Value(setContainsValue(set, indexValue)));
-                    break;
-                }
-
-                return runtimeError(
-                    "Indexing is only supported on array, dict, and set.");
-            }
-            VM_CASE(SET_INDEX): {
-                Value value = m_stack.popMove();
-                Value indexValue = m_stack.popMove();
-                Value container = m_stack.popMove();
-
-                if (container.isArray()) {
-                    size_t index = 0;
-                    if (!toArrayIndex(indexValue, index)) {
-                        return runtimeError(
-                            "Array index must be a non-negative integer.");
-                    }
-
-                    auto array = container.asArray();
-                    if (index >= array->elements.size()) {
-                        return runtimeError("Array index out of bounds.");
-                    }
-
-                    if (!valueMatchesType(value, array->elementType)) {
-                        return runtimeError(
-                            "Type error: array assignment expects element "
-                            "type '" +
-                            array->elementType->toString() + "', got '" +
-                            valueTypeName(value) + "'.");
-                    }
-
-                    array->elements[index] = value;
-                    m_stack.push(std::move(value));
-                    break;
-                }
-
-                if (container.isDict()) {
-                    auto dict = container.asDict();
-
-                    if (!valueMatchesType(indexValue, dict->keyType)) {
-                        return runtimeError(
-                            "Type error: dictionary key expects '" +
-                            dict->keyType->toString() + "', got '" +
-                            valueTypeName(indexValue) + "'.");
-                    }
-
-                    if (!valueMatchesType(value, dict->valueType)) {
-                        return runtimeError(
-                            "Type error: dictionary value expects '" +
-                            dict->valueType->toString() + "', got '" +
-                            valueTypeName(value) + "'.");
-                    }
-
-                    dict->map.insert_or_assign(std::move(indexValue), value);
-                    m_stack.push(std::move(value));
-                    break;
-                }
-
-                return runtimeError(
-                    "Indexed assignment is only supported on array and dict.");
-            }
-            VM_CASE(DUP): {
-                m_stack.push(m_stack.peek(0));
-                break;
-            }
-            VM_CASE(DUP2): {
-                Value second = m_stack.peek(1);
-                Value top = m_stack.peek(0);
-                m_stack.push(second);
-                m_stack.push(top);
-                break;
-            }
-            VM_CASE(ITER_INIT): {
-                Value iterable = m_stack.popMove();
-                auto iterator = gcAlloc<IteratorObject>();
-
-                if (iterable.isArray()) {
-                    iterator->kind = IteratorObject::ARRAY_ITER;
-                    iterator->array = iterable.asArray();
-                } else if (iterable.isDict()) {
-                    iterator->kind = IteratorObject::DICT_ITER;
-                    iterator->dict = iterable.asDict();
-
-                    iterator->dictKeys = sortedDictKeys(iterator->dict);
-                } else if (iterable.isSet()) {
-                    iterator->kind = IteratorObject::SET_ITER;
-                    iterator->set = iterable.asSet();
                 } else {
                     return runtimeError(
-                        "Foreach expects an iterable (array, dict, or set).");
+                        "Native bound method receiver is invalid.");
                 }
 
-                m_stack.push(Value(iterator));
-                break;
+                m_stack.popN(m_stack.size() - calleeIndex);
+                m_stack.push(std::move(result));
+                DISPATCH();
             }
-            VM_CASE(ITER_HAS_NEXT): {
-                Value iteratorValue = m_stack.pop();
-                if (!iteratorValue.isIterator()) {
-                    return runtimeError("Internal error: iterator expected.");
+
+            if (callee.isBoundMethod()) {
+                auto bound = callee.asBoundMethod();
+                Status status =
+                    callClosure(bound->method, argumentCount, bound->receiver);
+                if (status != Status::OK) {
+                    return status;
                 }
-
-                auto iterator = iteratorValue.asIterator();
-                bool hasNext = false;
-
-                switch (iterator->kind) {
-                    case IteratorObject::ARRAY_ITER:
-                        hasNext =
-                            iterator->array &&
-                            iterator->index < iterator->array->elements.size();
-                        break;
-                    case IteratorObject::DICT_ITER:
-                        hasNext = iterator->dict &&
-                                  iterator->index < iterator->dictKeys.size();
-                        break;
-                    case IteratorObject::SET_ITER:
-                        hasNext =
-                            iterator->set &&
-                            iterator->index < iterator->set->elements.size();
-                        break;
-                }
-
-                m_stack.push(Value(hasNext));
-                break;
+                DISPATCH();
             }
-            VM_CASE(ITER_NEXT): {
-                Value iteratorValue = m_stack.pop();
-                if (!iteratorValue.isIterator()) {
-                    return runtimeError("Internal error: iterator expected.");
+
+            if (callee.isClosure()) {
+                Status status = callClosure(callee.asClosure(), argumentCount);
+                if (status != Status::OK) {
+                    return status;
                 }
-
-                auto iterator = iteratorValue.asIterator();
-                Value nextValue;
-
-                switch (iterator->kind) {
-                    case IteratorObject::ARRAY_ITER:
-                        if (!iterator->array ||
-                            iterator->index >=
-                                iterator->array->elements.size()) {
-                            return runtimeError(
-                                "Foreach iterator exhausted unexpectedly.");
-                        }
-                        nextValue =
-                            iterator->array->elements[iterator->index++];
-                        break;
-                    case IteratorObject::DICT_ITER:
-                        if (!iterator->dict ||
-                            iterator->index >= iterator->dictKeys.size()) {
-                            return runtimeError(
-                                "Foreach iterator exhausted unexpectedly.");
-                        }
-                        nextValue = iterator->dictKeys[iterator->index++];
-                        break;
-                    case IteratorObject::SET_ITER:
-                        if (!iterator->set ||
-                            iterator->index >= iterator->set->elements.size()) {
-                            return runtimeError(
-                                "Foreach iterator exhausted unexpectedly.");
-                        }
-                        nextValue = iterator->set->elements[iterator->index++];
-                        break;
-                }
-
-                m_stack.push(nextValue);
-                break;
+                DISPATCH();
             }
-            VM_CASE(IMPORT_MODULE): {
-                const std::string& path = readConstant().asString();
 
-                auto cached = m_moduleCache.find(path);
-                if (cached != m_moduleCache.end()) {
-                    m_stack.push(Value(cached->second));
-                    break;
-                }
-
-                if (m_importStack.find(path) != m_importStack.end()) {
-                    return runtimeError("Circular import detected: '" + path +
-                                        "'.");
-                }
-
-                std::ifstream file(path);
-                if (!file) {
-                    return runtimeError("Failed to open module '" + path +
-                                        "'.");
-                }
-
-                std::string source((std::istreambuf_iterator<char>(file)),
-                                   std::istreambuf_iterator<char>());
-                std::string_view compileSource = stripStrictDirectiveLine(source);
-                bool importStrict =
-                    m_defaultStrictMode || hasStrictDirective(source);
-
-                m_importStack.insert(path);
-
-                Chunk importedChunk;
-                m_compiler.setStrictMode(importStrict);
-                if (!m_compiler.compile(compileSource, importedChunk, path)) {
-                    m_importStack.erase(path);
-                    return Status::COMPILATION_ERROR;
-                }
-
-                auto* module = gcAlloc<ModuleObject>();
-                module->path = path;
-
-                auto savedGlobalNames = m_globalNames;
-                auto savedGlobalTypes = m_globalTypes;
-                auto savedGlobalValues = m_globalValues;
-                auto savedGlobalDefined = m_globalDefined;
-                ModuleObject* outerModule = m_currentModule;
-
-                m_globalNames = m_compiler.globalNames();
-                m_globalTypes = m_compiler.globalTypes();
-                if (m_globalTypes.size() < m_globalNames.size()) {
-                    m_globalTypes.resize(m_globalNames.size(),
-                                         TypeInfo::makeAny());
-                }
-                m_globalValues.assign(m_globalNames.size(), Value());
-                m_globalDefined.assign(m_globalNames.size(), false);
-                for (size_t i = 0; i < m_globalNames.size(); ++i) {
-                    auto nativeIt = m_nativeGlobals.find(m_globalNames[i]);
-                    if (nativeIt != m_nativeGlobals.end()) {
-                        m_globalValues[i] = nativeIt->second;
-                        m_globalDefined[i] = true;
-                    }
-                }
-
-                m_currentModule = module;
-
-                auto function = gcAlloc<FunctionObject>();
-                function->name = path;
-                function->parameters = {};
-                function->chunk =
-                    std::make_unique<Chunk>(std::move(importedChunk));
-                function->upvalueCount = 0;
-
+            if (callee.isFunction()) {
                 auto closure = gcAlloc<ClosureObject>();
-                closure->function = function;
+                closure->function = callee.asFunction();
                 closure->upvalues = {};
+                Status status = callClosure(closure, argumentCount);
+                if (status != Status::OK) {
+                    return status;
+                }
+                DISPATCH();
+            }
 
-                m_stack.push(Value(closure));
-                size_t callerFrameCount = m_frameCount;
-                Status callStatus = callClosure(closure, 0);
-                if (callStatus != Status::OK) {
-                    m_stack.pop();
-                    m_currentModule = outerModule;
-                    m_globalNames = std::move(savedGlobalNames);
-                    m_globalTypes = std::move(savedGlobalTypes);
-                    m_globalValues = std::move(savedGlobalValues);
-                    m_globalDefined = std::move(savedGlobalDefined);
-                    m_importStack.erase(path);
-                    return callStatus;
+            if (!callee.isFunction()) {
+                return runtimeError(
+                    "Can only call functions, classes, methods, and "
+                    "natives.");
+            }
+            DISPATCH();
+        }
+
+        VM_CASE(CLOSURE) {
+            Value constant = readConstant();
+            if (!constant.isFunction()) {
+                return runtimeError("CLOSURE expects a function constant.");
+            }
+
+            auto function = constant.asFunction();
+            auto closure = gcAlloc<ClosureObject>();
+            closure->function = function;
+            closure->upvalues.reserve(function->upvalueCount);
+            m_stack.push(Value(closure));
+
+            for (uint8_t i = 0; i < function->upvalueCount; ++i) {
+                uint8_t isLocal = readByte();
+                uint8_t index = readByte();
+
+                if (isLocal) {
+                    size_t stackIndex = currentFrame().slotBase + index;
+                    closure->upvalues.push_back(captureUpvalue(stackIndex));
+                } else {
+                    closure->upvalues.push_back(
+                        currentFrame().closure->upvalues[index]);
+                }
+            }
+            DISPATCH();
+        }
+
+        VM_CASE(CLOSE_UPVALUE) {
+            closeUpvalues(m_stack.size() - 1);
+            m_stack.pop();
+            DISPATCH();
+        }
+
+        VM_CASE(BUILD_ARRAY) {
+            uint8_t count = readByte();
+            auto array = gcAlloc<ArrayObject>();
+            array->elements.resize(count);
+
+            auto mergeType = [&](const TypeRef& current,
+                                 const TypeRef& next) -> TypeRef {
+                if (!current) {
+                    return next;
+                }
+                if (!next) {
+                    return current;
+                }
+                if (current->isAny() || next->isAny()) {
+                    return TypeInfo::makeAny();
+                }
+                if (isAssignable(next, current)) {
+                    return current;
+                }
+                if (isAssignable(current, next)) {
+                    return next;
+                }
+                if (current->isNumeric() && next->isNumeric()) {
+                    TypeRef promoted = numericPromotion(current, next);
+                    return promoted ? promoted : TypeInfo::makeAny();
+                }
+                return nullptr;
+            };
+
+            TypeRef inferredElementType = nullptr;
+            for (int i = static_cast<int>(count) - 1; i >= 0; --i) {
+                Value element = m_stack.popMove();
+                TypeRef elementType = inferRuntimeType(element);
+                TypeRef merged = mergeType(inferredElementType, elementType);
+                if (!merged) {
+                    return runtimeError(
+                        "Array literal elements must have consistent "
+                        "types.");
+                }
+                inferredElementType = merged;
+                array->elements[static_cast<size_t>(i)] = std::move(element);
+            }
+
+            array->elementType =
+                inferredElementType ? inferredElementType : TypeInfo::makeAny();
+
+            m_stack.push(Value(array));
+            DISPATCH();
+        }
+
+        VM_CASE(BUILD_DICT) {
+            uint8_t pairCount = readByte();
+            auto dict = gcAlloc<DictObject>();
+            dict->map.reserve(pairCount);
+
+            auto mergeType = [&](const TypeRef& current,
+                                 const TypeRef& next) -> TypeRef {
+                if (!current) {
+                    return next;
+                }
+                if (!next) {
+                    return current;
+                }
+                if (current->isAny() || next->isAny()) {
+                    return TypeInfo::makeAny();
+                }
+                if (isAssignable(next, current)) {
+                    return current;
+                }
+                if (isAssignable(current, next)) {
+                    return next;
+                }
+                if (current->isNumeric() && next->isNumeric()) {
+                    TypeRef promoted = numericPromotion(current, next);
+                    return promoted ? promoted : TypeInfo::makeAny();
+                }
+                return nullptr;
+            };
+
+            TypeRef keyType = nullptr;
+            TypeRef valueType = nullptr;
+
+            for (int i = 0; i < pairCount; ++i) {
+                Value value = m_stack.popMove();
+                Value keyValue = m_stack.popMove();
+
+                TypeRef mergedKeyType =
+                    mergeType(keyType, inferRuntimeType(keyValue));
+                if (!mergedKeyType) {
+                    return runtimeError(
+                        "Dictionary literal keys must have consistent "
+                        "types.");
+                }
+                keyType = mergedKeyType;
+
+                TypeRef mergedValueType =
+                    mergeType(valueType, inferRuntimeType(value));
+                if (!mergedValueType) {
+                    return runtimeError(
+                        "Dictionary literal values must have consistent "
+                        "types.");
+                }
+                valueType = mergedValueType;
+
+                dict->map.insert_or_assign(std::move(keyValue),
+                                           std::move(value));
+            }
+
+            dict->keyType = keyType ? keyType : TypeInfo::makeAny();
+            dict->valueType = valueType ? valueType : TypeInfo::makeAny();
+
+            m_stack.push(Value(dict));
+            DISPATCH();
+        }
+
+        VM_CASE(GET_INDEX) {
+            const Value& indexValue = m_stack.top();
+            const Value& container = m_stack.second();
+
+            if (container.isArray()) {
+                size_t index = 0;
+                if (!toArrayIndex(indexValue, index)) {
+                    return runtimeError(
+                        "Array index must be a non-negative integer.");
                 }
 
-                Value ignored;
-                Status moduleStatus = run(false, ignored, callerFrameCount);
-                if (moduleStatus != Status::OK) {
-                    m_currentModule = outerModule;
-                    m_globalNames = std::move(savedGlobalNames);
-                    m_globalTypes = std::move(savedGlobalTypes);
-                    m_globalValues = std::move(savedGlobalValues);
-                    m_globalDefined = std::move(savedGlobalDefined);
-                    m_importStack.erase(path);
-                    return moduleStatus;
+                auto array = container.asArray();
+                if (index >= array->elements.size()) {
+                    return runtimeError("Array index out of bounds.");
                 }
 
+                m_stack.replaceTopPair(array->elements[index]);
+                DISPATCH();
+            }
+
+            if (container.isDict()) {
+                auto dict = container.asDict();
+                auto it = dict->map.find(indexValue);
+                if (it == dict->map.end()) {
+                    return runtimeError("Dictionary key not found.");
+                }
+
+                m_stack.replaceTopPair(it->second);
+                DISPATCH();
+            }
+
+            if (container.isSet()) {
+                auto set = container.asSet();
+                if (!valueMatchesType(indexValue, set->elementType)) {
+                    return runtimeError(
+                        "Type error: set lookup expects element type '" +
+                        set->elementType->toString() + "', got '" +
+                        valueTypeName(indexValue) + "'.");
+                }
+                m_stack.replaceTopPair(
+                    Value(setContainsValue(set, indexValue)));
+                DISPATCH();
+            }
+
+            return runtimeError(
+                "Indexing is only supported on array, dict, and set.");
+        }
+
+        VM_CASE(SET_INDEX) {
+            Value value = m_stack.popMove();
+            Value indexValue = m_stack.popMove();
+            Value container = m_stack.popMove();
+
+            if (container.isArray()) {
+                size_t index = 0;
+                if (!toArrayIndex(indexValue, index)) {
+                    return runtimeError(
+                        "Array index must be a non-negative integer.");
+                }
+
+                auto array = container.asArray();
+                if (index >= array->elements.size()) {
+                    return runtimeError("Array index out of bounds.");
+                }
+
+                if (!valueMatchesType(value, array->elementType)) {
+                    return runtimeError(
+                        "Type error: array assignment expects element "
+                        "type '" +
+                        array->elementType->toString() + "', got '" +
+                        valueTypeName(value) + "'.");
+                }
+
+                array->elements[index] = value;
+                m_stack.push(std::move(value));
+                DISPATCH();
+            }
+
+            if (container.isDict()) {
+                auto dict = container.asDict();
+
+                if (!valueMatchesType(indexValue, dict->keyType)) {
+                    return runtimeError("Type error: dictionary key expects '" +
+                                        dict->keyType->toString() + "', got '" +
+                                        valueTypeName(indexValue) + "'.");
+                }
+
+                if (!valueMatchesType(value, dict->valueType)) {
+                    return runtimeError(
+                        "Type error: dictionary value expects '" +
+                        dict->valueType->toString() + "', got '" +
+                        valueTypeName(value) + "'.");
+                }
+
+                dict->map.insert_or_assign(std::move(indexValue), value);
+                m_stack.push(std::move(value));
+                DISPATCH();
+            }
+
+            return runtimeError(
+                "Indexed assignment is only supported on array and dict.");
+        }
+
+        VM_CASE(DUP) {
+            m_stack.push(m_stack.peek(0));
+            DISPATCH();
+        }
+
+        VM_CASE(DUP2) {
+            Value second = m_stack.peek(1);
+            Value top = m_stack.peek(0);
+            m_stack.push(second);
+            m_stack.push(top);
+            DISPATCH();
+        }
+
+        VM_CASE(ITER_INIT) {
+            Value iterable = m_stack.popMove();
+            auto iterator = gcAlloc<IteratorObject>();
+
+            if (iterable.isArray()) {
+                iterator->kind = IteratorObject::ARRAY_ITER;
+                iterator->array = iterable.asArray();
+            } else if (iterable.isDict()) {
+                iterator->kind = IteratorObject::DICT_ITER;
+                iterator->dict = iterable.asDict();
+
+                iterator->dictKeys = sortedDictKeys(iterator->dict);
+            } else if (iterable.isSet()) {
+                iterator->kind = IteratorObject::SET_ITER;
+                iterator->set = iterable.asSet();
+            } else {
+                return runtimeError(
+                    "Foreach expects an iterable (array, dict, or set).");
+            }
+
+            m_stack.push(Value(iterator));
+            DISPATCH();
+        }
+
+        VM_CASE(ITER_HAS_NEXT) {
+            Value iteratorValue = m_stack.pop();
+            if (!iteratorValue.isIterator()) {
+                return runtimeError("Internal error: iterator expected.");
+            }
+
+            auto iterator = iteratorValue.asIterator();
+            bool hasNext = false;
+
+            switch (iterator->kind) {
+                case IteratorObject::ARRAY_ITER:
+                    hasNext =
+                        iterator->array &&
+                        iterator->index < iterator->array->elements.size();
+                    break;
+                case IteratorObject::DICT_ITER:
+                    hasNext = iterator->dict &&
+                              iterator->index < iterator->dictKeys.size();
+                    break;
+                case IteratorObject::SET_ITER:
+                    hasNext = iterator->set &&
+                              iterator->index < iterator->set->elements.size();
+                    break;
+            }
+
+            m_stack.push(Value(hasNext));
+            DISPATCH();
+        }
+
+        VM_CASE(ITER_NEXT) {
+            Value iteratorValue = m_stack.pop();
+            if (!iteratorValue.isIterator()) {
+                return runtimeError("Internal error: iterator expected.");
+            }
+
+            auto iterator = iteratorValue.asIterator();
+            Value nextValue;
+
+            switch (iterator->kind) {
+                case IteratorObject::ARRAY_ITER:
+                    if (!iterator->array ||
+                        iterator->index >= iterator->array->elements.size()) {
+                        return runtimeError(
+                            "Foreach iterator exhausted unexpectedly.");
+                    }
+                    nextValue = iterator->array->elements[iterator->index++];
+                    break;
+                case IteratorObject::DICT_ITER:
+                    if (!iterator->dict ||
+                        iterator->index >= iterator->dictKeys.size()) {
+                        return runtimeError(
+                            "Foreach iterator exhausted unexpectedly.");
+                    }
+                    nextValue = iterator->dictKeys[iterator->index++];
+                    break;
+                case IteratorObject::SET_ITER:
+                    if (!iterator->set ||
+                        iterator->index >= iterator->set->elements.size()) {
+                        return runtimeError(
+                            "Foreach iterator exhausted unexpectedly.");
+                    }
+                    nextValue = iterator->set->elements[iterator->index++];
+                    break;
+            }
+
+            m_stack.push(nextValue);
+            DISPATCH();
+        }
+
+        VM_CASE(IMPORT_MODULE) {
+            const std::string& path = readConstant().asString();
+
+            auto cached = m_moduleCache.find(path);
+            if (cached != m_moduleCache.end()) {
+                m_stack.push(Value(cached->second));
+                DISPATCH();
+            }
+
+            if (m_importStack.find(path) != m_importStack.end()) {
+                return runtimeError("Circular import detected: '" + path +
+                                    "'.");
+            }
+
+            std::ifstream file(path);
+            if (!file) {
+                return runtimeError("Failed to open module '" + path + "'.");
+            }
+
+            std::string source((std::istreambuf_iterator<char>(file)),
+                               std::istreambuf_iterator<char>());
+            std::string_view compileSource = stripStrictDirectiveLine(source);
+            bool importStrict =
+                m_defaultStrictMode || hasStrictDirective(source);
+
+            m_importStack.insert(path);
+
+            Chunk importedChunk;
+            m_compiler.setStrictMode(importStrict);
+            if (!m_compiler.compile(compileSource, importedChunk, path)) {
+                m_importStack.erase(path);
+                return Status::COMPILATION_ERROR;
+            }
+
+            auto* module = gcAlloc<ModuleObject>();
+            module->path = path;
+
+            auto savedGlobalNames = m_globalNames;
+            auto savedGlobalTypes = m_globalTypes;
+            auto savedGlobalValues = m_globalValues;
+            auto savedGlobalDefined = m_globalDefined;
+            ModuleObject* outerModule = m_currentModule;
+
+            m_globalNames = m_compiler.globalNames();
+            m_globalTypes = m_compiler.globalTypes();
+            if (m_globalTypes.size() < m_globalNames.size()) {
+                m_globalTypes.resize(m_globalNames.size(), TypeInfo::makeAny());
+            }
+            m_globalValues.assign(m_globalNames.size(), Value());
+            m_globalDefined.assign(m_globalNames.size(), false);
+            for (size_t i = 0; i < m_globalNames.size(); ++i) {
+                auto nativeIt = m_nativeGlobals.find(m_globalNames[i]);
+                if (nativeIt != m_nativeGlobals.end()) {
+                    m_globalValues[i] = nativeIt->second;
+                    m_globalDefined[i] = true;
+                }
+            }
+
+            m_currentModule = module;
+
+            auto function = gcAlloc<FunctionObject>();
+            function->name = path;
+            function->parameters = {};
+            function->chunk = std::make_unique<Chunk>(std::move(importedChunk));
+            function->upvalueCount = 0;
+
+            auto closure = gcAlloc<ClosureObject>();
+            closure->function = function;
+            closure->upvalues = {};
+
+            m_stack.push(Value(closure));
+            size_t callerFrameCount = m_frameCount;
+            Status callStatus = callClosure(closure, 0);
+            if (callStatus != Status::OK) {
                 m_stack.pop();
-
                 m_currentModule = outerModule;
                 m_globalNames = std::move(savedGlobalNames);
                 m_globalTypes = std::move(savedGlobalTypes);
                 m_globalValues = std::move(savedGlobalValues);
                 m_globalDefined = std::move(savedGlobalDefined);
-
-                m_moduleCache[path] = module;
                 m_importStack.erase(path);
-                m_stack.push(Value(module));
-                break;
+                return callStatus;
             }
-            VM_CASE(EXPORT_NAME): {
-                const std::string& name = readConstant().asString();
-                if (m_currentModule != nullptr) {
-                    Value value = m_stack.peek(0);
-                    TypeRef declaredType = TypeInfo::makeAny();
-                    for (size_t i = 0; i < m_globalNames.size(); ++i) {
-                        if (m_globalNames[i] == name) {
-                            if (i < m_globalTypes.size() && m_globalTypes[i]) {
-                                declaredType = m_globalTypes[i];
-                            }
-                            break;
-                        }
-                    }
 
-                    if (declaredType && !declaredType->isAny() &&
-                        !valueMatchesType(value, declaredType)) {
-                        return runtimeError(
-                            "Type error: cannot export '" + name + "' as '" +
-                            declaredType->toString() + "' from module '" +
-                            m_currentModule->path + "'; got '" +
-                            valueTypeName(value) + "'.");
-                    }
+            Value ignored;
+            Status moduleStatus = run(false, ignored, callerFrameCount);
+            if (moduleStatus != Status::OK) {
+                m_currentModule = outerModule;
+                m_globalNames = std::move(savedGlobalNames);
+                m_globalTypes = std::move(savedGlobalTypes);
+                m_globalValues = std::move(savedGlobalValues);
+                m_globalDefined = std::move(savedGlobalDefined);
+                m_importStack.erase(path);
+                return moduleStatus;
+            }
 
-                    m_currentModule->exports[name] = value;
-                    m_currentModule->exportTypes[name] = declaredType;
-                }
-                break;
-            }
-            VM_CASE(JUMP): {
-                uint16_t offset = readShort();
-                currentFrame().ip += offset;
-                break;
-            }
-            VM_CASE(JUMP_IF_FALSE): {
-                uint16_t offset = readShort();
-                Value condition = m_stack.peek(0);
-                if (isFalsey(condition)) {
-                    currentFrame().ip += offset;
-                }
-                break;
-            }
-            VM_CASE(LOOP): {
-                uint16_t offset = readShort();
-                currentFrame().ip -= offset;
-                break;
-            }
-            VM_CASE(SHIFT_LEFT): {
-                Value b = m_stack.pop();
-                Value a = m_stack.pop();
-                int64_t shift = 0;
-                if (!valueToSignedInt(b, shift)) {
-                    return runtimeError("Operands must be numbers for '<<'.");
-                }
+            m_stack.pop();
 
-                uint32_t amount = static_cast<uint32_t>(shift) & 63u;
-                if (a.isUnsignedInt()) {
-                    m_stack.push(Value(a.asUnsignedInt() << amount));
-                } else {
-                    int64_t lhs = 0;
-                    if (!valueToSignedInt(a, lhs)) {
-                        return runtimeError(
-                            "Operands must be numbers for '<<'.");
-                    }
-                    m_stack.push(Value(static_cast<int64_t>(
-                        static_cast<uint64_t>(lhs) << amount)));
-                }
-                break;
-            }
-            VM_CASE(SHIFT_RIGHT): {
-                Value b = m_stack.pop();
-                Value a = m_stack.pop();
-                int64_t shift = 0;
-                if (!valueToSignedInt(b, shift)) {
-                    return runtimeError("Operands must be numbers for '>>'.");
-                }
+            m_currentModule = outerModule;
+            m_globalNames = std::move(savedGlobalNames);
+            m_globalTypes = std::move(savedGlobalTypes);
+            m_globalValues = std::move(savedGlobalValues);
+            m_globalDefined = std::move(savedGlobalDefined);
 
-                uint32_t amount = static_cast<uint32_t>(shift) & 63u;
-                if (a.isUnsignedInt()) {
-                    m_stack.push(Value(a.asUnsignedInt() >> amount));
-                } else {
-                    int64_t lhs = 0;
-                    if (!valueToSignedInt(a, lhs)) {
-                        return runtimeError(
-                            "Operands must be numbers for '>>'.");
-                    }
-                    m_stack.push(Value(lhs >> amount));
-                }
-                break;
-            }
-            VM_CASE(BITWISE_AND): {
-                uint64_t rhs = 0;
-                uint64_t lhs = 0;
-                if (!valueToBitwiseUnsignedInt(m_stack.pop(), rhs) ||
-                    !valueToBitwiseUnsignedInt(m_stack.pop(), lhs)) {
-                    return runtimeError("Operands must be integers for '&'.");
-                }
-                m_stack.push(Value(lhs & rhs));
-                break;
-            }
-            VM_CASE(BITWISE_OR): {
-                uint64_t rhs = 0;
-                uint64_t lhs = 0;
-                if (!valueToBitwiseUnsignedInt(m_stack.pop(), rhs) ||
-                    !valueToBitwiseUnsignedInt(m_stack.pop(), lhs)) {
-                    return runtimeError("Operands must be integers for '|'.");
-                }
-                m_stack.push(Value(lhs | rhs));
-                break;
-            }
-            VM_CASE(BITWISE_XOR): {
-                uint64_t rhs = 0;
-                uint64_t lhs = 0;
-                if (!valueToBitwiseUnsignedInt(m_stack.pop(), rhs) ||
-                    !valueToBitwiseUnsignedInt(m_stack.pop(), lhs)) {
-                    return runtimeError("Operands must be integers for '^'.");
-                }
-                m_stack.push(Value(lhs ^ rhs));
-                break;
-            }
-            VM_CASE(BITWISE_NOT): {
-                uint64_t value = 0;
-                if (!valueToBitwiseUnsignedInt(m_stack.pop(), value)) {
-                    return runtimeError("Operand must be an integer for '~'.");
-                }
-                m_stack.push(Value(~value));
-                break;
-            }
-            VM_CASE(WIDEN_INT): {
-                readByte();
-                break;
-            }
-            VM_CASE(NARROW_INT): {
-                uint8_t kind = readByte();
-                Value value = m_stack.pop();
+            m_moduleCache[path] = module;
+            m_importStack.erase(path);
+            m_stack.push(Value(module));
+            DISPATCH();
+        }
 
-                switch (static_cast<TypeKind>(kind)) {
-                    case TypeKind::I8: {
-                        int64_t converted = 0;
-                        if (!valueToSignedInt(value, converted)) {
-                            return runtimeError("Cannot cast value to i8.");
-                        }
-                        m_stack.push(Value(static_cast<int64_t>(
-                            static_cast<int8_t>(converted))));
-                        break;
-                    }
-                    case TypeKind::I16: {
-                        int64_t converted = 0;
-                        if (!valueToSignedInt(value, converted)) {
-                            return runtimeError("Cannot cast value to i16.");
-                        }
-                        m_stack.push(Value(static_cast<int64_t>(
-                            static_cast<int16_t>(converted))));
-                        break;
-                    }
-                    case TypeKind::I32: {
-                        int64_t converted = 0;
-                        if (!valueToSignedInt(value, converted)) {
-                            return runtimeError("Cannot cast value to i32.");
-                        }
-                        m_stack.push(Value(static_cast<int64_t>(
-                            static_cast<int32_t>(converted))));
-                        break;
-                    }
-                    case TypeKind::I64: {
-                        int64_t converted = 0;
-                        if (!valueToSignedInt(value, converted)) {
-                            return runtimeError("Cannot cast value to i64.");
-                        }
-                        m_stack.push(Value(converted));
-                        break;
-                    }
-                    case TypeKind::U8: {
-                        uint64_t converted = 0;
-                        if (!valueToUnsignedInt(value, converted)) {
-                            return runtimeError("Cannot cast value to u8.");
-                        }
-                        m_stack.push(Value(static_cast<uint64_t>(
-                            static_cast<uint8_t>(converted))));
-                        break;
-                    }
-                    case TypeKind::U16: {
-                        uint64_t converted = 0;
-                        if (!valueToUnsignedInt(value, converted)) {
-                            return runtimeError("Cannot cast value to u16.");
-                        }
-                        m_stack.push(Value(static_cast<uint64_t>(
-                            static_cast<uint16_t>(converted))));
-                        break;
-                    }
-                    case TypeKind::U32: {
-                        uint64_t converted = 0;
-                        if (!valueToUnsignedInt(value, converted)) {
-                            return runtimeError("Cannot cast value to u32.");
-                        }
-                        m_stack.push(Value(static_cast<uint64_t>(
-                            static_cast<uint32_t>(converted))));
-                        break;
-                    }
-                    case TypeKind::U64:
-                    case TypeKind::USIZE: {
-                        uint64_t converted = 0;
-                        if (!valueToUnsignedInt(value, converted)) {
-                            return runtimeError("Cannot cast value to u64.");
-                        }
-                        m_stack.push(Value(converted));
-                        break;
-                    }
-                    default:
-                        m_stack.push(value);
-                        break;
-                }
-                break;
-            }
-            VM_CASE(INT_TO_FLOAT): {
-                Value value = m_stack.pop();
-                double converted = 0.0;
-                if (!valueToDouble(value, converted)) {
-                    return runtimeError("Cannot cast value to floating-point.");
-                }
-                m_stack.push(Value(converted));
-                break;
-            }
-            VM_CASE(FLOAT_TO_INT): {
-                Value value = m_stack.pop();
-                int64_t converted = 0;
-                if (!valueToSignedInt(value, converted)) {
-                    return runtimeError("Cannot cast value to integer.");
-                }
-                m_stack.push(Value(converted));
-                break;
-            }
-            VM_CASE(INT_TO_STR): {
-                Value value = m_stack.pop();
-                if (value.isSignedInt()) {
-                    m_stack.push(Value(std::to_string(value.asSignedInt())));
-                    break;
-                }
-                if (value.isUnsignedInt()) {
-                    m_stack.push(Value(std::to_string(value.asUnsignedInt())));
-                    break;
-                }
-                if (value.isNumber()) {
-                    m_stack.push(Value(std::to_string(value.asNumber())));
-                    break;
-                }
-                return runtimeError("Cannot cast value to str.");
-            }
-            VM_CASE(CHECK_INSTANCE_TYPE): {
-                const std::string& expectedClass = readNameConstant();
+        VM_CASE(EXPORT_NAME) {
+            const std::string& name = readConstant().asString();
+            if (m_currentModule != nullptr) {
                 Value value = m_stack.peek(0);
+                TypeRef declaredType = TypeInfo::makeAny();
+                for (size_t i = 0; i < m_globalNames.size(); ++i) {
+                    if (m_globalNames[i] == name) {
+                        if (i < m_globalTypes.size() && m_globalTypes[i]) {
+                            declaredType = m_globalTypes[i];
+                        }
+                        break;
+                    }
+                }
 
-                if (!value.isInstance()) {
-                    return runtimeError("Type error: expected instance of '" +
-                                        expectedClass + "', got '" +
+                if (declaredType && !declaredType->isAny() &&
+                    !valueMatchesType(value, declaredType)) {
+                    return runtimeError("Type error: cannot export '" + name +
+                                        "' as '" + declaredType->toString() +
+                                        "' from module '" +
+                                        m_currentModule->path + "'; got '" +
                                         valueTypeName(value) + "'.");
                 }
 
-                auto instance = value.asInstance();
-                if (!isInstanceOfClass(instance, expectedClass)) {
-                    std::string actualClass = (instance && instance->klass)
-                                                  ? instance->klass->name
-                                                  : std::string("<unknown>");
-                    return runtimeError("Type error: expected instance of '" +
-                                        expectedClass + "', got '" +
-                                        actualClass + "'.");
-                }
-                break;
+                m_currentModule->exports[name] = value;
+                m_currentModule->exportTypes[name] = declaredType;
             }
-            VM_CASE(INT_NEGATE): {
-                int64_t value = requireSignedInt(m_stack.pop());
-                m_stack.push(Value(wrapSignedSub(0, value)));
-                break;
-            }
-            default:
-                return runtimeError("Invalid instruction opcode.");
-            }
-            goto dispatch;
-        } catch (const std::exception& error) {
-            return runtimeError(error.what());
+            DISPATCH();
         }
+
+        VM_CASE(JUMP) {
+            uint16_t offset = readShort();
+            currentFrame().ip += offset;
+            DISPATCH();
+        }
+
+        VM_CASE(JUMP_IF_FALSE) {
+            uint16_t offset = readShort();
+            Value condition = m_stack.peek(0);
+            if (isFalsey(condition)) {
+                currentFrame().ip += offset;
+            }
+            DISPATCH();
+        }
+
+        VM_CASE(LOOP) {
+            uint16_t offset = readShort();
+            currentFrame().ip -= offset;
+            DISPATCH();
+        }
+
+        VM_CASE(SHIFT_LEFT) {
+            Value b = m_stack.pop();
+            Value a = m_stack.pop();
+            int64_t shift = 0;
+            if (!valueToSignedInt(b, shift)) {
+                return runtimeError("Operands must be numbers for '<<'.");
+            }
+
+            uint32_t amount = static_cast<uint32_t>(shift) & 63u;
+            if (a.isUnsignedInt()) {
+                m_stack.push(Value(a.asUnsignedInt() << amount));
+            } else {
+                int64_t lhs = 0;
+                if (!valueToSignedInt(a, lhs)) {
+                    return runtimeError("Operands must be numbers for '<<'.");
+                }
+                m_stack.push(Value(static_cast<int64_t>(
+                    static_cast<uint64_t>(lhs) << amount)));
+            }
+            DISPATCH();
+        }
+
+        VM_CASE(SHIFT_RIGHT) {
+            Value b = m_stack.pop();
+            Value a = m_stack.pop();
+            int64_t shift = 0;
+            if (!valueToSignedInt(b, shift)) {
+                return runtimeError("Operands must be numbers for '>>'.");
+            }
+
+            uint32_t amount = static_cast<uint32_t>(shift) & 63u;
+            if (a.isUnsignedInt()) {
+                m_stack.push(Value(a.asUnsignedInt() >> amount));
+            } else {
+                int64_t lhs = 0;
+                if (!valueToSignedInt(a, lhs)) {
+                    return runtimeError("Operands must be numbers for '>>'.");
+                }
+                m_stack.push(Value(lhs >> amount));
+            }
+            DISPATCH();
+        }
+
+        VM_CASE(BITWISE_AND) {
+            uint64_t rhs = 0;
+            uint64_t lhs = 0;
+            if (!valueToBitwiseUnsignedInt(m_stack.pop(), rhs) ||
+                !valueToBitwiseUnsignedInt(m_stack.pop(), lhs)) {
+                return runtimeError("Operands must be integers for '&'.");
+            }
+            m_stack.push(Value(lhs & rhs));
+            DISPATCH();
+        }
+
+        VM_CASE(BITWISE_OR) {
+            uint64_t rhs = 0;
+            uint64_t lhs = 0;
+            if (!valueToBitwiseUnsignedInt(m_stack.pop(), rhs) ||
+                !valueToBitwiseUnsignedInt(m_stack.pop(), lhs)) {
+                return runtimeError("Operands must be integers for '|'.");
+            }
+            m_stack.push(Value(lhs | rhs));
+            DISPATCH();
+        }
+
+        VM_CASE(BITWISE_XOR) {
+            uint64_t rhs = 0;
+            uint64_t lhs = 0;
+            if (!valueToBitwiseUnsignedInt(m_stack.pop(), rhs) ||
+                !valueToBitwiseUnsignedInt(m_stack.pop(), lhs)) {
+                return runtimeError("Operands must be integers for '^'.");
+            }
+            m_stack.push(Value(lhs ^ rhs));
+            DISPATCH();
+        }
+
+        VM_CASE(BITWISE_NOT) {
+            uint64_t value = 0;
+            if (!valueToBitwiseUnsignedInt(m_stack.pop(), value)) {
+                return runtimeError("Operand must be an integer for '~'.");
+            }
+            m_stack.push(Value(~value));
+            DISPATCH();
+        }
+
+        VM_CASE(WIDEN_INT) {
+            readByte();
+            DISPATCH();
+        }
+
+        VM_CASE(NARROW_INT) {
+            uint8_t kind = readByte();
+            Value value = m_stack.pop();
+
+            switch (static_cast<TypeKind>(kind)) {
+                case TypeKind::I8: {
+                    int64_t converted = 0;
+                    if (!valueToSignedInt(value, converted)) {
+                        return runtimeError("Cannot cast value to i8.");
+                    }
+                    m_stack.push(Value(
+                        static_cast<int64_t>(static_cast<int8_t>(converted))));
+                    break;
+                }
+                case TypeKind::I16: {
+                    int64_t converted = 0;
+                    if (!valueToSignedInt(value, converted)) {
+                        return runtimeError("Cannot cast value to i16.");
+                    }
+                    m_stack.push(Value(
+                        static_cast<int64_t>(static_cast<int16_t>(converted))));
+                    break;
+                }
+                case TypeKind::I32: {
+                    int64_t converted = 0;
+                    if (!valueToSignedInt(value, converted)) {
+                        return runtimeError("Cannot cast value to i32.");
+                    }
+                    m_stack.push(Value(
+                        static_cast<int64_t>(static_cast<int32_t>(converted))));
+                    break;
+                }
+                case TypeKind::I64: {
+                    int64_t converted = 0;
+                    if (!valueToSignedInt(value, converted)) {
+                        return runtimeError("Cannot cast value to i64.");
+                    }
+                    m_stack.push(Value(converted));
+                    break;
+                }
+                case TypeKind::U8: {
+                    uint64_t converted = 0;
+                    if (!valueToUnsignedInt(value, converted)) {
+                        return runtimeError("Cannot cast value to u8.");
+                    }
+                    m_stack.push(Value(static_cast<uint64_t>(
+                        static_cast<uint8_t>(converted))));
+                    break;
+                }
+                case TypeKind::U16: {
+                    uint64_t converted = 0;
+                    if (!valueToUnsignedInt(value, converted)) {
+                        return runtimeError("Cannot cast value to u16.");
+                    }
+                    m_stack.push(Value(static_cast<uint64_t>(
+                        static_cast<uint16_t>(converted))));
+                    break;
+                }
+                case TypeKind::U32: {
+                    uint64_t converted = 0;
+                    if (!valueToUnsignedInt(value, converted)) {
+                        return runtimeError("Cannot cast value to u32.");
+                    }
+                    m_stack.push(Value(static_cast<uint64_t>(
+                        static_cast<uint32_t>(converted))));
+                    break;
+                }
+                case TypeKind::U64:
+                case TypeKind::USIZE: {
+                    uint64_t converted = 0;
+                    if (!valueToUnsignedInt(value, converted)) {
+                        return runtimeError("Cannot cast value to u64.");
+                    }
+                    m_stack.push(Value(converted));
+                    break;
+                }
+                default:
+                    m_stack.push(value);
+                    break;
+            }
+            DISPATCH();
+        }
+
+        VM_CASE(INT_TO_FLOAT) {
+            Value value = m_stack.pop();
+            double converted = 0.0;
+            if (!valueToDouble(value, converted)) {
+                return runtimeError("Cannot cast value to floating-point.");
+            }
+            m_stack.push(Value(converted));
+            DISPATCH();
+        }
+
+        VM_CASE(FLOAT_TO_INT) {
+            Value value = m_stack.pop();
+            int64_t converted = 0;
+            if (!valueToSignedInt(value, converted)) {
+                return runtimeError("Cannot cast value to integer.");
+            }
+            m_stack.push(Value(converted));
+            DISPATCH();
+        }
+
+        VM_CASE(INT_TO_STR) {
+            Value value = m_stack.pop();
+            if (value.isSignedInt()) {
+                m_stack.push(Value(std::to_string(value.asSignedInt())));
+                DISPATCH();
+            }
+            if (value.isUnsignedInt()) {
+                m_stack.push(Value(std::to_string(value.asUnsignedInt())));
+                DISPATCH();
+            }
+            if (value.isNumber()) {
+                m_stack.push(Value(std::to_string(value.asNumber())));
+                DISPATCH();
+            }
+            return runtimeError("Cannot cast value to str.");
+        }
+
+        VM_CASE(CHECK_INSTANCE_TYPE) {
+            const std::string& expectedClass = readNameConstant();
+            Value value = m_stack.peek(0);
+
+            if (!value.isInstance()) {
+                return runtimeError("Type error: expected instance of '" +
+                                    expectedClass + "', got '" +
+                                    valueTypeName(value) + "'.");
+            }
+
+            auto instance = value.asInstance();
+            if (!isInstanceOfClass(instance, expectedClass)) {
+                std::string actualClass = (instance && instance->klass)
+                                              ? instance->klass->name
+                                              : std::string("<unknown>");
+                return runtimeError("Type error: expected instance of '" +
+                                    expectedClass + "', got '" + actualClass +
+                                    "'.");
+            }
+            DISPATCH();
+        }
+
+        VM_CASE(INT_NEGATE) {
+            int64_t value = requireSignedInt(m_stack.pop());
+            m_stack.push(Value(wrapSignedSub(0, value)));
+            DISPATCH();
+        }
+
+    } catch (const std::exception& error) {
+        return runtimeError(error.what());
     }
 }
+
+#undef DISPATCH
+#undef DISPATCH_INSTRUCTION
 
 #undef VM_OPCODE_LABEL
 #undef VM_OPCODE_ADDR
