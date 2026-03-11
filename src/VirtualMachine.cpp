@@ -869,7 +869,7 @@ dispatch:
                 break;
             }
             VM_CASE(NEGATE): {
-                const Value& value = m_stack.peek(0);
+                const Value& value = m_stack.top();
                 if (!value.isAnyNumeric()) {
                     return runtimeError(
                         "Operand must be a number for unary '-'.");
@@ -884,44 +884,35 @@ dispatch:
                 } else {
                     result = Value(-value.asNumber());
                 }
-                m_stack.popN(1);
-                m_stack.push(std::move(result));
+                m_stack.replaceTop(std::move(result));
                 break;
             }
             VM_CASE(NOT): {
-                bool result = isFalsey(m_stack.peek(0));
-                m_stack.popN(1);
-                m_stack.push(Value(result));
+                m_stack.replaceTop(Value(isFalsey(m_stack.top())));
                 break;
             }
             VM_CASE(EQUAL_OP): {
-                bool result = m_stack.peek(1) == m_stack.peek(0);
-                m_stack.popN(2);
-                m_stack.push(Value(result));
+                m_stack.replaceTopPair(Value(m_stack.second() == m_stack.top()));
                 break;
             }
             VM_CASE(NOT_EQUAL_OP): {
-                bool result = m_stack.peek(1) != m_stack.peek(0);
-                m_stack.popN(2);
-                m_stack.push(Value(result));
+                m_stack.replaceTopPair(Value(m_stack.second() != m_stack.top()));
                 break;
             }
             VM_CASE(ADD): {
-                const Value& b = m_stack.peek(0);
-                const Value& a = m_stack.peek(1);
+                const Value& b = m_stack.top();
+                const Value& a = m_stack.second();
 
                 if (a.isSignedInt() && b.isSignedInt()) {
                     Value result(
                         wrapSignedAdd(a.asSignedInt(), b.asSignedInt()));
-                    m_stack.popN(2);
-                    m_stack.push(std::move(result));
+                    m_stack.replaceTopPair(std::move(result));
                     break;
                 }
 
                 if (a.isUnsignedInt() && b.isUnsignedInt()) {
                     Value result(a.asUnsignedInt() + b.asUnsignedInt());
-                    m_stack.popN(2);
-                    m_stack.push(std::move(result));
+                    m_stack.replaceTopPair(std::move(result));
                     break;
                 }
 
@@ -931,15 +922,13 @@ dispatch:
                     valueToDouble(a, lhs);
                     valueToDouble(b, rhs);
                     Value result(lhs + rhs);
-                    m_stack.popN(2);
-                    m_stack.push(std::move(result));
+                    m_stack.replaceTopPair(std::move(result));
                     break;
                 }
 
                 if (a.isString() && b.isString()) {
                     std::string result = a.asString() + b.asString();
-                    m_stack.popN(2);
-                    m_stack.push(Value(std::move(result)));
+                    m_stack.replaceTopPair(Value(std::move(result)));
                     break;
                 }
 
@@ -947,8 +936,8 @@ dispatch:
                     "Operands must be two numbers or two strings for '+'.");
             }
             VM_CASE(SUB): {
-                const Value& b = m_stack.peek(0);
-                const Value& a = m_stack.peek(1);
+                const Value& b = m_stack.top();
+                const Value& a = m_stack.second();
                 if (!isNumberPair(a, b)) {
                     return runtimeError("Operands must be numbers for '-'.");
                 }
@@ -956,15 +945,13 @@ dispatch:
                 if (a.isSignedInt() && b.isSignedInt()) {
                     Value result(
                         wrapSignedSub(a.asSignedInt(), b.asSignedInt()));
-                    m_stack.popN(2);
-                    m_stack.push(std::move(result));
+                    m_stack.replaceTopPair(std::move(result));
                     break;
                 }
 
                 if (a.isUnsignedInt() && b.isUnsignedInt()) {
                     Value result(a.asUnsignedInt() - b.asUnsignedInt());
-                    m_stack.popN(2);
-                    m_stack.push(std::move(result));
+                    m_stack.replaceTopPair(std::move(result));
                     break;
                 }
 
@@ -973,13 +960,12 @@ dispatch:
                 valueToDouble(a, lhs);
                 valueToDouble(b, rhs);
                 Value result(lhs - rhs);
-                m_stack.popN(2);
-                m_stack.push(std::move(result));
+                m_stack.replaceTopPair(std::move(result));
                 break;
             }
             VM_CASE(MULT): {
-                const Value& b = m_stack.peek(0);
-                const Value& a = m_stack.peek(1);
+                const Value& b = m_stack.top();
+                const Value& a = m_stack.second();
                 if (!isNumberPair(a, b)) {
                     return runtimeError("Operands must be numbers for '*'.");
                 }
@@ -987,15 +973,13 @@ dispatch:
                 if (a.isSignedInt() && b.isSignedInt()) {
                     Value result(
                         wrapSignedMul(a.asSignedInt(), b.asSignedInt()));
-                    m_stack.popN(2);
-                    m_stack.push(std::move(result));
+                    m_stack.replaceTopPair(std::move(result));
                     break;
                 }
 
                 if (a.isUnsignedInt() && b.isUnsignedInt()) {
                     Value result(a.asUnsignedInt() * b.asUnsignedInt());
-                    m_stack.popN(2);
-                    m_stack.push(std::move(result));
+                    m_stack.replaceTopPair(std::move(result));
                     break;
                 }
 
@@ -1004,13 +988,12 @@ dispatch:
                 valueToDouble(a, lhs);
                 valueToDouble(b, rhs);
                 Value result(lhs * rhs);
-                m_stack.popN(2);
-                m_stack.push(std::move(result));
+                m_stack.replaceTopPair(std::move(result));
                 break;
             }
             VM_CASE(DIV): {
-                const Value& b = m_stack.peek(0);
-                const Value& a = m_stack.peek(1);
+                const Value& b = m_stack.top();
+                const Value& a = m_stack.second();
                 if (!isNumberPair(a, b)) {
                     return runtimeError("Operands must be numbers for '/'.");
                 }
@@ -1020,8 +1003,7 @@ dispatch:
                         return runtimeError("Division by zero.");
                     }
                     Value result(a.asSignedInt() / b.asSignedInt());
-                    m_stack.popN(2);
-                    m_stack.push(std::move(result));
+                    m_stack.replaceTopPair(std::move(result));
                     break;
                 }
 
@@ -1030,8 +1012,7 @@ dispatch:
                         return runtimeError("Division by zero.");
                     }
                     Value result(a.asUnsignedInt() / b.asUnsignedInt());
-                    m_stack.popN(2);
-                    m_stack.push(std::move(result));
+                    m_stack.replaceTopPair(std::move(result));
                     break;
                 }
 
@@ -1040,110 +1021,97 @@ dispatch:
                 valueToDouble(a, lhs);
                 valueToDouble(b, rhs);
                 Value result(lhs / rhs);
-                m_stack.popN(2);
-                m_stack.push(std::move(result));
+                m_stack.replaceTopPair(std::move(result));
                 break;
             }
             VM_CASE(IADD): {
-                int64_t rhs = requireSignedInt(m_stack.peek(0));
-                int64_t lhs = requireSignedInt(m_stack.peek(1));
-                m_stack.popN(2);
-                m_stack.push(Value(wrapSignedAdd(lhs, rhs)));
+                int64_t rhs = requireSignedInt(m_stack.top());
+                int64_t lhs = requireSignedInt(m_stack.second());
+                m_stack.replaceTopPair(Value(wrapSignedAdd(lhs, rhs)));
                 break;
             }
             VM_CASE(ISUB): {
-                int64_t rhs = requireSignedInt(m_stack.peek(0));
-                int64_t lhs = requireSignedInt(m_stack.peek(1));
-                m_stack.popN(2);
-                m_stack.push(Value(wrapSignedSub(lhs, rhs)));
+                int64_t rhs = requireSignedInt(m_stack.top());
+                int64_t lhs = requireSignedInt(m_stack.second());
+                m_stack.replaceTopPair(Value(wrapSignedSub(lhs, rhs)));
                 break;
             }
             VM_CASE(IMULT): {
-                int64_t rhs = requireSignedInt(m_stack.peek(0));
-                int64_t lhs = requireSignedInt(m_stack.peek(1));
-                m_stack.popN(2);
-                m_stack.push(Value(wrapSignedMul(lhs, rhs)));
+                int64_t rhs = requireSignedInt(m_stack.top());
+                int64_t lhs = requireSignedInt(m_stack.second());
+                m_stack.replaceTopPair(Value(wrapSignedMul(lhs, rhs)));
                 break;
             }
             VM_CASE(IDIV): {
-                int64_t rhs = requireSignedInt(m_stack.peek(0));
-                int64_t lhs = requireSignedInt(m_stack.peek(1));
+                int64_t rhs = requireSignedInt(m_stack.top());
+                int64_t lhs = requireSignedInt(m_stack.second());
                 if (rhs == 0) {
                     return runtimeError("Division by zero.");
                 }
-                m_stack.popN(2);
-                m_stack.push(Value(lhs / rhs));
+                m_stack.replaceTopPair(Value(lhs / rhs));
                 break;
             }
             VM_CASE(IMOD): {
-                int64_t rhs = requireSignedInt(m_stack.peek(0));
-                int64_t lhs = requireSignedInt(m_stack.peek(1));
+                int64_t rhs = requireSignedInt(m_stack.top());
+                int64_t lhs = requireSignedInt(m_stack.second());
                 if (rhs == 0) {
                     return runtimeError("Division by zero.");
                 }
-                m_stack.popN(2);
-                m_stack.push(Value(lhs % rhs));
+                m_stack.replaceTopPair(Value(lhs % rhs));
                 break;
             }
             VM_CASE(UADD): {
-                uint64_t rhs = requireUnsignedInt(m_stack.peek(0));
-                uint64_t lhs = requireUnsignedInt(m_stack.peek(1));
-                m_stack.popN(2);
-                m_stack.push(Value(lhs + rhs));
+                uint64_t rhs = requireUnsignedInt(m_stack.top());
+                uint64_t lhs = requireUnsignedInt(m_stack.second());
+                m_stack.replaceTopPair(Value(lhs + rhs));
                 break;
             }
             VM_CASE(USUB): {
-                uint64_t rhs = requireUnsignedInt(m_stack.peek(0));
-                uint64_t lhs = requireUnsignedInt(m_stack.peek(1));
-                m_stack.popN(2);
-                m_stack.push(Value(lhs - rhs));
+                uint64_t rhs = requireUnsignedInt(m_stack.top());
+                uint64_t lhs = requireUnsignedInt(m_stack.second());
+                m_stack.replaceTopPair(Value(lhs - rhs));
                 break;
             }
             VM_CASE(UMULT): {
-                uint64_t rhs = requireUnsignedInt(m_stack.peek(0));
-                uint64_t lhs = requireUnsignedInt(m_stack.peek(1));
-                m_stack.popN(2);
-                m_stack.push(Value(lhs * rhs));
+                uint64_t rhs = requireUnsignedInt(m_stack.top());
+                uint64_t lhs = requireUnsignedInt(m_stack.second());
+                m_stack.replaceTopPair(Value(lhs * rhs));
                 break;
             }
             VM_CASE(UDIV): {
-                uint64_t rhs = requireUnsignedInt(m_stack.peek(0));
-                uint64_t lhs = requireUnsignedInt(m_stack.peek(1));
+                uint64_t rhs = requireUnsignedInt(m_stack.top());
+                uint64_t lhs = requireUnsignedInt(m_stack.second());
                 if (rhs == 0) {
                     return runtimeError("Division by zero.");
                 }
-                m_stack.popN(2);
-                m_stack.push(Value(lhs / rhs));
+                m_stack.replaceTopPair(Value(lhs / rhs));
                 break;
             }
             VM_CASE(UMOD): {
-                uint64_t rhs = requireUnsignedInt(m_stack.peek(0));
-                uint64_t lhs = requireUnsignedInt(m_stack.peek(1));
+                uint64_t rhs = requireUnsignedInt(m_stack.top());
+                uint64_t lhs = requireUnsignedInt(m_stack.second());
                 if (rhs == 0) {
                     return runtimeError("Division by zero.");
                 }
-                m_stack.popN(2);
-                m_stack.push(Value(lhs % rhs));
+                m_stack.replaceTopPair(Value(lhs % rhs));
                 break;
             }
             VM_CASE(GREATER_THAN): {
-                const Value& b = m_stack.peek(0);
-                const Value& a = m_stack.peek(1);
+                const Value& b = m_stack.top();
+                const Value& a = m_stack.second();
                 if (!isNumberPair(a, b)) {
                     return runtimeError("Operands must be numbers for '>'.");
                 }
 
                 if (a.isSignedInt() && b.isSignedInt()) {
-                    Value result(a.asSignedInt() > b.asSignedInt());
-                    m_stack.popN(2);
-                    m_stack.push(std::move(result));
+                    m_stack.replaceTopPair(
+                        Value(a.asSignedInt() > b.asSignedInt()));
                     break;
                 }
 
                 if (a.isUnsignedInt() && b.isUnsignedInt()) {
-                    Value result(a.asUnsignedInt() > b.asUnsignedInt());
-                    m_stack.popN(2);
-                    m_stack.push(std::move(result));
+                    m_stack.replaceTopPair(
+                        Value(a.asUnsignedInt() > b.asUnsignedInt()));
                     break;
                 }
 
@@ -1151,29 +1119,25 @@ dispatch:
                 double rhs = 0.0;
                 valueToDouble(a, lhs);
                 valueToDouble(b, rhs);
-                Value result(lhs > rhs);
-                m_stack.popN(2);
-                m_stack.push(std::move(result));
+                m_stack.replaceTopPair(Value(lhs > rhs));
                 break;
             }
             VM_CASE(LESS_THAN): {
-                const Value& b = m_stack.peek(0);
-                const Value& a = m_stack.peek(1);
+                const Value& b = m_stack.top();
+                const Value& a = m_stack.second();
                 if (!isNumberPair(a, b)) {
                     return runtimeError("Operands must be numbers for '<'.");
                 }
 
                 if (a.isSignedInt() && b.isSignedInt()) {
-                    Value result(a.asSignedInt() < b.asSignedInt());
-                    m_stack.popN(2);
-                    m_stack.push(std::move(result));
+                    m_stack.replaceTopPair(
+                        Value(a.asSignedInt() < b.asSignedInt()));
                     break;
                 }
 
                 if (a.isUnsignedInt() && b.isUnsignedInt()) {
-                    Value result(a.asUnsignedInt() < b.asUnsignedInt());
-                    m_stack.popN(2);
-                    m_stack.push(std::move(result));
+                    m_stack.replaceTopPair(
+                        Value(a.asUnsignedInt() < b.asUnsignedInt()));
                     break;
                 }
 
@@ -1181,29 +1145,25 @@ dispatch:
                 double rhs = 0.0;
                 valueToDouble(a, lhs);
                 valueToDouble(b, rhs);
-                Value result(lhs < rhs);
-                m_stack.popN(2);
-                m_stack.push(std::move(result));
+                m_stack.replaceTopPair(Value(lhs < rhs));
                 break;
             }
             VM_CASE(GREATER_EQUAL_THAN): {
-                const Value& b = m_stack.peek(0);
-                const Value& a = m_stack.peek(1);
+                const Value& b = m_stack.top();
+                const Value& a = m_stack.second();
                 if (!isNumberPair(a, b)) {
                     return runtimeError("Operands must be numbers for '>='.");
                 }
 
                 if (a.isSignedInt() && b.isSignedInt()) {
-                    Value result(a.asSignedInt() >= b.asSignedInt());
-                    m_stack.popN(2);
-                    m_stack.push(std::move(result));
+                    m_stack.replaceTopPair(
+                        Value(a.asSignedInt() >= b.asSignedInt()));
                     break;
                 }
 
                 if (a.isUnsignedInt() && b.isUnsignedInt()) {
-                    Value result(a.asUnsignedInt() >= b.asUnsignedInt());
-                    m_stack.popN(2);
-                    m_stack.push(std::move(result));
+                    m_stack.replaceTopPair(
+                        Value(a.asUnsignedInt() >= b.asUnsignedInt()));
                     break;
                 }
 
@@ -1211,29 +1171,25 @@ dispatch:
                 double rhs = 0.0;
                 valueToDouble(a, lhs);
                 valueToDouble(b, rhs);
-                Value result(lhs >= rhs);
-                m_stack.popN(2);
-                m_stack.push(std::move(result));
+                m_stack.replaceTopPair(Value(lhs >= rhs));
                 break;
             }
             VM_CASE(LESS_EQUAL_THAN): {
-                const Value& b = m_stack.peek(0);
-                const Value& a = m_stack.peek(1);
+                const Value& b = m_stack.top();
+                const Value& a = m_stack.second();
                 if (!isNumberPair(a, b)) {
                     return runtimeError("Operands must be numbers for '<='.");
                 }
 
                 if (a.isSignedInt() && b.isSignedInt()) {
-                    Value result(a.asSignedInt() <= b.asSignedInt());
-                    m_stack.popN(2);
-                    m_stack.push(std::move(result));
+                    m_stack.replaceTopPair(
+                        Value(a.asSignedInt() <= b.asSignedInt()));
                     break;
                 }
 
                 if (a.isUnsignedInt() && b.isUnsignedInt()) {
-                    Value result(a.asUnsignedInt() <= b.asUnsignedInt());
-                    m_stack.popN(2);
-                    m_stack.push(std::move(result));
+                    m_stack.replaceTopPair(
+                        Value(a.asUnsignedInt() <= b.asUnsignedInt()));
                     break;
                 }
 
@@ -1241,65 +1197,55 @@ dispatch:
                 double rhs = 0.0;
                 valueToDouble(a, lhs);
                 valueToDouble(b, rhs);
-                Value result(lhs <= rhs);
-                m_stack.popN(2);
-                m_stack.push(std::move(result));
+                m_stack.replaceTopPair(Value(lhs <= rhs));
                 break;
             }
             VM_CASE(IGREATER): {
-                int64_t rhs = requireSignedInt(m_stack.peek(0));
-                int64_t lhs = requireSignedInt(m_stack.peek(1));
-                m_stack.popN(2);
-                m_stack.push(Value(lhs > rhs));
+                int64_t rhs = requireSignedInt(m_stack.top());
+                int64_t lhs = requireSignedInt(m_stack.second());
+                m_stack.replaceTopPair(Value(lhs > rhs));
                 break;
             }
             VM_CASE(ILESS): {
-                int64_t rhs = requireSignedInt(m_stack.peek(0));
-                int64_t lhs = requireSignedInt(m_stack.peek(1));
-                m_stack.popN(2);
-                m_stack.push(Value(lhs < rhs));
+                int64_t rhs = requireSignedInt(m_stack.top());
+                int64_t lhs = requireSignedInt(m_stack.second());
+                m_stack.replaceTopPair(Value(lhs < rhs));
                 break;
             }
             VM_CASE(IGREATER_EQ): {
-                int64_t rhs = requireSignedInt(m_stack.peek(0));
-                int64_t lhs = requireSignedInt(m_stack.peek(1));
-                m_stack.popN(2);
-                m_stack.push(Value(lhs >= rhs));
+                int64_t rhs = requireSignedInt(m_stack.top());
+                int64_t lhs = requireSignedInt(m_stack.second());
+                m_stack.replaceTopPair(Value(lhs >= rhs));
                 break;
             }
             VM_CASE(ILESS_EQ): {
-                int64_t rhs = requireSignedInt(m_stack.peek(0));
-                int64_t lhs = requireSignedInt(m_stack.peek(1));
-                m_stack.popN(2);
-                m_stack.push(Value(lhs <= rhs));
+                int64_t rhs = requireSignedInt(m_stack.top());
+                int64_t lhs = requireSignedInt(m_stack.second());
+                m_stack.replaceTopPair(Value(lhs <= rhs));
                 break;
             }
             VM_CASE(UGREATER): {
-                uint64_t rhs = requireUnsignedInt(m_stack.peek(0));
-                uint64_t lhs = requireUnsignedInt(m_stack.peek(1));
-                m_stack.popN(2);
-                m_stack.push(Value(lhs > rhs));
+                uint64_t rhs = requireUnsignedInt(m_stack.top());
+                uint64_t lhs = requireUnsignedInt(m_stack.second());
+                m_stack.replaceTopPair(Value(lhs > rhs));
                 break;
             }
             VM_CASE(ULESS): {
-                uint64_t rhs = requireUnsignedInt(m_stack.peek(0));
-                uint64_t lhs = requireUnsignedInt(m_stack.peek(1));
-                m_stack.popN(2);
-                m_stack.push(Value(lhs < rhs));
+                uint64_t rhs = requireUnsignedInt(m_stack.top());
+                uint64_t lhs = requireUnsignedInt(m_stack.second());
+                m_stack.replaceTopPair(Value(lhs < rhs));
                 break;
             }
             VM_CASE(UGREATER_EQ): {
-                uint64_t rhs = requireUnsignedInt(m_stack.peek(0));
-                uint64_t lhs = requireUnsignedInt(m_stack.peek(1));
-                m_stack.popN(2);
-                m_stack.push(Value(lhs >= rhs));
+                uint64_t rhs = requireUnsignedInt(m_stack.top());
+                uint64_t lhs = requireUnsignedInt(m_stack.second());
+                m_stack.replaceTopPair(Value(lhs >= rhs));
                 break;
             }
             VM_CASE(ULESS_EQ): {
-                uint64_t rhs = requireUnsignedInt(m_stack.peek(0));
-                uint64_t lhs = requireUnsignedInt(m_stack.peek(1));
-                m_stack.popN(2);
-                m_stack.push(Value(lhs <= rhs));
+                uint64_t rhs = requireUnsignedInt(m_stack.top());
+                uint64_t lhs = requireUnsignedInt(m_stack.second());
+                m_stack.replaceTopPair(Value(lhs <= rhs));
                 break;
             }
             VM_CASE(POP): {
@@ -1764,6 +1710,10 @@ dispatch:
                         return m_stack.getAt(argBase +
                                              static_cast<size_t>(index));
                     };
+                    auto argAtRef = [&](uint8_t index) -> Value& {
+                        return m_stack.getAtRef(argBase +
+                                                static_cast<size_t>(index));
+                    };
 
                     Value result;
                     switch (native->id) {
@@ -1997,7 +1947,7 @@ dispatch:
                             set->elements.reserve(argumentCount);
                             set->indexByValue.reserve(argumentCount);
                             for (uint8_t i = 0; i < argumentCount; ++i) {
-                                const Value& arg = argAt(i);
+                                Value& arg = argAtRef(i);
                                 if (set->elementType->isAny()) {
                                     set->elementType = inferRuntimeType(arg);
                                 } else if (!valueMatchesType(
@@ -2007,7 +1957,7 @@ dispatch:
                                         "elements to have a consistent type.");
                                 }
 
-                                setInsertValue(set, arg);
+                                setInsertValue(set, std::move(arg));
                             }
 
                             result = Value(set);
@@ -2032,6 +1982,10 @@ dispatch:
                         return m_stack.getAt(argBase +
                                              static_cast<size_t>(index));
                     };
+                    auto argAtRef = [&](uint8_t index) -> Value& {
+                        return m_stack.getAtRef(argBase +
+                                                static_cast<size_t>(index));
+                    };
 
                     Value result;
                     const Value& receiver = bound->receiver;
@@ -2055,7 +2009,7 @@ dispatch:
                                     array->elementType->toString() + "'.");
                             }
 
-                            array->elements.push_back(argAt(0));
+                            array->elements.push_back(std::move(argAtRef(0)));
                             result = Value(
                                 static_cast<double>(array->elements.size()));
                         } else if (bound->id == NativeMethodId::ARRAY_POP) {
@@ -2120,8 +2074,8 @@ dispatch:
 
                             array->elements.insert(array->elements.begin() +
                                                        static_cast<long>(index),
-                                                   argAt(1));
-                            result = Value(argAt(1));
+                                                   std::move(argAtRef(1)));
+                            result = array->elements[index];
                         } else if (bound->id == NativeMethodId::ARRAY_REMOVE) {
                             if (argumentCount != 1) {
                                 return runtimeError(
@@ -2205,7 +2159,7 @@ dispatch:
                                     "Dict method 'get' expects 1 argument.");
                             }
 
-                            const Value& key = argAt(0);
+                            Value& key = argAtRef(0);
                             auto it = dict->map.find(key);
                             if (it == dict->map.end()) {
                                 return runtimeError(
@@ -2229,17 +2183,20 @@ dispatch:
                                     dict->keyType->toString() + "'.");
                             }
 
+                            Value& storedValue = argAtRef(1);
                             if (dict->valueType->isAny()) {
-                                dict->valueType = inferRuntimeType(argAt(1));
-                            } else if (!valueMatchesType(argAt(1),
+                                dict->valueType = inferRuntimeType(storedValue);
+                            } else if (!valueMatchesType(storedValue,
                                                          dict->valueType)) {
                                 return runtimeError(
                                     "Dict method 'set' value expects type '" +
                                     dict->valueType->toString() + "'.");
                             }
 
-                            dict->map.insert_or_assign(key, argAt(1));
-                            result = argAt(1);
+                            auto [it, inserted] = dict->map.insert_or_assign(
+                                std::move(key), std::move(storedValue));
+                            (void)inserted;
+                            result = it->second;
                         } else if (bound->id == NativeMethodId::DICT_HAS) {
                             if (argumentCount != 1) {
                                 return runtimeError(
@@ -2351,9 +2308,10 @@ dispatch:
                                     "Set method 'add' expects 1 argument.");
                             }
 
+                            Value& element = argAtRef(0);
                             if (set->elementType->isAny()) {
-                                set->elementType = inferRuntimeType(argAt(0));
-                            } else if (!valueMatchesType(argAt(0),
+                                set->elementType = inferRuntimeType(element);
+                            } else if (!valueMatchesType(element,
                                                          set->elementType)) {
                                 return runtimeError(
                                     "Set method 'add' expects value of type "
@@ -2361,7 +2319,8 @@ dispatch:
                                     set->elementType->toString() + "'.");
                             }
 
-                            bool inserted = setInsertValue(set, argAt(0));
+                            bool inserted = setInsertValue(set,
+                                                           std::move(element));
                             result = Value(inserted);
                         } else if (bound->id == NativeMethodId::SET_HAS) {
                             if (argumentCount != 1) {
@@ -2729,8 +2688,8 @@ dispatch:
                 break;
             }
             VM_CASE(GET_INDEX): {
-                const Value& indexValue = m_stack.peek(0);
-                const Value& container = m_stack.peek(1);
+                const Value& indexValue = m_stack.top();
+                const Value& container = m_stack.second();
 
                 if (container.isArray()) {
                     size_t index = 0;
@@ -2744,9 +2703,7 @@ dispatch:
                         return runtimeError("Array index out of bounds.");
                     }
 
-                    Value result = array->elements[index];
-                    m_stack.popN(2);
-                    m_stack.push(std::move(result));
+                    m_stack.replaceTopPair(array->elements[index]);
                     break;
                 }
 
@@ -2757,9 +2714,7 @@ dispatch:
                         return runtimeError("Dictionary key not found.");
                     }
 
-                    Value result = it->second;
-                    m_stack.popN(2);
-                    m_stack.push(std::move(result));
+                    m_stack.replaceTopPair(it->second);
                     break;
                 }
 
@@ -2771,9 +2726,8 @@ dispatch:
                             set->elementType->toString() + "', got '" +
                             valueTypeName(indexValue) + "'.");
                     }
-                    bool result = setContainsValue(set, indexValue);
-                    m_stack.popN(2);
-                    m_stack.push(Value(result));
+                    m_stack.replaceTopPair(
+                        Value(setContainsValue(set, indexValue)));
                     break;
                 }
 

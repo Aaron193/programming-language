@@ -83,6 +83,22 @@ class Stack {
         return m_data[index];
     }
 
+    const T& top() const {
+        if (m_top < 0) {
+            throw std::underflow_error("Stack underflow.");
+        }
+
+        return m_data[m_top];
+    }
+
+    const T& second() const {
+        if (m_top < 1) {
+            throw std::underflow_error("Stack underflow.");
+        }
+
+        return m_data[m_top - 1];
+    }
+
     void setAt(size_t index, const T& value) {
         if (index <= static_cast<size_t>(m_top)) {
             m_data[index] = value;
@@ -100,6 +116,36 @@ class Stack {
             throw std::underflow_error("Stack underflow.");
         }
         m_top -= static_cast<int>(count);
+    }
+
+    void replaceTop(const T& value) {
+        if (m_top < 0) {
+            throw std::underflow_error("Stack underflow.");
+        }
+        m_data[m_top] = value;
+    }
+
+    void replaceTop(T&& value) {
+        if (m_top < 0) {
+            throw std::underflow_error("Stack underflow.");
+        }
+        m_data[m_top] = std::move(value);
+    }
+
+    void replaceTopPair(const T& value) {
+        if (m_top < 1) {
+            throw std::underflow_error("Stack underflow.");
+        }
+        m_data[m_top - 1] = value;
+        --m_top;
+    }
+
+    void replaceTopPair(T&& value) {
+        if (m_top < 1) {
+            throw std::underflow_error("Stack underflow.");
+        }
+        m_data[m_top - 1] = std::move(value);
+        --m_top;
     }
 
     void reset() { m_top = -1; }
