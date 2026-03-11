@@ -1,0 +1,25 @@
+class Base {
+  greet() -> str {
+    return "base";
+  }
+}
+
+class Derived < Base {
+  str label;
+
+  greet() -> str {
+    return super.greet() + "-" + this.label;
+  }
+}
+
+Derived d = Derived();
+d.label = "derived";
+print(d.greet());
+
+auto extracted = d.greet;
+print(extracted());
+
+auto values = [1i32, 2i32];
+print(values.size());
+values.push(3i32);
+print(values.size());

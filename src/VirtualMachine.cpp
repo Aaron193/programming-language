@@ -754,6 +754,850 @@ Status VirtualMachine::callClosure(ClosureObject* closure,
     return Status::OK;
 }
 
+Status VirtualMachine::callNativeMethod(NativeMethodId id,
+                                        const std::string& name,
+                                        const Value& receiver,
+                                        uint8_t argumentCount,
+                                        size_t calleeIndex) {
+    const size_t argBase = calleeIndex + 1;
+    auto argAt = [&](uint8_t index) -> const Value& {
+        return m_stack.getAt(argBase + static_cast<size_t>(index));
+    };
+    auto argAtRef = [&](uint8_t index) -> Value& {
+        return m_stack.getAtRef(argBase + static_cast<size_t>(index));
+    };
+
+    Value result;
+
+    if (receiver.isArray()) {
+        auto array = receiver.asArray();
+
+        if (id == NativeMethodId::ARRAY_PUSH) {
+            if (argumentCount != 1) {
+                return runtimeError("Array method 'push' expects 1 argument.");
+            }
+
+            if (array->elementType->isAny()) {
+                array->elementType = inferRuntimeType(argAt(0));
+            } else if (!valueMatchesType(argAt(0), array->elementType)) {
+                return runtimeError("Array method 'push' expects value of "
+                                    "type '" +
+                                    array->elementType->toString() + "'.");
+            }
+
+            array->elements.push_back(std::move(argAtRef(0)));
+            result = Value(static_cast<double>(array->elements.size()));
+        } else if (id == NativeMethodId::ARRAY_POP) {
+            if (argumentCount != 0) {
+                return runtimeError("Array method 'pop' expects 0 arguments.");
+            }
+
+            if (array->elements.empty()) {
+                return runtimeError(
+                    "Array method 'pop' called on empty array.");
+            }
+
+            result = array->elements.back();
+            array->elements.pop_back();
+        } else if (id == NativeMethodId::ARRAY_SIZE) {
+            if (argumentCount != 0) {
+                return runtimeError("Array method 'size' expects 0 arguments.");
+            }
+
+            result = Value(static_cast<double>(array->elements.size()));
+        } else if (id == NativeMethodId::ARRAY_HAS) {
+            if (argumentCount != 1) {
+                return runtimeError("Array method 'has' expects 1 argument.");
+            }
+
+            result = Value(containsValue(array->elements, argAt(0)));
+        } else if (id == NativeMethodId::ARRAY_INSERT) {
+            if (argumentCount != 2) {
+                return runtimeError(
+                    "Array method 'insert' expects 2 arguments.");
+            }
+
+            size_t index = 0;
+            if (!toArrayIndex(argAt(0), index)) {
+                return runtimeError("Array method 'insert' expects a "
+                                    "non-negative integer index.");
+            }
+
+            if (index > array->elements.size()) {
+                return runtimeError(
+                    "Array method 'insert' index out of bounds.");
+            }
+
+            if (array->elementType->isAny()) {
+                array->elementType = inferRuntimeType(argAt(1));
+            } else if (!valueMatchesType(argAt(1), array->elementType)) {
+                return runtimeError("Array method 'insert' expects value of "
+                                    "type '" +
+                                    array->elementType->toString() + "'.");
+            }
+
+            array->elements.insert(array->elements.begin() +
+                                       static_cast<long>(index),
+                                   std::move(argAtRef(1)));
+            result = array->elements[index];
+        } else if (id == NativeMethodId::ARRAY_REMOVE) {
+            if (argumentCount != 1) {
+                return runtimeError(
+                    "Array method 'remove' expects 1 argument.");
+            }
+
+            size_t index = 0;
+            if (!toArrayIndex(argAt(0), index)) {
+                return runtimeError("Array method 'remove' expects a "
+                                    "non-negative integer index.");
+            }
+
+            if (index >= array->elements.size()) {
+                return runtimeError(
+                    "Array method 'remove' index out of bounds.");
+            }
+
+            result = array->elements[index];
+            array->elements.erase(array->elements.begin() +
+                                  static_cast<long>(index));
+        } else if (id == NativeMethodId::ARRAY_CLEAR) {
+            if (argumentCount != 0) {
+                return runtimeError("Array method 'clear' expects 0 arguments.");
+            }
+
+            double removed = static_cast<double>(array->elements.size());
+            array->elements.clear();
+            result = Value(removed);
+        } else if (id == NativeMethodId::ARRAY_IS_EMPTY) {
+            if (argumentCount != 0) {
+                return runtimeError(
+                    "Array method 'isEmpty' expects 0 arguments.");
+            }
+
+            result = Value(array->elements.empty());
+        } else if (id == NativeMethodId::ARRAY_FIRST) {
+            if (argumentCount != 0) {
+                return runtimeError("Array method 'first' expects 0 arguments.");
+            }
+
+            if (array->elements.empty()) {
+                return runtimeError(
+                    "Array method 'first' called on empty array.");
+            }
+
+            result = array->elements.front();
+        } else if (id == NativeMethodId::ARRAY_LAST) {
+            if (argumentCount != 0) {
+                return runtimeError("Array method 'last' expects 0 arguments.");
+            }
+
+            if (array->elements.empty()) {
+                return runtimeError(
+                    "Array method 'last' called on empty array.");
+            }
+
+            result = array->elements.back();
+        } else {
+            return runtimeError("Undefined array method '" + name + "'.");
+        }
+    } else if (receiver.isDict()) {
+        auto dict = receiver.asDict();
+
+        if (id == NativeMethodId::DICT_GET) {
+            if (argumentCount != 1) {
+                return runtimeError("Dict method 'get' expects 1 argument.");
+            }
+
+            Value& key = argAtRef(0);
+            auto it = dict->map.find(key);
+            if (it == dict->map.end()) {
+                return runtimeError("Dict method 'get' key not found.");
+            }
+
+            result = it->second;
+        } else if (id == NativeMethodId::DICT_SET) {
+            if (argumentCount != 2) {
+                return runtimeError("Dict method 'set' expects 2 arguments.");
+            }
+
+            const Value& key = argAt(0);
+
+            if (dict->keyType->isAny()) {
+                dict->keyType = inferRuntimeType(key);
+            } else if (!valueMatchesType(key, dict->keyType)) {
+                return runtimeError("Dict method 'set' key expects type '" +
+                                    dict->keyType->toString() + "'.");
+            }
+
+            Value& storedValue = argAtRef(1);
+            if (dict->valueType->isAny()) {
+                dict->valueType = inferRuntimeType(storedValue);
+            } else if (!valueMatchesType(storedValue, dict->valueType)) {
+                return runtimeError("Dict method 'set' value expects type '" +
+                                    dict->valueType->toString() + "'.");
+            }
+
+            auto [it, inserted] = dict->map.insert_or_assign(
+                std::move(key), std::move(storedValue));
+            (void)inserted;
+            result = it->second;
+        } else if (id == NativeMethodId::DICT_HAS) {
+            if (argumentCount != 1) {
+                return runtimeError("Dict method 'has' expects 1 argument.");
+            }
+
+            const Value& key = argAt(0);
+            result = Value(dict->map.find(key) != dict->map.end());
+        } else if (id == NativeMethodId::DICT_KEYS) {
+            if (argumentCount != 0) {
+                return runtimeError("Dict method 'keys' expects 0 arguments.");
+            }
+
+            auto keys = gcAlloc<ArrayObject>();
+            std::vector<Value> orderedKeys = sortedDictKeys(dict);
+            keys->elements.reserve(orderedKeys.size());
+
+            for (const auto& key : orderedKeys) {
+                keys->elements.push_back(key);
+            }
+            keys->elementType =
+                dict->keyType ? dict->keyType : TypeInfo::makeAny();
+            result = Value(keys);
+        } else if (id == NativeMethodId::DICT_VALUES) {
+            if (argumentCount != 0) {
+                return runtimeError(
+                    "Dict method 'values' expects 0 arguments.");
+            }
+
+            auto values = gcAlloc<ArrayObject>();
+            std::vector<Value> orderedKeys = sortedDictKeys(dict);
+            values->elements.reserve(orderedKeys.size());
+
+            for (const auto& key : orderedKeys) {
+                auto it = dict->map.find(key);
+                if (it != dict->map.end()) {
+                    values->elements.push_back(it->second);
+                }
+            }
+            values->elementType = dict->valueType;
+            result = Value(values);
+        } else if (id == NativeMethodId::DICT_SIZE) {
+            if (argumentCount != 0) {
+                return runtimeError("Dict method 'size' expects 0 arguments.");
+            }
+
+            result = Value(static_cast<double>(dict->map.size()));
+        } else if (id == NativeMethodId::DICT_REMOVE) {
+            if (argumentCount != 1) {
+                return runtimeError("Dict method 'remove' expects 1 argument.");
+            }
+
+            const Value& key = argAt(0);
+            auto it = dict->map.find(key);
+            if (it == dict->map.end()) {
+                return runtimeError("Dict method 'remove' key not found.");
+            }
+
+            result = it->second;
+            dict->map.erase(it);
+        } else if (id == NativeMethodId::DICT_CLEAR) {
+            if (argumentCount != 0) {
+                return runtimeError("Dict method 'clear' expects 0 arguments.");
+            }
+
+            double removed = static_cast<double>(dict->map.size());
+            dict->map.clear();
+            result = Value(removed);
+        } else if (id == NativeMethodId::DICT_IS_EMPTY) {
+            if (argumentCount != 0) {
+                return runtimeError(
+                    "Dict method 'isEmpty' expects 0 arguments.");
+            }
+
+            result = Value(dict->map.empty());
+        } else if (id == NativeMethodId::DICT_GET_OR) {
+            if (argumentCount != 2) {
+                return runtimeError("Dict method 'getOr' expects 2 arguments.");
+            }
+
+            const Value& key = argAt(0);
+            auto it = dict->map.find(key);
+            result = (it != dict->map.end()) ? it->second : argAt(1);
+        } else {
+            return runtimeError("Undefined dict method '" + name + "'.");
+        }
+    } else if (receiver.isSet()) {
+        auto set = receiver.asSet();
+
+        if (id == NativeMethodId::SET_ADD) {
+            if (argumentCount != 1) {
+                return runtimeError("Set method 'add' expects 1 argument.");
+            }
+
+            Value& element = argAtRef(0);
+            if (set->elementType->isAny()) {
+                set->elementType = inferRuntimeType(element);
+            } else if (!valueMatchesType(element, set->elementType)) {
+                return runtimeError("Set method 'add' expects value of type '" +
+                                    set->elementType->toString() + "'.");
+            }
+
+            bool inserted = setInsertValue(set, std::move(element));
+            result = Value(inserted);
+        } else if (id == NativeMethodId::SET_HAS) {
+            if (argumentCount != 1) {
+                return runtimeError("Set method 'has' expects 1 argument.");
+            }
+
+            result = Value(setContainsValue(set, argAt(0)));
+        } else if (id == NativeMethodId::SET_REMOVE) {
+            if (argumentCount != 1) {
+                return runtimeError("Set method 'remove' expects 1 argument.");
+            }
+
+            bool removed = setRemoveValue(set, argAt(0));
+            result = Value(removed);
+        } else if (id == NativeMethodId::SET_SIZE) {
+            if (argumentCount != 0) {
+                return runtimeError("Set method 'size' expects 0 arguments.");
+            }
+
+            result = Value(static_cast<double>(set->elements.size()));
+        } else if (id == NativeMethodId::SET_TO_ARRAY) {
+            if (argumentCount != 0) {
+                return runtimeError(
+                    "Set method 'toArray' expects 0 arguments.");
+            }
+
+            auto array = gcAlloc<ArrayObject>();
+            array->elements.reserve(set->elements.size());
+            array->elements.insert(array->elements.end(), set->elements.begin(),
+                                   set->elements.end());
+            array->elementType = set->elementType;
+            result = Value(array);
+        } else if (id == NativeMethodId::SET_CLEAR) {
+            if (argumentCount != 0) {
+                return runtimeError("Set method 'clear' expects 0 arguments.");
+            }
+
+            double removed = static_cast<double>(set->elements.size());
+            set->elements.clear();
+            set->indexByValue.clear();
+            result = Value(removed);
+        } else if (id == NativeMethodId::SET_IS_EMPTY) {
+            if (argumentCount != 0) {
+                return runtimeError(
+                    "Set method 'isEmpty' expects 0 arguments.");
+            }
+
+            result = Value(set->elements.empty());
+        } else if (id == NativeMethodId::SET_UNION) {
+            if (argumentCount != 1) {
+                return runtimeError("Set method 'union' expects 1 argument.");
+            }
+            if (!argAt(0).isSet()) {
+                return runtimeError(
+                    "Set method 'union' expects a set argument.");
+            }
+
+            auto out = gcAlloc<SetObject>();
+            out->elementType = set->elementType;
+            auto rhs = argAt(0).asSet();
+            out->elements.reserve(set->elements.size() + rhs->elements.size());
+            out->indexByValue.reserve(set->elements.size() +
+                                      rhs->elements.size());
+            for (const auto& element : set->elements) {
+                setInsertValue(out, element);
+            }
+
+            if (!set->elementType->isAny() && !rhs->elementType->isAny() &&
+                !isAssignable(rhs->elementType, set->elementType) &&
+                !isAssignable(set->elementType, rhs->elementType)) {
+                return runtimeError(
+                    "Set method 'union' requires compatible element types.");
+            }
+
+            for (const auto& element : rhs->elements) {
+                setInsertValue(out, element);
+            }
+            result = Value(out);
+        } else if (id == NativeMethodId::SET_INTERSECT) {
+            if (argumentCount != 1) {
+                return runtimeError(
+                    "Set method 'intersect' expects 1 argument.");
+            }
+            if (!argAt(0).isSet()) {
+                return runtimeError(
+                    "Set method 'intersect' expects a set argument.");
+            }
+
+            auto out = gcAlloc<SetObject>();
+            out->elementType = set->elementType;
+            auto rhs = argAt(0).asSet();
+            out->elements.reserve(
+                std::min(set->elements.size(), rhs->elements.size()));
+            out->indexByValue.reserve(
+                std::min(set->elements.size(), rhs->elements.size()));
+
+            if (!set->elementType->isAny() && !rhs->elementType->isAny() &&
+                !isAssignable(rhs->elementType, set->elementType) &&
+                !isAssignable(set->elementType, rhs->elementType)) {
+                return runtimeError(
+                    "Set method 'intersect' requires compatible element types.");
+            }
+
+            for (const auto& element : set->elements) {
+                if (setContainsValue(rhs, element)) {
+                    setInsertValue(out, element);
+                }
+            }
+            result = Value(out);
+        } else if (id == NativeMethodId::SET_DIFFERENCE) {
+            if (argumentCount != 1) {
+                return runtimeError(
+                    "Set method 'difference' expects 1 argument.");
+            }
+            if (!argAt(0).isSet()) {
+                return runtimeError(
+                    "Set method 'difference' expects a set argument.");
+            }
+
+            auto out = gcAlloc<SetObject>();
+            out->elementType = set->elementType;
+            auto rhs = argAt(0).asSet();
+            out->elements.reserve(set->elements.size());
+            out->indexByValue.reserve(set->elements.size());
+
+            if (!set->elementType->isAny() && !rhs->elementType->isAny() &&
+                !isAssignable(rhs->elementType, set->elementType) &&
+                !isAssignable(set->elementType, rhs->elementType)) {
+                return runtimeError("Set method 'difference' requires "
+                                    "compatible element types.");
+            }
+
+            for (const auto& element : set->elements) {
+                if (!setContainsValue(rhs, element)) {
+                    setInsertValue(out, element);
+                }
+            }
+            result = Value(out);
+        } else {
+            return runtimeError("Undefined set method '" + name + "'.");
+        }
+    } else {
+        return runtimeError("Native bound method receiver is invalid.");
+    }
+
+    m_stack.popN(m_stack.size() - calleeIndex);
+    m_stack.push(std::move(result));
+    return Status::OK;
+}
+
+Status VirtualMachine::callValue(Value callee, uint8_t argumentCount,
+                                 size_t calleeIndex) {
+    if (callee.isClass()) {
+        if (argumentCount != 0) {
+            return runtimeError("Class '" + callee.asClass()->name +
+                                "' expected 0 arguments but got " +
+                                std::to_string(static_cast<int>(argumentCount)) +
+                                ".");
+        }
+
+        auto instance = gcAlloc<InstanceObject>();
+        instance->klass = callee.asClass();
+        instance->fieldSlots.resize(instance->klass->fieldNames.size());
+        instance->initializedFieldSlots.assign(
+            instance->klass->fieldNames.size(), 0);
+        m_stack.setAt(calleeIndex, Value(instance));
+        return Status::OK;
+    }
+
+    if (callee.isNative()) {
+        auto native = callee.asNative();
+        if (native->arity >= 0 && native->arity != argumentCount) {
+            return runtimeError("Native function '" + native->name +
+                                "' expected " +
+                                std::to_string(native->arity) +
+                                " arguments but got " +
+                                std::to_string(static_cast<int>(argumentCount)) +
+                                ".");
+        }
+
+        const size_t argBase = calleeIndex + 1;
+        auto argAt = [&](uint8_t index) -> const Value& {
+            return m_stack.getAt(argBase + static_cast<size_t>(index));
+        };
+        auto argAtRef = [&](uint8_t index) -> Value& {
+            return m_stack.getAtRef(argBase + static_cast<size_t>(index));
+        };
+
+        Value result;
+        switch (native->id) {
+            case NativeFunctionId::CLOCK: {
+                auto now = std::chrono::duration<double>(
+                               std::chrono::system_clock::now()
+                                   .time_since_epoch())
+                               .count();
+                result = Value(now);
+                break;
+            }
+            case NativeFunctionId::SQRT: {
+                const Value& arg = argAt(0);
+                if (!arg.isAnyNumeric()) {
+                    return runtimeError(
+                        "Native function 'sqrt' expects a number.");
+                }
+
+                double number = 0.0;
+                valueToDouble(arg, number);
+                if (number < 0.0) {
+                    return runtimeError(
+                        "Native function 'sqrt' cannot take negative numbers.");
+                }
+
+                result = Value(std::sqrt(number));
+                break;
+            }
+            case NativeFunctionId::LEN: {
+                const Value& arg = argAt(0);
+                if (arg.isString()) {
+                    result =
+                        Value(static_cast<int64_t>(arg.asString().length()));
+                } else if (arg.isArray()) {
+                    result = Value(
+                        static_cast<int64_t>(arg.asArray()->elements.size()));
+                } else if (arg.isDict()) {
+                    result = Value(
+                        static_cast<int64_t>(arg.asDict()->map.size()));
+                } else if (arg.isSet()) {
+                    result =
+                        Value(static_cast<int64_t>(arg.asSet()->elements.size()));
+                } else {
+                    return runtimeError("Native function 'len' expects a "
+                                        "string, array, dict, or set.");
+                }
+                break;
+            }
+            case NativeFunctionId::TYPE:
+                result = makeStringValue(valueTypeName(argAt(0)));
+                break;
+            case NativeFunctionId::STR:
+            case NativeFunctionId::TO_STRING: {
+                const Value& arg = argAt(0);
+                result = arg.isString() ? arg : makeStringValue(valueToString(arg));
+                break;
+            }
+            case NativeFunctionId::NUM: {
+                const Value& arg = argAt(0);
+                if (arg.isNumber()) {
+                    result = arg;
+                } else if (arg.isSignedInt() || arg.isUnsignedInt()) {
+                    double number = 0.0;
+                    valueToDouble(arg, number);
+                    result = Value(number);
+                } else if (arg.isString()) {
+                    const std::string& text = arg.asString();
+                    size_t parseIndex = 0;
+                    try {
+                        double number = std::stod(text, &parseIndex);
+                        if (parseIndex != text.size()) {
+                            return runtimeError("Native function 'num' expects "
+                                                "a numeric string.");
+                        }
+                        result = Value(number);
+                    } catch (const std::exception&) {
+                        return runtimeError(
+                            "Native function 'num' expects a numeric string.");
+                    }
+                } else {
+                    return runtimeError(
+                        "Native function 'num' expects a number or string.");
+                }
+                break;
+            }
+            case NativeFunctionId::PARSE_INT: {
+                const Value& arg = argAt(0);
+                if (!arg.isString()) {
+                    return runtimeError(
+                        "Native function 'parseInt' expects a string.");
+                }
+
+                size_t parseIndex = 0;
+                try {
+                    int64_t parsed = std::stoll(arg.asString(), &parseIndex, 10);
+                    if (parseIndex != arg.asString().size()) {
+                        return runtimeError("Native function 'parseInt' expects "
+                                            "an integer string.");
+                    }
+                    result = Value(parsed);
+                } catch (const std::exception&) {
+                    return runtimeError("Native function 'parseInt' expects an "
+                                        "integer string.");
+                }
+                break;
+            }
+            case NativeFunctionId::PARSE_UINT: {
+                const Value& arg = argAt(0);
+                if (!arg.isString()) {
+                    return runtimeError(
+                        "Native function 'parseUInt' expects a string.");
+                }
+
+                size_t parseIndex = 0;
+                try {
+                    uint64_t parsed =
+                        std::stoull(arg.asString(), &parseIndex, 10);
+                    if (parseIndex != arg.asString().size()) {
+                        return runtimeError("Native function 'parseUInt' "
+                                            "expects an unsigned integer string.");
+                    }
+                    result = Value(parsed);
+                } catch (const std::exception&) {
+                    return runtimeError("Native function 'parseUInt' expects "
+                                        "an unsigned integer string.");
+                }
+                break;
+            }
+            case NativeFunctionId::PARSE_FLOAT: {
+                const Value& arg = argAt(0);
+                if (!arg.isString()) {
+                    return runtimeError(
+                        "Native function 'parseFloat' expects a string.");
+                }
+
+                size_t parseIndex = 0;
+                try {
+                    double parsed = std::stod(arg.asString(), &parseIndex);
+                    if (parseIndex != arg.asString().size()) {
+                        return runtimeError("Native function 'parseFloat' "
+                                            "expects a numeric string.");
+                    }
+                    result = Value(parsed);
+                } catch (const std::exception&) {
+                    return runtimeError("Native function 'parseFloat' expects "
+                                        "a numeric string.");
+                }
+                break;
+            }
+            case NativeFunctionId::ABS: {
+                const Value& arg = argAt(0);
+                if (!arg.isAnyNumeric()) {
+                    return runtimeError(
+                        "Native function 'abs' expects a number.");
+                }
+
+                double number = 0.0;
+                valueToDouble(arg, number);
+                result = Value(std::fabs(number));
+                break;
+            }
+            case NativeFunctionId::FLOOR: {
+                const Value& arg = argAt(0);
+                if (!arg.isAnyNumeric()) {
+                    return runtimeError(
+                        "Native function 'floor' expects a number.");
+                }
+
+                double number = 0.0;
+                valueToDouble(arg, number);
+                result = Value(std::floor(number));
+                break;
+            }
+            case NativeFunctionId::CEIL: {
+                const Value& arg = argAt(0);
+                if (!arg.isAnyNumeric()) {
+                    return runtimeError(
+                        "Native function 'ceil' expects a number.");
+                }
+
+                double number = 0.0;
+                valueToDouble(arg, number);
+                result = Value(std::ceil(number));
+                break;
+            }
+            case NativeFunctionId::POW: {
+                double base = 0.0;
+                double exponent = 0.0;
+                if (!valueToDouble(argAt(0), base) ||
+                    !valueToDouble(argAt(1), exponent)) {
+                    return runtimeError(
+                        "Native function 'pow' expects numeric arguments.");
+                }
+
+                result = Value(std::pow(base, exponent));
+                break;
+            }
+            case NativeFunctionId::ERROR: {
+                const Value& arg = argAt(0);
+                if (!arg.isString()) {
+                    return runtimeError(
+                        "Native function 'error' expects a string.");
+                }
+
+                return runtimeError(arg.asString());
+            }
+            case NativeFunctionId::SET: {
+                auto set = gcAlloc<SetObject>();
+                set->elements.reserve(argumentCount);
+                set->indexByValue.reserve(argumentCount);
+                for (uint8_t i = 0; i < argumentCount; ++i) {
+                    Value& arg = argAtRef(i);
+                    if (set->elementType->isAny()) {
+                        set->elementType = inferRuntimeType(arg);
+                    } else if (!valueMatchesType(arg, set->elementType)) {
+                        return runtimeError("Native function 'Set' expects all "
+                                            "elements to have a consistent "
+                                            "type.");
+                    }
+
+                    setInsertValue(set, std::move(arg));
+                }
+
+                result = Value(set);
+                break;
+            }
+            case NativeFunctionId::UNKNOWN:
+            default:
+                return runtimeError("Unknown native function '" +
+                                    native->name + "'.");
+        }
+
+        m_stack.popN(m_stack.size() - calleeIndex);
+        m_stack.push(std::move(result));
+        return Status::OK;
+    }
+
+    if (callee.isNativeBound()) {
+        auto bound = callee.asNativeBound();
+        return callNativeMethod(bound->id, bound->name, bound->receiver,
+                                argumentCount, calleeIndex);
+    }
+
+    if (callee.isBoundMethod()) {
+        auto bound = callee.asBoundMethod();
+        return callClosure(bound->method, argumentCount, bound->receiver);
+    }
+
+    if (callee.isClosure()) {
+        return callClosure(callee.asClosure(), argumentCount);
+    }
+
+    if (callee.isFunction()) {
+        auto closure = gcAlloc<ClosureObject>();
+        closure->function = callee.asFunction();
+        closure->upvalues = {};
+        return callClosure(closure, argumentCount);
+    }
+
+    return runtimeError(
+        "Can only call functions, classes, methods, and natives.");
+}
+
+Status VirtualMachine::invokeProperty(size_t instructionOffset,
+                                      const std::string& name,
+                                      uint8_t argumentCount) {
+    size_t calleeIndex =
+        m_stack.size() - static_cast<size_t>(argumentCount) - 1;
+    Value receiver = m_stack.peek(argumentCount);
+
+    if (receiver.isModule()) {
+        auto module = receiver.asModule();
+        auto it = module->exports.find(name);
+        if (it == module->exports.end()) {
+            return runtimeError("Module '" + module->path +
+                                "' has no export '" + name + "'.");
+        }
+
+        auto typeIt = module->exportTypes.find(name);
+        if (typeIt != module->exportTypes.end() &&
+            !valueMatchesType(it->second, typeIt->second)) {
+            return runtimeError("Type error: module export '" + name +
+                                "' from '" + module->path + "' expected '" +
+                                typeIt->second->toString() + "', got '" +
+                                valueTypeName(it->second) + "'.");
+        }
+
+        return callValue(it->second, argumentCount, calleeIndex);
+    }
+
+    if (receiver.isArray() || receiver.isDict() || receiver.isSet()) {
+        return callNativeMethod(resolveNativeMethodId(receiver, name), name,
+                                receiver, argumentCount, calleeIndex);
+    }
+
+    if (!receiver.isInstance()) {
+        return runtimeError("Only instances have properties.");
+    }
+
+    auto instance = receiver.asInstance();
+    auto& cache =
+        currentFrame().chunk->propertyInlineCacheAt(instructionOffset);
+    if (cache.klass == instance->klass) {
+        if (cache.kind == PropertyInlineCacheKind::FIELD &&
+            cache.slotIndex < instance->fieldSlots.size() &&
+            cache.slotIndex < instance->initializedFieldSlots.size() &&
+            instance->initializedFieldSlots[cache.slotIndex]) {
+            return callValue(instance->fieldSlots[cache.slotIndex],
+                             argumentCount, calleeIndex);
+        }
+
+        if (cache.kind == PropertyInlineCacheKind::METHOD &&
+            cache.method != nullptr) {
+            return callClosure(cache.method, argumentCount, instance);
+        }
+    }
+
+    auto fieldSlotIt = instance->klass->fieldIndexByName.find(name);
+    if (fieldSlotIt != instance->klass->fieldIndexByName.end()) {
+        cache.klass = instance->klass;
+        cache.kind = PropertyInlineCacheKind::FIELD;
+        cache.slotIndex = fieldSlotIt->second;
+        cache.method = nullptr;
+        cache.fieldType.reset();
+
+        if (fieldSlotIt->second < instance->fieldSlots.size() &&
+            fieldSlotIt->second < instance->initializedFieldSlots.size() &&
+            instance->initializedFieldSlots[fieldSlotIt->second]) {
+            return callValue(instance->fieldSlots[fieldSlotIt->second],
+                             argumentCount, calleeIndex);
+        }
+    }
+
+    auto method = findMethodClosure(instance->klass, name);
+    if (!method) {
+        cache.klass = nullptr;
+        cache.kind = PropertyInlineCacheKind::EMPTY;
+        cache.slotIndex = 0;
+        cache.method = nullptr;
+        cache.fieldType.reset();
+        return runtimeError("Undefined property '" + name + "'.");
+    }
+
+    cache.klass = instance->klass;
+    cache.kind = PropertyInlineCacheKind::METHOD;
+    cache.slotIndex = 0;
+    cache.method = method;
+    cache.fieldType.reset();
+    return callClosure(method, argumentCount, instance);
+}
+
+Status VirtualMachine::invokeSuper(const std::string& name,
+                                   uint8_t argumentCount) {
+    Value receiver = m_stack.peek(argumentCount);
+    if (!receiver.isInstance() || !receiver.asInstance()->klass ||
+        !receiver.asInstance()->klass->superclass) {
+        return runtimeError("Invalid super lookup.");
+    }
+
+    auto instance = receiver.asInstance();
+    auto method = findMethodClosure(instance->klass->superclass, name);
+    if (!method) {
+        return runtimeError("Undefined superclass method '" + name + "'.");
+    }
+
+    return callClosure(method, argumentCount, instance);
+}
+
 Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                            size_t stopFrameCount) {
 #define VM_OPCODE_LABEL(name) VM_LABEL_##name
@@ -813,7 +1657,9 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
         VM_OPCODE_ADDR(METHOD),
         VM_OPCODE_ADDR(GET_THIS),
         VM_OPCODE_ADDR(GET_SUPER),
+        VM_OPCODE_ADDR(INVOKE_SUPER),
         VM_OPCODE_ADDR(GET_PROPERTY),
+        VM_OPCODE_ADDR(INVOKE),
         VM_OPCODE_ADDR(SET_PROPERTY),
         VM_OPCODE_ADDR(CALL),
         VM_OPCODE_ADDR(CLOSURE),
@@ -1549,6 +2395,16 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
             DISPATCH();
         }
 
+        VM_CASE(INVOKE_SUPER) {
+            const std::string& name = readNameConstant();
+            uint8_t argumentCount = readByte();
+            Status status = invokeSuper(name, argumentCount);
+            if (status != Status::OK) {
+                return status;
+            }
+            DISPATCH();
+        }
+
         VM_CASE(GET_PROPERTY) {
             size_t instructionOffset = currentInstructionOffset();
             const std::string& name = readNameConstant();
@@ -1694,6 +2550,18 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
             DISPATCH();
         }
 
+        VM_CASE(INVOKE) {
+            size_t instructionOffset = currentInstructionOffset();
+            const std::string& name = readNameConstant();
+            uint8_t argumentCount = readByte();
+            Status status =
+                invokeProperty(instructionOffset, name, argumentCount);
+            if (status != Status::OK) {
+                return status;
+            }
+            DISPATCH();
+        }
+
         VM_CASE(SET_PROPERTY) {
             size_t instructionOffset = currentInstructionOffset();
             const std::string& name = readNameConstant();
@@ -1775,845 +2643,9 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
             Value callee = m_stack.peek(argumentCount);
             size_t calleeIndex =
                 m_stack.size() - static_cast<size_t>(argumentCount) - 1;
-
-            if (callee.isClass()) {
-                if (argumentCount != 0) {
-                    return runtimeError(
-                        "Class '" + callee.asClass()->name +
-                        "' expected 0 arguments but got " +
-                        std::to_string(static_cast<int>(argumentCount)) + ".");
-                }
-
-                auto instance = gcAlloc<InstanceObject>();
-                instance->klass = callee.asClass();
-                instance->fieldSlots.resize(instance->klass->fieldNames.size());
-                instance->initializedFieldSlots.assign(
-                    instance->klass->fieldNames.size(), 0);
-                m_stack.setAt(calleeIndex, Value(instance));
-                DISPATCH();
-            }
-
-            if (callee.isNative()) {
-                auto native = callee.asNative();
-                if (native->arity >= 0 && native->arity != argumentCount) {
-                    return runtimeError(
-                        "Native function '" + native->name + "' expected " +
-                        std::to_string(native->arity) + " arguments but got " +
-                        std::to_string(static_cast<int>(argumentCount)) + ".");
-                }
-
-                const size_t argBase = calleeIndex + 1;
-                auto argAt = [&](uint8_t index) -> const Value& {
-                    return m_stack.getAt(argBase + static_cast<size_t>(index));
-                };
-                auto argAtRef = [&](uint8_t index) -> Value& {
-                    return m_stack.getAtRef(argBase +
-                                            static_cast<size_t>(index));
-                };
-
-                Value result;
-                switch (native->id) {
-                    case NativeFunctionId::CLOCK: {
-                        auto now = std::chrono::duration<double>(
-                                       std::chrono::system_clock::now()
-                                           .time_since_epoch())
-                                       .count();
-                        result = Value(now);
-                        break;
-                    }
-                    case NativeFunctionId::SQRT: {
-                        const Value& arg = argAt(0);
-                        if (!arg.isAnyNumeric()) {
-                            return runtimeError(
-                                "Native function 'sqrt' expects a number.");
-                        }
-
-                        double number = 0.0;
-                        valueToDouble(arg, number);
-                        if (number < 0.0) {
-                            return runtimeError(
-                                "Native function 'sqrt' cannot take "
-                                "negative numbers.");
-                        }
-
-                        result = Value(std::sqrt(number));
-                        break;
-                    }
-                    case NativeFunctionId::LEN: {
-                        const Value& arg = argAt(0);
-                        if (arg.isString()) {
-                            result = Value(
-                                static_cast<int64_t>(arg.asString().length()));
-                        } else if (arg.isArray()) {
-                            result = Value(static_cast<int64_t>(
-                                arg.asArray()->elements.size()));
-                        } else if (arg.isDict()) {
-                            result = Value(
-                                static_cast<int64_t>(arg.asDict()->map.size()));
-                        } else if (arg.isSet()) {
-                            result = Value(static_cast<int64_t>(
-                                arg.asSet()->elements.size()));
-                        } else {
-                            return runtimeError(
-                                "Native function 'len' expects a string, "
-                                "array, dict, or set.");
-                        }
-                        break;
-                    }
-                    case NativeFunctionId::TYPE:
-                        result = makeStringValue(valueTypeName(argAt(0)));
-                        break;
-                    case NativeFunctionId::STR:
-                    case NativeFunctionId::TO_STRING: {
-                        const Value& arg = argAt(0);
-                        if (arg.isString()) {
-                            result = arg;
-                        } else {
-                            result = makeStringValue(valueToString(arg));
-                        }
-                        break;
-                    }
-                    case NativeFunctionId::NUM: {
-                        const Value& arg = argAt(0);
-                        if (arg.isNumber()) {
-                            result = arg;
-                        } else if (arg.isSignedInt() || arg.isUnsignedInt()) {
-                            double number = 0.0;
-                            valueToDouble(arg, number);
-                            result = Value(number);
-                        } else if (arg.isString()) {
-                            const std::string& text = arg.asString();
-                            size_t parseIndex = 0;
-                            try {
-                                double number = std::stod(text, &parseIndex);
-                                if (parseIndex != text.size()) {
-                                    return runtimeError(
-                                        "Native function 'num' expects a "
-                                        "numeric string.");
-                                }
-                                result = Value(number);
-                            } catch (const std::exception&) {
-                                return runtimeError(
-                                    "Native function 'num' expects a "
-                                    "numeric string.");
-                            }
-                        } else {
-                            return runtimeError(
-                                "Native function 'num' expects a number or "
-                                "string.");
-                        }
-                        break;
-                    }
-                    case NativeFunctionId::PARSE_INT: {
-                        const Value& arg = argAt(0);
-                        if (!arg.isString()) {
-                            return runtimeError(
-                                "Native function 'parseInt' expects a "
-                                "string.");
-                        }
-
-                        size_t parseIndex = 0;
-                        try {
-                            int64_t parsed =
-                                std::stoll(arg.asString(), &parseIndex, 10);
-                            if (parseIndex != arg.asString().size()) {
-                                return runtimeError(
-                                    "Native function 'parseInt' expects an "
-                                    "integer string.");
-                            }
-                            result = Value(parsed);
-                        } catch (const std::exception&) {
-                            return runtimeError(
-                                "Native function 'parseInt' expects an "
-                                "integer string.");
-                        }
-                        break;
-                    }
-                    case NativeFunctionId::PARSE_UINT: {
-                        const Value& arg = argAt(0);
-                        if (!arg.isString()) {
-                            return runtimeError(
-                                "Native function 'parseUInt' expects a "
-                                "string.");
-                        }
-
-                        size_t parseIndex = 0;
-                        try {
-                            uint64_t parsed =
-                                std::stoull(arg.asString(), &parseIndex, 10);
-                            if (parseIndex != arg.asString().size()) {
-                                return runtimeError(
-                                    "Native function 'parseUInt' expects an "
-                                    "unsigned integer string.");
-                            }
-                            result = Value(parsed);
-                        } catch (const std::exception&) {
-                            return runtimeError(
-                                "Native function 'parseUInt' expects an "
-                                "unsigned integer string.");
-                        }
-                        break;
-                    }
-                    case NativeFunctionId::PARSE_FLOAT: {
-                        const Value& arg = argAt(0);
-                        if (!arg.isString()) {
-                            return runtimeError(
-                                "Native function 'parseFloat' expects a "
-                                "string.");
-                        }
-
-                        size_t parseIndex = 0;
-                        try {
-                            double parsed =
-                                std::stod(arg.asString(), &parseIndex);
-                            if (parseIndex != arg.asString().size()) {
-                                return runtimeError(
-                                    "Native function 'parseFloat' expects a "
-                                    "numeric string.");
-                            }
-                            result = Value(parsed);
-                        } catch (const std::exception&) {
-                            return runtimeError(
-                                "Native function 'parseFloat' expects a "
-                                "numeric string.");
-                        }
-                        break;
-                    }
-                    case NativeFunctionId::ABS: {
-                        const Value& arg = argAt(0);
-                        if (!arg.isAnyNumeric()) {
-                            return runtimeError(
-                                "Native function 'abs' expects a number.");
-                        }
-
-                        double number = 0.0;
-                        valueToDouble(arg, number);
-                        result = Value(std::fabs(number));
-                        break;
-                    }
-                    case NativeFunctionId::FLOOR: {
-                        const Value& arg = argAt(0);
-                        if (!arg.isAnyNumeric()) {
-                            return runtimeError(
-                                "Native function 'floor' expects a number.");
-                        }
-
-                        double number = 0.0;
-                        valueToDouble(arg, number);
-                        result = Value(std::floor(number));
-                        break;
-                    }
-                    case NativeFunctionId::CEIL: {
-                        const Value& arg = argAt(0);
-                        if (!arg.isAnyNumeric()) {
-                            return runtimeError(
-                                "Native function 'ceil' expects a number.");
-                        }
-
-                        double number = 0.0;
-                        valueToDouble(arg, number);
-                        result = Value(std::ceil(number));
-                        break;
-                    }
-                    case NativeFunctionId::POW: {
-                        double base = 0.0;
-                        double exponent = 0.0;
-                        if (!valueToDouble(argAt(0), base) ||
-                            !valueToDouble(argAt(1), exponent)) {
-                            return runtimeError(
-                                "Native function 'pow' expects numeric "
-                                "arguments.");
-                        }
-
-                        result = Value(std::pow(base, exponent));
-                        break;
-                    }
-                    case NativeFunctionId::ERROR: {
-                        const Value& arg = argAt(0);
-                        if (!arg.isString()) {
-                            return runtimeError(
-                                "Native function 'error' expects a string.");
-                        }
-
-                        return runtimeError(arg.asString());
-                    }
-                    case NativeFunctionId::SET: {
-                        auto set = gcAlloc<SetObject>();
-                        set->elements.reserve(argumentCount);
-                        set->indexByValue.reserve(argumentCount);
-                        for (uint8_t i = 0; i < argumentCount; ++i) {
-                            Value& arg = argAtRef(i);
-                            if (set->elementType->isAny()) {
-                                set->elementType = inferRuntimeType(arg);
-                            } else if (!valueMatchesType(arg,
-                                                         set->elementType)) {
-                                return runtimeError(
-                                    "Native function 'Set' expects all "
-                                    "elements to have a consistent type.");
-                            }
-
-                            setInsertValue(set, std::move(arg));
-                        }
-
-                        result = Value(set);
-                        break;
-                    }
-                    case NativeFunctionId::UNKNOWN:
-                    default:
-                        return runtimeError("Unknown native function '" +
-                                            native->name + "'.");
-                }
-
-                m_stack.popN(m_stack.size() - calleeIndex);
-                m_stack.push(std::move(result));
-                DISPATCH();
-            }
-
-            if (callee.isNativeBound()) {
-                auto bound = callee.asNativeBound();
-
-                const size_t argBase = calleeIndex + 1;
-                auto argAt = [&](uint8_t index) -> const Value& {
-                    return m_stack.getAt(argBase + static_cast<size_t>(index));
-                };
-                auto argAtRef = [&](uint8_t index) -> Value& {
-                    return m_stack.getAtRef(argBase +
-                                            static_cast<size_t>(index));
-                };
-
-                Value result;
-                const Value& receiver = bound->receiver;
-
-                if (receiver.isArray()) {
-                    auto array = receiver.asArray();
-
-                    if (bound->id == NativeMethodId::ARRAY_PUSH) {
-                        if (argumentCount != 1) {
-                            return runtimeError(
-                                "Array method 'push' expects 1 argument.");
-                        }
-
-                        if (array->elementType->isAny()) {
-                            array->elementType = inferRuntimeType(argAt(0));
-                        } else if (!valueMatchesType(argAt(0),
-                                                     array->elementType)) {
-                            return runtimeError(
-                                "Array method 'push' expects value of "
-                                "type '" +
-                                array->elementType->toString() + "'.");
-                        }
-
-                        array->elements.push_back(std::move(argAtRef(0)));
-                        result =
-                            Value(static_cast<double>(array->elements.size()));
-                    } else if (bound->id == NativeMethodId::ARRAY_POP) {
-                        if (argumentCount != 0) {
-                            return runtimeError(
-                                "Array method 'pop' expects 0 arguments.");
-                        }
-
-                        if (array->elements.empty()) {
-                            return runtimeError(
-                                "Array method 'pop' called on empty "
-                                "array.");
-                        }
-
-                        result = array->elements.back();
-                        array->elements.pop_back();
-                    } else if (bound->id == NativeMethodId::ARRAY_SIZE) {
-                        if (argumentCount != 0) {
-                            return runtimeError(
-                                "Array method 'size' expects 0 arguments.");
-                        }
-
-                        result =
-                            Value(static_cast<double>(array->elements.size()));
-                    } else if (bound->id == NativeMethodId::ARRAY_HAS) {
-                        if (argumentCount != 1) {
-                            return runtimeError(
-                                "Array method 'has' expects 1 argument.");
-                        }
-
-                        result =
-                            Value(containsValue(array->elements, argAt(0)));
-                    } else if (bound->id == NativeMethodId::ARRAY_INSERT) {
-                        if (argumentCount != 2) {
-                            return runtimeError(
-                                "Array method 'insert' expects 2 "
-                                "arguments.");
-                        }
-
-                        size_t index = 0;
-                        if (!toArrayIndex(argAt(0), index)) {
-                            return runtimeError(
-                                "Array method 'insert' expects a "
-                                "non-negative integer index.");
-                        }
-
-                        if (index > array->elements.size()) {
-                            return runtimeError(
-                                "Array method 'insert' index out of "
-                                "bounds.");
-                        }
-
-                        if (array->elementType->isAny()) {
-                            array->elementType = inferRuntimeType(argAt(1));
-                        } else if (!valueMatchesType(argAt(1),
-                                                     array->elementType)) {
-                            return runtimeError(
-                                "Array method 'insert' expects value of "
-                                "type '" +
-                                array->elementType->toString() + "'.");
-                        }
-
-                        array->elements.insert(
-                            array->elements.begin() + static_cast<long>(index),
-                            std::move(argAtRef(1)));
-                        result = array->elements[index];
-                    } else if (bound->id == NativeMethodId::ARRAY_REMOVE) {
-                        if (argumentCount != 1) {
-                            return runtimeError(
-                                "Array method 'remove' expects 1 "
-                                "argument.");
-                        }
-
-                        size_t index = 0;
-                        if (!toArrayIndex(argAt(0), index)) {
-                            return runtimeError(
-                                "Array method 'remove' expects a "
-                                "non-negative integer index.");
-                        }
-
-                        if (index >= array->elements.size()) {
-                            return runtimeError(
-                                "Array method 'remove' index out of "
-                                "bounds.");
-                        }
-
-                        result = array->elements[index];
-                        array->elements.erase(array->elements.begin() +
-                                              static_cast<long>(index));
-                    } else if (bound->id == NativeMethodId::ARRAY_CLEAR) {
-                        if (argumentCount != 0) {
-                            return runtimeError(
-                                "Array method 'clear' expects 0 "
-                                "arguments.");
-                        }
-
-                        double removed =
-                            static_cast<double>(array->elements.size());
-                        array->elements.clear();
-                        result = Value(removed);
-                    } else if (bound->id == NativeMethodId::ARRAY_IS_EMPTY) {
-                        if (argumentCount != 0) {
-                            return runtimeError(
-                                "Array method 'isEmpty' expects 0 "
-                                "arguments.");
-                        }
-
-                        result = Value(array->elements.empty());
-                    } else if (bound->id == NativeMethodId::ARRAY_FIRST) {
-                        if (argumentCount != 0) {
-                            return runtimeError(
-                                "Array method 'first' expects 0 "
-                                "arguments.");
-                        }
-
-                        if (array->elements.empty()) {
-                            return runtimeError(
-                                "Array method 'first' called on empty "
-                                "array.");
-                        }
-
-                        result = array->elements.front();
-                    } else if (bound->id == NativeMethodId::ARRAY_LAST) {
-                        if (argumentCount != 0) {
-                            return runtimeError(
-                                "Array method 'last' expects 0 arguments.");
-                        }
-
-                        if (array->elements.empty()) {
-                            return runtimeError(
-                                "Array method 'last' called on empty "
-                                "array.");
-                        }
-
-                        result = array->elements.back();
-                    } else {
-                        return runtimeError("Undefined array method '" +
-                                            bound->name + "'.");
-                    }
-                } else if (receiver.isDict()) {
-                    auto dict = receiver.asDict();
-
-                    if (bound->id == NativeMethodId::DICT_GET) {
-                        if (argumentCount != 1) {
-                            return runtimeError(
-                                "Dict method 'get' expects 1 argument.");
-                        }
-
-                        Value& key = argAtRef(0);
-                        auto it = dict->map.find(key);
-                        if (it == dict->map.end()) {
-                            return runtimeError(
-                                "Dict method 'get' key not found.");
-                        }
-
-                        result = it->second;
-                    } else if (bound->id == NativeMethodId::DICT_SET) {
-                        if (argumentCount != 2) {
-                            return runtimeError(
-                                "Dict method 'set' expects 2 arguments.");
-                        }
-
-                        const Value& key = argAt(0);
-
-                        if (dict->keyType->isAny()) {
-                            dict->keyType = inferRuntimeType(key);
-                        } else if (!valueMatchesType(key, dict->keyType)) {
-                            return runtimeError(
-                                "Dict method 'set' key expects type '" +
-                                dict->keyType->toString() + "'.");
-                        }
-
-                        Value& storedValue = argAtRef(1);
-                        if (dict->valueType->isAny()) {
-                            dict->valueType = inferRuntimeType(storedValue);
-                        } else if (!valueMatchesType(storedValue,
-                                                     dict->valueType)) {
-                            return runtimeError(
-                                "Dict method 'set' value expects type '" +
-                                dict->valueType->toString() + "'.");
-                        }
-
-                        auto [it, inserted] = dict->map.insert_or_assign(
-                            std::move(key), std::move(storedValue));
-                        (void)inserted;
-                        result = it->second;
-                    } else if (bound->id == NativeMethodId::DICT_HAS) {
-                        if (argumentCount != 1) {
-                            return runtimeError(
-                                "Dict method 'has' expects 1 argument.");
-                        }
-
-                        const Value& key = argAt(0);
-                        result = Value(dict->map.find(key) != dict->map.end());
-                    } else if (bound->id == NativeMethodId::DICT_KEYS) {
-                        if (argumentCount != 0) {
-                            return runtimeError(
-                                "Dict method 'keys' expects 0 arguments.");
-                        }
-
-                        auto keys = gcAlloc<ArrayObject>();
-                        std::vector<Value> orderedKeys = sortedDictKeys(dict);
-                        keys->elements.reserve(orderedKeys.size());
-
-                        for (const auto& key : orderedKeys) {
-                            keys->elements.push_back(key);
-                        }
-                        keys->elementType =
-                            dict->keyType ? dict->keyType : TypeInfo::makeAny();
-                        result = Value(keys);
-                    } else if (bound->id == NativeMethodId::DICT_VALUES) {
-                        if (argumentCount != 0) {
-                            return runtimeError(
-                                "Dict method 'values' expects 0 "
-                                "arguments.");
-                        }
-
-                        auto values = gcAlloc<ArrayObject>();
-                        std::vector<Value> orderedKeys = sortedDictKeys(dict);
-                        values->elements.reserve(orderedKeys.size());
-
-                        for (const auto& key : orderedKeys) {
-                            auto it = dict->map.find(key);
-                            if (it != dict->map.end()) {
-                                values->elements.push_back(it->second);
-                            }
-                        }
-                        values->elementType = dict->valueType;
-                        result = Value(values);
-                    } else if (bound->id == NativeMethodId::DICT_SIZE) {
-                        if (argumentCount != 0) {
-                            return runtimeError(
-                                "Dict method 'size' expects 0 arguments.");
-                        }
-
-                        result = Value(static_cast<double>(dict->map.size()));
-                    } else if (bound->id == NativeMethodId::DICT_REMOVE) {
-                        if (argumentCount != 1) {
-                            return runtimeError(
-                                "Dict method 'remove' expects 1 argument.");
-                        }
-
-                        const Value& key = argAt(0);
-                        auto it = dict->map.find(key);
-                        if (it == dict->map.end()) {
-                            return runtimeError(
-                                "Dict method 'remove' key not found.");
-                        }
-
-                        result = it->second;
-                        dict->map.erase(it);
-                    } else if (bound->id == NativeMethodId::DICT_CLEAR) {
-                        if (argumentCount != 0) {
-                            return runtimeError(
-                                "Dict method 'clear' expects 0 arguments.");
-                        }
-
-                        double removed = static_cast<double>(dict->map.size());
-                        dict->map.clear();
-                        result = Value(removed);
-                    } else if (bound->id == NativeMethodId::DICT_IS_EMPTY) {
-                        if (argumentCount != 0) {
-                            return runtimeError(
-                                "Dict method 'isEmpty' expects 0 "
-                                "arguments.");
-                        }
-
-                        result = Value(dict->map.empty());
-                    } else if (bound->id == NativeMethodId::DICT_GET_OR) {
-                        if (argumentCount != 2) {
-                            return runtimeError(
-                                "Dict method 'getOr' expects 2 arguments.");
-                        }
-
-                        const Value& key = argAt(0);
-                        auto it = dict->map.find(key);
-                        result =
-                            (it != dict->map.end()) ? it->second : argAt(1);
-                    } else {
-                        return runtimeError("Undefined dict method '" +
-                                            bound->name + "'.");
-                    }
-                } else if (receiver.isSet()) {
-                    auto set = receiver.asSet();
-
-                    if (bound->id == NativeMethodId::SET_ADD) {
-                        if (argumentCount != 1) {
-                            return runtimeError(
-                                "Set method 'add' expects 1 argument.");
-                        }
-
-                        Value& element = argAtRef(0);
-                        if (set->elementType->isAny()) {
-                            set->elementType = inferRuntimeType(element);
-                        } else if (!valueMatchesType(element,
-                                                     set->elementType)) {
-                            return runtimeError(
-                                "Set method 'add' expects value of type "
-                                "'" +
-                                set->elementType->toString() + "'.");
-                        }
-
-                        bool inserted = setInsertValue(set, std::move(element));
-                        result = Value(inserted);
-                    } else if (bound->id == NativeMethodId::SET_HAS) {
-                        if (argumentCount != 1) {
-                            return runtimeError(
-                                "Set method 'has' expects 1 argument.");
-                        }
-
-                        result = Value(setContainsValue(set, argAt(0)));
-                    } else if (bound->id == NativeMethodId::SET_REMOVE) {
-                        if (argumentCount != 1) {
-                            return runtimeError(
-                                "Set method 'remove' expects 1 argument.");
-                        }
-
-                        bool removed = setRemoveValue(set, argAt(0));
-                        result = Value(removed);
-                    } else if (bound->id == NativeMethodId::SET_SIZE) {
-                        if (argumentCount != 0) {
-                            return runtimeError(
-                                "Set method 'size' expects 0 arguments.");
-                        }
-
-                        result =
-                            Value(static_cast<double>(set->elements.size()));
-                    } else if (bound->id == NativeMethodId::SET_TO_ARRAY) {
-                        if (argumentCount != 0) {
-                            return runtimeError(
-                                "Set method 'toArray' expects 0 "
-                                "arguments.");
-                        }
-
-                        auto array = gcAlloc<ArrayObject>();
-                        array->elements.reserve(set->elements.size());
-                        array->elements.insert(array->elements.end(),
-                                               set->elements.begin(),
-                                               set->elements.end());
-                        array->elementType = set->elementType;
-                        result = Value(array);
-                    } else if (bound->id == NativeMethodId::SET_CLEAR) {
-                        if (argumentCount != 0) {
-                            return runtimeError(
-                                "Set method 'clear' expects 0 arguments.");
-                        }
-
-                        double removed =
-                            static_cast<double>(set->elements.size());
-                        set->elements.clear();
-                        set->indexByValue.clear();
-                        result = Value(removed);
-                    } else if (bound->id == NativeMethodId::SET_IS_EMPTY) {
-                        if (argumentCount != 0) {
-                            return runtimeError(
-                                "Set method 'isEmpty' expects 0 "
-                                "arguments.");
-                        }
-
-                        result = Value(set->elements.empty());
-                    } else if (bound->id == NativeMethodId::SET_UNION) {
-                        if (argumentCount != 1) {
-                            return runtimeError(
-                                "Set method 'union' expects 1 argument.");
-                        }
-                        if (!argAt(0).isSet()) {
-                            return runtimeError(
-                                "Set method 'union' expects a set "
-                                "argument.");
-                        }
-
-                        auto out = gcAlloc<SetObject>();
-                        out->elementType = set->elementType;
-                        auto rhs = argAt(0).asSet();
-                        out->elements.reserve(set->elements.size() +
-                                              rhs->elements.size());
-                        out->indexByValue.reserve(set->elements.size() +
-                                                  rhs->elements.size());
-                        for (const auto& element : set->elements) {
-                            setInsertValue(out, element);
-                        }
-
-                        if (!set->elementType->isAny() &&
-                            !rhs->elementType->isAny() &&
-                            !isAssignable(rhs->elementType, set->elementType) &&
-                            !isAssignable(set->elementType, rhs->elementType)) {
-                            return runtimeError(
-                                "Set method 'union' requires compatible "
-                                "element types.");
-                        }
-
-                        for (const auto& element : rhs->elements) {
-                            setInsertValue(out, element);
-                        }
-                        result = Value(out);
-                    } else if (bound->id == NativeMethodId::SET_INTERSECT) {
-                        if (argumentCount != 1) {
-                            return runtimeError(
-                                "Set method 'intersect' expects 1 "
-                                "argument.");
-                        }
-                        if (!argAt(0).isSet()) {
-                            return runtimeError(
-                                "Set method 'intersect' expects a set "
-                                "argument.");
-                        }
-
-                        auto out = gcAlloc<SetObject>();
-                        out->elementType = set->elementType;
-                        auto rhs = argAt(0).asSet();
-                        out->elements.reserve(std::min(set->elements.size(),
-                                                       rhs->elements.size()));
-                        out->indexByValue.reserve(std::min(
-                            set->elements.size(), rhs->elements.size()));
-
-                        if (!set->elementType->isAny() &&
-                            !rhs->elementType->isAny() &&
-                            !isAssignable(rhs->elementType, set->elementType) &&
-                            !isAssignable(set->elementType, rhs->elementType)) {
-                            return runtimeError(
-                                "Set method 'intersect' requires "
-                                "compatible element types.");
-                        }
-
-                        for (const auto& element : set->elements) {
-                            if (setContainsValue(rhs, element)) {
-                                setInsertValue(out, element);
-                            }
-                        }
-                        result = Value(out);
-                    } else if (bound->id == NativeMethodId::SET_DIFFERENCE) {
-                        if (argumentCount != 1) {
-                            return runtimeError(
-                                "Set method 'difference' expects 1 "
-                                "argument.");
-                        }
-                        if (!argAt(0).isSet()) {
-                            return runtimeError(
-                                "Set method 'difference' expects a set "
-                                "argument.");
-                        }
-
-                        auto out = gcAlloc<SetObject>();
-                        out->elementType = set->elementType;
-                        auto rhs = argAt(0).asSet();
-                        out->elements.reserve(set->elements.size());
-                        out->indexByValue.reserve(set->elements.size());
-
-                        if (!set->elementType->isAny() &&
-                            !rhs->elementType->isAny() &&
-                            !isAssignable(rhs->elementType, set->elementType) &&
-                            !isAssignable(set->elementType, rhs->elementType)) {
-                            return runtimeError(
-                                "Set method 'difference' requires "
-                                "compatible element types.");
-                        }
-
-                        for (const auto& element : set->elements) {
-                            if (!setContainsValue(rhs, element)) {
-                                setInsertValue(out, element);
-                            }
-                        }
-                        result = Value(out);
-                    } else {
-                        return runtimeError("Undefined set method '" +
-                                            bound->name + "'.");
-                    }
-                } else {
-                    return runtimeError(
-                        "Native bound method receiver is invalid.");
-                }
-
-                m_stack.popN(m_stack.size() - calleeIndex);
-                m_stack.push(std::move(result));
-                DISPATCH();
-            }
-
-            if (callee.isBoundMethod()) {
-                auto bound = callee.asBoundMethod();
-                Status status =
-                    callClosure(bound->method, argumentCount, bound->receiver);
-                if (status != Status::OK) {
-                    return status;
-                }
-                DISPATCH();
-            }
-
-            if (callee.isClosure()) {
-                Status status = callClosure(callee.asClosure(), argumentCount);
-                if (status != Status::OK) {
-                    return status;
-                }
-                DISPATCH();
-            }
-
-            if (callee.isFunction()) {
-                auto closure = gcAlloc<ClosureObject>();
-                closure->function = callee.asFunction();
-                closure->upvalues = {};
-                Status status = callClosure(closure, argumentCount);
-                if (status != Status::OK) {
-                    return status;
-                }
-                DISPATCH();
-            }
-
-            if (!callee.isFunction()) {
-                return runtimeError(
-                    "Can only call functions, classes, methods, and "
-                    "natives.");
+            Status status = callValue(callee, argumentCount, calleeIndex);
+            if (status != Status::OK) {
+                return status;
             }
             DISPATCH();
         }

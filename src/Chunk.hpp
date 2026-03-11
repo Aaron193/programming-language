@@ -198,7 +198,9 @@ enum OpCode {
     METHOD,
     GET_THIS,
     GET_SUPER,
+    INVOKE_SUPER,
     GET_PROPERTY,
+    INVOKE,
     SET_PROPERTY,
     CALL,
     CLOSURE,
@@ -272,28 +274,20 @@ struct Value {
 
     Value() = default;
 
-    Value(double value) : kind(Kind::NUMBER) {
-        payload.number = value;
-    }
+    Value(double value) : kind(Kind::NUMBER) { payload.number = value; }
 
-    Value(int64_t value) : kind(Kind::SIGNED_INT) {
-        payload.signedInt = value;
-    }
+    Value(int64_t value) : kind(Kind::SIGNED_INT) { payload.signedInt = value; }
 
     Value(uint64_t value) : kind(Kind::UNSIGNED_INT) {
         payload.unsignedInt = value;
     }
 
     Value(bool value) : kind(Kind::BOOL) { payload.boolean = value; }
-    Value(StringObject* value) : kind(Kind::STRING) {
-        payload.object = value;
-    }
+    Value(StringObject* value) : kind(Kind::STRING) { payload.object = value; }
     Value(FunctionObject* value) : kind(Kind::FUNCTION) {
         payload.object = value;
     }
-    Value(ClassObject* value) : kind(Kind::CLASS) {
-        payload.object = value;
-    }
+    Value(ClassObject* value) : kind(Kind::CLASS) { payload.object = value; }
     Value(InstanceObject* value) : kind(Kind::INSTANCE) {
         payload.object = value;
     }
@@ -309,21 +303,13 @@ struct Value {
     Value(ClosureObject* value) : kind(Kind::CLOSURE) {
         payload.object = value;
     }
-    Value(ArrayObject* value) : kind(Kind::ARRAY) {
-        payload.object = value;
-    }
-    Value(DictObject* value) : kind(Kind::DICT) {
-        payload.object = value;
-    }
-    Value(SetObject* value) : kind(Kind::SET) {
-        payload.object = value;
-    }
+    Value(ArrayObject* value) : kind(Kind::ARRAY) { payload.object = value; }
+    Value(DictObject* value) : kind(Kind::DICT) { payload.object = value; }
+    Value(SetObject* value) : kind(Kind::SET) { payload.object = value; }
     Value(IteratorObject* value) : kind(Kind::ITERATOR) {
         payload.object = value;
     }
-    Value(ModuleObject* value) : kind(Kind::MODULE) {
-        payload.object = value;
-    }
+    Value(ModuleObject* value) : kind(Kind::MODULE) { payload.object = value; }
 
     bool isNumber() const { return kind == Kind::NUMBER; }
     bool isSignedInt() const { return kind == Kind::SIGNED_INT; }
@@ -379,7 +365,9 @@ struct Value {
     ArrayObject* asArray() const {
         return static_cast<ArrayObject*>(payload.object);
     }
-    DictObject* asDict() const { return static_cast<DictObject*>(payload.object); }
+    DictObject* asDict() const {
+        return static_cast<DictObject*>(payload.object);
+    }
     SetObject* asSet() const { return static_cast<SetObject*>(payload.object); }
     IteratorObject* asIterator() const {
         return static_cast<IteratorObject*>(payload.object);

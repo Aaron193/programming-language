@@ -41,6 +41,17 @@ static int byteInstruction(const std::string& label, int offset,
     return offset + 2;
 }
 
+static int invokeInstruction(const std::string& label, int offset,
+                             const std::vector<uint8_t>& bytes,
+                             const std::vector<Value>& constants) {
+    std::cout << label << " ";
+    uint8_t index = bytes.at(offset + 1);
+    Value val = constants.at(index);
+    std::cout << val << " " << static_cast<int>(bytes.at(offset + 2))
+              << std::endl;
+    return offset + 3;
+}
+
 static int closureInstruction(const std::string& label, int offset,
                               const std::vector<uint8_t>& bytes,
                               const std::vector<Value>& constants) {
@@ -193,8 +204,13 @@ int Chunk::disassembleInstruction(int offset) {
             return simpleInstruction("GET_THIS", offset);
         case OpCode::GET_SUPER:
             return constantInstruction("GET_SUPER", offset);
+        case OpCode::INVOKE_SUPER:
+            return invokeInstruction("INVOKE_SUPER", offset, *m_bytes,
+                                     *m_constants);
         case OpCode::GET_PROPERTY:
             return constantInstruction("GET_PROPERTY", offset);
+        case OpCode::INVOKE:
+            return invokeInstruction("INVOKE", offset, *m_bytes, *m_constants);
         case OpCode::SET_PROPERTY:
             return constantInstruction("SET_PROPERTY", offset);
         case OpCode::CALL:
@@ -333,7 +349,8 @@ void ClosureObject::trace(GC& gc) {
 void InstanceObject::trace(GC& gc) {
     gc.markObject(klass);
     for (size_t index = 0; index < fieldSlots.size(); ++index) {
-        if (index < initializedFieldSlots.size() && initializedFieldSlots[index]) {
+        if (index < initializedFieldSlots.size() &&
+            initializedFieldSlots[index]) {
             gc.markValue(fieldSlots[index]);
         }
     }

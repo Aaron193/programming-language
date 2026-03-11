@@ -300,6 +300,50 @@ void Compiler::emitBytes(uint8_t byte1, uint8_t byte2) {
     emitByte(byte2);
 }
 
+uint8_t Compiler::parseCallArguments(std::vector<TypeRef>& argumentTypes) {
+    uint8_t argCount = 0;
+    if (m_parser->current.type() != TokenType::CLOSE_PAREN) {
+        do {
+            expression();
+            argumentTypes.push_back(popExprType());
+            if (argCount == UINT8_MAX) {
+                errorAtCurrent("Cannot have more than 255 arguments.");
+                break;
+            }
+            argCount++;
+
+            if (m_parser->current.type() != TokenType::COMMA) {
+                break;
+            }
+            advance();
+        } while (true);
+    }
+
+    consume(TokenType::CLOSE_PAREN, "Expected ')' after arguments.");
+    return argCount;
+}
+
+void Compiler::pushCallResultType(const TypeRef& calleeType) {
+    if (calleeType && calleeType->kind == TypeKind::FUNCTION &&
+        calleeType->returnType) {
+        pushExprType(calleeType->returnType);
+    } else {
+        pushExprType(TypeInfo::makeAny());
+    }
+}
+
+void Compiler::emitInvokeCall(uint8_t invokeOpcode, uint8_t name,
+                              const TypeRef& calleeType) {
+    consume(TokenType::OPEN_PAREN, "Expected '(' after method name.");
+
+    std::vector<TypeRef> argumentTypes;
+    uint8_t argCount = parseCallArguments(argumentTypes);
+    emitByte(invokeOpcode);
+    emitByte(name);
+    emitByte(argCount);
+    pushCallResultType(calleeType);
+}
+
 void Compiler::emitReturn() {
     emitByte(OpCode::NIL);
     emitByte(OpCode::RETURN);
@@ -1304,7 +1348,8 @@ void Compiler::importDeclaration() {
     }
 
     auto emitImportPath = [&](const std::string& resolvedPath) {
-        emitBytes(OpCode::IMPORT_MODULE, makeConstant(makeStringValue(resolvedPath)));
+        emitBytes(OpCode::IMPORT_MODULE,
+                  makeConstant(makeStringValue(resolvedPath)));
     };
 
     auto parseAndResolvePath = [&]() -> std::string {
@@ -2186,7 +2231,6 @@ void Compiler::superExpression(bool canAssign) {
     uint8_t name = identifierConstant(m_parser->previous);
     std::string methodName(m_parser->previous.start(),
                            m_parser->previous.length());
-    emitBytes(OpCode::GET_SUPER, name);
 
     TypeRef methodType = TypeInfo::makeAny();
     if (m_currentClass && !m_currentClass->className.empty()) {
@@ -2198,6 +2242,14 @@ void Compiler::superExpression(bool canAssign) {
             }
         }
     }
+
+    if (m_parser->current.type() == TokenType::OPEN_PAREN) {
+        emitByte(OpCode::GET_THIS);
+        emitInvokeCall(OpCode::INVOKE_SUPER, name, methodType);
+        return;
+    }
+
+    emitBytes(OpCode::GET_SUPER, name);
     pushExprType(methodType);
 }
 
@@ -2526,7 +2578,8 @@ void Compiler::binary(bool canAssign) {
             }
             break;
         case TokenType::GREATER:
-            if (m_strictMode && promotedNumeric && promotedNumeric->isInteger()) {
+            if (m_strictMode && promotedNumeric &&
+                promotedNumeric->isInteger()) {
                 emitByte(promotedNumeric->isSigned() ? OpCode::IGREATER
                                                      : OpCode::UGREATER);
             } else {
@@ -2535,7 +2588,8 @@ void Compiler::binary(bool canAssign) {
             resultType = TypeInfo::makeBool();
             break;
         case TokenType::GREATER_EQUAL:
-            if (m_strictMode && promotedNumeric && promotedNumeric->isInteger()) {
+            if (m_strictMode && promotedNumeric &&
+                promotedNumeric->isInteger()) {
                 emitByte(promotedNumeric->isSigned() ? OpCode::IGREATER_EQ
                                                      : OpCode::UGREATER_EQ);
             } else {
@@ -2544,7 +2598,8 @@ void Compiler::binary(bool canAssign) {
             resultType = TypeInfo::makeBool();
             break;
         case TokenType::LESS:
-            if (m_strictMode && promotedNumeric && promotedNumeric->isInteger()) {
+            if (m_strictMode && promotedNumeric &&
+                promotedNumeric->isInteger()) {
                 emitByte(promotedNumeric->isSigned() ? OpCode::ILESS
                                                      : OpCode::ULESS);
             } else {
@@ -2553,7 +2608,8 @@ void Compiler::binary(bool canAssign) {
             resultType = TypeInfo::makeBool();
             break;
         case TokenType::LESS_EQUAL:
-            if (m_strictMode && promotedNumeric && promotedNumeric->isInteger()) {
+            if (m_strictMode && promotedNumeric &&
+                promotedNumeric->isInteger()) {
                 emitByte(promotedNumeric->isSigned() ? OpCode::ILESS_EQ
                                                      : OpCode::ULESS_EQ);
             } else {
@@ -2619,34 +2675,9 @@ void Compiler::call(bool canAssign) {
 
     TypeRef calleeType = popExprType();
     std::vector<TypeRef> argumentTypes;
-
-    uint8_t argCount = 0;
-    if (m_parser->current.type() != TokenType::CLOSE_PAREN) {
-        do {
-            expression();
-            argumentTypes.push_back(popExprType());
-            if (argCount == UINT8_MAX) {
-                errorAtCurrent("Cannot have more than 255 arguments.");
-                break;
-            }
-            argCount++;
-
-            if (m_parser->current.type() != TokenType::COMMA) {
-                break;
-            }
-            advance();
-        } while (true);
-    }
-
-    consume(TokenType::CLOSE_PAREN, "Expected ')' after arguments.");
+    uint8_t argCount = parseCallArguments(argumentTypes);
     emitBytes(OpCode::CALL, argCount);
-
-    if (calleeType && calleeType->kind == TypeKind::FUNCTION &&
-        calleeType->returnType) {
-        pushExprType(calleeType->returnType);
-    } else {
-        pushExprType(TypeInfo::makeAny());
-    }
+    pushCallResultType(calleeType);
 }
 
 void Compiler::dot(bool canAssign) {
@@ -2714,6 +2745,11 @@ void Compiler::dot(bool canAssign) {
             pushExprType(memberType);
             return;
         }
+    }
+
+    if (m_parser->current.type() == TokenType::OPEN_PAREN) {
+        emitInvokeCall(OpCode::INVOKE, name, memberType);
+        return;
     }
 
     emitBytes(OpCode::GET_PROPERTY, name);

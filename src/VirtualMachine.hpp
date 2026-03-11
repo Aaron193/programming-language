@@ -83,6 +83,13 @@ class VirtualMachine {
     void printStackTrace();
     Status callClosure(ClosureObject* closure, uint8_t argumentCount,
                        InstanceObject* receiver = nullptr);
+    Status callValue(Value callee, uint8_t argumentCount, size_t calleeIndex);
+    Status callNativeMethod(NativeMethodId id, const std::string& name,
+                            const Value& receiver, uint8_t argumentCount,
+                            size_t calleeIndex);
+    Status invokeProperty(size_t instructionOffset, const std::string& name,
+                          uint8_t argumentCount);
+    Status invokeSuper(const std::string& name, uint8_t argumentCount);
     UpvalueObject* captureUpvalue(size_t stackIndex);
     void closeUpvalues(size_t fromStackIndex);
     void markRoots();

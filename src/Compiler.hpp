@@ -157,6 +157,10 @@ class Compiler {
     void emitCheckInstanceType(const TypeRef& targetType);
     uint8_t arithmeticOpcode(TokenType operatorType,
                              const TypeRef& numericType) const;
+    uint8_t parseCallArguments(std::vector<TypeRef>& argumentTypes);
+    void pushCallResultType(const TypeRef& calleeType);
+    void emitInvokeCall(uint8_t invokeOpcode, uint8_t name,
+                        const TypeRef& calleeType);
     void pushExprType(const TypeRef& type);
     TypeRef popExprType();
     TypeRef peekExprType() const;
