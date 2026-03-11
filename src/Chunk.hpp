@@ -8,6 +8,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -267,6 +268,7 @@ struct Value {
     Value(uint64_t value) : data(value) {}
     Value(bool value) : data(value) {}
     Value(const std::string& value) : data(value) {}
+    Value(std::string&& value) : data(std::move(value)) {}
     Value(const char* value) : data(std::string(value)) {}
     Value(FunctionObject* value) : data(value) {}
     Value(ClassObject* value) : data(value) {}

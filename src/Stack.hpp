@@ -2,6 +2,7 @@
 #include <cstddef>
 #include <iostream>
 #include <stdexcept>
+#include <utility>
 
 #define STACK_SIZE 256
 
@@ -25,6 +26,13 @@ class Stack {
         m_data[++m_top] = value;
     }
 
+    void push(T&& value) {
+        if (m_top >= static_cast<int>(m_capacity) - 1) {
+            throw std::overflow_error("Stack overflow.");
+        }
+        m_data[++m_top] = std::move(value);
+    }
+
     T pop() {
         if (m_top < 0) {
             throw std::underflow_error("Stack underflow.");
@@ -32,8 +40,24 @@ class Stack {
         return m_data[m_top--];
     }
 
+    T popMove() {
+        if (m_top < 0) {
+            throw std::underflow_error("Stack underflow.");
+        }
+        return std::move(m_data[m_top--]);
+    }
+
     const T& peek(size_t distance) const {
         static const T empty{};
+        if (m_top < 0 || distance > static_cast<size_t>(m_top)) {
+            return empty;
+        }
+
+        return m_data[m_top - static_cast<int>(distance)];
+    }
+
+    T& peekRef(size_t distance) {
+        static T empty{};
         if (m_top < 0 || distance > static_cast<size_t>(m_top)) {
             return empty;
         }
@@ -50,9 +74,24 @@ class Stack {
         return m_data[index];
     }
 
+    T& getAtRef(size_t index) {
+        static T empty{};
+        if (index > static_cast<size_t>(m_top)) {
+            return empty;
+        }
+
+        return m_data[index];
+    }
+
     void setAt(size_t index, const T& value) {
         if (index <= static_cast<size_t>(m_top)) {
             m_data[index] = value;
+        }
+    }
+
+    void setAt(size_t index, T&& value) {
+        if (index <= static_cast<size_t>(m_top)) {
+            m_data[index] = std::move(value);
         }
     }
 
