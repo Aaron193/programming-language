@@ -305,6 +305,17 @@ void Compiler::emitReturn() {
     emitByte(OpCode::RETURN);
 }
 
+Value Compiler::makeStringValue(const std::string& text) {
+    if (m_gc == nullptr) {
+        errorAtCurrent("Internal compiler error: GC allocator unavailable.");
+        return Value();
+    }
+
+    auto* stringObject = m_gc->allocate<StringObject>();
+    stringObject->value = text;
+    return Value(stringObject);
+}
+
 uint8_t Compiler::makeConstant(Value value) {
     int constant = currentChunk()->addConstant(value);
     if (constant > UINT8_MAX) {
@@ -585,7 +596,7 @@ void Compiler::emitCheckInstanceType(const TypeRef& targetType) {
     }
 
     emitBytes(OpCode::CHECK_INSTANCE_TYPE,
-              makeConstant(Value(targetType->className)));
+              makeConstant(makeStringValue(targetType->className)));
 }
 
 bool Compiler::emitCompoundBinary(TokenType assignmentType,
@@ -613,7 +624,8 @@ bool Compiler::emitCompoundBinary(TokenType assignmentType,
 }
 
 uint8_t Compiler::identifierConstant(const Token& name) {
-    return makeConstant(Value(std::string(name.start(), name.length())));
+    return makeConstant(
+        makeStringValue(std::string(name.start(), name.length())));
 }
 
 uint8_t Compiler::globalSlot(const Token& name) {
@@ -1292,7 +1304,7 @@ void Compiler::importDeclaration() {
     }
 
     auto emitImportPath = [&](const std::string& resolvedPath) {
-        emitBytes(OpCode::IMPORT_MODULE, makeConstant(Value(resolvedPath)));
+        emitBytes(OpCode::IMPORT_MODULE, makeConstant(makeStringValue(resolvedPath)));
     };
 
     auto parseAndResolvePath = [&]() -> std::string {
@@ -1683,13 +1695,11 @@ void Compiler::ifStatement() {
     popExprType();
     consume(TokenType::CLOSE_PAREN, "Expected ')' after condition.");
 
-    int thenJump = emitJump(OpCode::JUMP_IF_FALSE);
-    emitByte(OpCode::POP);
+    int thenJump = emitJump(OpCode::JUMP_IF_FALSE_POP);
     statement();
     int endJump = emitJump(OpCode::JUMP);
 
     patchJump(thenJump);
-    emitByte(OpCode::POP);
     if (m_parser->current.type() == TokenType::ELSE) {
         advance();
         statement();
@@ -1705,12 +1715,10 @@ void Compiler::whileStatement() {
     popExprType();
     consume(TokenType::CLOSE_PAREN, "Expected ')' after condition.");
 
-    int exitJump = emitJump(OpCode::JUMP_IF_FALSE);
-    emitByte(OpCode::POP);
+    int exitJump = emitJump(OpCode::JUMP_IF_FALSE_POP);
     statement();
     emitLoop(loopStart);
     patchJump(exitJump);
-    emitByte(OpCode::POP);
 }
 
 void Compiler::forStatement() {
@@ -1745,21 +1753,13 @@ void Compiler::forStatement() {
             emitByte(OpCode::ITER_INIT);
 
             int loopStart = currentChunk()->count();
-            emitByte(OpCode::DUP);
-            emitByte(OpCode::ITER_HAS_NEXT);
-            int exitJump = emitJump(OpCode::JUMP_IF_FALSE);
-            emitByte(OpCode::POP);
-
-            emitByte(OpCode::DUP);
-            emitByte(OpCode::ITER_NEXT);
-            emitBytes(OpCode::SET_LOCAL, loopVariableSlot);
-            emitByte(OpCode::POP);
+            int exitJump = emitJump(OpCode::ITER_HAS_NEXT_JUMP);
+            emitBytes(OpCode::ITER_NEXT_SET_LOCAL, loopVariableSlot);
 
             statement();
             emitLoop(loopStart);
 
             patchJump(exitJump);
-            emitByte(OpCode::POP);
             emitByte(OpCode::POP);
 
             endScope();
@@ -1813,8 +1813,7 @@ void Compiler::forStatement() {
         expression();
         popExprType();
         consume(TokenType::SEMI_COLON, "Expected ';' after loop condition.");
-        exitJump = emitJump(OpCode::JUMP_IF_FALSE);
-        emitByte(OpCode::POP);
+        exitJump = emitJump(OpCode::JUMP_IF_FALSE_POP);
     } else {
         advance();
     }
@@ -1840,7 +1839,6 @@ void Compiler::forStatement() {
 
     if (exitJump != -1) {
         patchJump(exitJump);
-        emitByte(OpCode::POP);
     }
 
     endScope();
@@ -2234,7 +2232,7 @@ void Compiler::stringLiteral(bool canAssign) {
     }
 
     std::string value = tokenText.substr(1, tokenText.length() - 2);
-    emitConstant(Value(value));
+    emitConstant(makeStringValue(value));
     pushExprType(TypeInfo::makeStr());
 }
 

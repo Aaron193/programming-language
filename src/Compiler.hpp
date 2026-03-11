@@ -117,6 +117,7 @@ class Compiler {
     void emitByte(uint8_t byte);
     void emitBytes(uint8_t byte1, uint8_t byte2);
     void emitReturn();
+    Value makeStringValue(const std::string& text);
     uint8_t makeConstant(Value value);
     void emitConstant(Value value);
     uint8_t identifierConstant(const Token& name);

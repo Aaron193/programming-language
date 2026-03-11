@@ -1,0 +1,17 @@
+#!strict
+i32 sum = 0;
+Array<i32> nums = [1, 2, 3];
+
+for (auto n : nums) {
+    sum += n;
+}
+
+i32 i = 0;
+while (i < 2) {
+    sum += i;
+    i += 1;
+}
+
+if (sum > 0) {
+    print(sum);
+}

@@ -225,6 +225,10 @@ int Chunk::disassembleInstruction(int offset) {
             return jumpInstruction("JUMP_IF_FALSE", 1, offset,
                                    m_bytes->at(offset + 1),
                                    m_bytes->at(offset + 2));
+        case OpCode::JUMP_IF_FALSE_POP:
+            return jumpInstruction("JUMP_IF_FALSE_POP", 1, offset,
+                                   m_bytes->at(offset + 1),
+                                   m_bytes->at(offset + 2));
         case OpCode::LOOP:
             return jumpInstruction("LOOP", -1, offset, m_bytes->at(offset + 1),
                                    m_bytes->at(offset + 2));
@@ -260,8 +264,15 @@ int Chunk::disassembleInstruction(int offset) {
             return simpleInstruction("ITER_INIT", offset);
         case OpCode::ITER_HAS_NEXT:
             return simpleInstruction("ITER_HAS_NEXT", offset);
+        case OpCode::ITER_HAS_NEXT_JUMP:
+            return jumpInstruction("ITER_HAS_NEXT_JUMP", 1, offset,
+                                   m_bytes->at(offset + 1),
+                                   m_bytes->at(offset + 2));
         case OpCode::ITER_NEXT:
             return simpleInstruction("ITER_NEXT", offset);
+        case OpCode::ITER_NEXT_SET_LOCAL:
+            return byteInstruction("ITER_NEXT_SET_LOCAL", offset,
+                                   m_bytes->at(offset + 1));
         case OpCode::IMPORT_MODULE:
             return constantInstruction("IMPORT_MODULE", offset);
         case OpCode::EXPORT_NAME:
@@ -303,6 +314,8 @@ void BoundMethodObject::trace(GC& gc) {
 }
 
 void NativeFunctionObject::trace(GC& gc) { (void)gc; }
+
+void StringObject::trace(GC& gc) { (void)gc; }
 
 void UpvalueObject::trace(GC& gc) {
     if (isClosed) {

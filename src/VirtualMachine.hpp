@@ -76,6 +76,7 @@ class VirtualMachine {
         return static_cast<size_t>(frame.ip - frame.chunk->getBytes() - 1);
     }
 
+    Value makeStringValue(std::string text);
     Status run(bool printReturnValue, Value& returnValue,
                size_t stopFrameCount = 0);
     Status runtimeError(const std::string& message);

@@ -29,6 +29,7 @@ struct DictObject;
 struct SetObject;
 struct IteratorObject;
 struct ModuleObject;
+struct StringObject;
 
 enum class PropertyInlineCacheKind : uint8_t {
     EMPTY,
@@ -134,6 +135,12 @@ struct NativeFunctionObject : GcObject {
     void trace(GC& gc) override;
 };
 
+struct StringObject : GcObject {
+    std::string value;
+
+    void trace(GC& gc) override;
+};
+
 /*
  OpCode is a bytecode *instruction*
  eg: [CONST 2, CONST 3, ADD] -> 2 + 3 -> 5
@@ -204,6 +211,7 @@ enum OpCode {
     DUP2,
     JUMP,
     JUMP_IF_FALSE,
+    JUMP_IF_FALSE_POP,
     LOOP,
     SHIFT_LEFT,
     SHIFT_RIGHT,
@@ -220,120 +228,165 @@ enum OpCode {
     INT_NEGATE,
     ITER_INIT,
     ITER_HAS_NEXT,
+    ITER_HAS_NEXT_JUMP,
     ITER_NEXT,
+    ITER_NEXT_SET_LOCAL,
     IMPORT_MODULE,
     EXPORT_NAME,
 };
 
-enum ValueType {
-    NUMBER_VALUE,
-    BOOL_VALUE,
-    NIL_VALUE,
-    STRING_VALUE,
-};
-
 struct Value {
-    using Storage =
-        std::variant<double, int64_t, uint64_t, bool, std::monostate,
-                     std::string, FunctionObject*, ClassObject*,
-                     InstanceObject*, BoundMethodObject*,
-                     NativeFunctionObject*, NativeBoundMethodObject*,
-                     ClosureObject*, ArrayObject*, DictObject*, SetObject*,
-                     IteratorObject*, ModuleObject*>;
+    enum class Kind : uint8_t {
+        NUMBER,
+        SIGNED_INT,
+        UNSIGNED_INT,
+        BOOL,
+        NIL,
+        STRING,
+        FUNCTION,
+        CLASS,
+        INSTANCE,
+        BOUND_METHOD,
+        NATIVE,
+        NATIVE_BOUND,
+        CLOSURE,
+        ARRAY,
+        DICT,
+        SET,
+        ITERATOR,
+        MODULE,
+    };
 
-    static constexpr size_t NUMBER_INDEX = 0;
-    static constexpr size_t SIGNED_INT_INDEX = 1;
-    static constexpr size_t UNSIGNED_INT_INDEX = 2;
-    static constexpr size_t BOOL_INDEX = 3;
-    static constexpr size_t NIL_INDEX = 4;
-    static constexpr size_t STRING_INDEX = 5;
-    static constexpr size_t FUNCTION_INDEX = 6;
-    static constexpr size_t CLASS_INDEX = 7;
-    static constexpr size_t INSTANCE_INDEX = 8;
-    static constexpr size_t BOUND_METHOD_INDEX = 9;
-    static constexpr size_t NATIVE_INDEX = 10;
-    static constexpr size_t NATIVE_BOUND_INDEX = 11;
-    static constexpr size_t CLOSURE_INDEX = 12;
-    static constexpr size_t ARRAY_INDEX = 13;
-    static constexpr size_t DICT_INDEX = 14;
-    static constexpr size_t SET_INDEX = 15;
-    static constexpr size_t ITERATOR_INDEX = 16;
-    static constexpr size_t MODULE_INDEX = 17;
+    union Payload {
+        double number;
+        int64_t signedInt;
+        uint64_t unsignedInt;
+        bool boolean;
+        void* object;
 
-    Storage data;
+        Payload() : unsignedInt(0) {}
+    };
 
-    Value() : data(std::monostate{}) {}
-    Value(double value) : data(value) {}
-    Value(int64_t value) : data(value) {}
-    Value(uint64_t value) : data(value) {}
-    Value(bool value) : data(value) {}
-    Value(const std::string& value) : data(value) {}
-    Value(std::string&& value) : data(std::move(value)) {}
-    Value(const char* value) : data(std::string(value)) {}
-    Value(FunctionObject* value) : data(value) {}
-    Value(ClassObject* value) : data(value) {}
-    Value(InstanceObject* value) : data(value) {}
-    Value(BoundMethodObject* value) : data(value) {}
-    Value(NativeFunctionObject* value) : data(value) {}
-    Value(NativeBoundMethodObject* value) : data(value) {}
-    Value(ClosureObject* value) : data(value) {}
-    Value(ArrayObject* value) : data(value) {}
-    Value(DictObject* value) : data(value) {}
-    Value(SetObject* value) : data(value) {}
-    Value(IteratorObject* value) : data(value) {}
-    Value(ModuleObject* value) : data(value) {}
+    Kind kind = Kind::NIL;
+    Payload payload;
 
-    bool isNumber() const { return data.index() == NUMBER_INDEX; }
-    bool isSignedInt() const { return data.index() == SIGNED_INT_INDEX; }
-    bool isUnsignedInt() const { return data.index() == UNSIGNED_INT_INDEX; }
+    Value() = default;
+
+    Value(double value) : kind(Kind::NUMBER) {
+        payload.number = value;
+    }
+
+    Value(int64_t value) : kind(Kind::SIGNED_INT) {
+        payload.signedInt = value;
+    }
+
+    Value(uint64_t value) : kind(Kind::UNSIGNED_INT) {
+        payload.unsignedInt = value;
+    }
+
+    Value(bool value) : kind(Kind::BOOL) { payload.boolean = value; }
+    Value(StringObject* value) : kind(Kind::STRING) {
+        payload.object = value;
+    }
+    Value(FunctionObject* value) : kind(Kind::FUNCTION) {
+        payload.object = value;
+    }
+    Value(ClassObject* value) : kind(Kind::CLASS) {
+        payload.object = value;
+    }
+    Value(InstanceObject* value) : kind(Kind::INSTANCE) {
+        payload.object = value;
+    }
+    Value(BoundMethodObject* value) : kind(Kind::BOUND_METHOD) {
+        payload.object = value;
+    }
+    Value(NativeFunctionObject* value) : kind(Kind::NATIVE) {
+        payload.object = value;
+    }
+    Value(NativeBoundMethodObject* value) : kind(Kind::NATIVE_BOUND) {
+        payload.object = value;
+    }
+    Value(ClosureObject* value) : kind(Kind::CLOSURE) {
+        payload.object = value;
+    }
+    Value(ArrayObject* value) : kind(Kind::ARRAY) {
+        payload.object = value;
+    }
+    Value(DictObject* value) : kind(Kind::DICT) {
+        payload.object = value;
+    }
+    Value(SetObject* value) : kind(Kind::SET) {
+        payload.object = value;
+    }
+    Value(IteratorObject* value) : kind(Kind::ITERATOR) {
+        payload.object = value;
+    }
+    Value(ModuleObject* value) : kind(Kind::MODULE) {
+        payload.object = value;
+    }
+
+    bool isNumber() const { return kind == Kind::NUMBER; }
+    bool isSignedInt() const { return kind == Kind::SIGNED_INT; }
+    bool isUnsignedInt() const { return kind == Kind::UNSIGNED_INT; }
     bool isAnyNumeric() const {
         return isNumber() || isSignedInt() || isUnsignedInt();
     }
-    bool isBool() const { return data.index() == BOOL_INDEX; }
-    bool isNil() const { return data.index() == NIL_INDEX; }
-    bool isString() const { return data.index() == STRING_INDEX; }
-    bool isFunction() const { return data.index() == FUNCTION_INDEX; }
-    bool isClass() const { return data.index() == CLASS_INDEX; }
-    bool isInstance() const { return data.index() == INSTANCE_INDEX; }
-    bool isBoundMethod() const { return data.index() == BOUND_METHOD_INDEX; }
-    bool isNative() const { return data.index() == NATIVE_INDEX; }
-    bool isNativeBound() const { return data.index() == NATIVE_BOUND_INDEX; }
-    bool isClosure() const { return data.index() == CLOSURE_INDEX; }
-    bool isArray() const { return data.index() == ARRAY_INDEX; }
-    bool isDict() const { return data.index() == DICT_INDEX; }
-    bool isSet() const { return data.index() == SET_INDEX; }
-    bool isIterator() const { return data.index() == ITERATOR_INDEX; }
-    bool isModule() const { return data.index() == MODULE_INDEX; }
+    bool isBool() const { return kind == Kind::BOOL; }
+    bool isNil() const { return kind == Kind::NIL; }
+    bool isString() const { return kind == Kind::STRING; }
+    bool isFunction() const { return kind == Kind::FUNCTION; }
+    bool isClass() const { return kind == Kind::CLASS; }
+    bool isInstance() const { return kind == Kind::INSTANCE; }
+    bool isBoundMethod() const { return kind == Kind::BOUND_METHOD; }
+    bool isNative() const { return kind == Kind::NATIVE; }
+    bool isNativeBound() const { return kind == Kind::NATIVE_BOUND; }
+    bool isClosure() const { return kind == Kind::CLOSURE; }
+    bool isArray() const { return kind == Kind::ARRAY; }
+    bool isDict() const { return kind == Kind::DICT; }
+    bool isSet() const { return kind == Kind::SET; }
+    bool isIterator() const { return kind == Kind::ITERATOR; }
+    bool isModule() const { return kind == Kind::MODULE; }
 
-    double asNumber() const { return std::get<double>(data); }
-    int64_t asSignedInt() const { return std::get<int64_t>(data); }
-    uint64_t asUnsignedInt() const { return std::get<uint64_t>(data); }
-    bool asBool() const { return std::get<bool>(data); }
-    const std::string& asString() const { return std::get<std::string>(data); }
-    FunctionObject* asFunction() const {
-        return std::get<FunctionObject*>(data);
+    double asNumber() const { return payload.number; }
+    int64_t asSignedInt() const { return payload.signedInt; }
+    uint64_t asUnsignedInt() const { return payload.unsignedInt; }
+    bool asBool() const { return payload.boolean; }
+    StringObject* asStringObject() const {
+        return static_cast<StringObject*>(payload.object);
     }
-    ClassObject* asClass() const { return std::get<ClassObject*>(data); }
+    const std::string& asString() const { return asStringObject()->value; }
+    FunctionObject* asFunction() const {
+        return static_cast<FunctionObject*>(payload.object);
+    }
+    ClassObject* asClass() const {
+        return static_cast<ClassObject*>(payload.object);
+    }
     InstanceObject* asInstance() const {
-        return std::get<InstanceObject*>(data);
+        return static_cast<InstanceObject*>(payload.object);
     }
     BoundMethodObject* asBoundMethod() const {
-        return std::get<BoundMethodObject*>(data);
+        return static_cast<BoundMethodObject*>(payload.object);
     }
     NativeFunctionObject* asNative() const {
-        return std::get<NativeFunctionObject*>(data);
+        return static_cast<NativeFunctionObject*>(payload.object);
     }
     NativeBoundMethodObject* asNativeBound() const {
-        return std::get<NativeBoundMethodObject*>(data);
+        return static_cast<NativeBoundMethodObject*>(payload.object);
     }
-    ClosureObject* asClosure() const { return std::get<ClosureObject*>(data); }
-    ArrayObject* asArray() const { return std::get<ArrayObject*>(data); }
-    DictObject* asDict() const { return std::get<DictObject*>(data); }
-    SetObject* asSet() const { return std::get<SetObject*>(data); }
+    ClosureObject* asClosure() const {
+        return static_cast<ClosureObject*>(payload.object);
+    }
+    ArrayObject* asArray() const {
+        return static_cast<ArrayObject*>(payload.object);
+    }
+    DictObject* asDict() const { return static_cast<DictObject*>(payload.object); }
+    SetObject* asSet() const { return static_cast<SetObject*>(payload.object); }
     IteratorObject* asIterator() const {
-        return std::get<IteratorObject*>(data);
+        return static_cast<IteratorObject*>(payload.object);
     }
-    ModuleObject* asModule() const { return std::get<ModuleObject*>(data); }
+    ModuleObject* asModule() const {
+        return static_cast<ModuleObject*>(payload.object);
+    }
 };
 
 inline uint64_t normalizeDoubleBits(double number) {
@@ -355,30 +408,32 @@ inline uint64_t normalizeDoubleBits(double number) {
 }
 
 inline uintptr_t valuePointerBits(const Value& value) {
-    switch (value.data.index()) {
-        case Value::FUNCTION_INDEX:
+    switch (value.kind) {
+        case Value::Kind::STRING:
+            return reinterpret_cast<uintptr_t>(value.asStringObject());
+        case Value::Kind::FUNCTION:
             return reinterpret_cast<uintptr_t>(value.asFunction());
-        case Value::CLASS_INDEX:
+        case Value::Kind::CLASS:
             return reinterpret_cast<uintptr_t>(value.asClass());
-        case Value::INSTANCE_INDEX:
+        case Value::Kind::INSTANCE:
             return reinterpret_cast<uintptr_t>(value.asInstance());
-        case Value::BOUND_METHOD_INDEX:
+        case Value::Kind::BOUND_METHOD:
             return reinterpret_cast<uintptr_t>(value.asBoundMethod());
-        case Value::NATIVE_INDEX:
+        case Value::Kind::NATIVE:
             return reinterpret_cast<uintptr_t>(value.asNative());
-        case Value::NATIVE_BOUND_INDEX:
+        case Value::Kind::NATIVE_BOUND:
             return reinterpret_cast<uintptr_t>(value.asNativeBound());
-        case Value::CLOSURE_INDEX:
+        case Value::Kind::CLOSURE:
             return reinterpret_cast<uintptr_t>(value.asClosure());
-        case Value::ARRAY_INDEX:
+        case Value::Kind::ARRAY:
             return reinterpret_cast<uintptr_t>(value.asArray());
-        case Value::DICT_INDEX:
+        case Value::Kind::DICT:
             return reinterpret_cast<uintptr_t>(value.asDict());
-        case Value::SET_INDEX:
+        case Value::Kind::SET:
             return reinterpret_cast<uintptr_t>(value.asSet());
-        case Value::ITERATOR_INDEX:
+        case Value::Kind::ITERATOR:
             return reinterpret_cast<uintptr_t>(value.asIterator());
-        case Value::MODULE_INDEX:
+        case Value::Kind::MODULE:
             return reinterpret_cast<uintptr_t>(value.asModule());
         default:
             return 0;
@@ -386,23 +441,23 @@ inline uintptr_t valuePointerBits(const Value& value) {
 }
 
 inline bool valueSortLess(const Value& lhs, const Value& rhs) {
-    if (lhs.data.index() != rhs.data.index()) {
-        return lhs.data.index() < rhs.data.index();
+    if (lhs.kind != rhs.kind) {
+        return static_cast<uint8_t>(lhs.kind) < static_cast<uint8_t>(rhs.kind);
     }
 
-    switch (lhs.data.index()) {
-        case Value::NUMBER_INDEX:
+    switch (lhs.kind) {
+        case Value::Kind::NUMBER:
             return normalizeDoubleBits(lhs.asNumber()) <
                    normalizeDoubleBits(rhs.asNumber());
-        case Value::SIGNED_INT_INDEX:
+        case Value::Kind::SIGNED_INT:
             return lhs.asSignedInt() < rhs.asSignedInt();
-        case Value::UNSIGNED_INT_INDEX:
+        case Value::Kind::UNSIGNED_INT:
             return lhs.asUnsignedInt() < rhs.asUnsignedInt();
-        case Value::BOOL_INDEX:
+        case Value::Kind::BOOL:
             return lhs.asBool() < rhs.asBool();
-        case Value::NIL_INDEX:
+        case Value::Kind::NIL:
             return false;
-        case Value::STRING_INDEX:
+        case Value::Kind::STRING:
             return lhs.asString() < rhs.asString();
         default:
             return valuePointerBits(lhs) < valuePointerBits(rhs);
@@ -411,27 +466,28 @@ inline bool valueSortLess(const Value& lhs, const Value& rhs) {
 
 struct ValueHash {
     size_t operator()(const Value& value) const noexcept {
-        const size_t indexHash = std::hash<size_t>{}(value.data.index());
+        const size_t indexHash =
+            std::hash<uint8_t>{}(static_cast<uint8_t>(value.kind));
         size_t payloadHash = 0;
 
-        switch (value.data.index()) {
-            case Value::NUMBER_INDEX:
+        switch (value.kind) {
+            case Value::Kind::NUMBER:
                 payloadHash = std::hash<uint64_t>{}(
                     normalizeDoubleBits(value.asNumber()));
                 break;
-            case Value::SIGNED_INT_INDEX:
+            case Value::Kind::SIGNED_INT:
                 payloadHash = std::hash<int64_t>{}(value.asSignedInt());
                 break;
-            case Value::UNSIGNED_INT_INDEX:
+            case Value::Kind::UNSIGNED_INT:
                 payloadHash = std::hash<uint64_t>{}(value.asUnsignedInt());
                 break;
-            case Value::BOOL_INDEX:
+            case Value::Kind::BOOL:
                 payloadHash = std::hash<bool>{}(value.asBool());
                 break;
-            case Value::NIL_INDEX:
+            case Value::Kind::NIL:
                 payloadHash = 0;
                 break;
-            case Value::STRING_INDEX:
+            case Value::Kind::STRING:
                 payloadHash = std::hash<std::string>{}(value.asString());
                 break;
             default:
@@ -446,7 +502,27 @@ struct ValueHash {
 
 struct ValueEqual {
     bool operator()(const Value& lhs, const Value& rhs) const {
-        return lhs.data == rhs.data;
+        if (lhs.kind != rhs.kind) {
+            return false;
+        }
+
+        switch (lhs.kind) {
+            case Value::Kind::NUMBER:
+                return normalizeDoubleBits(lhs.asNumber()) ==
+                       normalizeDoubleBits(rhs.asNumber());
+            case Value::Kind::SIGNED_INT:
+                return lhs.asSignedInt() == rhs.asSignedInt();
+            case Value::Kind::UNSIGNED_INT:
+                return lhs.asUnsignedInt() == rhs.asUnsignedInt();
+            case Value::Kind::BOOL:
+                return lhs.asBool() == rhs.asBool();
+            case Value::Kind::NIL:
+                return true;
+            case Value::Kind::STRING:
+                return lhs.asString() == rhs.asString();
+            default:
+                return valuePointerBits(lhs) == valuePointerBits(rhs);
+        }
     }
 };
 
@@ -529,10 +605,27 @@ struct NativeBoundMethodObject : GcObject {
 };
 
 inline bool operator==(const Value& lhs, const Value& rhs) {
-    if (lhs.data.index() != rhs.data.index()) {
+    if (lhs.kind != rhs.kind) {
         return false;
     }
-    return lhs.data == rhs.data;
+
+    switch (lhs.kind) {
+        case Value::Kind::NUMBER:
+            return normalizeDoubleBits(lhs.asNumber()) ==
+                   normalizeDoubleBits(rhs.asNumber());
+        case Value::Kind::SIGNED_INT:
+            return lhs.asSignedInt() == rhs.asSignedInt();
+        case Value::Kind::UNSIGNED_INT:
+            return lhs.asUnsignedInt() == rhs.asUnsignedInt();
+        case Value::Kind::BOOL:
+            return lhs.asBool() == rhs.asBool();
+        case Value::Kind::NIL:
+            return true;
+        case Value::Kind::STRING:
+            return lhs.asString() == rhs.asString();
+        default:
+            return valuePointerBits(lhs) == valuePointerBits(rhs);
+    }
 }
 
 inline bool operator!=(const Value& lhs, const Value& rhs) {
@@ -660,8 +753,10 @@ inline void printValueInternal(std::ostream& stream, const Value& value,
     } else if (value.isModule()) {
         auto module = value.asModule();
         stream << "<module " << module->path << ">";
-    } else {
+    } else if (value.isString()) {
         stream << value.asString();
+    } else {
+        stream << "<unknown>";
     }
 }
 

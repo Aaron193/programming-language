@@ -719,6 +719,12 @@ Status VirtualMachine::runtimeError(const std::string& message) {
     return Status::RUNTIME_ERROR;
 }
 
+Value VirtualMachine::makeStringValue(std::string text) {
+    auto* stringObject = gcAlloc<StringObject>();
+    stringObject->value = std::move(text);
+    return Value(stringObject);
+}
+
 Status VirtualMachine::callClosure(ClosureObject* closure,
                                    uint8_t argumentCount,
                                    InstanceObject* receiver) {
@@ -820,6 +826,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
         VM_OPCODE_ADDR(DUP2),
         VM_OPCODE_ADDR(JUMP),
         VM_OPCODE_ADDR(JUMP_IF_FALSE),
+        VM_OPCODE_ADDR(JUMP_IF_FALSE_POP),
         VM_OPCODE_ADDR(LOOP),
         VM_OPCODE_ADDR(SHIFT_LEFT),
         VM_OPCODE_ADDR(SHIFT_RIGHT),
@@ -836,7 +843,9 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
         VM_OPCODE_ADDR(INT_NEGATE),
         VM_OPCODE_ADDR(ITER_INIT),
         VM_OPCODE_ADDR(ITER_HAS_NEXT),
+        VM_OPCODE_ADDR(ITER_HAS_NEXT_JUMP),
         VM_OPCODE_ADDR(ITER_NEXT),
+        VM_OPCODE_ADDR(ITER_NEXT_SET_LOCAL),
         VM_OPCODE_ADDR(IMPORT_MODULE),
         VM_OPCODE_ADDR(EXPORT_NAME),
     };
@@ -981,7 +990,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
             if (a.isString() && b.isString()) {
                 std::string result = a.asString() + b.asString();
-                m_stack.replaceTopPair(Value(std::move(result)));
+                m_stack.replaceTopPair(makeStringValue(std::move(result)));
                 DISPATCH();
             }
 
@@ -1852,7 +1861,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                         break;
                     }
                     case NativeFunctionId::TYPE:
-                        result = Value(valueTypeName(argAt(0)));
+                        result = makeStringValue(valueTypeName(argAt(0)));
                         break;
                     case NativeFunctionId::STR:
                     case NativeFunctionId::TO_STRING: {
@@ -1860,7 +1869,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                         if (arg.isString()) {
                             result = arg;
                         } else {
-                            result = Value(valueToString(arg));
+                            result = makeStringValue(valueToString(arg));
                         }
                         break;
                     }
@@ -2926,6 +2935,38 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
             DISPATCH();
         }
 
+        VM_CASE(ITER_HAS_NEXT_JUMP) {
+            uint16_t offset = readShort();
+            const Value& iteratorValue = m_stack.top();
+            if (!iteratorValue.isIterator()) {
+                return runtimeError("Internal error: iterator expected.");
+            }
+
+            auto iterator = iteratorValue.asIterator();
+            bool hasNext = false;
+
+            switch (iterator->kind) {
+                case IteratorObject::ARRAY_ITER:
+                    hasNext =
+                        iterator->array &&
+                        iterator->index < iterator->array->elements.size();
+                    break;
+                case IteratorObject::DICT_ITER:
+                    hasNext = iterator->dict &&
+                              iterator->index < iterator->dictKeys.size();
+                    break;
+                case IteratorObject::SET_ITER:
+                    hasNext = iterator->set &&
+                              iterator->index < iterator->set->elements.size();
+                    break;
+            }
+
+            if (!hasNext) {
+                currentFrame().ip += offset;
+            }
+            DISPATCH();
+        }
+
         VM_CASE(ITER_NEXT) {
             Value iteratorValue = m_stack.pop();
             if (!iteratorValue.isIterator()) {
@@ -2963,6 +3004,47 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
             }
 
             m_stack.push(nextValue);
+            DISPATCH();
+        }
+
+        VM_CASE(ITER_NEXT_SET_LOCAL) {
+            uint8_t slot = readByte();
+            const Value& iteratorValue = m_stack.top();
+            if (!iteratorValue.isIterator()) {
+                return runtimeError("Internal error: iterator expected.");
+            }
+
+            auto iterator = iteratorValue.asIterator();
+            Value nextValue;
+
+            switch (iterator->kind) {
+                case IteratorObject::ARRAY_ITER:
+                    if (!iterator->array ||
+                        iterator->index >= iterator->array->elements.size()) {
+                        return runtimeError(
+                            "Foreach iterator exhausted unexpectedly.");
+                    }
+                    nextValue = iterator->array->elements[iterator->index++];
+                    break;
+                case IteratorObject::DICT_ITER:
+                    if (!iterator->dict ||
+                        iterator->index >= iterator->dictKeys.size()) {
+                        return runtimeError(
+                            "Foreach iterator exhausted unexpectedly.");
+                    }
+                    nextValue = iterator->dictKeys[iterator->index++];
+                    break;
+                case IteratorObject::SET_ITER:
+                    if (!iterator->set ||
+                        iterator->index >= iterator->set->elements.size()) {
+                        return runtimeError(
+                            "Foreach iterator exhausted unexpectedly.");
+                    }
+                    nextValue = iterator->set->elements[iterator->index++];
+                    break;
+            }
+
+            m_stack.setAt(currentFrame().slotBase + slot, std::move(nextValue));
             DISPATCH();
         }
 
@@ -3115,6 +3197,16 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
             uint16_t offset = readShort();
             Value condition = m_stack.peek(0);
             if (isFalsey(condition)) {
+                currentFrame().ip += offset;
+            }
+            DISPATCH();
+        }
+
+        VM_CASE(JUMP_IF_FALSE_POP) {
+            uint16_t offset = readShort();
+            bool conditionFalsey = isFalsey(m_stack.top());
+            m_stack.pop();
+            if (conditionFalsey) {
                 currentFrame().ip += offset;
             }
             DISPATCH();
@@ -3322,15 +3414,16 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
         VM_CASE(INT_TO_STR) {
             Value value = m_stack.pop();
             if (value.isSignedInt()) {
-                m_stack.push(Value(std::to_string(value.asSignedInt())));
+                m_stack.push(makeStringValue(std::to_string(value.asSignedInt())));
                 DISPATCH();
             }
             if (value.isUnsignedInt()) {
-                m_stack.push(Value(std::to_string(value.asUnsignedInt())));
+                m_stack.push(
+                    makeStringValue(std::to_string(value.asUnsignedInt())));
                 DISPATCH();
             }
             if (value.isNumber()) {
-                m_stack.push(Value(std::to_string(value.asNumber())));
+                m_stack.push(makeStringValue(std::to_string(value.asNumber())));
                 DISPATCH();
             }
             return runtimeError("Cannot cast value to str.");

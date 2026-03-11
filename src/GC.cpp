@@ -3,7 +3,9 @@
 #include "Chunk.hpp"
 
 void GC::markValue(const Value& value) {
-    if (value.isFunction()) {
+    if (value.isString()) {
+        markObject(value.asStringObject());
+    } else if (value.isFunction()) {
         markObject(value.asFunction());
     } else if (value.isClass()) {
         markObject(value.asClass());
