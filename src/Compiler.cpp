@@ -186,7 +186,7 @@ bool Compiler::compile(std::string_view source, Chunk& chunk,
     m_exprTypeStack.clear();
     m_globalNames.clear();
     m_exportedNames.clear();
-    m_hasBufferedToken = false;
+    m_bufferedTokens.clear();
     m_contexts.push_back(
         FunctionContext{{}, {}, 0, false, false, TypeInfo::makeAny()});
 
@@ -1191,7 +1191,7 @@ TypeRef Compiler::parseTypeExprType() {
 
 bool Compiler::isTypedVarDeclarationStart() {
     if (m_parser->current.type() == TokenType::TYPE_FN) {
-        return peekNextToken().type() == TokenType::OPEN_PAREN;
+        return looksLikeFunctionTypeDeclarationStart();
     }
 
     if (isTypeToken(m_parser->current.type())) {
@@ -1222,9 +1222,9 @@ void Compiler::advance() {
     m_parser->previous = m_parser->current;
 
     while (true) {
-        if (m_hasBufferedToken) {
-            m_parser->current = m_bufferedToken;
-            m_hasBufferedToken = false;
+        if (!m_bufferedTokens.empty()) {
+            m_parser->current = m_bufferedTokens.front();
+            m_bufferedTokens.pop_front();
         } else {
             m_parser->current = m_scanner->nextToken();
         }
@@ -1235,20 +1235,135 @@ void Compiler::advance() {
     }
 }
 
-const Token& Compiler::peekNextToken() {
-    if (!m_hasBufferedToken) {
+const Token& Compiler::peekToken(size_t offset) {
+    while (m_bufferedTokens.size() < offset) {
         while (true) {
-            m_bufferedToken = m_scanner->nextToken();
-            if (m_bufferedToken.type() != TokenType::ERROR) {
-                m_hasBufferedToken = true;
+            Token token = m_scanner->nextToken();
+            if (token.type() != TokenType::ERROR) {
+                m_bufferedTokens.push_back(token);
                 break;
             }
 
-            errorAt(m_bufferedToken, m_bufferedToken.start());
+            errorAt(token, token.start());
         }
     }
 
-    return m_bufferedToken;
+    return m_bufferedTokens[offset - 1];
+}
+
+const Token& Compiler::peekNextToken() {
+    return peekToken();
+}
+
+const Token& Compiler::tokenAt(size_t offset) {
+    if (offset == 0) {
+        return m_parser->current;
+    }
+
+    return peekToken(offset);
+}
+
+bool Compiler::parseTypeLookahead(size_t& offset) {
+    auto consumeOptionalSuffix = [&]() {
+        while (tokenAt(offset).type() == TokenType::QUESTION) {
+            ++offset;
+        }
+    };
+
+    const Token& current = tokenAt(offset);
+    if (current.type() == TokenType::TYPE_FN) {
+        ++offset;
+        if (tokenAt(offset).type() != TokenType::OPEN_PAREN) {
+            return false;
+        }
+
+        ++offset;
+        if (tokenAt(offset).type() != TokenType::CLOSE_PAREN) {
+            while (true) {
+                if (!parseTypeLookahead(offset)) {
+                    return false;
+                }
+                if (tokenAt(offset).type() == TokenType::COMMA) {
+                    ++offset;
+                    continue;
+                }
+                if (tokenAt(offset).type() != TokenType::CLOSE_PAREN) {
+                    return false;
+                }
+                break;
+            }
+        }
+
+        ++offset;
+        if (tokenAt(offset).type() != TokenType::ARROW) {
+            return false;
+        }
+
+        ++offset;
+        if (!parseTypeLookahead(offset)) {
+            return false;
+        }
+
+        consumeOptionalSuffix();
+        return true;
+    }
+
+    if (isTypeToken(current.type())) {
+        ++offset;
+        consumeOptionalSuffix();
+        return true;
+    }
+
+    if (current.type() != TokenType::IDENTIFIER) {
+        return false;
+    }
+
+    std::string_view name(current.start(), current.length());
+    ++offset;
+
+    if (isCollectionTypeNameText(name) && tokenAt(offset).type() == TokenType::LESS) {
+        ++offset;
+
+        if (name == "Array" || name == "Set") {
+            if (!parseTypeLookahead(offset) ||
+                tokenAt(offset).type() != TokenType::GREATER) {
+                return false;
+            }
+            ++offset;
+            consumeOptionalSuffix();
+            return true;
+        }
+
+        if (!parseTypeLookahead(offset) ||
+            tokenAt(offset).type() != TokenType::COMMA) {
+            return false;
+        }
+        ++offset;
+
+        if (!parseTypeLookahead(offset) ||
+            tokenAt(offset).type() != TokenType::GREATER) {
+            return false;
+        }
+        ++offset;
+        consumeOptionalSuffix();
+        return true;
+    }
+
+    consumeOptionalSuffix();
+    return true;
+}
+
+bool Compiler::looksLikeFunctionTypeDeclarationStart() {
+    if (m_parser->current.type() != TokenType::TYPE_FN) {
+        return false;
+    }
+
+    size_t offset = 0;
+    if (!parseTypeLookahead(offset)) {
+        return false;
+    }
+
+    return tokenAt(offset).type() == TokenType::IDENTIFIER;
 }
 
 void Compiler::synchronize() {
@@ -1339,7 +1454,13 @@ void Compiler::declaration() {
     } else if (m_parser->current.type() == TokenType::EXPORT) {
         advance();
         exportDeclaration();
-    } else if (m_parser->current.type() == TokenType::FUNCTION) {
+    } else if (m_parser->current.type() == TokenType::TYPE_FN &&
+               peekNextToken().type() == TokenType::IDENTIFIER) {
+        advance();
+        functionDeclaration();
+    } else if (m_parser->current.type() == TokenType::FUNCTION &&
+               peekNextToken().type() == TokenType::IDENTIFIER) {
+        errorAtCurrent("Keyword 'function' was removed; use 'fn'.");
         advance();
         functionDeclaration();
     } else if (m_parser->current.type() == TokenType::CONST ||
@@ -1369,7 +1490,21 @@ void Compiler::exportDeclaration() {
         errorAtCurrent("'export' is only allowed at the top level.");
     }
 
+    if (m_parser->current.type() == TokenType::TYPE_FN &&
+        peekNextToken().type() == TokenType::IDENTIFIER) {
+        advance();
+        if (m_parser->current.type() != TokenType::IDENTIFIER) {
+            errorAtCurrent("Expected function name.");
+            return;
+        }
+        Token exportName = m_parser->current;
+        functionDeclaration();
+        emitExportName(exportName);
+        return;
+    }
+
     if (m_parser->current.type() == TokenType::FUNCTION) {
+        errorAtCurrent("Keyword 'function' was removed; use 'fn'.");
         advance();
         if (m_parser->current.type() != TokenType::IDENTIFIER) {
             errorAtCurrent("Expected function name.");
@@ -1402,7 +1537,7 @@ void Compiler::exportDeclaration() {
     }
 
     errorAtCurrent(
-        "Expected 'function', typed variable declaration, or 'class' after "
+        "Expected 'fn', typed variable declaration, or 'class' after "
         "'export'.");
 }
 
@@ -2020,7 +2155,11 @@ void Compiler::typedVarDeclaration(Token* declaredName) {
             "required).");
     TypeRef initializerType = TypeInfo::makeAny();
     if (declaredType->kind == TypeKind::FUNCTION &&
-        m_parser->current.type() == TokenType::FUNCTION) {
+        (m_parser->current.type() == TokenType::TYPE_FN ||
+         m_parser->current.type() == TokenType::FUNCTION)) {
+        if (m_parser->current.type() == TokenType::FUNCTION) {
+            errorAtCurrent("Keyword 'function' was removed; use 'fn'.");
+        }
         advance();
         initializerType = emitFunctionLiteral(declaredType);
     } else {
@@ -2118,10 +2257,18 @@ Compiler::ParseRule Compiler::getRule(TokenType type) {
         case TokenType::TYPE_NULL_KW:
             return ParseRule{[this](bool canAssign) { literal(canAssign); },
                              nullptr, PREC_NONE};
-        case TokenType::FUNCTION:
+        case TokenType::TYPE_FN:
             return ParseRule{
                 [this](bool canAssign) { functionLiteral(canAssign); }, nullptr,
                 PREC_NONE};
+        case TokenType::FUNCTION:
+            return ParseRule{
+                [this](bool canAssign) {
+                    errorAt(m_parser->previous,
+                            "Keyword 'function' was removed; use 'fn'.");
+                    functionLiteral(canAssign);
+                },
+                nullptr, PREC_NONE};
 
         case TokenType::BANG:
             return ParseRule{[this](bool canAssign) { unary(canAssign); },

@@ -1,6 +1,6 @@
-function outer() -> i32 {
+fn outer() -> i32 {
   const i32 value = 1;
-  function inner() -> i32 {
+  fn inner() -> i32 {
     value = 2;
     return value;
   }

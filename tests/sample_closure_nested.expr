@@ -1,8 +1,8 @@
-function outer() -> i32 {
+fn outer() -> i32 {
   i32 a = 1;
-  function middle() -> i32 {
+  fn middle() -> i32 {
     i32 b = 2;
-    function inner() -> i32 {
+    fn inner() -> i32 {
       return a + b;
     }
     return inner();

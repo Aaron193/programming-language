@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <limits>
 #include <string>
@@ -101,8 +102,7 @@ class CheckerImpl {
     Scanner m_scanner;
     Token m_current;
     Token m_previous;
-    bool m_hasBufferedToken = false;
-    Token m_bufferedToken;
+    std::deque<Token> m_bufferedTokens;
 
     const std::unordered_set<std::string>& m_classNames;
     const std::unordered_map<std::string, TypeRef>& m_functionSignatures;
@@ -339,19 +339,130 @@ class CheckerImpl {
     }
 
     Token nextToken() {
-        if (m_hasBufferedToken) {
-            m_hasBufferedToken = false;
-            return m_bufferedToken;
+        if (!m_bufferedTokens.empty()) {
+            Token token = m_bufferedTokens.front();
+            m_bufferedTokens.pop_front();
+            return token;
         }
         return m_scanner.nextToken();
     }
 
-    Token peekToken() {
-        if (!m_hasBufferedToken) {
-            m_bufferedToken = m_scanner.nextToken();
-            m_hasBufferedToken = true;
+    Token peekToken(size_t offset = 1) {
+        while (m_bufferedTokens.size() < offset) {
+            m_bufferedTokens.push_back(m_scanner.nextToken());
         }
-        return m_bufferedToken;
+        return m_bufferedTokens[offset - 1];
+    }
+
+    Token tokenAt(size_t offset) {
+        if (offset == 0) {
+            return m_current;
+        }
+        return peekToken(offset);
+    }
+
+    bool parseTypeLookahead(size_t& offset) {
+        auto consumeOptionalSuffix = [&]() {
+            while (tokenAt(offset).type() == TokenType::QUESTION) {
+                ++offset;
+            }
+        };
+
+        Token current = tokenAt(offset);
+        if (current.type() == TokenType::TYPE_FN) {
+            ++offset;
+            if (tokenAt(offset).type() != TokenType::OPEN_PAREN) {
+                return false;
+            }
+
+            ++offset;
+            if (tokenAt(offset).type() != TokenType::CLOSE_PAREN) {
+                while (true) {
+                    if (!parseTypeLookahead(offset)) {
+                        return false;
+                    }
+                    if (tokenAt(offset).type() == TokenType::COMMA) {
+                        ++offset;
+                        continue;
+                    }
+                    if (tokenAt(offset).type() != TokenType::CLOSE_PAREN) {
+                        return false;
+                    }
+                    break;
+                }
+            }
+
+            ++offset;
+            if (tokenAt(offset).type() != TokenType::ARROW) {
+                return false;
+            }
+
+            ++offset;
+            if (!parseTypeLookahead(offset)) {
+                return false;
+            }
+
+            consumeOptionalSuffix();
+            return true;
+        }
+
+        if (isTypeToken(current.type())) {
+            ++offset;
+            consumeOptionalSuffix();
+            return true;
+        }
+
+        if (current.type() != TokenType::IDENTIFIER) {
+            return false;
+        }
+
+        std::string_view name(current.start(), current.length());
+        ++offset;
+
+        if (isCollectionTypeNameText(name) &&
+            tokenAt(offset).type() == TokenType::LESS) {
+            ++offset;
+
+            if (name == "Array" || name == "Set") {
+                if (!parseTypeLookahead(offset) ||
+                    tokenAt(offset).type() != TokenType::GREATER) {
+                    return false;
+                }
+                ++offset;
+                consumeOptionalSuffix();
+                return true;
+            }
+
+            if (!parseTypeLookahead(offset) ||
+                tokenAt(offset).type() != TokenType::COMMA) {
+                return false;
+            }
+            ++offset;
+
+            if (!parseTypeLookahead(offset) ||
+                tokenAt(offset).type() != TokenType::GREATER) {
+                return false;
+            }
+            ++offset;
+            consumeOptionalSuffix();
+            return true;
+        }
+
+        consumeOptionalSuffix();
+        return true;
+    }
+
+    bool looksLikeFunctionTypeDeclarationStart() {
+        if (!check(TokenType::TYPE_FN)) {
+            return false;
+        }
+
+        size_t offset = 0;
+        if (!parseTypeLookahead(offset)) {
+            return false;
+        }
+
+        return tokenAt(offset).type() == TokenType::IDENTIFIER;
     }
 
     void advance() {
@@ -878,7 +989,7 @@ class CheckerImpl {
 
     bool isTypedVarDeclarationStart() {
         if (check(TokenType::TYPE_FN)) {
-            return peekToken().type() == TokenType::OPEN_PAREN;
+            return looksLikeFunctionTypeDeclarationStart();
         }
 
         if (isTypeToken(m_current.type())) {
@@ -1425,7 +1536,7 @@ class CheckerImpl {
 
     ExprInfo parseFunctionLiteralExpr(
         const TypeRef& expectedSignature = nullptr) {
-        consume(TokenType::OPEN_PAREN, "Expected '(' after 'function'.");
+        consume(TokenType::OPEN_PAREN, "Expected '(' after 'fn'.");
 
         const bool hasExpectedFunctionType =
             expectedSignature && expectedSignature->kind == TypeKind::FUNCTION;
@@ -1564,7 +1675,13 @@ class CheckerImpl {
             return ExprInfo{expr.type, false, false, "", m_previous.line()};
         }
 
+        if (match(TokenType::TYPE_FN)) {
+            return parseFunctionLiteralExpr();
+        }
+
         if (match(TokenType::FUNCTION)) {
+            addError(m_previous.line(),
+                     "Type error: keyword 'function' was removed; use 'fn'.");
             return parseFunctionLiteralExpr();
         }
 
@@ -1910,7 +2027,12 @@ class CheckerImpl {
                 "required).");
         ExprInfo initializer;
         if (declaredType->kind == TypeKind::FUNCTION &&
-            check(TokenType::FUNCTION)) {
+            (check(TokenType::TYPE_FN) || check(TokenType::FUNCTION))) {
+            if (check(TokenType::FUNCTION)) {
+                addError(
+                    m_current.line(),
+                    "Type error: keyword 'function' was removed; use 'fn'.");
+            }
             advance();
             initializer = parseFunctionLiteralExpr(declaredType);
         } else {
@@ -2145,7 +2267,18 @@ class CheckerImpl {
     }
 
     void parseExportDeclaration() {
-        if (match(TokenType::FUNCTION)) {
+        if (check(TokenType::TYPE_FN) &&
+            peekToken().type() == TokenType::IDENTIFIER) {
+            advance();
+            parseFunctionDeclaration();
+            return;
+        }
+
+        if (check(TokenType::FUNCTION) &&
+            peekToken().type() == TokenType::IDENTIFIER) {
+            advance();
+            addError(m_previous.line(),
+                     "Type error: keyword 'function' was removed; use 'fn'.");
             parseFunctionDeclaration();
             return;
         }
@@ -2219,7 +2352,16 @@ class CheckerImpl {
             return;
         }
 
+        if (check(TokenType::TYPE_FN) &&
+            peekToken().type() == TokenType::IDENTIFIER) {
+            advance();
+            parseFunctionDeclaration();
+            return;
+        }
+
         if (match(TokenType::FUNCTION)) {
+            addError(m_previous.line(),
+                     "Type error: keyword 'function' was removed; use 'fn'.");
             parseFunctionDeclaration();
             return;
         }
@@ -2505,12 +2647,22 @@ bool TypeChecker::collectSymbols(
             continue;
         }
 
-        if (classDepth != 0 || token.type() != TokenType::FUNCTION) {
+        if (classDepth != 0 ||
+            (token.type() != TokenType::FUNCTION &&
+             token.type() != TokenType::TYPE_FN)) {
+            continue;
+        }
+
+        if (peekToken().type() != TokenType::IDENTIFIER) {
             continue;
         }
 
         Token functionName = nextToken();
         if (functionName.type() != TokenType::IDENTIFIER) {
+            continue;
+        }
+
+        if (peekToken().type() != TokenType::OPEN_PAREN) {
             continue;
         }
 

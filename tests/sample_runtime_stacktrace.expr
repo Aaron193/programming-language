@@ -1,12 +1,12 @@
-function c() -> f64 {
+fn c() -> f64 {
   return num("x");
 }
 
-function b() -> f64 {
+fn b() -> f64 {
   return c();
 }
 
-function a() -> f64 {
+fn a() -> f64 {
   return b();
 }
 

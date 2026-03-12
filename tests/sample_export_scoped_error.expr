@@ -1,4 +1,4 @@
-function bad() {
+fn bad() {
     export i32 x = 1;
 }
 

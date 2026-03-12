@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <string>
@@ -115,11 +116,14 @@ class Compiler {
     std::vector<std::string> m_exportedNames;
     std::string m_sourcePath;
     bool m_strictMode = false;
-    bool m_hasBufferedToken = false;
-    Token m_bufferedToken;
+    std::deque<Token> m_bufferedTokens;
 
     void advance();
+    const Token& peekToken(size_t offset = 1);
     const Token& peekNextToken();
+    const Token& tokenAt(size_t offset);
+    bool parseTypeLookahead(size_t& offset);
+    bool looksLikeFunctionTypeDeclarationStart();
     void synchronize();
     void errorAtCurrent(const std::string& message);
     void errorAt(const Token& token, const std::string& message);

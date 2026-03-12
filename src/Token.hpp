@@ -92,7 +92,7 @@ enum TokenType {
 class Scanner;
 
 class Token {
-    friend class Scanner;
+   friend class Scanner;
 
    private:
     Token(Scanner* scanner, TokenType type);

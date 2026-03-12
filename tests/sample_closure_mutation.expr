@@ -1,6 +1,6 @@
-function makeCounter() -> i32 {
+fn makeCounter() -> i32 {
   i32 x = 0;
-  function inc() -> i32 {
+  fn inc() -> i32 {
     x = x + 1;
     return x;
   }

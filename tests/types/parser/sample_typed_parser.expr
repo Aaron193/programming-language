@@ -1,6 +1,6 @@
 i32 count = 41;
 
-function inc(i32 value) -> i32 {
+fn inc(i32 value) -> i32 {
     return value + 1;
 }
 

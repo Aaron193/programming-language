@@ -163,7 +163,7 @@ perf report
 Top-level exports:
 
 ```expr
-export function add(a, b) { return a + b; }
+export fn add(a, b) { return a + b; }
 export const f64 PI = 3.14159;
 export class Vector {}
 ```
