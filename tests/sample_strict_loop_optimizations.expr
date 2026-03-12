@@ -2,7 +2,7 @@
 i32 sum = 0;
 Array<i32> nums = [1, 2, 3];
 
-for (auto n : nums) {
+for (i32 n : nums) {
     sum += n;
 }
 

@@ -27,7 +27,7 @@ class Box {
   i32 value;
 }
 
-auto box = Box();
+Box box = Box();
 print(box.value);
 EOF
 

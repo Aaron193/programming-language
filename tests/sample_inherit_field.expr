@@ -10,7 +10,7 @@ class Derived < Base {
   }
 }
 
-auto item = Derived();
+Derived item = Derived();
 item.x = 3;
 item.y = 4;
 

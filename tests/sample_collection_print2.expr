@@ -1,19 +1,19 @@
-auto a = [1, 2, 3];
+Array<i32> a = [1, 2, 3];
 print(a.first());
 print(a.last());
 print(a.isEmpty());
 print(a.clear());
 print(a.isEmpty());
 
-auto d = {"x": 1};
+Dict<str, i32> d = {"x": 1};
 print(d.getOr("x", 0));
 print(d.getOr("missing", 7));
 print(d.isEmpty());
 print(d.clear());
 print(d.isEmpty());
 
-auto left = Set(1, 2, 3);
-auto right = Set(3, 4);
+Set<i32> left = Set(1, 2, 3);
+Set<i32> right = Set(3, 4);
 print(left.union(right));
 print(left.intersect(right));
 print(left.difference(right));

@@ -1,36 +1,36 @@
-auto n = 30;
-auto size = n * n;
+i32 n = 30;
+i32 size = n * n;
 
-auto a = [];
-auto b = [];
-auto c = [];
+Array<i32> a = [];
+Array<i32> b = [];
+Array<i32> c = [];
 
-for (auto i = 0; i < n; i++) {
-  for (auto j = 0; j < n; j++) {
+for (i32 i = 0; i < n; i++) {
+  for (i32 j = 0; j < n; j++) {
     a.push(i + j);
     b.push(i * j);
     c.push(0);
   }
 }
 
-auto start = clock();
+f64 start = clock();
 
-for (auto row = 0; row < n; row++) {
-  for (auto col = 0; col < n; col++) {
-    auto sum = 0;
-    for (auto k = 0; k < n; k++) {
+for (i32 row = 0; row < n; row++) {
+  for (i32 col = 0; col < n; col++) {
+    i32 sum = 0;
+    for (i32 k = 0; k < n; k++) {
       sum += a[row * n + k] * b[k * n + col];
     }
     c[row * n + col] = sum;
   }
 }
 
-auto checksum = 0;
-for (auto idx = 0; idx < size; idx++) {
+i32 checksum = 0;
+for (i32 idx = 0; idx < size; idx++) {
   checksum += c[idx];
 }
 
-auto elapsed = clock() - start;
+f64 elapsed = clock() - start;
 
 print(checksum);
 print(elapsed);

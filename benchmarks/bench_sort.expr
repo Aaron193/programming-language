@@ -1,17 +1,17 @@
-auto n = 5000;
-auto arr = [];
+i32 n = 5000;
+Array<i32> arr = [];
 
-for (auto value = n; value > 0; value--) {
+for (i32 value = n; value > 0; value--) {
   arr.push(value);
 }
 
-auto start = clock();
+f64 start = clock();
 
-auto i = 1;
+i32 i = 1;
 while (i < arr.size()) {
-  auto key = arr[i];
-  auto j = i - 1;
-  auto shifting = true;
+  i32 key = arr[i];
+  i32 j = i - 1;
+  bool shifting = true;
 
   while (j >= 0 and shifting) {
     if (arr[j] > key) {
@@ -26,7 +26,7 @@ while (i < arr.size()) {
   i = i + 1;
 }
 
-auto elapsed = clock() - start;
+f64 elapsed = clock() - start;
 
 print(arr[0]);
 print(arr[n - 1]);

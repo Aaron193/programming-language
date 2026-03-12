@@ -1,14 +1,14 @@
-auto sum = 0;
+i64 sum = 0;
 
-auto timeA = clock();
+f64 timeA = clock();
 
-for (auto i = 0; i < 100000; i++) {
+for (i64 i = 0; i < 100000; i++) {
     sum += i;
 }
 
-auto timeB = clock();
+f64 timeB = clock();
 
-auto timeTaken = timeB - timeA;
+f64 timeTaken = timeB - timeA;
 
 print(timeTaken);
 print(sum)

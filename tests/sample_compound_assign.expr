@@ -1,4 +1,4 @@
-auto x = 10;
+i32 x = 10;
 x += 5;
 print(x);
 
@@ -32,7 +32,7 @@ print(x);
 class Box {
 	i32 value;
 }
-auto b = Box();
+Box b = Box();
 b.value = 7;
 b.value += 5;
 print(b.value);

@@ -1,12 +1,12 @@
-auto i = 0;
+i32 i = 0;
 while (i < 40000) {
-  auto a = [];
+  Array<i32> a = [];
   a.push(i);
 
-  auto d = {};
+  Dict<str, i32> d = {};
   d["i"] = i;
 
-  auto s = Set();
+  Set<i32> s = Set();
   s.add(i);
 
   i = i + 1;

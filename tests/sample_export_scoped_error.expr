@@ -1,5 +1,5 @@
 function bad() {
-    export auto x = 1;
+    export i32 x = 1;
 }
 
 bad();

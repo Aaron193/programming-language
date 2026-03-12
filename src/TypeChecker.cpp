@@ -1737,8 +1737,20 @@ class CheckerImpl {
         consume(TokenType::OPEN_PAREN, "Expected '(' after 'for'.");
 
         if (match(TokenType::SEMI_COLON)) {
-        } else if (match(TokenType::AUTO)) {
-            consume(TokenType::IDENTIFIER, "Expected variable name.");
+        } else if (isTypedVarDeclarationStart()) {
+            TypeRef declaredType = parseTypeExprType();
+            if (!declaredType) {
+                addError(m_current.line(),
+                         "Type error: expected type in loop variable "
+                         "declaration.");
+                declaredType = TypeInfo::makeAny();
+            }
+            if (declaredType->isVoid()) {
+                addError(m_current.line(),
+                         "Type error: variables cannot have type 'void'.");
+            }
+
+            consume(TokenType::IDENTIFIER, "Expected variable name after type.");
             std::string variableName = tokenText(m_previous);
             size_t variableLine = m_previous.line();
 
@@ -1770,26 +1782,38 @@ class CheckerImpl {
                              "V>, or Set<T>.");
                 }
 
-                defineSymbol(variableName, inferredLoopType);
-                recordDeclarationType(variableName, inferredLoopType,
+                if (!isAssignableType(inferredLoopType, declaredType)) {
+                    addError(variableLine,
+                             "Type error: cannot assign '" +
+                                 inferredLoopType->toString() +
+                                 "' to variable '" + variableName +
+                                 "' of type '" + declaredType->toString() +
+                                 "'.");
+                }
+
+                defineSymbol(variableName, declaredType);
+                recordDeclarationType(variableName, declaredType,
                                       variableLine);
                 statement();
                 endScope();
                 return;
             }
 
-            TypeRef declared = TypeInfo::makeAny();
-            if (match(TokenType::EQUAL)) {
-                declared = parseExpression().type;
-            } else {
-                addError(
-                    m_previous.line(),
-                    "Type error: 'auto' declaration requires an initializer.");
+            consume(TokenType::EQUAL,
+                    "Expected '=' in typed loop variable declaration "
+                    "(initializer is required).");
+            ExprInfo initializer = parseExpression();
+            if (!isAssignableType(initializer.type, declaredType)) {
+                addError(variableLine, "Type error: cannot assign '" +
+                                           initializer.type->toString() +
+                                           "' to variable '" + variableName +
+                                           "' of type '" +
+                                           declaredType->toString() + "'.");
             }
             consume(TokenType::SEMI_COLON,
                     "Expected ';' after loop initializer.");
-            defineSymbol(variableName, declared);
-            recordDeclarationType(variableName, declared, variableLine);
+            defineSymbol(variableName, declaredType);
+            recordDeclarationType(variableName, declaredType, variableLine);
         } else {
             parseExpression();
             consume(TokenType::SEMI_COLON,
@@ -1822,38 +1846,6 @@ class CheckerImpl {
         }
         consume(TokenType::CLOSE_CURLY, "Expected '}' after block.");
         endScope();
-    }
-
-    void parseAutoVarDeclaration() {
-        consume(TokenType::IDENTIFIER, "Expected variable name after 'auto'.");
-        Token nameToken = m_previous;
-        std::string name = tokenText(nameToken);
-
-        if (!match(TokenType::EQUAL)) {
-            addError(nameToken.line(),
-                     "Type error: 'auto' declaration requires an initializer.");
-            consume(TokenType::SEMI_COLON,
-                    "Expected ';' after auto variable declaration.");
-            defineSymbol(name, TypeInfo::makeAny());
-            return;
-        }
-
-        ExprInfo initializer = parseExpression();
-        if (initializer.type && initializer.type->kind == TypeKind::NULL_TYPE) {
-            addError(nameToken.line(),
-                     "Type error: cannot infer type for 'auto' from 'null'.");
-            defineSymbol(name, TypeInfo::makeAny());
-            recordDeclarationType(name, TypeInfo::makeAny(), nameToken.line());
-        } else {
-            defineSymbol(name, initializer.type ? initializer.type
-                                                : TypeInfo::makeAny());
-            recordDeclarationType(
-                name, initializer.type ? initializer.type : TypeInfo::makeAny(),
-                nameToken.line());
-        }
-
-        consume(TokenType::SEMI_COLON,
-                "Expected ';' after auto variable declaration.");
     }
 
     void parseTypedVarDeclaration() {
@@ -2119,13 +2111,13 @@ class CheckerImpl {
             return;
         }
 
-        if (match(TokenType::AUTO)) {
-            parseAutoVarDeclaration();
+        if (match(TokenType::CLASS)) {
+            parseClassDeclaration();
             return;
         }
 
-        if (match(TokenType::CLASS)) {
-            parseClassDeclaration();
+        if (isTypedVarDeclarationStart()) {
+            parseTypedVarDeclaration();
             return;
         }
 
@@ -2190,11 +2182,6 @@ class CheckerImpl {
 
         if (match(TokenType::FUNCTION)) {
             parseFunctionDeclaration();
-            return;
-        }
-
-        if (match(TokenType::AUTO)) {
-            parseAutoVarDeclaration();
             return;
         }
 

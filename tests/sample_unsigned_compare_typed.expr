@@ -1,5 +1,5 @@
-auto a = 10u32;
-auto b = 3u32;
+u32 a = 10u32;
+u32 b = 3u32;
 
 print(a > b);
 print(a >= b);

@@ -1,6 +1,0 @@
-class Animal {}
-class Dog < Animal {}
-
-auto dynamic = Dog();
-Animal a = dynamic;
-print(a);

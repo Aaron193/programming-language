@@ -9,27 +9,27 @@ class Particle {
   }
 }
 
-auto particles = [];
-for (auto i = 0; i < 50000; i++) {
-  auto p = Particle();
+Array<Particle> particles = [];
+for (i32 i = 0; i < 50000; i++) {
+  Particle p = Particle();
   p.x = i;
   p.y = i * 2;
   particles.push(p);
 }
 
-auto start = clock();
+f64 start = clock();
 
-auto checksum = 0;
-for (auto round = 0; round < 10; round++) {
-  for (auto i = 0; i < particles.size(); i++) {
-    auto p = particles[i];
+i64 checksum = 0;
+for (i32 round = 0; round < 10; round++) {
+  for (i32 i = 0; i < particles.size(); i++) {
+    Particle p = particles[i];
     checksum += p.move(1, 2);
     checksum += p.x;
     checksum += p.y;
   }
 }
 
-auto elapsed = clock() - start;
+f64 elapsed = clock() - start;
 
 print(checksum);
 print(particles.size());

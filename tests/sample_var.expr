@@ -1,2 +1,2 @@
-auto x = 41;
+i32 x = 41;
 print(x + 1);

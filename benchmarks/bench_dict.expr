@@ -1,19 +1,19 @@
-auto d = {};
+Dict<str, i32> d = {};
 
-auto start = clock();
+f64 start = clock();
 
-for (auto i = 0; i < 30000; i++) {
-  auto key = "key" + str(i);
+for (i32 i = 0; i < 30000; i++) {
+  str key = "key" + str(i);
   d[key] = i;
 }
 
-auto sum = 0;
-for (auto i = 0; i < 30000; i++) {
-  auto key = "key" + str(i);
+i32 sum = 0;
+for (i32 i = 0; i < 30000; i++) {
+  str key = "key" + str(i);
   sum += d[key];
 }
 
-auto elapsed = clock() - start;
+f64 elapsed = clock() - start;
 
 print(sum);
 print(d.size());

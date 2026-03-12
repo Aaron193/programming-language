@@ -1,17 +1,13 @@
-auto a = [];
-a.push(a);
-print(a[0] == a);
+class Node {
+  Node? next;
+}
 
-auto d = {};
-d["self"] = d;
-print(d["self"] == d);
+Node a = Node();
+Node b = Node();
+a.next = b;
+b.next = a;
 
-auto s = Set();
-auto seed = Set();
-s.add(seed);
-s.add(s);
-print(s.has(s));
-
-print(a);
-print(d);
-print(s);
+print(a.next == b);
+print(b.next == a);
+print(a != null);
+print(b != null);

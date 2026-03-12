@@ -5,20 +5,20 @@ function makeAdder(i32 n) -> fn(i32) -> i32 {
   return addOne;
 }
 
-auto funcs = [];
+Array<fn(i32) -> i32> funcs = [];
 
-auto start = clock();
+f64 start = clock();
 
-for (auto i = 0; i < 10000; i++) {
+for (i32 i = 0; i < 10000; i++) {
   funcs.push(makeAdder(i));
 }
 
-auto sum = 0;
-for (auto i = 0; i < funcs.size(); i++) {
+i32 sum = 0;
+for (i32 i = 0; i < funcs.size(); i++) {
   sum += funcs[i](1);
 }
 
-auto elapsed = clock() - start;
+f64 elapsed = clock() - start;
 
 print(sum);
 print(elapsed);

@@ -16,10 +16,10 @@ Derived d = Derived();
 d.label = "derived";
 print(d.greet());
 
-auto extracted = d.greet;
+fn() -> str extracted = d.greet;
 print(extracted());
 
-auto values = [1i32, 2i32];
+Array<i32> values = [1i32, 2i32];
 print(values.size());
 values.push(3i32);
 print(values.size());

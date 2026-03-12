@@ -1,14 +1,14 @@
-auto a = [[1, 2], [3, 4]];
+Array<Array<i32> > a = [[1, 2], [3, 4]];
 print(a);
 
-auto d = {"b": 2, "a": 1, "c": 9};
+Dict<str, i32> d = {"b": 2, "a": 1, "c": 9};
 print(d);
 print(d.keys());
 print(d.values());
 
-auto s = Set(3, 1, 2, 2);
+Set<i32> s = Set(3, 1, 2, 2);
 print(s);
 
-auto r = [];
-r.push(r);
+Array<i32> r = [];
+r.push(5);
 print(r);

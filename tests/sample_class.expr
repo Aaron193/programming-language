@@ -3,7 +3,7 @@ class Bag {
 	str label;
 }
 
-auto bag = Bag();
+Bag bag = Bag();
 bag.value = 42;
 print(bag.value);
 

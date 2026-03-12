@@ -2,4 +2,4 @@ export function add(i32 a, i32 b) -> i32 {
     return a + b;
 }
 
-export auto PI = 3.14159;
+export f64 PI = 3.14159;

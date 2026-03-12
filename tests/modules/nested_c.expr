@@ -1,1 +1,1 @@
-export auto C = 40;
+export i32 C = 40;

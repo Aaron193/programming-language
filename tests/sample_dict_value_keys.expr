@@ -1,13 +1,13 @@
-auto key = [1, 2];
+Array<i32> key = [1, 2];
 
-auto d = {};
+Dict<Array<i32>, i32> d = {};
 d[key] = 42;
 print(d[key]);
 print(d.has(key));
 print(d.keys().size());
 print(d.values().size());
 
-auto s = Set();
+Set<Array<i32> > s = Set();
 print(s.add(key));
 print(s.has(key));
 print(s.add(key));

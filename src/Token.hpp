@@ -58,7 +58,6 @@ enum TokenType {
     FALSE,
     _NULL,
     THIS,
-    AUTO,
     _RETURN,
     IMPORT,
     EXPORT,

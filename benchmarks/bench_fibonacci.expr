@@ -3,9 +3,9 @@ function fib(i32 n) -> i32 {
   return fib(n - 1) + fib(n - 2);
 }
 
-auto start = clock();
-auto result = fib(35);
-auto elapsed = clock() - start;
+f64 start = clock();
+i32 result = fib(35);
+f64 elapsed = clock() - start;
 
 print(result);
 print(elapsed);

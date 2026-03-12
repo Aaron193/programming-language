@@ -1,2 +1,2 @@
 print("cache_target_loaded");
-export auto VALUE = 42;
+export i32 VALUE = 42;

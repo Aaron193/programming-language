@@ -1,2 +1,2 @@
-auto y = true;
+bool y = true;
 print(y);

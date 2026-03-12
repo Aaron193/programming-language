@@ -1,8 +1,8 @@
-auto a = false;
-auto b = false;
+bool a = false;
+bool b = false;
 a and (b = true);
 print(b);
-auto c = true;
-auto d = false;
+bool c = true;
+bool d = false;
 c or (d = true);
 print(d);

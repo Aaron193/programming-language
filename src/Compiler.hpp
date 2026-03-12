@@ -188,8 +188,7 @@ class Compiler {
     void printStatement();
     void returnStatement();
     void expressionStatement();
-    void autoVarDeclaration();
-    void typedVarDeclaration();
+    void typedVarDeclaration(Token* declaredName = nullptr);
     bool isTypeToken(TokenType type) const;
     bool isCollectionTypeName(const Token& token) const;
     bool isTypedTypeAnnotationStart();

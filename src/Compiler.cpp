@@ -1191,7 +1191,6 @@ void Compiler::synchronize() {
         switch (m_parser->current.type()) {
             case TokenType::CLASS:
             case TokenType::FUNCTION:
-            case TokenType::AUTO:
             case TokenType::TYPE_I8:
             case TokenType::TYPE_I16:
             case TokenType::TYPE_I32:
@@ -1272,9 +1271,6 @@ void Compiler::declaration() {
     } else if (m_parser->current.type() == TokenType::FUNCTION) {
         advance();
         functionDeclaration();
-    } else if (m_parser->current.type() == TokenType::AUTO) {
-        advance();
-        autoVarDeclaration();
     } else if (isTypedVarDeclarationStart()) {
         typedVarDeclaration();
     } else {
@@ -1313,14 +1309,9 @@ void Compiler::exportDeclaration() {
         return;
     }
 
-    if (m_parser->current.type() == TokenType::AUTO) {
-        advance();
-        if (m_parser->current.type() != TokenType::IDENTIFIER) {
-            errorAtCurrent("Expected variable name.");
-            return;
-        }
-        Token exportName = m_parser->current;
-        autoVarDeclaration();
+    if (isTypedVarDeclarationStart()) {
+        Token exportName;
+        typedVarDeclaration(&exportName);
         emitExportName(exportName);
         return;
     }
@@ -1337,7 +1328,9 @@ void Compiler::exportDeclaration() {
         return;
     }
 
-    errorAtCurrent("Expected 'function', 'auto', or 'class' after 'export'.");
+    errorAtCurrent(
+        "Expected 'function', typed variable declaration, or 'class' after "
+        "'export'.");
 }
 
 void Compiler::importDeclaration() {
@@ -1773,18 +1766,23 @@ void Compiler::forStatement() {
 
     if (m_parser->current.type() == TokenType::SEMI_COLON) {
         advance();
-    } else if (m_parser->current.type() == TokenType::AUTO) {
-        advance();
+    } else if (isTypedVarDeclarationStart()) {
+        TypeRef declaredType = parseTypeExprType();
+        if (!declaredType) {
+            errorAtCurrent("Expected type in loop variable declaration.");
+            declaredType = TypeInfo::makeAny();
+        }
+        if (declaredType->isVoid()) {
+            errorAtCurrent("Variables cannot be declared with type 'void'.");
+        }
 
-        consume(TokenType::IDENTIFIER, "Expected variable name.");
+        consume(TokenType::IDENTIFIER, "Expected variable name after type.");
         Token loopVariable = m_parser->previous;
-        TypeRef checkerLoopType = lookupCheckerDeclarationType(loopVariable);
 
         if (m_parser->current.type() == TokenType::COLON) {
             advance();
 
-            addLocal(loopVariable,
-                     checkerLoopType ? checkerLoopType : TypeInfo::makeAny());
+            addLocal(loopVariable, declaredType);
             emitByte(OpCode::NIL);
             markInitialized();
             uint8_t loopVariableSlot =
@@ -1811,39 +1809,17 @@ void Compiler::forStatement() {
             return;
         }
 
-        uint8_t global = 0;
-        if (currentContext().scopeDepth > 0) {
-            addLocal(loopVariable,
-                     checkerLoopType ? checkerLoopType : TypeInfo::makeAny());
-        } else {
-            global = globalSlot(loopVariable);
-        }
+        addLocal(loopVariable, declaredType);
+        consume(TokenType::EQUAL,
+                "Expected '=' in typed loop variable declaration "
+                "(initializer is required).");
+        expression();
+        TypeRef initializerType = popExprType();
+        emitCoerceToType(initializerType, declaredType);
+        emitCheckInstanceType(declaredType);
 
-        if (m_parser->current.type() == TokenType::EQUAL) {
-            advance();
-            expression();
-            TypeRef inferredType = popExprType();
-            if (!inferredType) {
-                inferredType = TypeInfo::makeAny();
-            }
-
-            if (currentContext().scopeDepth > 0 &&
-                !currentContext().locals.empty()) {
-                if (!checkerLoopType) {
-                    currentContext().locals.back().type = inferredType;
-                }
-            } else if (global < m_globalTypes.size() &&
-                       !shouldPreserveCheckerGlobalType(global, inferredType)) {
-                m_globalTypes[global] = inferredType;
-            }
-        } else {
-            errorAtCurrent("'auto' declaration requires an initializer.");
-            emitByte(OpCode::NIL);
-        }
-
-        consume(TokenType::SEMI_COLON,
-                "Expected ';' after variable declaration.");
-        defineVariable(global);
+        consume(TokenType::SEMI_COLON, "Expected ';' after loop initializer.");
+        defineVariable(0);
     } else {
         expression();
         popExprType();
@@ -1943,39 +1919,7 @@ void Compiler::expressionStatement() {
     emitByte(OpCode::POP);
 }
 
-void Compiler::autoVarDeclaration() {
-    uint8_t global = parseVariable("Expected variable name after 'auto'.",
-                                   TypeInfo::makeAny());
-
-    if (m_parser->current.type() != TokenType::EQUAL) {
-        errorAtCurrent("'auto' declaration requires an initializer.");
-        emitByte(OpCode::NIL);
-        consume(TokenType::SEMI_COLON,
-                "Expected ';' after auto variable declaration.");
-        defineVariable(global);
-        return;
-    }
-
-    advance();
-    expression();
-    TypeRef inferredType = popExprType();
-    if (!inferredType) {
-        inferredType = TypeInfo::makeAny();
-    }
-
-    if (currentContext().scopeDepth > 0 && !currentContext().locals.empty()) {
-        currentContext().locals.back().type = inferredType;
-    } else if (global < m_globalTypes.size() &&
-               !shouldPreserveCheckerGlobalType(global, inferredType)) {
-        m_globalTypes[global] = inferredType;
-    }
-
-    consume(TokenType::SEMI_COLON,
-            "Expected ';' after auto variable declaration.");
-    defineVariable(global);
-}
-
-void Compiler::typedVarDeclaration() {
+void Compiler::typedVarDeclaration(Token* declaredName) {
     TypeRef declaredType = parseTypeExprType();
     if (!declaredType) {
         errorAtCurrent("Expected type in typed variable declaration.");
@@ -1988,6 +1932,9 @@ void Compiler::typedVarDeclaration() {
 
     uint8_t global =
         parseVariable("Expected variable name after type.", declaredType);
+    if (declaredName != nullptr) {
+        *declaredName = m_parser->previous;
+    }
     consume(TokenType::EQUAL,
             "Expected '=' in typed variable declaration (initializer is "
             "required).");
