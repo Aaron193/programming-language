@@ -1,0 +1,3 @@
+import missing from "missing_package";
+
+print(missing);

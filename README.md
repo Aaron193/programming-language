@@ -17,6 +17,7 @@ This project is a bytecode-compiled, stack-based interpreter implemented in C++.
 - Classes: class declarations, fields, methods, `this`
 - Inheritance: subclassing with `<` and `super.method()` calls
 - Modules: `import` / `export` with runtime module cache and circular import detection
+- Native packages: runtime-loadable C++ shared libraries imported through `import`
 
 ## Runtime / Engine Features
 
@@ -56,6 +57,12 @@ GCC or Clang is required to build the project.
 
 ```bash
 ./build/interpreter path/to/program.expr
+```
+
+Add extra native package roots if needed:
+
+```bash
+./build/interpreter --package-path /path/to/packages path/to/program.expr
 ```
 
 Or start REPL:
@@ -187,3 +194,22 @@ Notes:
 - Import paths must be string literals and include full filename.
 - Relative paths are resolved from the importing file's directory.
 - REPL mode does not allow `import` statements.
+
+## Native Packages
+
+Source modules and native packages share the same import syntax:
+
+```expr
+import nativeMath from "example_math";
+import { addI64, greet } from "example_math";
+```
+
+The interpreter searches for native packages in:
+
+- `build/packages` relative to the interpreter binary
+- any additional roots passed with `--package-path`
+- `packages/` relative to the importing source file or current working directory
+
+Each package is a shared library that exports `exprRegisterPackage()` and
+declares its functions/constants using the ABI in `src/NativePackageAPI.hpp`.
+This repository includes a reference package in `packages/example_math/`.

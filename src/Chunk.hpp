@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "GcObject.hpp"
+#include "RuntimeCommon.hpp"
 #include "TypeInfo.hpp"
 
 class Chunk;
@@ -73,26 +74,6 @@ struct BoundMethodObject : GcObject {
     void trace(GC& gc) override;
 };
 
-enum class NativeFunctionId : uint8_t {
-    CLOCK,
-    SQRT,
-    LEN,
-    TYPE,
-    STR,
-    TO_STRING,
-    NUM,
-    PARSE_INT,
-    PARSE_UINT,
-    PARSE_FLOAT,
-    ABS,
-    FLOOR,
-    CEIL,
-    POW,
-    ERROR,
-    SET,
-    UNKNOWN,
-};
-
 enum class NativeMethodId : uint8_t {
     ARRAY_PUSH,
     ARRAY_POP,
@@ -130,7 +111,8 @@ enum class NativeMethodId : uint8_t {
 struct NativeFunctionObject : GcObject {
     std::string name;
     int arity;
-    NativeFunctionId id = NativeFunctionId::UNKNOWN;
+    NativeInvokeFn callback = nullptr;
+    const void* userdata = nullptr;
 
     void trace(GC& gc) override;
 };

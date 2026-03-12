@@ -248,15 +248,27 @@ TypeRef Compiler::tokenToType(const Token& token) const {
     }
 }
 
-bool Compiler::resolveModuleExportTypes(
-    const std::string& resolvedPath,
+bool Compiler::resolveImportExportTypes(
+    const ImportTarget& importTarget,
     std::unordered_map<std::string, TypeRef>& outExportTypes,
     std::string& outError) {
     outExportTypes.clear();
 
-    std::ifstream file(resolvedPath);
+    if (importTarget.kind == ImportTargetKind::NATIVE_PACKAGE) {
+        NativePackageDescriptor packageDescriptor;
+        if (!loadNativePackageDescriptor(importTarget.resolvedPath,
+                                         packageDescriptor, outError, false,
+                                         nullptr)) {
+            return false;
+        }
+
+        outExportTypes = std::move(packageDescriptor.exportTypes);
+        return true;
+    }
+
+    std::ifstream file(importTarget.resolvedPath);
     if (!file) {
-        outError = "Failed to open module '" + resolvedPath + "'.";
+        outError = "Failed to open module '" + importTarget.resolvedPath + "'.";
         return false;
     }
 
@@ -266,12 +278,14 @@ bool Compiler::resolveModuleExportTypes(
     Chunk chunk;
     Compiler moduleCompiler;
     moduleCompiler.setGC(m_gc);
+    moduleCompiler.setPackageSearchPaths(m_packageSearchPaths);
     bool moduleStrict = m_strictMode || hasStrictDirective(source);
     std::string_view compileSource = stripStrictDirectiveLine(source);
     moduleCompiler.setStrictMode(moduleStrict);
-    if (!moduleCompiler.compile(compileSource, chunk, resolvedPath)) {
-        outError =
-            "Failed to type-check imported module '" + resolvedPath + "'.";
+    if (!moduleCompiler.compile(compileSource, chunk,
+                                importTarget.resolvedPath)) {
+        outError = "Failed to type-check imported module '" +
+                   importTarget.resolvedPath + "'.";
         return false;
     }
 
@@ -1553,7 +1567,7 @@ void Compiler::importDeclaration() {
                   makeConstant(makeStringValue(resolvedPath)));
     };
 
-    auto parseAndResolvePath = [&]() -> std::string {
+    auto parseAndResolvePath = [&]() -> ImportTarget {
         consume(TokenType::FROM, "Expected 'from' in import declaration.");
         consume(TokenType::STRING,
                 "Expected string literal module path in import declaration.");
@@ -1562,18 +1576,19 @@ void Compiler::importDeclaration() {
                              m_parser->previous.length());
         if (pathText.length() < 2) {
             errorAt(m_parser->previous, "Invalid import path.");
-            return "";
+            return ImportTarget{};
         }
 
         std::string rawPath = pathText.substr(1, pathText.length() - 2);
-        std::string resolvedPath = resolveImportPath(m_sourcePath, rawPath);
-        if (resolvedPath.empty()) {
+        ImportTarget importTarget;
+        if (!resolveImportTarget(m_sourcePath, rawPath, m_packageSearchPaths,
+                                 importTarget)) {
             errorAt(m_parser->previous,
-                    "Cannot find module '" + rawPath + "'.");
-            return "";
+                    "Cannot find module or native package '" + rawPath + "'.");
+            return ImportTarget{};
         }
 
-        return resolvedPath;
+        return importTarget;
     };
 
     if (m_parser->current.type() == TokenType::OPEN_CURLY) {
@@ -1623,55 +1638,53 @@ void Compiler::importDeclaration() {
 
         consume(TokenType::CLOSE_CURLY,
                 "Expected '}' after named import list.");
-        std::string resolvedPath = parseAndResolvePath();
+        ImportTarget importTarget = parseAndResolvePath();
         consume(TokenType::SEMI_COLON,
                 "Expected ';' after import declaration.");
 
-        if (resolvedPath.empty()) {
+        if (importTarget.canonicalId.empty()) {
             return;
         }
 
-        const bool hasExpectedTypes = std::any_of(
-            bindings.begin(), bindings.end(), [](const NamedBinding& binding) {
-                return binding.expectedType != nullptr;
-            });
+        std::unordered_map<std::string, TypeRef> moduleExportTypes;
+        std::string moduleTypeError;
+        if (!resolveImportExportTypes(importTarget, moduleExportTypes,
+                                      moduleTypeError)) {
+            errorAtCurrent(moduleTypeError);
+            return;
+        }
 
-        if (hasExpectedTypes) {
-            std::unordered_map<std::string, TypeRef> moduleExportTypes;
-            std::string moduleTypeError;
-            if (!resolveModuleExportTypes(resolvedPath, moduleExportTypes,
-                                          moduleTypeError)) {
-                errorAtCurrent(moduleTypeError);
-                return;
+        for (auto& binding : bindings) {
+            std::string exportName(binding.exportName.start(),
+                                   binding.exportName.length());
+            auto exportedTypeIt = moduleExportTypes.find(exportName);
+            if (exportedTypeIt == moduleExportTypes.end()) {
+                errorAt(binding.exportName, "Module or native package does not "
+                                           "export '" +
+                                               exportName + "'.");
+                binding.resolvedType = TypeInfo::makeAny();
+                continue;
             }
 
-            for (auto& binding : bindings) {
-                std::string exportName(binding.exportName.start(),
-                                       binding.exportName.length());
-                auto exportedTypeIt = moduleExportTypes.find(exportName);
-                TypeRef exportedType = exportedTypeIt != moduleExportTypes.end()
-                                           ? exportedTypeIt->second
-                                           : TypeInfo::makeAny();
-
-                if (binding.expectedType) {
-                    if (!isAssignable(exportedType, binding.expectedType)) {
-                        std::string localName(binding.localName.start(),
-                                              binding.localName.length());
-                        errorAt(binding.localName,
-                                "Type error: imported symbol '" + localName +
-                                    "' expects '" +
-                                    binding.expectedType->toString() +
-                                    "' but module exports '" + exportName +
-                                    "' as '" + exportedType->toString() + "'.");
-                    }
-                    binding.resolvedType = binding.expectedType;
-                } else {
-                    binding.resolvedType = exportedType;
+            TypeRef exportedType = exportedTypeIt->second;
+            if (binding.expectedType) {
+                if (!isAssignable(exportedType, binding.expectedType)) {
+                    std::string localName(binding.localName.start(),
+                                          binding.localName.length());
+                    errorAt(binding.localName,
+                            "Type error: imported symbol '" + localName +
+                                "' expects '" +
+                                binding.expectedType->toString() +
+                                "' but module exports '" + exportName +
+                                "' as '" + exportedType->toString() + "'.");
                 }
+                binding.resolvedType = binding.expectedType;
+            } else {
+                binding.resolvedType = exportedType;
             }
         }
 
-        emitImportPath(resolvedPath);
+        emitImportPath(importTarget.canonicalId);
         for (const auto& binding : bindings) {
             emitByte(OpCode::DUP);
             emitBytes(OpCode::GET_PROPERTY,
@@ -1700,14 +1713,14 @@ void Compiler::importDeclaration() {
             "Expected module alias or named import list after 'import'.");
     Token aliasName = m_parser->previous;
 
-    std::string resolvedPath = parseAndResolvePath();
+    ImportTarget importTarget = parseAndResolvePath();
     consume(TokenType::SEMI_COLON, "Expected ';' after import declaration.");
 
-    if (resolvedPath.empty()) {
+    if (importTarget.canonicalId.empty()) {
         return;
     }
 
-    emitImportPath(resolvedPath);
+    emitImportPath(importTarget.canonicalId);
 
     uint8_t variable = 0;
     if (currentContext().scopeDepth > 0) {

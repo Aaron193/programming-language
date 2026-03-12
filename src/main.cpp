@@ -13,12 +13,14 @@ struct CliOptions {
     bool disassemble = false;
     bool strict = false;
     std::string sourceFile;
+    std::vector<std::string> packagePaths;
 };
 
 static void printUsage(const char* executable) {
     std::cout
         << "Usage: " << executable
-        << " [--trace] [--show-return] [--disassemble] [--strict] [source file]"
+        << " [--trace] [--show-return] [--disassemble] [--strict]"
+        << " [--package-path <dir>|--package-path=<dir>] [source file]"
         << std::endl;
 }
 
@@ -35,6 +37,15 @@ static bool parseArgs(int argc, char** argv, CliOptions& options) {
             options.disassemble = true;
         } else if (arg == "--strict") {
             options.strict = true;
+        } else if (arg == "--package-path") {
+            if (index + 1 >= argc) {
+                std::cerr << "Missing value for --package-path." << std::endl;
+                printUsage(argv[0]);
+                return false;
+            }
+            options.packagePaths.push_back(argv[++index]);
+        } else if (arg.rfind("--package-path=", 0) == 0) {
+            options.packagePaths.push_back(arg.substr(15));
         } else if (arg == "--help" || arg == "-h") {
             printUsage(argv[0]);
             return false;
@@ -82,6 +93,7 @@ static int runFile(const CliOptions& options) {
     }
 
     VirtualMachine vm;
+    vm.setPackageSearchPaths(options.packagePaths);
     Status status =
         vm.interpret(*source, options.showReturn, options.trace,
                      options.disassemble, absolutePath, options.strict);
@@ -102,6 +114,7 @@ static int runFile(const CliOptions& options) {
 
 static int runRepl(const CliOptions& options) {
     VirtualMachine vm;
+    vm.setPackageSearchPaths(options.packagePaths);
     std::string line;
 
     while (true) {
@@ -135,6 +148,12 @@ static int runRepl(const CliOptions& options) {
 
 int main(int argc, char** argv) {
     CliOptions options;
+    try {
+        std::filesystem::path executablePath = std::filesystem::weakly_canonical(argv[0]);
+        options.packagePaths.push_back(
+            (executablePath.parent_path() / "packages").string());
+    } catch (const std::exception&) {
+    }
     if (!parseArgs(argc, argv, options)) {
         return 1;
     }

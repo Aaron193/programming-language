@@ -1,6 +1,7 @@
 #pragma once
 #include <array>
 #include <cstdint>
+#include <deque>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -10,17 +11,24 @@
 #include "Chunk.hpp"
 #include "Compiler.hpp"
 #include "GC.hpp"
+#include "RuntimeCommon.hpp"
 #include "Stack.hpp"
-
-enum Status {
-    OK,
-    COMPILATION_ERROR,
-    RUNTIME_ERROR,
-};
 
 class VirtualMachine {
    private:
     static constexpr size_t MAX_FRAMES = 256;
+    friend Status invokeBuiltinNative(VirtualMachine& vm,
+                                      const NativeFunctionObject& native,
+                                      uint8_t argumentCount,
+                                      size_t calleeIndex);
+    friend Status invokePackageNative(VirtualMachine& vm,
+                                      const NativeFunctionObject& native,
+                                      uint8_t argumentCount,
+                                      size_t calleeIndex);
+    friend bool packageValueToValue(VirtualMachine& vm,
+                                    const ExprPackageValue& value,
+                                    Value& outValue,
+                                    std::string& outError);
 
     struct CallFrame {
         Chunk* chunk;
@@ -50,6 +58,9 @@ class VirtualMachine {
     std::unordered_map<std::string, Value> m_nativeGlobals;
     std::unordered_map<std::string, ModuleObject*> m_moduleCache;
     std::unordered_set<std::string> m_importStack;
+    std::vector<std::string> m_packageSearchPaths;
+    std::vector<void*> m_loadedNativeLibraryHandles;
+    std::deque<NativePackageBinding> m_nativePackageBindings;
     ModuleObject* m_currentModule = nullptr;
     bool m_defaultStrictMode = false;
     // open upvalues, maintained in descending stack-index order
@@ -108,7 +119,11 @@ class VirtualMachine {
 
    public:
     VirtualMachine() = default;
-    ~VirtualMachine() = default;
+    ~VirtualMachine();
+
+    void setPackageSearchPaths(std::vector<std::string> packageSearchPaths) {
+        m_packageSearchPaths = std::move(packageSearchPaths);
+    }
 
     Status interpret(std::string_view source, bool printReturnValue = false,
                      bool traceEnabled = false, bool disassembleEnabled = false,

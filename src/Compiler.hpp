@@ -11,6 +11,7 @@
 
 #include "Chunk.hpp"
 #include "GC.hpp"
+#include "NativePackage.hpp"
 #include "Scanner.hpp"
 #include "TypeChecker.hpp"
 #include "TypeInfo.hpp"
@@ -114,6 +115,7 @@ class Compiler {
     std::vector<TypeRef> m_exprTypeStack;
     std::vector<std::string> m_globalNames;
     std::vector<std::string> m_exportedNames;
+    std::vector<std::string> m_packageSearchPaths;
     std::string m_sourcePath;
     bool m_strictMode = false;
     std::deque<Token> m_bufferedTokens;
@@ -189,8 +191,8 @@ class Compiler {
 
     void expression();
     void declaration();
-    bool resolveModuleExportTypes(
-        const std::string& resolvedPath,
+    bool resolveImportExportTypes(
+        const ImportTarget& importTarget,
         std::unordered_map<std::string, TypeRef>& outExportTypes,
         std::string& outError);
     TypeRef tokenToType(const Token& token) const;
@@ -253,6 +255,9 @@ class Compiler {
     void setGC(GC* gc) { m_gc = gc; }
     void setSourcePath(const std::string& path) { m_sourcePath = path; }
     void setStrictMode(bool strictMode) { m_strictMode = strictMode; }
+    void setPackageSearchPaths(std::vector<std::string> packageSearchPaths) {
+        m_packageSearchPaths = std::move(packageSearchPaths);
+    }
     const std::vector<std::string>& globalNames() const {
         return m_globalNames;
     }

@@ -20,6 +20,8 @@ SUCCESS_FILES=(
     "$SCRIPT_DIR/sample_import_alias.expr"
     "$SCRIPT_DIR/sample_import_class.expr"
     "$SCRIPT_DIR/sample_import_nested.expr"
+    "$SCRIPT_DIR/sample_import_native_package.expr"
+    "$SCRIPT_DIR/sample_import_native_named.expr"
 )
 
 for file in "${SUCCESS_FILES[@]}"; do
@@ -90,6 +92,36 @@ if "$INTERPRETER" "$SCOPED_EXPORT_FILE"; then
     FAIL=$((FAIL + 1))
 else
     echo "[PASS] scoped export failed as expected"
+    PASS=$((PASS + 1))
+fi
+
+echo
+
+MISSING_NATIVE_FILE="$SCRIPT_DIR/sample_import_native_missing.expr"
+echo "========================================"
+echo "Running (expect compile error): $MISSING_NATIVE_FILE"
+echo "----------------------------------------"
+
+if "$INTERPRETER" "$MISSING_NATIVE_FILE"; then
+    echo "[FAIL] expected compile error for missing native package"
+    FAIL=$((FAIL + 1))
+else
+    echo "[PASS] missing native package failed as expected"
+    PASS=$((PASS + 1))
+fi
+
+echo
+
+TYPE_MISMATCH_FILE="$SCRIPT_DIR/sample_import_native_type_mismatch.expr"
+echo "========================================"
+echo "Running (expect compile error): $TYPE_MISMATCH_FILE"
+echo "----------------------------------------"
+
+if "$INTERPRETER" "$TYPE_MISMATCH_FILE"; then
+    echo "[FAIL] expected compile error for native package type mismatch"
+    FAIL=$((FAIL + 1))
+else
+    echo "[PASS] native package type mismatch failed as expected"
     PASS=$((PASS + 1))
 fi
 

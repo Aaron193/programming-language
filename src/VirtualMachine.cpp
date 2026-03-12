@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <exception>
 #include <fstream>
 #include <iostream>
@@ -12,6 +13,9 @@
 #include <utility>
 #include <vector>
 
+#include <dlfcn.h>
+
+#include "NativePackage.hpp"
 #include "StdLib.hpp"
 
 static bool isFalsey(const Value& value) {
@@ -267,24 +271,173 @@ static std::vector<Value> sortedDictKeys(const DictObject* dict) {
     return orderedKeys;
 }
 
-static NativeFunctionId resolveNativeFunctionId(const std::string& name) {
-    if (name == "clock") return NativeFunctionId::CLOCK;
-    if (name == "sqrt") return NativeFunctionId::SQRT;
-    if (name == "len") return NativeFunctionId::LEN;
-    if (name == "type") return NativeFunctionId::TYPE;
-    if (name == "str") return NativeFunctionId::STR;
-    if (name == "toString") return NativeFunctionId::TO_STRING;
-    if (name == "num") return NativeFunctionId::NUM;
-    if (name == "parseInt") return NativeFunctionId::PARSE_INT;
-    if (name == "parseUInt") return NativeFunctionId::PARSE_UINT;
-    if (name == "parseFloat") return NativeFunctionId::PARSE_FLOAT;
-    if (name == "abs") return NativeFunctionId::ABS;
-    if (name == "floor") return NativeFunctionId::FLOOR;
-    if (name == "ceil") return NativeFunctionId::CEIL;
-    if (name == "pow") return NativeFunctionId::POW;
-    if (name == "error") return NativeFunctionId::ERROR;
-    if (name == "Set") return NativeFunctionId::SET;
-    return NativeFunctionId::UNKNOWN;
+enum class BuiltinNativeKind : uint8_t {
+    CLOCK,
+    SQRT,
+    LEN,
+    TYPE,
+    STR,
+    TO_STRING,
+    NUM,
+    PARSE_INT,
+    PARSE_UINT,
+    PARSE_FLOAT,
+    ABS,
+    FLOOR,
+    CEIL,
+    POW,
+    ERROR,
+    SET,
+};
+
+static const ExprHostApi kExprHostApi = {EXPR_NATIVE_PACKAGE_ABI_VERSION};
+
+static bool valueToPackageValue(const Value& value, ExprPackageValue& out) {
+    out = ExprPackageValue{};
+    if (value.isNil()) {
+        out.kind = EXPR_PACKAGE_VALUE_NULL;
+        return true;
+    }
+    if (value.isBool()) {
+        out.kind = EXPR_PACKAGE_VALUE_BOOL;
+        out.as.boolean_value = value.asBool();
+        return true;
+    }
+    if (value.isSignedInt()) {
+        out.kind = EXPR_PACKAGE_VALUE_I64;
+        out.as.i64_value = value.asSignedInt();
+        return true;
+    }
+    if (value.isUnsignedInt()) {
+        out.kind = EXPR_PACKAGE_VALUE_U64;
+        out.as.u64_value = value.asUnsignedInt();
+        return true;
+    }
+    if (value.isNumber()) {
+        out.kind = EXPR_PACKAGE_VALUE_F64;
+        out.as.f64_value = value.asNumber();
+        return true;
+    }
+    if (value.isString()) {
+        out.kind = EXPR_PACKAGE_VALUE_STR;
+        out.as.string_value.data = value.asString().c_str();
+        out.as.string_value.length = value.asString().size();
+        return true;
+    }
+
+    return false;
+}
+
+bool packageValueToValue(VirtualMachine& vm, const ExprPackageValue& value,
+                         Value& outValue, std::string& outError) {
+    switch (value.kind) {
+        case EXPR_PACKAGE_VALUE_NULL:
+            outValue = Value();
+            return true;
+        case EXPR_PACKAGE_VALUE_BOOL:
+            outValue = Value(value.as.boolean_value);
+            return true;
+        case EXPR_PACKAGE_VALUE_I64:
+            outValue = Value(static_cast<int64_t>(value.as.i64_value));
+            return true;
+        case EXPR_PACKAGE_VALUE_U64:
+            outValue = Value(static_cast<uint64_t>(value.as.u64_value));
+            return true;
+        case EXPR_PACKAGE_VALUE_F64:
+            outValue = Value(value.as.f64_value);
+            return true;
+        case EXPR_PACKAGE_VALUE_STR: {
+            std::string text;
+            if (value.as.string_value.data != nullptr &&
+                value.as.string_value.length > 0) {
+                text.assign(value.as.string_value.data,
+                            value.as.string_value.length);
+            }
+            outValue = vm.makeStringValue(std::move(text));
+            return true;
+        }
+        default:
+            outError = "Native package returned unsupported value kind.";
+            return false;
+    }
+}
+
+static const char* builtinKindName(BuiltinNativeKind kind) {
+    switch (kind) {
+        case BuiltinNativeKind::CLOCK:
+            return "clock";
+        case BuiltinNativeKind::SQRT:
+            return "sqrt";
+        case BuiltinNativeKind::LEN:
+            return "len";
+        case BuiltinNativeKind::TYPE:
+            return "type";
+        case BuiltinNativeKind::STR:
+            return "str";
+        case BuiltinNativeKind::TO_STRING:
+            return "toString";
+        case BuiltinNativeKind::NUM:
+            return "num";
+        case BuiltinNativeKind::PARSE_INT:
+            return "parseInt";
+        case BuiltinNativeKind::PARSE_UINT:
+            return "parseUInt";
+        case BuiltinNativeKind::PARSE_FLOAT:
+            return "parseFloat";
+        case BuiltinNativeKind::ABS:
+            return "abs";
+        case BuiltinNativeKind::FLOOR:
+            return "floor";
+        case BuiltinNativeKind::CEIL:
+            return "ceil";
+        case BuiltinNativeKind::POW:
+            return "pow";
+        case BuiltinNativeKind::ERROR:
+            return "error";
+        case BuiltinNativeKind::SET:
+            return "Set";
+        default:
+            return "<native>";
+    }
+}
+
+static const void* builtinNativeTag(const std::string& name) {
+    static constexpr BuiltinNativeKind kClock = BuiltinNativeKind::CLOCK;
+    static constexpr BuiltinNativeKind kSqrt = BuiltinNativeKind::SQRT;
+    static constexpr BuiltinNativeKind kLen = BuiltinNativeKind::LEN;
+    static constexpr BuiltinNativeKind kType = BuiltinNativeKind::TYPE;
+    static constexpr BuiltinNativeKind kStr = BuiltinNativeKind::STR;
+    static constexpr BuiltinNativeKind kToString = BuiltinNativeKind::TO_STRING;
+    static constexpr BuiltinNativeKind kNum = BuiltinNativeKind::NUM;
+    static constexpr BuiltinNativeKind kParseInt = BuiltinNativeKind::PARSE_INT;
+    static constexpr BuiltinNativeKind kParseUInt =
+        BuiltinNativeKind::PARSE_UINT;
+    static constexpr BuiltinNativeKind kParseFloat =
+        BuiltinNativeKind::PARSE_FLOAT;
+    static constexpr BuiltinNativeKind kAbs = BuiltinNativeKind::ABS;
+    static constexpr BuiltinNativeKind kFloor = BuiltinNativeKind::FLOOR;
+    static constexpr BuiltinNativeKind kCeil = BuiltinNativeKind::CEIL;
+    static constexpr BuiltinNativeKind kPow = BuiltinNativeKind::POW;
+    static constexpr BuiltinNativeKind kError = BuiltinNativeKind::ERROR;
+    static constexpr BuiltinNativeKind kSet = BuiltinNativeKind::SET;
+
+    if (name == "clock") return &kClock;
+    if (name == "sqrt") return &kSqrt;
+    if (name == "len") return &kLen;
+    if (name == "type") return &kType;
+    if (name == "str") return &kStr;
+    if (name == "toString") return &kToString;
+    if (name == "num") return &kNum;
+    if (name == "parseInt") return &kParseInt;
+    if (name == "parseUInt") return &kParseUInt;
+    if (name == "parseFloat") return &kParseFloat;
+    if (name == "abs") return &kAbs;
+    if (name == "floor") return &kFloor;
+    if (name == "ceil") return &kCeil;
+    if (name == "pow") return &kPow;
+    if (name == "error") return &kError;
+    if (name == "Set") return &kSet;
+    return nullptr;
 }
 
 static NativeMethodId resolveArrayMethodId(const std::string& name) {
@@ -723,6 +876,300 @@ Value VirtualMachine::makeStringValue(std::string text) {
     auto* stringObject = gcAlloc<StringObject>();
     stringObject->value = std::move(text);
     return Value(stringObject);
+}
+
+Status invokeBuiltinNative(VirtualMachine& vm, const NativeFunctionObject& native,
+                           uint8_t argumentCount, size_t calleeIndex) {
+    if (native.userdata == nullptr) {
+        return vm.runtimeError("Unknown native function '" + native.name + "'.");
+    }
+
+    const auto kind =
+        *static_cast<const BuiltinNativeKind*>(native.userdata);
+    const size_t argBase = calleeIndex + 1;
+    auto argAt = [&](uint8_t index) -> const Value& {
+        return vm.m_stack.getAt(argBase + static_cast<size_t>(index));
+    };
+    auto argAtRef = [&](uint8_t index) -> Value& {
+        return vm.m_stack.getAtRef(argBase + static_cast<size_t>(index));
+    };
+
+    Value result;
+    switch (kind) {
+        case BuiltinNativeKind::CLOCK: {
+            auto now = std::chrono::duration<double>(
+                           std::chrono::system_clock::now().time_since_epoch())
+                           .count();
+            result = Value(now);
+            break;
+        }
+        case BuiltinNativeKind::SQRT: {
+            const Value& arg = argAt(0);
+            if (!arg.isAnyNumeric()) {
+                return vm.runtimeError(
+                    "Native function 'sqrt' expects a number.");
+            }
+
+            double number = 0.0;
+            valueToDouble(arg, number);
+            if (number < 0.0) {
+                return vm.runtimeError(
+                    "Native function 'sqrt' cannot take negative numbers.");
+            }
+
+            result = Value(std::sqrt(number));
+            break;
+        }
+        case BuiltinNativeKind::LEN: {
+            const Value& arg = argAt(0);
+            if (arg.isString()) {
+                result = Value(static_cast<int64_t>(arg.asString().length()));
+            } else if (arg.isArray()) {
+                result =
+                    Value(static_cast<int64_t>(arg.asArray()->elements.size()));
+            } else if (arg.isDict()) {
+                result = Value(static_cast<int64_t>(arg.asDict()->map.size()));
+            } else if (arg.isSet()) {
+                result = Value(static_cast<int64_t>(arg.asSet()->elements.size()));
+            } else {
+                return vm.runtimeError("Native function 'len' expects a "
+                                       "string, array, dict, or set.");
+            }
+            break;
+        }
+        case BuiltinNativeKind::TYPE:
+            result = vm.makeStringValue(valueTypeName(argAt(0)));
+            break;
+        case BuiltinNativeKind::STR:
+        case BuiltinNativeKind::TO_STRING: {
+            const Value& arg = argAt(0);
+            result =
+                arg.isString() ? arg : vm.makeStringValue(valueToString(arg));
+            break;
+        }
+        case BuiltinNativeKind::NUM: {
+            const Value& arg = argAt(0);
+            if (arg.isNumber()) {
+                result = arg;
+            } else if (arg.isSignedInt() || arg.isUnsignedInt()) {
+                double number = 0.0;
+                valueToDouble(arg, number);
+                result = Value(number);
+            } else if (arg.isString()) {
+                const std::string& text = arg.asString();
+                size_t parseIndex = 0;
+                try {
+                    double number = std::stod(text, &parseIndex);
+                    if (parseIndex != text.size()) {
+                        return vm.runtimeError("Native function 'num' expects "
+                                               "a numeric string.");
+                    }
+                    result = Value(number);
+                } catch (const std::exception&) {
+                    return vm.runtimeError(
+                        "Native function 'num' expects a numeric string.");
+                }
+            } else {
+                return vm.runtimeError(
+                    "Native function 'num' expects a number or string.");
+            }
+            break;
+        }
+        case BuiltinNativeKind::PARSE_INT: {
+            const Value& arg = argAt(0);
+            if (!arg.isString()) {
+                return vm.runtimeError(
+                    "Native function 'parseInt' expects a string.");
+            }
+
+            size_t parseIndex = 0;
+            try {
+                int64_t parsed = std::stoll(arg.asString(), &parseIndex, 10);
+                if (parseIndex != arg.asString().size()) {
+                    return vm.runtimeError("Native function 'parseInt' expects "
+                                           "an integer string.");
+                }
+                result = Value(parsed);
+            } catch (const std::exception&) {
+                return vm.runtimeError("Native function 'parseInt' expects an "
+                                       "integer string.");
+            }
+            break;
+        }
+        case BuiltinNativeKind::PARSE_UINT: {
+            const Value& arg = argAt(0);
+            if (!arg.isString()) {
+                return vm.runtimeError(
+                    "Native function 'parseUInt' expects a string.");
+            }
+
+            size_t parseIndex = 0;
+            try {
+                uint64_t parsed = std::stoull(arg.asString(), &parseIndex, 10);
+                if (parseIndex != arg.asString().size()) {
+                    return vm.runtimeError("Native function 'parseUInt' expects "
+                                           "an unsigned integer string.");
+                }
+                result = Value(parsed);
+            } catch (const std::exception&) {
+                return vm.runtimeError("Native function 'parseUInt' expects "
+                                       "an unsigned integer string.");
+            }
+            break;
+        }
+        case BuiltinNativeKind::PARSE_FLOAT: {
+            const Value& arg = argAt(0);
+            if (!arg.isString()) {
+                return vm.runtimeError(
+                    "Native function 'parseFloat' expects a string.");
+            }
+
+            size_t parseIndex = 0;
+            try {
+                double parsed = std::stod(arg.asString(), &parseIndex);
+                if (parseIndex != arg.asString().size()) {
+                    return vm.runtimeError("Native function 'parseFloat' "
+                                           "expects a numeric string.");
+                }
+                result = Value(parsed);
+            } catch (const std::exception&) {
+                return vm.runtimeError("Native function 'parseFloat' expects "
+                                       "a numeric string.");
+            }
+            break;
+        }
+        case BuiltinNativeKind::ABS: {
+            const Value& arg = argAt(0);
+            if (!arg.isAnyNumeric()) {
+                return vm.runtimeError(
+                    "Native function 'abs' expects a number.");
+            }
+
+            double number = 0.0;
+            valueToDouble(arg, number);
+            result = Value(std::fabs(number));
+            break;
+        }
+        case BuiltinNativeKind::FLOOR: {
+            const Value& arg = argAt(0);
+            if (!arg.isAnyNumeric()) {
+                return vm.runtimeError(
+                    "Native function 'floor' expects a number.");
+            }
+
+            double number = 0.0;
+            valueToDouble(arg, number);
+            result = Value(std::floor(number));
+            break;
+        }
+        case BuiltinNativeKind::CEIL: {
+            const Value& arg = argAt(0);
+            if (!arg.isAnyNumeric()) {
+                return vm.runtimeError(
+                    "Native function 'ceil' expects a number.");
+            }
+
+            double number = 0.0;
+            valueToDouble(arg, number);
+            result = Value(std::ceil(number));
+            break;
+        }
+        case BuiltinNativeKind::POW: {
+            double base = 0.0;
+            double exponent = 0.0;
+            if (!valueToDouble(argAt(0), base) ||
+                !valueToDouble(argAt(1), exponent)) {
+                return vm.runtimeError(
+                    "Native function 'pow' expects numeric arguments.");
+            }
+
+            result = Value(std::pow(base, exponent));
+            break;
+        }
+        case BuiltinNativeKind::ERROR: {
+            const Value& arg = argAt(0);
+            if (!arg.isString()) {
+                return vm.runtimeError(
+                    "Native function 'error' expects a string.");
+            }
+
+            return vm.runtimeError(arg.asString());
+        }
+        case BuiltinNativeKind::SET: {
+            auto set = vm.gcAlloc<SetObject>();
+            set->elements.reserve(argumentCount);
+            set->indexByValue.reserve(argumentCount);
+            for (uint8_t i = 0; i < argumentCount; ++i) {
+                Value& arg = argAtRef(i);
+                if (set->elementType->isAny()) {
+                    set->elementType = inferRuntimeType(arg);
+                } else if (!valueMatchesType(arg, set->elementType)) {
+                    return vm.runtimeError("Native function 'Set' expects all "
+                                           "elements to have a consistent "
+                                           "type.");
+                }
+
+                setInsertValue(set, std::move(arg));
+            }
+
+            result = Value(set);
+            break;
+        }
+    }
+
+    vm.m_stack.popN(vm.m_stack.size() - calleeIndex);
+    vm.m_stack.push(std::move(result));
+    return Status::OK;
+}
+
+Status invokePackageNative(VirtualMachine& vm, const NativeFunctionObject& native,
+                           uint8_t argumentCount, size_t calleeIndex) {
+    auto* binding =
+        static_cast<const NativePackageBinding*>(native.userdata);
+    if (binding == nullptr || binding->function == nullptr ||
+        binding->function->callback == nullptr) {
+        return vm.runtimeError("Native package function '" + native.name +
+                               "' is not callable.");
+    }
+
+    std::vector<ExprPackageValue> packageArgs(argumentCount);
+    const size_t argBase = calleeIndex + 1;
+    for (uint8_t index = 0; index < argumentCount; ++index) {
+        const Value& arg = vm.m_stack.getAt(argBase + static_cast<size_t>(index));
+        if (!valueToPackageValue(arg, packageArgs[index])) {
+            return vm.runtimeError("Native package function '" + native.name +
+                                   "' cannot accept runtime value of type '" +
+                                   valueTypeName(arg) + "'.");
+        }
+    }
+
+    ExprPackageValue resultValue{};
+    ExprPackageStringView errorView{nullptr, 0};
+    bool ok = binding->function->callback(&kExprHostApi, packageArgs.data(),
+                                          packageArgs.size(), &resultValue,
+                                          &errorView);
+    if (!ok) {
+        std::string message = "Native package function '" + binding->packageName +
+                              "." + native.name + "' failed.";
+        if (errorView.data != nullptr && errorView.length > 0) {
+            message = "Native package function '" + binding->packageName + "." +
+                      native.name + "' failed: " +
+                      std::string(errorView.data, errorView.length);
+        }
+        return vm.runtimeError(message);
+    }
+
+    Value result;
+    std::string conversionError;
+    if (!packageValueToValue(vm, resultValue, result, conversionError)) {
+        return vm.runtimeError("Native package function '" +
+                               binding->packageName + "." + native.name +
+                               "' returned invalid value: " + conversionError);
+    }
+
+    vm.m_stack.popN(vm.m_stack.size() - calleeIndex);
+    vm.m_stack.push(std::move(result));
+    return Status::OK;
 }
 
 Status VirtualMachine::callClosure(ClosureObject* closure,
@@ -1223,248 +1670,11 @@ Status VirtualMachine::callValue(Value callee, uint8_t argumentCount,
                                 ".");
         }
 
-        const size_t argBase = calleeIndex + 1;
-        auto argAt = [&](uint8_t index) -> const Value& {
-            return m_stack.getAt(argBase + static_cast<size_t>(index));
-        };
-        auto argAtRef = [&](uint8_t index) -> Value& {
-            return m_stack.getAtRef(argBase + static_cast<size_t>(index));
-        };
-
-        Value result;
-        switch (native->id) {
-            case NativeFunctionId::CLOCK: {
-                auto now = std::chrono::duration<double>(
-                               std::chrono::system_clock::now()
-                                   .time_since_epoch())
-                               .count();
-                result = Value(now);
-                break;
-            }
-            case NativeFunctionId::SQRT: {
-                const Value& arg = argAt(0);
-                if (!arg.isAnyNumeric()) {
-                    return runtimeError(
-                        "Native function 'sqrt' expects a number.");
-                }
-
-                double number = 0.0;
-                valueToDouble(arg, number);
-                if (number < 0.0) {
-                    return runtimeError(
-                        "Native function 'sqrt' cannot take negative numbers.");
-                }
-
-                result = Value(std::sqrt(number));
-                break;
-            }
-            case NativeFunctionId::LEN: {
-                const Value& arg = argAt(0);
-                if (arg.isString()) {
-                    result =
-                        Value(static_cast<int64_t>(arg.asString().length()));
-                } else if (arg.isArray()) {
-                    result = Value(
-                        static_cast<int64_t>(arg.asArray()->elements.size()));
-                } else if (arg.isDict()) {
-                    result = Value(
-                        static_cast<int64_t>(arg.asDict()->map.size()));
-                } else if (arg.isSet()) {
-                    result =
-                        Value(static_cast<int64_t>(arg.asSet()->elements.size()));
-                } else {
-                    return runtimeError("Native function 'len' expects a "
-                                        "string, array, dict, or set.");
-                }
-                break;
-            }
-            case NativeFunctionId::TYPE:
-                result = makeStringValue(valueTypeName(argAt(0)));
-                break;
-            case NativeFunctionId::STR:
-            case NativeFunctionId::TO_STRING: {
-                const Value& arg = argAt(0);
-                result = arg.isString() ? arg : makeStringValue(valueToString(arg));
-                break;
-            }
-            case NativeFunctionId::NUM: {
-                const Value& arg = argAt(0);
-                if (arg.isNumber()) {
-                    result = arg;
-                } else if (arg.isSignedInt() || arg.isUnsignedInt()) {
-                    double number = 0.0;
-                    valueToDouble(arg, number);
-                    result = Value(number);
-                } else if (arg.isString()) {
-                    const std::string& text = arg.asString();
-                    size_t parseIndex = 0;
-                    try {
-                        double number = std::stod(text, &parseIndex);
-                        if (parseIndex != text.size()) {
-                            return runtimeError("Native function 'num' expects "
-                                                "a numeric string.");
-                        }
-                        result = Value(number);
-                    } catch (const std::exception&) {
-                        return runtimeError(
-                            "Native function 'num' expects a numeric string.");
-                    }
-                } else {
-                    return runtimeError(
-                        "Native function 'num' expects a number or string.");
-                }
-                break;
-            }
-            case NativeFunctionId::PARSE_INT: {
-                const Value& arg = argAt(0);
-                if (!arg.isString()) {
-                    return runtimeError(
-                        "Native function 'parseInt' expects a string.");
-                }
-
-                size_t parseIndex = 0;
-                try {
-                    int64_t parsed = std::stoll(arg.asString(), &parseIndex, 10);
-                    if (parseIndex != arg.asString().size()) {
-                        return runtimeError("Native function 'parseInt' expects "
-                                            "an integer string.");
-                    }
-                    result = Value(parsed);
-                } catch (const std::exception&) {
-                    return runtimeError("Native function 'parseInt' expects an "
-                                        "integer string.");
-                }
-                break;
-            }
-            case NativeFunctionId::PARSE_UINT: {
-                const Value& arg = argAt(0);
-                if (!arg.isString()) {
-                    return runtimeError(
-                        "Native function 'parseUInt' expects a string.");
-                }
-
-                size_t parseIndex = 0;
-                try {
-                    uint64_t parsed =
-                        std::stoull(arg.asString(), &parseIndex, 10);
-                    if (parseIndex != arg.asString().size()) {
-                        return runtimeError("Native function 'parseUInt' "
-                                            "expects an unsigned integer string.");
-                    }
-                    result = Value(parsed);
-                } catch (const std::exception&) {
-                    return runtimeError("Native function 'parseUInt' expects "
-                                        "an unsigned integer string.");
-                }
-                break;
-            }
-            case NativeFunctionId::PARSE_FLOAT: {
-                const Value& arg = argAt(0);
-                if (!arg.isString()) {
-                    return runtimeError(
-                        "Native function 'parseFloat' expects a string.");
-                }
-
-                size_t parseIndex = 0;
-                try {
-                    double parsed = std::stod(arg.asString(), &parseIndex);
-                    if (parseIndex != arg.asString().size()) {
-                        return runtimeError("Native function 'parseFloat' "
-                                            "expects a numeric string.");
-                    }
-                    result = Value(parsed);
-                } catch (const std::exception&) {
-                    return runtimeError("Native function 'parseFloat' expects "
-                                        "a numeric string.");
-                }
-                break;
-            }
-            case NativeFunctionId::ABS: {
-                const Value& arg = argAt(0);
-                if (!arg.isAnyNumeric()) {
-                    return runtimeError(
-                        "Native function 'abs' expects a number.");
-                }
-
-                double number = 0.0;
-                valueToDouble(arg, number);
-                result = Value(std::fabs(number));
-                break;
-            }
-            case NativeFunctionId::FLOOR: {
-                const Value& arg = argAt(0);
-                if (!arg.isAnyNumeric()) {
-                    return runtimeError(
-                        "Native function 'floor' expects a number.");
-                }
-
-                double number = 0.0;
-                valueToDouble(arg, number);
-                result = Value(std::floor(number));
-                break;
-            }
-            case NativeFunctionId::CEIL: {
-                const Value& arg = argAt(0);
-                if (!arg.isAnyNumeric()) {
-                    return runtimeError(
-                        "Native function 'ceil' expects a number.");
-                }
-
-                double number = 0.0;
-                valueToDouble(arg, number);
-                result = Value(std::ceil(number));
-                break;
-            }
-            case NativeFunctionId::POW: {
-                double base = 0.0;
-                double exponent = 0.0;
-                if (!valueToDouble(argAt(0), base) ||
-                    !valueToDouble(argAt(1), exponent)) {
-                    return runtimeError(
-                        "Native function 'pow' expects numeric arguments.");
-                }
-
-                result = Value(std::pow(base, exponent));
-                break;
-            }
-            case NativeFunctionId::ERROR: {
-                const Value& arg = argAt(0);
-                if (!arg.isString()) {
-                    return runtimeError(
-                        "Native function 'error' expects a string.");
-                }
-
-                return runtimeError(arg.asString());
-            }
-            case NativeFunctionId::SET: {
-                auto set = gcAlloc<SetObject>();
-                set->elements.reserve(argumentCount);
-                set->indexByValue.reserve(argumentCount);
-                for (uint8_t i = 0; i < argumentCount; ++i) {
-                    Value& arg = argAtRef(i);
-                    if (set->elementType->isAny()) {
-                        set->elementType = inferRuntimeType(arg);
-                    } else if (!valueMatchesType(arg, set->elementType)) {
-                        return runtimeError("Native function 'Set' expects all "
-                                            "elements to have a consistent "
-                                            "type.");
-                    }
-
-                    setInsertValue(set, std::move(arg));
-                }
-
-                result = Value(set);
-                break;
-            }
-            case NativeFunctionId::UNKNOWN:
-            default:
-                return runtimeError("Unknown native function '" +
-                                    native->name + "'.");
+        if (native->callback == nullptr) {
+            return runtimeError("Unknown native function '" + native->name +
+                                "'.");
         }
-
-        m_stack.popN(m_stack.size() - calleeIndex);
-        m_stack.push(std::move(result));
-        return Status::OK;
+        return native->callback(*this, *native, argumentCount, calleeIndex);
     }
 
     if (callee.isNativeBound()) {
@@ -3094,6 +3304,66 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                                     "'.");
             }
 
+            if (isNativeImportTargetId(path)) {
+                std::string libraryPath = nativeImportLibraryPath(path);
+                NativePackageDescriptor packageDescriptor;
+                void* libraryHandle = nullptr;
+                std::string packageError;
+                if (!loadNativePackageDescriptor(libraryPath, packageDescriptor,
+                                                 packageError, true,
+                                                 &libraryHandle)) {
+                    return runtimeError(packageError);
+                }
+
+                auto* module = gcAlloc<ModuleObject>();
+                module->path = packageDescriptor.packageName;
+
+                for (const auto& functionDescriptor : packageDescriptor.functions) {
+                    auto* nativeFn = gcAlloc<NativeFunctionObject>();
+                    nativeFn->name = functionDescriptor.name;
+                    nativeFn->arity = functionDescriptor.arity;
+                    nativeFn->callback = invokePackageNative;
+                    auto& binding = m_nativePackageBindings.emplace_back();
+                    binding.packageName = packageDescriptor.packageName;
+                    binding.function = functionDescriptor.callback;
+                    nativeFn->userdata = &binding;
+                    module->exports[functionDescriptor.name] = Value(nativeFn);
+                    module->exportTypes[functionDescriptor.name] =
+                        functionDescriptor.type;
+                }
+
+                for (const auto& constantDescriptor : packageDescriptor.constants) {
+                    Value value;
+                    std::string conversionError;
+                    ExprPackageValue constantValue = constantDescriptor.value;
+                    if (constantValue.kind == EXPR_PACKAGE_VALUE_STR) {
+                        constantValue.as.string_value.data =
+                            constantDescriptor.stringValueStorage.c_str();
+                        constantValue.as.string_value.length =
+                            constantDescriptor.stringValueStorage.size();
+                    }
+
+                    if (!packageValueToValue(*this, constantValue, value,
+                                             conversionError)) {
+                        return runtimeError("Failed to materialize native package "
+                                            "constant '" +
+                                            constantDescriptor.name + "': " +
+                                            conversionError);
+                    }
+
+                    module->exports[constantDescriptor.name] = value;
+                    module->exportTypes[constantDescriptor.name] =
+                        constantDescriptor.type;
+                }
+
+                m_moduleCache[path] = module;
+                m_stack.push(Value(module));
+                if (libraryHandle != nullptr) {
+                    m_loadedNativeLibraryHandles.push_back(libraryHandle);
+                }
+                DISPATCH();
+            }
+
             std::ifstream file(path);
             if (!file) {
                 return runtimeError("Failed to open module '" + path + "'.");
@@ -3501,6 +3771,14 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 #undef VM_OPCODE_ADDR
 #undef VM_CASE
 
+VirtualMachine::~VirtualMachine() {
+    for (void* handle : m_loadedNativeLibraryHandles) {
+        if (handle != nullptr) {
+            dlclose(handle);
+        }
+    }
+}
+
 Status VirtualMachine::interpret(std::string_view source, bool printReturnValue,
                                  bool traceEnabled, bool disassembleEnabled,
                                  const std::string& sourcePath,
@@ -3514,9 +3792,12 @@ Status VirtualMachine::interpret(std::string_view source, bool printReturnValue,
     m_nativeGlobals.clear();
     m_moduleCache.clear();
     m_importStack.clear();
+    m_loadedNativeLibraryHandles.clear();
+    m_nativePackageBindings.clear();
     m_currentModule = nullptr;
     m_defaultStrictMode = strictMode || hasStrictDirective(source);
     m_compiler.setGC(&m_gc);
+    m_compiler.setPackageSearchPaths(m_packageSearchPaths);
     m_compiler.setStrictMode(m_defaultStrictMode);
     m_traceEnabled = traceEnabled;
     m_disassembleEnabled = disassembleEnabled;
@@ -3546,7 +3827,8 @@ Status VirtualMachine::interpret(std::string_view source, bool printReturnValue,
         auto nativeFn = gcAlloc<NativeFunctionObject>();
         nativeFn->name = name;
         nativeFn->arity = arity;
-        nativeFn->id = resolveNativeFunctionId(name);
+        nativeFn->callback = invokeBuiltinNative;
+        nativeFn->userdata = builtinNativeTag(name);
         m_nativeGlobals[name] = Value(nativeFn);
 
         for (size_t i = 0; i < m_globalNames.size(); ++i) {
