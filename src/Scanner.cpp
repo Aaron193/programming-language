@@ -240,6 +240,7 @@ TokenType Scanner::getIdentifier() {
 
         case 'c':
             if (matchKeyword("class", 5)) return TokenType::CLASS;
+            if (matchKeyword("const", 5)) return TokenType::CONST;
             break;
 
         case 'e':

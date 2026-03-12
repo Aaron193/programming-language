@@ -20,6 +20,7 @@ struct TypeCheckerDeclarationType {
     size_t scopeDepth = 0;
     std::string name;
     TypeRef type;
+    bool isConst = false;
 };
 
 struct TypeCheckerMetadata {

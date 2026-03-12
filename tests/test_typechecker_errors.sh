@@ -85,6 +85,22 @@ run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/function_closure_param_count_mismatch.expr" \
     "closure parameter count mismatch: expected 1, got 2." || failed=1
 
+run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/assign_to_const.expr" \
+    "cannot assign to const variable 'value'." || failed=1
+
+run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/compound_assign_to_const.expr" \
+    "cannot assign to const variable 'total'." || failed=1
+
+run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/update_const.expr" \
+    "cannot assign to const variable 'count'." || failed=1
+
+run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/closure_assign_to_const.expr" \
+    "cannot assign to const variable 'value'." || failed=1
+
 if [[ $failed -ne 0 ]]; then
     exit 1
 fi

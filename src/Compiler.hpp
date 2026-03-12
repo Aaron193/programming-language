@@ -46,11 +46,22 @@ class Compiler {
         int depth;
         bool isCaptured;
         TypeRef type;
+        bool isConst;
     };
 
     struct Upvalue {
         uint8_t index;
         bool isLocal;
+        TypeRef type;
+        bool isConst;
+    };
+
+    struct ResolvedVariable {
+        uint8_t arg;
+        uint8_t getOp;
+        uint8_t setOp;
+        TypeRef type;
+        bool isConst;
     };
 
     struct FunctionContext {
@@ -98,6 +109,7 @@ class Compiler {
     std::unordered_map<std::string, TypeRef> m_checkerTopLevelSymbolTypes;
     std::vector<TypeCheckerDeclarationType> m_checkerDeclarationTypes;
     std::vector<TypeRef> m_globalTypes;
+    std::vector<bool> m_globalConstness;
     std::vector<TypeRef> m_exprTypeStack;
     std::vector<std::string> m_globalNames;
     std::vector<std::string> m_exportedNames;
@@ -122,17 +134,21 @@ class Compiler {
     void emitConstant(Value value);
     uint8_t identifierConstant(const Token& name);
     uint8_t globalSlot(const Token& name);
+    ResolvedVariable resolveNamedVariable(const Token& name);
     void namedVariable(const Token& name, bool canAssign);
     uint8_t parseVariable(const std::string& message,
-                          const TypeRef& declaredType = TypeInfo::makeAny());
+                          const TypeRef& declaredType = TypeInfo::makeAny(),
+                          bool isConst = false);
     void defineVariable(uint8_t global);
     void beginScope();
     void endScope();
     void addLocal(const Token& name,
-                  const TypeRef& declaredType = TypeInfo::makeAny());
+                  const TypeRef& declaredType = TypeInfo::makeAny(),
+                  bool isConst = false);
     int resolveLocal(const Token& name);
     int resolveLocalInContext(const Token& name, int contextIndex);
-    int addUpvalue(int contextIndex, uint8_t index, bool isLocal);
+    int addUpvalue(int contextIndex, uint8_t index, bool isLocal,
+                   const TypeRef& type, bool isConst);
     int resolveUpvalue(const Token& name, int contextIndex);
     void markInitialized();
     FunctionContext& currentContext() { return m_contexts.back(); }
@@ -147,6 +163,8 @@ class Compiler {
                             const TypeRef& rightType = TypeInfo::makeAny());
     bool shouldPreserveCheckerGlobalType(uint8_t slot,
                                          const TypeRef& newType) const;
+    const TypeCheckerDeclarationType* lookupCheckerDeclaration(
+        const Token& nameToken) const;
     TypeRef lookupCheckerDeclarationType(const Token& nameToken) const;
     TypeRef inferVariableType(const Token& name) const;
     TypeRef lookupClassFieldType(const std::string& className,

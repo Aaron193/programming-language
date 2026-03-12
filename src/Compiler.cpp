@@ -182,6 +182,7 @@ bool Compiler::compile(std::string_view source, Chunk& chunk,
     m_contexts.clear();
     m_globalSlots.clear();
     m_globalTypes.clear();
+    m_globalConstness.clear();
     m_exprTypeStack.clear();
     m_globalNames.clear();
     m_exportedNames.clear();
@@ -511,11 +512,8 @@ bool Compiler::shouldPreserveCheckerGlobalType(uint8_t slot,
     return checkerType->toString() != newType->toString();
 }
 
-TypeRef Compiler::lookupCheckerDeclarationType(const Token& nameToken) const {
-    if (!m_strictMode || m_checkerDeclarationTypes.empty()) {
-        return nullptr;
-    }
-
+const TypeCheckerDeclarationType* Compiler::lookupCheckerDeclaration(
+    const Token& nameToken) const {
     const std::string name(nameToken.start(), nameToken.length());
     const size_t line = nameToken.line();
     const size_t functionDepth =
@@ -528,11 +526,21 @@ TypeRef Compiler::lookupCheckerDeclarationType(const Token& nameToken) const {
          it != m_checkerDeclarationTypes.rend(); ++it) {
         if (it->line == line && it->functionDepth == functionDepth &&
             it->scopeDepth == scopeDepth && it->name == name) {
-            return it->type;
+            return &(*it);
         }
     }
 
     return nullptr;
+}
+
+TypeRef Compiler::lookupCheckerDeclarationType(const Token& nameToken) const {
+    if (!m_strictMode || m_checkerDeclarationTypes.empty()) {
+        return nullptr;
+    }
+
+    const TypeCheckerDeclarationType* declaration =
+        lookupCheckerDeclaration(nameToken);
+    return declaration ? declaration->type : nullptr;
 }
 
 TypeRef Compiler::inferVariableType(const Token& name) const {
@@ -693,14 +701,16 @@ uint8_t Compiler::globalSlot(const Token& name) {
     m_globalSlots.emplace(globalName, slot);
     m_globalNames.push_back(std::move(globalName));
     m_globalTypes.push_back(checkerType);
+    m_globalConstness.push_back(false);
     return slot;
 }
 
-void Compiler::namedVariable(const Token& name, bool canAssign) {
+Compiler::ResolvedVariable Compiler::resolveNamedVariable(const Token& name) {
     uint8_t arg = 0;
     uint8_t getOp = OpCode::GET_GLOBAL_SLOT;
     uint8_t setOp = OpCode::SET_GLOBAL_SLOT;
     TypeRef declaredType = TypeInfo::makeAny();
+    bool isConst = false;
 
     int local = resolveLocal(name);
     if (local != -1) {
@@ -708,6 +718,7 @@ void Compiler::namedVariable(const Token& name, bool canAssign) {
         setOp = OpCode::SET_LOCAL;
         arg = static_cast<uint8_t>(local);
         declaredType = currentContext().locals[local].type;
+        isConst = currentContext().locals[local].isConst;
     } else {
         int upvalue =
             resolveUpvalue(name, static_cast<int>(m_contexts.size()) - 1);
@@ -715,19 +726,46 @@ void Compiler::namedVariable(const Token& name, bool canAssign) {
             getOp = OpCode::GET_UPVALUE;
             setOp = OpCode::SET_UPVALUE;
             arg = static_cast<uint8_t>(upvalue);
+            declaredType = currentContext().upvalues[upvalue].type
+                               ? currentContext().upvalues[upvalue].type
+                               : TypeInfo::makeAny();
+            isConst = currentContext().upvalues[upvalue].isConst;
         } else {
             arg = globalSlot(name);
             if (arg < m_globalTypes.size()) {
                 declaredType = m_globalTypes[arg] ? m_globalTypes[arg]
                                                   : TypeInfo::makeAny();
             }
+            if (arg < m_globalConstness.size()) {
+                isConst = m_globalConstness[arg];
+            }
         }
     }
+
+    return ResolvedVariable{arg, getOp, setOp, declaredType, isConst};
+}
+
+void Compiler::namedVariable(const Token& name, bool canAssign) {
+    ResolvedVariable resolved = resolveNamedVariable(name);
+    uint8_t arg = resolved.arg;
+    uint8_t getOp = resolved.getOp;
+    uint8_t setOp = resolved.setOp;
+    TypeRef declaredType = resolved.type;
 
     if (canAssign) {
         TokenType assignmentType = m_parser->current.type();
 
         if (assignmentType == TokenType::EQUAL) {
+            if (resolved.isConst) {
+                errorAt(name, "Cannot assign to const variable '" +
+                                  std::string(name.start(), name.length()) +
+                                  "'.");
+                advance();
+                expression();
+                popExprType();
+                pushExprType(declaredType);
+                return;
+            }
             advance();
             expression();
             TypeRef rhsType = popExprType();
@@ -741,6 +779,14 @@ void Compiler::namedVariable(const Token& name, bool canAssign) {
 
         if (assignmentType == TokenType::PLUS_PLUS ||
             assignmentType == TokenType::MINUS_MINUS) {
+            if (resolved.isConst) {
+                errorAt(name, "Cannot assign to const variable '" +
+                                  std::string(name.start(), name.length()) +
+                                  "'.");
+                advance();
+                pushExprType(declaredType);
+                return;
+            }
             advance();
             emitBytes(getOp, arg);
             emitConstant(Value(static_cast<int64_t>(1)));
@@ -760,6 +806,16 @@ void Compiler::namedVariable(const Token& name, bool canAssign) {
             assignmentType == TokenType::SLASH_EQUAL ||
             assignmentType == TokenType::SHIFT_LEFT_EQUAL ||
             assignmentType == TokenType::SHIFT_RIGHT_EQUAL) {
+            if (resolved.isConst) {
+                errorAt(name, "Cannot assign to const variable '" +
+                                  std::string(name.start(), name.length()) +
+                                  "'.");
+                advance();
+                expression();
+                popExprType();
+                pushExprType(declaredType);
+                return;
+            }
             advance();
             emitBytes(getOp, arg);
             expression();
@@ -779,17 +835,20 @@ void Compiler::namedVariable(const Token& name, bool canAssign) {
 }
 
 uint8_t Compiler::parseVariable(const std::string& message,
-                                const TypeRef& declaredType) {
+                                const TypeRef& declaredType, bool isConst) {
     consume(TokenType::IDENTIFIER, message);
 
     TypeRef normalized = declaredType ? declaredType : TypeInfo::makeAny();
-    TypeRef checkerType = lookupCheckerDeclarationType(m_parser->previous);
-    if (checkerType) {
-        normalized = checkerType;
+    if (const TypeCheckerDeclarationType* declaration =
+            lookupCheckerDeclaration(m_parser->previous)) {
+        if (declaration->type) {
+            normalized = declaration->type;
+        }
+        isConst = isConst || declaration->isConst;
     }
 
     if (currentContext().scopeDepth > 0) {
-        addLocal(m_parser->previous, normalized);
+        addLocal(m_parser->previous, normalized, isConst);
         return 0;
     }
 
@@ -798,6 +857,9 @@ uint8_t Compiler::parseVariable(const std::string& message,
         if (!shouldPreserveCheckerGlobalType(slot, normalized)) {
             m_globalTypes[slot] = normalized;
         }
+    }
+    if (slot < m_globalConstness.size()) {
+        m_globalConstness[slot] = isConst;
     }
 
     return slot;
@@ -828,7 +890,8 @@ void Compiler::endScope() {
     }
 }
 
-void Compiler::addLocal(const Token& name, const TypeRef& declaredType) {
+void Compiler::addLocal(const Token& name, const TypeRef& declaredType,
+                        bool isConst) {
     if (currentContext().locals.size() > UINT8_MAX) {
         errorAt(name, "Too many local variables in function.");
         return;
@@ -847,8 +910,9 @@ void Compiler::addLocal(const Token& name, const TypeRef& declaredType) {
         }
     }
 
-    currentContext().locals.push_back(Local{
-        name, -1, false, declaredType ? declaredType : TypeInfo::makeAny()});
+    currentContext().locals.push_back(
+        Local{name, -1, false, declaredType ? declaredType : TypeInfo::makeAny(),
+              isConst});
 }
 
 int Compiler::resolveLocal(const Token& name) {
@@ -871,7 +935,8 @@ int Compiler::resolveLocalInContext(const Token& name, int contextIndex) {
     return -1;
 }
 
-int Compiler::addUpvalue(int contextIndex, uint8_t index, bool isLocal) {
+int Compiler::addUpvalue(int contextIndex, uint8_t index, bool isLocal,
+                         const TypeRef& type, bool isConst) {
     auto& upvalues = m_contexts[contextIndex].upvalues;
     for (size_t i = 0; i < upvalues.size(); ++i) {
         if (upvalues[i].index == index && upvalues[i].isLocal == isLocal) {
@@ -884,7 +949,8 @@ int Compiler::addUpvalue(int contextIndex, uint8_t index, bool isLocal) {
         return -1;
     }
 
-    upvalues.push_back(Upvalue{index, isLocal});
+    upvalues.push_back(
+        Upvalue{index, isLocal, type ? type : TypeInfo::makeAny(), isConst});
     return static_cast<int>(upvalues.size()) - 1;
 }
 
@@ -896,12 +962,17 @@ int Compiler::resolveUpvalue(const Token& name, int contextIndex) {
     int local = resolveLocalInContext(name, contextIndex - 1);
     if (local != -1) {
         m_contexts[contextIndex - 1].locals[local].isCaptured = true;
-        return addUpvalue(contextIndex, static_cast<uint8_t>(local), true);
+        const auto& localInfo = m_contexts[contextIndex - 1].locals[local];
+        return addUpvalue(contextIndex, static_cast<uint8_t>(local), true,
+                          localInfo.type, localInfo.isConst);
     }
 
     int upvalue = resolveUpvalue(name, contextIndex - 1);
     if (upvalue != -1) {
-        return addUpvalue(contextIndex, static_cast<uint8_t>(upvalue), false);
+        const auto& upvalueInfo = m_contexts[contextIndex - 1].upvalues[upvalue];
+        return addUpvalue(
+            contextIndex, static_cast<uint8_t>(upvalue), false,
+            upvalueInfo.type, upvalueInfo.isConst);
     }
 
     return -1;
@@ -1271,7 +1342,8 @@ void Compiler::declaration() {
     } else if (m_parser->current.type() == TokenType::FUNCTION) {
         advance();
         functionDeclaration();
-    } else if (isTypedVarDeclarationStart()) {
+    } else if (m_parser->current.type() == TokenType::CONST ||
+               isTypedVarDeclarationStart()) {
         typedVarDeclaration();
     } else {
         statement();
@@ -1309,7 +1381,8 @@ void Compiler::exportDeclaration() {
         return;
     }
 
-    if (isTypedVarDeclarationStart()) {
+    if (m_parser->current.type() == TokenType::CONST ||
+        isTypedVarDeclarationStart()) {
         Token exportName;
         typedVarDeclaration(&exportName);
         emitExportName(exportName);
@@ -1920,6 +1993,12 @@ void Compiler::expressionStatement() {
 }
 
 void Compiler::typedVarDeclaration(Token* declaredName) {
+    bool isConst = false;
+    if (m_parser->current.type() == TokenType::CONST) {
+        isConst = true;
+        advance();
+    }
+
     TypeRef declaredType = parseTypeExprType();
     if (!declaredType) {
         errorAtCurrent("Expected type in typed variable declaration.");
@@ -1931,7 +2010,8 @@ void Compiler::typedVarDeclaration(Token* declaredName) {
     }
 
     uint8_t global =
-        parseVariable("Expected variable name after type.", declaredType);
+        parseVariable("Expected variable name after type.", declaredType,
+                      isConst);
     if (declaredName != nullptr) {
         *declaredName = m_parser->previous;
     }
@@ -2390,40 +2470,23 @@ void Compiler::prefixUpdate(bool canAssign) {
     bool isIncrement = updateToken == TokenType::PLUS_PLUS;
 
     auto emitNamedUpdate = [&](const Token& nameToken) {
-        uint8_t arg = 0;
-        uint8_t getOp = OpCode::GET_GLOBAL_SLOT;
-        uint8_t setOp = OpCode::SET_GLOBAL_SLOT;
-        TypeRef declaredType = TypeInfo::makeAny();
-
-        int local = resolveLocal(nameToken);
-        if (local != -1) {
-            getOp = OpCode::GET_LOCAL;
-            setOp = OpCode::SET_LOCAL;
-            arg = static_cast<uint8_t>(local);
-            declaredType = currentContext().locals[local].type;
-        } else {
-            int upvalue = resolveUpvalue(
-                nameToken, static_cast<int>(m_contexts.size()) - 1);
-            if (upvalue != -1) {
-                getOp = OpCode::GET_UPVALUE;
-                setOp = OpCode::SET_UPVALUE;
-                arg = static_cast<uint8_t>(upvalue);
-            } else {
-                arg = globalSlot(nameToken);
-                if (arg < m_globalTypes.size()) {
-                    declaredType = m_globalTypes[arg] ? m_globalTypes[arg]
-                                                      : TypeInfo::makeAny();
-                }
-            }
+        ResolvedVariable resolved = resolveNamedVariable(nameToken);
+        if (resolved.isConst) {
+            errorAt(nameToken, "Cannot assign to const variable '" +
+                                   std::string(nameToken.start(),
+                                               nameToken.length()) +
+                                   "'.");
+            pushExprType(resolved.type);
+            return;
         }
 
-        emitBytes(getOp, arg);
+        emitBytes(resolved.getOp, resolved.arg);
         emitConstant(Value(static_cast<int64_t>(1)));
         emitByte(arithmeticOpcode(
-            isIncrement ? TokenType::PLUS : TokenType::MINUS, declaredType));
-        emitCoerceToType(declaredType, declaredType);
-        emitBytes(setOp, arg);
-        pushExprType(declaredType);
+            isIncrement ? TokenType::PLUS : TokenType::MINUS, resolved.type));
+        emitCoerceToType(resolved.type, resolved.type);
+        emitBytes(resolved.setOp, resolved.arg);
+        pushExprType(resolved.type);
     };
 
     if (m_parser->current.type() == TokenType::IDENTIFIER) {

@@ -1,0 +1,2 @@
+const i32 count = 1;
+++count;

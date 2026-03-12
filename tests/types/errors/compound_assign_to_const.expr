@@ -1,0 +1,2 @@
+const i32 total = 1;
+total += 2;

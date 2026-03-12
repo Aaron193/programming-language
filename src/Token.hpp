@@ -49,6 +49,7 @@ enum TokenType {
     AND,
     OR,
     CLASS,
+    CONST,
     SUPER,
     FOR,
     WHILE,

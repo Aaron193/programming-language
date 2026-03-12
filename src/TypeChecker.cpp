@@ -82,6 +82,12 @@ class CheckerImpl {
         bool isClassSymbol = false;
         std::string name;
         size_t line = 0;
+        bool isConstSymbol = false;
+    };
+
+    struct SymbolInfo {
+        TypeRef type = TypeInfo::makeAny();
+        bool isConst = false;
     };
 
     struct FunctionCtx {
@@ -102,7 +108,7 @@ class CheckerImpl {
     const std::unordered_map<std::string, TypeRef>& m_functionSignatures;
     std::vector<TypeError>& m_errors;
 
-    std::vector<std::unordered_map<std::string, TypeRef>> m_scopes;
+    std::vector<std::unordered_map<std::string, SymbolInfo>> m_scopes;
     std::unordered_set<std::string> m_declaredGlobalSymbols;
     std::vector<TypeCheckerDeclarationType> m_declarationTypes;
     std::unordered_map<std::string, std::string> m_superclassOf;
@@ -381,30 +387,41 @@ class CheckerImpl {
         }
     }
 
-    void defineSymbol(const std::string& name, const TypeRef& type) {
-        m_scopes.back()[name] = type ? type : TypeInfo::makeAny();
+    void defineSymbol(const std::string& name, const TypeRef& type,
+                      bool isConst = false) {
+        m_scopes.back()[name] =
+            SymbolInfo{type ? type : TypeInfo::makeAny(), isConst};
         if (m_scopes.size() == 1) {
             m_declaredGlobalSymbols.emplace(name);
         }
     }
 
     void recordDeclarationType(const std::string& name, const TypeRef& type,
-                               size_t line) {
+                               size_t line, bool isConst = false) {
         TypeCheckerDeclarationType declaration;
         declaration.line = line;
         declaration.functionDepth = m_functionContexts.size();
         declaration.scopeDepth = m_scopes.empty() ? 0 : (m_scopes.size() - 1);
         declaration.name = name;
         declaration.type = type ? type : TypeInfo::makeAny();
+        declaration.isConst = isConst;
         m_declarationTypes.push_back(std::move(declaration));
     }
 
-    TypeRef resolveSymbol(const std::string& name) const {
+    const SymbolInfo* resolveSymbolInfo(const std::string& name) const {
         for (auto it = m_scopes.rbegin(); it != m_scopes.rend(); ++it) {
             auto found = it->find(name);
             if (found != it->end()) {
-                return found->second;
+                return &found->second;
             }
+        }
+
+        return nullptr;
+    }
+
+    TypeRef resolveSymbol(const std::string& name) const {
+        if (const SymbolInfo* symbol = resolveSymbolInfo(name)) {
+            return symbol->type;
         }
 
         auto sigIt = m_functionSignatures.find(name);
@@ -907,6 +924,13 @@ class CheckerImpl {
                 return ExprInfo{TypeInfo::makeAny(), false, false, "", line};
             }
 
+            if (lhs.isConstSymbol && !lhs.name.empty()) {
+                addError(line, "Type error: cannot assign to const variable '" +
+                                   lhs.name + "'.");
+                return ExprInfo{lhs.type ? lhs.type : TypeInfo::makeAny(),
+                                false, false, lhs.name, line, true};
+            }
+
             TypeRef targetType = lhs.type;
             if ((!targetType || targetType->isAny()) && !lhs.name.empty()) {
                 targetType = resolveSymbol(lhs.name);
@@ -936,6 +960,13 @@ class CheckerImpl {
 
         if (!lhs.isAssignable) {
             return ExprInfo{TypeInfo::makeAny(), false, false, "", line};
+        }
+
+        if (lhs.isConstSymbol && !lhs.name.empty()) {
+            addError(line, "Type error: cannot assign to const variable '" +
+                               lhs.name + "'.");
+            return ExprInfo{lhs.type ? lhs.type : TypeInfo::makeAny(), false,
+                            false, lhs.name, line, true};
         }
 
         TypeRef targetType = lhs.type;
@@ -1147,6 +1178,11 @@ class CheckerImpl {
 
         if (match(TokenType::PLUS_PLUS) || match(TokenType::MINUS_MINUS)) {
             ExprInfo operand = parseUnary();
+            if (operand.isConstSymbol && !operand.name.empty()) {
+                addError(m_previous.line(),
+                         "Type error: cannot assign to const variable '" +
+                             operand.name + "'.");
+            }
             if (!(operand.type->isNumeric() || operand.type->isAny())) {
                 addError(
                     m_previous.line(),
@@ -1645,7 +1681,8 @@ class CheckerImpl {
             Token token = m_current;
             advance();
             std::string name(token.start(), token.length());
-            TypeRef type = resolveSymbol(name);
+            const SymbolInfo* symbol = resolveSymbolInfo(name);
+            TypeRef type = symbol ? symbol->type : resolveSymbol(name);
 
             if (!type && m_classNames.find(name) != m_classNames.end()) {
                 return ExprInfo{TypeInfo::makeClass(name), false, true, name,
@@ -1655,7 +1692,8 @@ class CheckerImpl {
             const bool isClass = m_classNames.find(name) != m_classNames.end();
             const bool assignable = !isClass;
             return ExprInfo{type ? type : TypeInfo::makeAny(), assignable,
-                            isClass, name, token.line()};
+                            isClass, name, token.line(),
+                            symbol ? symbol->isConst : false};
         }
 
         addError(m_current.line(), "Type error: expected expression.");
@@ -1849,6 +1887,7 @@ class CheckerImpl {
     }
 
     void parseTypedVarDeclaration() {
+        bool isConst = match(TokenType::CONST);
         TypeRef declaredType = parseTypeExprType();
         if (!declaredType) {
             addError(
@@ -1888,8 +1927,8 @@ class CheckerImpl {
 
         consume(TokenType::SEMI_COLON,
                 "Expected ';' after typed variable declaration.");
-        defineSymbol(name, declaredType);
-        recordDeclarationType(name, declaredType, nameToken.line());
+        defineSymbol(name, declaredType, isConst);
+        recordDeclarationType(name, declaredType, nameToken.line(), isConst);
     }
 
     void parseFunctionCommon(const std::string& functionName,
@@ -2116,7 +2155,7 @@ class CheckerImpl {
             return;
         }
 
-        if (isTypedVarDeclarationStart()) {
+        if (check(TokenType::CONST) || isTypedVarDeclarationStart()) {
             parseTypedVarDeclaration();
             return;
         }
@@ -2185,7 +2224,7 @@ class CheckerImpl {
             return;
         }
 
-        if (isTypedVarDeclarationStart()) {
+        if (check(TokenType::CONST) || isTypedVarDeclarationStart()) {
             parseTypedVarDeclaration();
             return;
         }
@@ -2206,7 +2245,8 @@ class CheckerImpl {
         m_scopes.emplace_back();
 
         for (const auto& entry : functionSignatures) {
-            m_scopes.front()[entry.first] = entry.second;
+            m_scopes.front()[entry.first] =
+                SymbolInfo{entry.second, false};
         }
 
         m_current = nextToken();
@@ -2227,7 +2267,7 @@ class CheckerImpl {
         for (const auto& symbolName : m_declaredGlobalSymbols) {
             auto it = m_scopes.front().find(symbolName);
             if (it != m_scopes.front().end()) {
-                out.topLevelSymbolTypes[symbolName] = it->second;
+                out.topLevelSymbolTypes[symbolName] = it->second.type;
             }
         }
         return out;
