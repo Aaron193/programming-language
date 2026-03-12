@@ -4,7 +4,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define EXPR_NATIVE_PACKAGE_ABI_VERSION 1u
+#define EXPR_HOST_API_ABI_VERSION 1u
+#define EXPR_NATIVE_PACKAGE_ABI_VERSION 2u
+#define EXPR_NATIVE_PACKAGE_LEGACY_ABI_VERSION 1u
 
 typedef enum ExprPackageValueKind {
     EXPR_PACKAGE_VALUE_NULL = 0,
@@ -53,8 +55,22 @@ typedef struct ExprPackageConstantExport {
     ExprPackageValue value;
 } ExprPackageConstantExport;
 
+typedef struct ExprPackageRegistrationHeader {
+    uint32_t abi_version;
+} ExprPackageRegistrationHeader;
+
+typedef struct ExprPackageRegistrationV1 {
+    uint32_t abi_version;
+    const char* package_name;
+    const ExprPackageFunctionExport* functions;
+    size_t function_count;
+    const ExprPackageConstantExport* constants;
+    size_t constant_count;
+} ExprPackageRegistrationV1;
+
 typedef struct ExprPackageRegistration {
     uint32_t abi_version;
+    const char* package_namespace;
     const char* package_name;
     const ExprPackageFunctionExport* functions;
     size_t function_count;

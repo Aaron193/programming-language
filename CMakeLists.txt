@@ -50,6 +50,30 @@ set_target_properties(example_math_package PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/packages/example_math"
 )
 
+add_library(examples_math_package MODULE
+    packages/examples/math/package.cpp
+)
+target_include_directories(examples_math_package
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+set_target_properties(examples_math_package PROPERTIES
+    PREFIX ""
+    OUTPUT_NAME "package"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/packages/examples/math"
+)
+
+add_library(examples_mismatch_package MODULE
+    packages/examples/mismatch/package.cpp
+)
+target_include_directories(examples_mismatch_package
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+set_target_properties(examples_mismatch_package PROPERTIES
+    PREFIX ""
+    OUTPUT_NAME "package"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/packages/examples/mismatch"
+)
+
 if(ENABLE_VM_TRACE)
     target_compile_definitions(interpreter PRIVATE VM_TRACE)
 endif()

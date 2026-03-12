@@ -22,6 +22,7 @@ SUCCESS_FILES=(
     "$SCRIPT_DIR/sample_import_nested.expr"
     "$SCRIPT_DIR/sample_import_native_package.expr"
     "$SCRIPT_DIR/sample_import_native_named.expr"
+    "$SCRIPT_DIR/sample_import_native_legacy.expr"
 )
 
 for file in "${SUCCESS_FILES[@]}"; do
@@ -122,6 +123,36 @@ if "$INTERPRETER" "$TYPE_MISMATCH_FILE"; then
     FAIL=$((FAIL + 1))
 else
     echo "[PASS] native package type mismatch failed as expected"
+    PASS=$((PASS + 1))
+fi
+
+echo
+
+INVALID_ID_FILE="$SCRIPT_DIR/sample_import_native_invalid_id.expr"
+echo "========================================"
+echo "Running (expect compile error): $INVALID_ID_FILE"
+echo "----------------------------------------"
+
+if "$INTERPRETER" "$INVALID_ID_FILE"; then
+    echo "[FAIL] expected compile error for invalid native package ID"
+    FAIL=$((FAIL + 1))
+else
+    echo "[PASS] invalid native package ID failed as expected"
+    PASS=$((PASS + 1))
+fi
+
+echo
+
+MISMATCH_FILE="$SCRIPT_DIR/sample_import_native_metadata_mismatch.expr"
+echo "========================================"
+echo "Running (expect compile error): $MISMATCH_FILE"
+echo "----------------------------------------"
+
+if "$INTERPRETER" "$MISMATCH_FILE"; then
+    echo "[FAIL] expected compile error for native package metadata mismatch"
+    FAIL=$((FAIL + 1))
+else
+    echo "[PASS] native package metadata mismatch failed as expected"
     PASS=$((PASS + 1))
 fi
 

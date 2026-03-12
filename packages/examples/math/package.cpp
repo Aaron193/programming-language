@@ -64,17 +64,22 @@ constexpr ExprPackageFunctionExport kFunctions[] = {
 };
 
 constexpr ExprPackageConstantExport kConstants[] = {
-    {"PACKAGE_NAME",
+    {"PACKAGE_NAME", "str", {EXPR_PACKAGE_VALUE_STR, {.string_value = {"math", 4}}}},
+    {"PACKAGE_NAMESPACE",
      "str",
-     {EXPR_PACKAGE_VALUE_STR, {.string_value = {"example_math", 12}}}},
+     {EXPR_PACKAGE_VALUE_STR, {.string_value = {"examples", 8}}}},
+    {"PACKAGE_ID",
+     "str",
+     {EXPR_PACKAGE_VALUE_STR, {.string_value = {"examples:math", 13}}}},
     {"MEANING_OF_LIFE",
      "i64",
      {EXPR_PACKAGE_VALUE_I64, {.i64_value = 42}}},
 };
 
-constexpr ExprPackageRegistrationV1 kRegistration = {
-    EXPR_NATIVE_PACKAGE_LEGACY_ABI_VERSION,
-    "example_math",
+constexpr ExprPackageRegistration kRegistration = {
+    EXPR_NATIVE_PACKAGE_ABI_VERSION,
+    "examples",
+    "math",
     kFunctions,
     sizeof(kFunctions) / sizeof(kFunctions[0]),
     kConstants,
@@ -84,5 +89,5 @@ constexpr ExprPackageRegistrationV1 kRegistration = {
 }  // namespace
 
 extern "C" const ExprPackageRegistration* exprRegisterPackage(void) {
-    return reinterpret_cast<const ExprPackageRegistration*>(&kRegistration);
+    return &kRegistration;
 }

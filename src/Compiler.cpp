@@ -119,6 +119,34 @@ NumericLiteralInfo parseNumericLiteralInfo(const std::string& literal) {
 
     return info;
 }
+
+bool validateNativePackageImport(const ImportTarget& importTarget,
+                                 const NativePackageDescriptor& descriptor,
+                                 std::string& outError) {
+    outError.clear();
+
+    if (importTarget.kind != ImportTargetKind::NATIVE_PACKAGE ||
+        importTarget.isLegacyBarePackage) {
+        return true;
+    }
+
+    if (descriptor.isLegacyAbi) {
+        outError = "Native package '" + importTarget.rawSpecifier +
+                   "' uses legacy ABI metadata and cannot satisfy a "
+                   "namespaced import.";
+        return false;
+    }
+
+    if (descriptor.packageNamespace != importTarget.packageNamespace ||
+        descriptor.packageName != importTarget.packageName) {
+        outError = "Native package '" + importTarget.rawSpecifier +
+                   "' declared '" + descriptor.packageId +
+                   "' in registration metadata.";
+        return false;
+    }
+
+    return true;
+}
 }  // namespace
 
 bool Compiler::compile(std::string_view source, Chunk& chunk,
@@ -259,6 +287,11 @@ bool Compiler::resolveImportExportTypes(
         if (!loadNativePackageDescriptor(importTarget.resolvedPath,
                                          packageDescriptor, outError, false,
                                          nullptr)) {
+            return false;
+        }
+
+        if (!validateNativePackageImport(importTarget, packageDescriptor,
+                                         outError)) {
             return false;
         }
 
@@ -1581,11 +1614,29 @@ void Compiler::importDeclaration() {
 
         std::string rawPath = pathText.substr(1, pathText.length() - 2);
         ImportTarget importTarget;
+        std::string resolveError;
         if (!resolveImportTarget(m_sourcePath, rawPath, m_packageSearchPaths,
-                                 importTarget)) {
-            errorAt(m_parser->previous,
-                    "Cannot find module or native package '" + rawPath + "'.");
+                                 importTarget, resolveError)) {
+            errorAt(m_parser->previous, resolveError);
             return ImportTarget{};
+        }
+
+        if (importTarget.kind == ImportTargetKind::NATIVE_PACKAGE &&
+            !importTarget.isLegacyBarePackage) {
+            NativePackageDescriptor packageDescriptor;
+            std::string packageError;
+            if (!loadNativePackageDescriptor(importTarget.resolvedPath,
+                                             packageDescriptor, packageError,
+                                             false, nullptr)) {
+                errorAt(m_parser->previous, packageError);
+                return ImportTarget{};
+            }
+
+            if (!validateNativePackageImport(importTarget, packageDescriptor,
+                                             packageError)) {
+                errorAt(m_parser->previous, packageError);
+                return ImportTarget{};
+            }
         }
 
         return importTarget;

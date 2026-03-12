@@ -290,7 +290,7 @@ enum class BuiltinNativeKind : uint8_t {
     SET,
 };
 
-static const ExprHostApi kExprHostApi = {EXPR_NATIVE_PACKAGE_ABI_VERSION};
+static const ExprHostApi kExprHostApi = {EXPR_HOST_API_ABI_VERSION};
 
 static bool valueToPackageValue(const Value& value, ExprPackageValue& out) {
     out = ExprPackageValue{};
@@ -1149,10 +1149,10 @@ Status invokePackageNative(VirtualMachine& vm, const NativeFunctionObject& nativ
                                           packageArgs.size(), &resultValue,
                                           &errorView);
     if (!ok) {
-        std::string message = "Native package function '" + binding->packageName +
+        std::string message = "Native package function '" + binding->packageId +
                               "." + native.name + "' failed.";
         if (errorView.data != nullptr && errorView.length > 0) {
-            message = "Native package function '" + binding->packageName + "." +
+            message = "Native package function '" + binding->packageId + "." +
                       native.name + "' failed: " +
                       std::string(errorView.data, errorView.length);
         }
@@ -1163,7 +1163,7 @@ Status invokePackageNative(VirtualMachine& vm, const NativeFunctionObject& nativ
     std::string conversionError;
     if (!packageValueToValue(vm, resultValue, result, conversionError)) {
         return vm.runtimeError("Native package function '" +
-                               binding->packageName + "." + native.name +
+                               binding->packageId + "." + native.name +
                                "' returned invalid value: " + conversionError);
     }
 
@@ -3316,7 +3316,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 }
 
                 auto* module = gcAlloc<ModuleObject>();
-                module->path = packageDescriptor.packageName;
+                module->path = packageDescriptor.packageId;
 
                 for (const auto& functionDescriptor : packageDescriptor.functions) {
                     auto* nativeFn = gcAlloc<NativeFunctionObject>();
@@ -3324,7 +3324,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                     nativeFn->arity = functionDescriptor.arity;
                     nativeFn->callback = invokePackageNative;
                     auto& binding = m_nativePackageBindings.emplace_back();
-                    binding.packageName = packageDescriptor.packageName;
+                    binding.packageId = packageDescriptor.packageId;
                     binding.function = functionDescriptor.callback;
                     nativeFn->userdata = &binding;
                     module->exports[functionDescriptor.name] = Value(nativeFn);

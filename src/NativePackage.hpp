@@ -18,6 +18,9 @@ struct ImportTarget {
     std::string canonicalId;
     std::string resolvedPath;
     std::string displayName;
+    std::string packageNamespace;
+    std::string packageName;
+    bool isLegacyBarePackage = false;
 };
 
 struct NativePackageConstantDescriptor {
@@ -35,15 +38,18 @@ struct NativePackageFunctionDescriptor {
 };
 
 struct NativePackageDescriptor {
+    std::string packageNamespace;
     std::string packageName;
+    std::string packageId;
     std::string libraryPath;
+    bool isLegacyAbi = false;
     std::unordered_map<std::string, TypeRef> exportTypes;
     std::vector<NativePackageFunctionDescriptor> functions;
     std::vector<NativePackageConstantDescriptor> constants;
 };
 
 struct NativePackageBinding {
-    std::string packageName;
+    std::string packageId;
     const ExprPackageFunctionExport* function = nullptr;
 };
 
@@ -54,7 +60,8 @@ std::vector<std::string> normalizePackageSearchPaths(
 bool resolveImportTarget(const std::string& importerPath,
                          const std::string& rawImportPath,
                          const std::vector<std::string>& packageSearchPaths,
-                         ImportTarget& outTarget);
+                         ImportTarget& outTarget,
+                         std::string& outError);
 
 bool isNativeImportTargetId(const std::string& canonicalId);
 std::string nativeImportLibraryPath(const std::string& canonicalId);

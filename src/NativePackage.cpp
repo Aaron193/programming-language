@@ -47,6 +47,63 @@ bool looksLikeSourceModuleSpecifier(const std::string& rawImportPath) {
     return path.extension() == ".expr";
 }
 
+bool isValidPackageIdPart(std::string_view text) {
+    if (text.empty()) {
+        return false;
+    }
+
+    for (char ch : text) {
+        if ((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_' ||
+            ch == '-') {
+            continue;
+        }
+        return false;
+    }
+
+    return true;
+}
+
+std::string makePackageId(std::string_view packageNamespace,
+                          std::string_view packageName) {
+    return std::string(packageNamespace) + ":" + std::string(packageName);
+}
+
+bool parseNamespacedPackageSpecifier(const std::string& rawImportPath,
+                                     std::string& outNamespace,
+                                     std::string& outName,
+                                     std::string& outError) {
+    outNamespace.clear();
+    outName.clear();
+    outError.clear();
+
+    size_t colon = rawImportPath.find(':');
+    if (colon == std::string::npos) {
+        return false;
+    }
+
+    if (rawImportPath.find(':', colon + 1) != std::string::npos) {
+        outError = "Invalid package ID '" + rawImportPath +
+                   "': expected exactly one ':'.";
+        return false;
+    }
+
+    std::string_view packageNamespace(rawImportPath.data(), colon);
+    std::string_view packageName(rawImportPath.data() + colon + 1,
+                                 rawImportPath.size() - colon - 1);
+
+    if (!isValidPackageIdPart(packageNamespace) ||
+        !isValidPackageIdPart(packageName)) {
+        outError = "Invalid package ID '" + rawImportPath +
+                   "': namespace and name must use lowercase letters, digits, "
+                   "'_', or '-'.";
+        return false;
+    }
+
+    outNamespace.assign(packageNamespace);
+    outName.assign(packageName);
+    return true;
+}
+
 std::string weaklyCanonicalOrEmpty(const std::filesystem::path& path) {
     std::error_code ec;
     std::filesystem::path resolved = std::filesystem::weakly_canonical(path, ec);
@@ -296,6 +353,14 @@ bool shouldKeepHandle(bool keepLibraryLoaded, void** outLibraryHandle) {
     return keepLibraryLoaded || outLibraryHandle != nullptr;
 }
 
+std::string packageDescriptorId(const NativePackageDescriptor& descriptor) {
+    if (descriptor.packageNamespace.empty()) {
+        return descriptor.packageName;
+    }
+
+    return descriptor.packageId;
+}
+
 }  // namespace
 
 std::vector<std::string> normalizePackageSearchPaths(
@@ -331,13 +396,16 @@ std::vector<std::string> normalizePackageSearchPaths(
 bool resolveImportTarget(const std::string& importerPath,
                          const std::string& rawImportPath,
                          const std::vector<std::string>& packageSearchPaths,
-                         ImportTarget& outTarget) {
+                         ImportTarget& outTarget,
+                         std::string& outError) {
     outTarget = ImportTarget{};
+    outError.clear();
     outTarget.rawSpecifier = rawImportPath;
 
     if (looksLikeSourceModuleSpecifier(rawImportPath)) {
         std::string resolvedPath = resolveImportPath(importerPath, rawImportPath);
         if (resolvedPath.empty()) {
+            outError = "Cannot find module '" + rawImportPath + "'.";
             return false;
         }
 
@@ -346,6 +414,42 @@ bool resolveImportTarget(const std::string& importerPath,
         outTarget.resolvedPath = resolvedPath;
         outTarget.displayName = resolvedPath;
         return true;
+    }
+
+    std::string packageNamespace;
+    std::string packageName;
+    std::string parseError;
+    bool isNamespacedImport = rawImportPath.find(':') != std::string::npos;
+    if (isNamespacedImport &&
+        !parseNamespacedPackageSpecifier(rawImportPath, packageNamespace,
+                                         packageName, parseError)) {
+        outError = parseError;
+        return false;
+    }
+
+    if (isNamespacedImport) {
+        for (const auto& root :
+             normalizePackageSearchPaths(packageSearchPaths, importerPath)) {
+            std::filesystem::path libraryPath = std::filesystem::path(root) /
+                                                packageNamespace / packageName /
+                                                kPackageLibraryFileName;
+            std::string resolvedLibraryPath = weaklyCanonicalOrEmpty(libraryPath);
+            if (resolvedLibraryPath.empty()) {
+                continue;
+            }
+
+            outTarget.kind = ImportTargetKind::NATIVE_PACKAGE;
+            outTarget.canonicalId =
+                std::string(kNativeImportPrefix) + resolvedLibraryPath;
+            outTarget.resolvedPath = resolvedLibraryPath;
+            outTarget.displayName = rawImportPath;
+            outTarget.packageNamespace = packageNamespace;
+            outTarget.packageName = packageName;
+            return true;
+        }
+
+        outError = "Cannot find native package '" + rawImportPath + "'.";
+        return false;
     }
 
     for (const auto& root :
@@ -362,9 +466,12 @@ bool resolveImportTarget(const std::string& importerPath,
             std::string(kNativeImportPrefix) + resolvedLibraryPath;
         outTarget.resolvedPath = resolvedLibraryPath;
         outTarget.displayName = rawImportPath;
+        outTarget.packageName = rawImportPath;
+        outTarget.isLegacyBarePackage = true;
         return true;
     }
 
+    outError = "Cannot find module or native package '" + rawImportPath + "'.";
     return false;
 }
 
@@ -431,31 +538,86 @@ bool loadNativePackageDescriptor(const std::string& libraryPath,
         return false;
     }
 
-    if (registration->abi_version != EXPR_NATIVE_PACKAGE_ABI_VERSION) {
+    const auto* registrationHeader =
+        reinterpret_cast<const ExprPackageRegistrationHeader*>(registration);
+
+    const ExprPackageFunctionExport* functions = nullptr;
+    size_t functionCount = 0;
+    const ExprPackageConstantExport* constants = nullptr;
+    size_t constantCount = 0;
+
+    if (registrationHeader->abi_version == EXPR_NATIVE_PACKAGE_ABI_VERSION) {
+        if (registration->package_namespace == nullptr ||
+            registration->package_namespace[0] == '\0') {
+            outError = "Native package '" + libraryPath +
+                       "' did not declare a package namespace.";
+            closeHandle();
+            return false;
+        }
+
+        if (registration->package_name == nullptr ||
+            registration->package_name[0] == '\0') {
+            outError = "Native package '" + libraryPath +
+                       "' did not declare a package name.";
+            closeHandle();
+            return false;
+        }
+
+        if (!isValidPackageIdPart(registration->package_namespace) ||
+            !isValidPackageIdPart(registration->package_name)) {
+            outError = "Native package '" + libraryPath +
+                       "' declared an invalid package ID.";
+            closeHandle();
+            return false;
+        }
+
+        outDescriptor.packageNamespace = registration->package_namespace;
+        outDescriptor.packageName = registration->package_name;
+        outDescriptor.packageId = makePackageId(outDescriptor.packageNamespace,
+                                                outDescriptor.packageName);
+        functions = registration->functions;
+        functionCount = registration->function_count;
+        constants = registration->constants;
+        constantCount = registration->constant_count;
+    } else if (registrationHeader->abi_version ==
+               EXPR_NATIVE_PACKAGE_LEGACY_ABI_VERSION) {
+        const auto* legacyRegistration =
+            reinterpret_cast<const ExprPackageRegistrationV1*>(registration);
+        if (legacyRegistration->package_name == nullptr ||
+            legacyRegistration->package_name[0] == '\0') {
+            outError = "Native package '" + libraryPath +
+                       "' did not declare a package name.";
+            closeHandle();
+            return false;
+        }
+
+        outDescriptor.packageName = legacyRegistration->package_name;
+        outDescriptor.packageId = outDescriptor.packageName;
+        outDescriptor.isLegacyAbi = true;
+        functions = legacyRegistration->functions;
+        functionCount = legacyRegistration->function_count;
+        constants = legacyRegistration->constants;
+        constantCount = legacyRegistration->constant_count;
+    } else {
         outError = "Native package '" + libraryPath +
                    "' has ABI version " +
-                   std::to_string(registration->abi_version) + ", expected " +
-                   std::to_string(EXPR_NATIVE_PACKAGE_ABI_VERSION) + ".";
+                   std::to_string(registrationHeader->abi_version) +
+                   ", expected " +
+                   std::to_string(EXPR_NATIVE_PACKAGE_ABI_VERSION) + " or " +
+                   std::to_string(EXPR_NATIVE_PACKAGE_LEGACY_ABI_VERSION) + ".";
         closeHandle();
         return false;
     }
 
-    if (registration->package_name == nullptr ||
-        registration->package_name[0] == '\0') {
-        outError = "Native package '" + libraryPath +
-                   "' did not declare a package name.";
-        closeHandle();
-        return false;
-    }
-
-    outDescriptor.packageName = registration->package_name;
     outDescriptor.libraryPath = libraryPath;
 
-    for (size_t index = 0; index < registration->function_count; ++index) {
-        const ExprPackageFunctionExport& function = registration->functions[index];
+    std::string descriptorId = packageDescriptorId(outDescriptor);
+
+    for (size_t index = 0; index < functionCount; ++index) {
+        const ExprPackageFunctionExport& function = functions[index];
         if (function.name == nullptr || function.signature == nullptr ||
             function.callback == nullptr) {
-            outError = "Native package '" + outDescriptor.packageName +
+            outError = "Native package '" + descriptorId +
                        "' has an incomplete function export entry.";
             closeHandle();
             return false;
@@ -464,7 +626,7 @@ bool loadNativePackageDescriptor(const std::string& libraryPath,
         std::string typeError;
         TypeRef type = parsePackageType(function.signature, typeError);
         if (!type || type->kind != TypeKind::FUNCTION) {
-            outError = "Native package '" + outDescriptor.packageName +
+            outError = "Native package '" + descriptorId +
                        "' export '" + function.name +
                        "' has invalid function signature: " + typeError;
             closeHandle();
@@ -473,7 +635,7 @@ bool loadNativePackageDescriptor(const std::string& libraryPath,
 
         if (function.arity >= 0 &&
             static_cast<size_t>(function.arity) != type->paramTypes.size()) {
-            outError = "Native package '" + outDescriptor.packageName +
+            outError = "Native package '" + descriptorId +
                        "' export '" + function.name +
                        "' has arity/signature mismatch.";
             closeHandle();
@@ -489,10 +651,10 @@ bool loadNativePackageDescriptor(const std::string& libraryPath,
         outDescriptor.functions.push_back(std::move(descriptor));
     }
 
-    for (size_t index = 0; index < registration->constant_count; ++index) {
-        const ExprPackageConstantExport& constant = registration->constants[index];
+    for (size_t index = 0; index < constantCount; ++index) {
+        const ExprPackageConstantExport& constant = constants[index];
         if (constant.name == nullptr || constant.type_name == nullptr) {
-            outError = "Native package '" + outDescriptor.packageName +
+            outError = "Native package '" + descriptorId +
                        "' has an incomplete constant export entry.";
             closeHandle();
             return false;
@@ -501,7 +663,7 @@ bool loadNativePackageDescriptor(const std::string& libraryPath,
         std::string typeError;
         TypeRef type = parsePackageType(constant.type_name, typeError);
         if (!type || type->kind == TypeKind::FUNCTION) {
-            outError = "Native package '" + outDescriptor.packageName +
+            outError = "Native package '" + descriptorId +
                        "' constant '" + constant.name +
                        "' has invalid type: " + typeError;
             closeHandle();
@@ -509,10 +671,10 @@ bool loadNativePackageDescriptor(const std::string& libraryPath,
         }
 
         if (!packageValueMatchesType(constant.value, type)) {
-            outError = "Native package '" + outDescriptor.packageName +
+            outError = "Native package '" + descriptorId +
                        "' constant '" + constant.name +
                        "' does not match declared type '" +
-                       type->toString() + "'.";
+                        type->toString() + "'.";
             closeHandle();
             return false;
         }

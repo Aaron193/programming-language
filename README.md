@@ -200,9 +200,13 @@ Notes:
 Source modules and native packages share the same import syntax:
 
 ```expr
-import nativeMath from "example_math";
-import { addI64, greet } from "example_math";
+import nativeMath from "examples:math";
+import { addI64, greet } from "examples:math";
 ```
+
+Namespaced package imports use `namespace:name` and resolve to nested package
+directories such as `packages/examples/math/package.so`. Bare package imports
+like `"example_math"` still work for legacy packages.
 
 The interpreter searches for native packages in:
 
@@ -212,4 +216,6 @@ The interpreter searches for native packages in:
 
 Each package is a shared library that exports `exprRegisterPackage()` and
 declares its functions/constants using the ABI in `src/NativePackageAPI.hpp`.
-This repository includes a reference package in `packages/example_math/`.
+This repository includes a namespaced reference package in
+`packages/examples/math/` and a legacy compatibility package in
+`packages/example_math/`.
