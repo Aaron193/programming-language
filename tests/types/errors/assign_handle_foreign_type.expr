@@ -1,0 +1,6 @@
+#!strict
+
+import counter from "examples:counter";
+
+const handle<examples:counter:CounterHandle> source = counter.create(1i64);
+const handle<examples:math:CounterHandle> bad = source;

@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "NativePackage.hpp"
 #include "Scanner.hpp"
 
 namespace {
@@ -74,6 +75,8 @@ bool isEqualityOperator(TokenType type) {
 bool isCollectionTypeNameText(std::string_view name) {
     return name == "Array" || name == "Dict" || name == "Set";
 }
+
+bool isHandleTypeNameText(std::string_view name) { return name == "handle"; }
 
 class CheckerImpl {
    private:
@@ -144,6 +147,10 @@ class CheckerImpl {
         }
 
         Token lookahead = peekToken();
+        if (isHandleTypeNameText(tokenText(m_current))) {
+            return lookahead.type() == TokenType::LESS;
+        }
+
         if (isCollectionTypeNameToken(m_current)) {
             return lookahead.type() == TokenType::LESS;
         }
@@ -418,6 +425,51 @@ class CheckerImpl {
 
         std::string_view name(current.start(), current.length());
         ++offset;
+
+        if (isHandleTypeNameText(name)) {
+            if (tokenAt(offset).type() != TokenType::LESS) {
+                return false;
+            }
+            ++offset;
+
+            if (tokenAt(offset).type() != TokenType::IDENTIFIER) {
+                return false;
+            }
+            std::string_view packageNamespace(tokenAt(offset).start(),
+                                              tokenAt(offset).length());
+            ++offset;
+            if (tokenAt(offset).type() != TokenType::COLON ||
+                !isValidPackageIdPart(packageNamespace)) {
+                return false;
+            }
+            ++offset;
+
+            if (tokenAt(offset).type() != TokenType::IDENTIFIER) {
+                return false;
+            }
+            std::string_view packageName(tokenAt(offset).start(),
+                                         tokenAt(offset).length());
+            ++offset;
+            if (tokenAt(offset).type() != TokenType::COLON ||
+                !isValidPackageIdPart(packageName)) {
+                return false;
+            }
+            ++offset;
+
+            if (tokenAt(offset).type() != TokenType::IDENTIFIER) {
+                return false;
+            }
+            std::string_view typeName(tokenAt(offset).start(),
+                                      tokenAt(offset).length());
+            ++offset;
+            if (tokenAt(offset).type() != TokenType::GREATER ||
+                !isValidHandleTypeName(typeName)) {
+                return false;
+            }
+            ++offset;
+            consumeOptionalSuffix();
+            return true;
+        }
 
         if (isCollectionTypeNameText(name) &&
             tokenAt(offset).type() == TokenType::LESS) {
@@ -902,6 +954,43 @@ class CheckerImpl {
         if (check(TokenType::IDENTIFIER)) {
             std::string className = tokenText(m_current);
 
+            if (isHandleTypeNameText(className)) {
+                advance();
+                consume(TokenType::LESS,
+                        "Type error: expected '<' after 'handle'.");
+                consume(TokenType::IDENTIFIER,
+                        "Type error: expected package namespace in handle "
+                        "type.");
+                std::string packageNamespace = tokenText(m_previous);
+                consume(TokenType::COLON,
+                        "Type error: expected ':' after handle package "
+                        "namespace.");
+                consume(TokenType::IDENTIFIER,
+                        "Type error: expected package name in handle type.");
+                std::string packageName = tokenText(m_previous);
+                consume(TokenType::COLON,
+                        "Type error: expected ':' before handle type name.");
+                consume(TokenType::IDENTIFIER,
+                        "Type error: expected native handle type name.");
+                std::string typeName = tokenText(m_previous);
+                consume(TokenType::GREATER,
+                        "Type error: expected '>' after handle type.");
+
+                if (!isValidPackageIdPart(packageNamespace) ||
+                    !isValidPackageIdPart(packageName) ||
+                    !isValidHandleTypeName(typeName)) {
+                    addError(
+                        m_previous.line(),
+                        "Type error: handle type must use "
+                        "handle<namespace:name:Type> with lowercase package "
+                        "IDs and an alphanumeric type name.");
+                    return nullptr;
+                }
+
+                return applyOptionalSuffix(TypeInfo::makeNativeHandle(
+                    makePackageId(packageNamespace, packageName), typeName));
+            }
+
             if (isCollectionTypeNameText(className)) {
                 advance();
                 consume(TokenType::LESS,
@@ -1003,6 +1092,10 @@ class CheckerImpl {
         }
 
         Token lookahead = peekToken();
+        if (isHandleTypeNameText(tokenText(m_current))) {
+            return lookahead.type() == TokenType::LESS;
+        }
+
         if (isCollectionTypeNameToken(m_current)) {
             return lookahead.type() == TokenType::LESS;
         }
@@ -2578,6 +2671,50 @@ bool TypeChecker::collectSymbols(
         }
 
         std::string name(token.start(), token.length());
+        if (isHandleTypeNameText(name)) {
+            Token lessToken = nextToken();
+            if (lessToken.type() != TokenType::LESS) {
+                return nullptr;
+            }
+
+            Token namespaceToken = nextToken();
+            if (namespaceToken.type() != TokenType::IDENTIFIER) {
+                return nullptr;
+            }
+            std::string packageNamespace(namespaceToken.start(),
+                                         namespaceToken.length());
+            Token firstColon = nextToken();
+            if (firstColon.type() != TokenType::COLON ||
+                !isValidPackageIdPart(packageNamespace)) {
+                return nullptr;
+            }
+
+            Token packageToken = nextToken();
+            if (packageToken.type() != TokenType::IDENTIFIER) {
+                return nullptr;
+            }
+            std::string packageName(packageToken.start(), packageToken.length());
+            Token secondColon = nextToken();
+            if (secondColon.type() != TokenType::COLON ||
+                !isValidPackageIdPart(packageName)) {
+                return nullptr;
+            }
+
+            Token typeToken = nextToken();
+            if (typeToken.type() != TokenType::IDENTIFIER) {
+                return nullptr;
+            }
+            std::string typeName(typeToken.start(), typeToken.length());
+            Token greaterToken = nextToken();
+            if (greaterToken.type() != TokenType::GREATER ||
+                !isValidHandleTypeName(typeName)) {
+                return nullptr;
+            }
+
+            return applyOptionalSuffix(TypeInfo::makeNativeHandle(
+                makePackageId(packageNamespace, packageName), typeName));
+        }
+
         if (isCollectionTypeNameText(name)) {
             Token lessToken = nextToken();
             if (lessToken.type() != TokenType::LESS) {

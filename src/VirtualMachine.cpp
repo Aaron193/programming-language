@@ -294,26 +294,6 @@ enum class BuiltinNativeKind : uint8_t {
 
 static const ExprHostApi kExprHostApi = {EXPR_HOST_API_ABI_VERSION};
 
-static std::string makePackageId(std::string_view packageNamespace,
-                                 std::string_view packageName) {
-    return std::string(packageNamespace) + ":" + std::string(packageName);
-}
-
-static bool isValidHandleTypeName(std::string_view text) {
-    if (text.empty()) {
-        return false;
-    }
-
-    for (char ch : text) {
-        if (std::isalnum(static_cast<unsigned char>(ch)) || ch == '_') {
-            continue;
-        }
-        return false;
-    }
-
-    return true;
-}
-
 static bool valueToPackageValue(const Value& value, ExprPackageValue& out) {
     out = ExprPackageValue{};
     if (value.isNil()) {

@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "PackageManifest.hpp"
 #include "VirtualMachine.hpp"
 
 struct CliOptions {
@@ -12,6 +13,7 @@ struct CliOptions {
     bool showReturn = false;
     bool disassemble = false;
     bool strict = false;
+    std::string validatePackageDir;
     std::string sourceFile;
     std::vector<std::string> packagePaths;
 };
@@ -20,7 +22,9 @@ static void printUsage(const char* executable) {
     std::cout
         << "Usage: " << executable
         << " [--trace] [--show-return] [--disassemble] [--strict]"
-        << " [--package-path <dir>|--package-path=<dir>] [source file]"
+        << " [--package-path <dir>|--package-path=<dir>]"
+        << " [--validate-package <dir>|--validate-package=<dir>]"
+        << " [source file]"
         << std::endl;
 }
 
@@ -46,6 +50,16 @@ static bool parseArgs(int argc, char** argv, CliOptions& options) {
             options.packagePaths.push_back(argv[++index]);
         } else if (arg.rfind("--package-path=", 0) == 0) {
             options.packagePaths.push_back(arg.substr(15));
+        } else if (arg == "--validate-package") {
+            if (index + 1 >= argc) {
+                std::cerr << "Missing value for --validate-package."
+                          << std::endl;
+                printUsage(argv[0]);
+                return false;
+            }
+            options.validatePackageDir = argv[++index];
+        } else if (arg.rfind("--validate-package=", 0) == 0) {
+            options.validatePackageDir = arg.substr(19);
         } else if (arg == "--help" || arg == "-h") {
             printUsage(argv[0]);
             return false;
@@ -68,7 +82,33 @@ static bool parseArgs(int argc, char** argv, CliOptions& options) {
         options.sourceFile = positional[0];
     }
 
+    if (!options.validatePackageDir.empty() && !options.sourceFile.empty()) {
+        std::cerr << "--validate-package cannot be used with a source file."
+                  << std::endl;
+        printUsage(argv[0]);
+        return false;
+    }
+
     return true;
+}
+
+static int runValidatePackage(const CliOptions& options) {
+    std::string repoRoot;
+    try {
+        repoRoot = std::filesystem::current_path().string();
+    } catch (const std::exception&) {
+        repoRoot.clear();
+    }
+
+    std::string error;
+    if (!validatePackageDirectory(options.validatePackageDir, repoRoot, error)) {
+        std::cerr << "Package validation failed: " << error << std::endl;
+        return 1;
+    }
+
+    std::cout << "Package validation passed: " << options.validatePackageDir
+              << std::endl;
+    return 0;
 }
 
 static int runFile(const CliOptions& options) {
@@ -160,6 +200,10 @@ int main(int argc, char** argv) {
 
     if (!options.sourceFile.empty()) {
         return runFile(options);
+    }
+
+    if (!options.validatePackageDir.empty()) {
+        return runValidatePackage(options);
     }
 
     return runRepl(options);

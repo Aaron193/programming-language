@@ -101,6 +101,10 @@ run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/closure_assign_to_const.expr" \
     "cannot assign to const variable 'value'." || failed=1
 
+run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/assign_handle_foreign_type.expr" \
+    "cannot assign 'handle<examples:counter:CounterHandle>' to variable 'bad' of type 'handle<examples:math:CounterHandle>'" || failed=1
+
 if [[ $failed -ne 0 ]]; then
     exit 1
 fi

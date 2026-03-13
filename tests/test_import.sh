@@ -24,6 +24,7 @@ SUCCESS_FILES=(
     "$SCRIPT_DIR/sample_import_native_named.expr"
     "$SCRIPT_DIR/sample_import_native_legacy.expr"
     "$SCRIPT_DIR/sample_import_native_handle.expr"
+    "$SCRIPT_DIR/sample_import_native_handle_typed.expr"
 )
 
 for file in "${SUCCESS_FILES[@]}"; do
@@ -199,6 +200,27 @@ else
 fi
 
 echo
+
+WINDOW_PACKAGE_SO="$PROJECT_ROOT/build/packages/mog/window/package.so"
+WINDOW_PACKAGE_DYLIB="$PROJECT_ROOT/build/packages/mog/window/package.dylib"
+if [[ -f "$WINDOW_PACKAGE_SO" || -f "$WINDOW_PACKAGE_DYLIB" ]]; then
+    WINDOW_FILE="$SCRIPT_DIR/sample_mog_window.expr"
+    echo "========================================"
+    echo "Running SDL window smoke test: $WINDOW_FILE"
+    echo "----------------------------------------"
+
+    if SDL_VIDEODRIVER=dummy "$INTERPRETER" "$WINDOW_FILE"; then
+        echo "[PASS] SDL window smoke test"
+        PASS=$((PASS + 1))
+    else
+        echo "[FAIL] SDL window smoke test"
+        FAIL=$((FAIL + 1))
+    fi
+    echo
+else
+    echo "[SKIP] SDL2 not available; mog:window package not built"
+    echo
+fi
 
 echo "========================================"
 echo "Summary: PASS=$PASS FAIL=$FAIL TOTAL=$((PASS + FAIL))"

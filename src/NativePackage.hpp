@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -54,6 +55,11 @@ struct NativePackageBinding {
     std::string packageName;
     const ExprPackageFunctionExport* function = nullptr;
 };
+
+bool isValidPackageIdPart(std::string_view text);
+bool isValidHandleTypeName(std::string_view text);
+std::string makePackageId(std::string_view packageNamespace,
+                          std::string_view packageName);
 
 std::vector<std::string> normalizePackageSearchPaths(
     const std::vector<std::string>& packageSearchPaths,

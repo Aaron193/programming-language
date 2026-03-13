@@ -1,0 +1,7 @@
+namespace = "mog"
+name = "window"
+version = "0.1.0"
+abi_version = 3
+author = "Mog runtime"
+description = "Official SDL2-backed windowing package."
+dependencies = []

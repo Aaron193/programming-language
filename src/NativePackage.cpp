@@ -47,6 +47,8 @@ bool looksLikeSourceModuleSpecifier(const std::string& rawImportPath) {
     return path.extension() == ".expr";
 }
 
+}  // namespace
+
 bool isValidPackageIdPart(std::string_view text) {
     if (text.empty()) {
         return false;
@@ -82,6 +84,8 @@ std::string makePackageId(std::string_view packageNamespace,
                           std::string_view packageName) {
     return std::string(packageNamespace) + ":" + std::string(packageName);
 }
+
+namespace {
 
 bool parseNamespacedPackageSpecifier(const std::string& rawImportPath,
                                      std::string& outNamespace,

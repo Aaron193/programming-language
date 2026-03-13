@@ -89,6 +89,8 @@ Run additional suites:
 ./tests/test_repl.sh
 ./tests/test_import.sh
 ./tests/test_const.sh
+./tests/test_typechecker_errors.sh
+./tests/test_package_validation.sh
 ```
 
 ## Benchmarks
@@ -225,8 +227,52 @@ Native packages can now return opaque native handles through signatures such as
 VM and invoke the package-provided finalizer when released. A reference handle
 package lives in `packages/examples/counter/`.
 
-Current limitation:
+Source files can declare native handles directly:
 
-- source files do not yet have first-class type syntax for declaring opaque
-  handle variables, so handles are easiest to use inline or via inferred flows
-  between native package calls
+```expr
+import counter from "examples:counter";
+
+const handle<examples:counter:CounterHandle> c = counter.create(10i64);
+print(counter.read(c));
+```
+
+Official runtime-maintained packages use the reserved `mog:*` namespace. The
+first official package is `mog:window`, built only when SDL2 is available at
+configure time:
+
+```expr
+import window from "mog:window";
+
+const handle<mog:window:WindowHandle> win =
+    window.create("Demo", 800i64, 600i64);
+const handle<mog:window:EventHandle>? evt = window.pollEvent(win);
+window.clear(win);
+window.present(win);
+window.close(win);
+```
+
+If SDL2 is not installed, the interpreter still builds normally and simply
+skips the optional `mog:window` package target.
+
+## Package Manifests
+
+Namespaced packages can declare authoring metadata in `package.toml`:
+
+```toml
+namespace = "examples"
+name = "math"
+version = "0.1.0"
+abi_version = 3
+description = "Reference namespaced math package."
+dependencies = []
+```
+
+Validate a package directory against its manifest and compiled shared library:
+
+```bash
+./build/interpreter --validate-package packages/examples/math
+./build/interpreter --validate-package=packages/examples/counter
+```
+
+The validator checks package ID syntax, reserved `mog` usage, manifest/ABI
+compatibility, registration metadata, and exported native signature parsing.

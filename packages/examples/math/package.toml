@@ -1,0 +1,7 @@
+namespace = "examples"
+name = "math"
+version = "0.1.0"
+abi_version = 3
+author = "Mog runtime"
+description = "Reference namespaced math package."
+dependencies = []

@@ -1,0 +1,7 @@
+namespace = "examples"
+name = "counter"
+version = "0.1.0"
+abi_version = 3
+author = "Mog runtime"
+description = "Reference opaque handle package."
+dependencies = []

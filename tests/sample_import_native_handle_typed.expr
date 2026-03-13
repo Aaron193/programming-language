@@ -1,0 +1,7 @@
+import counter from "examples:counter";
+
+const handle<examples:counter:CounterHandle> first = counter.create(10i64);
+const handle<examples:counter:CounterHandle> second = counter.create(20i64);
+
+print(counter.read(first));
+print(counter.add(second, 5i64));
