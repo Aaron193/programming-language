@@ -127,6 +127,14 @@ TypeRef TypeInfo::makeClass(const std::string& name) {
     return type;
 }
 
+TypeRef TypeInfo::makeNativeHandle(const std::string& packageId,
+                                   const std::string& typeName) {
+    auto type = std::make_shared<TypeInfo>(TypeKind::NATIVE_HANDLE);
+    type->nativeHandlePackageId = packageId;
+    type->nativeHandleTypeName = typeName;
+    return type;
+}
+
 TypeRef TypeInfo::makeFunction(std::vector<TypeRef> params, TypeRef ret) {
     auto type = std::make_shared<TypeInfo>(TypeKind::FUNCTION);
     type->paramTypes = std::move(params);
@@ -229,6 +237,9 @@ std::string TypeInfo::toString() const {
             return "any";
         case TypeKind::CLASS:
             return className;
+        case TypeKind::NATIVE_HANDLE:
+            return "handle<" + nativeHandlePackageId + ":" +
+                   nativeHandleTypeName + ">";
         case TypeKind::FUNCTION: {
             std::ostringstream out;
             out << "function(";
@@ -364,6 +375,11 @@ bool isAssignable(const TypeRef& from, const TypeRef& to) {
             TypeRef toValue = to->valueType;
             return isAssignable(fromKey, toKey) &&
                    isAssignable(fromValue, toValue);
+        }
+
+        if (from->kind == TypeKind::NATIVE_HANDLE) {
+            return from->nativeHandlePackageId == to->nativeHandlePackageId &&
+                   from->nativeHandleTypeName == to->nativeHandleTypeName;
         }
 
         if (from->kind != TypeKind::CLASS) {

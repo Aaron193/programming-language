@@ -1,0 +1,4 @@
+import counter from "examples:counter";
+import math from "examples:math";
+
+print(math.greet(counter.create(1i64)));

@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "GcObject.hpp"
+#include "NativePackageAPI.hpp"
 #include "RuntimeCommon.hpp"
 #include "TypeInfo.hpp"
 
@@ -31,6 +32,7 @@ struct SetObject;
 struct IteratorObject;
 struct ModuleObject;
 struct StringObject;
+struct NativeHandleObject;
 
 enum class PropertyInlineCacheKind : uint8_t {
     EMPTY,
@@ -121,6 +123,19 @@ struct StringObject : GcObject {
     std::string value;
 
     void trace(GC& gc) override;
+};
+
+struct NativeHandleObject : GcObject {
+    std::string packageNamespace;
+    std::string packageName;
+    std::string packageId;
+    std::string typeName;
+    void* handleData = nullptr;
+    ExprPackageHandleFinalizer finalizer = nullptr;
+
+    void trace(GC& gc) override;
+    void release();
+    ~NativeHandleObject() override;
 };
 
 /*
@@ -239,6 +254,7 @@ struct Value {
         SET,
         ITERATOR,
         MODULE,
+        NATIVE_HANDLE,
     };
 
     union Payload {
@@ -292,6 +308,9 @@ struct Value {
         payload.object = value;
     }
     Value(ModuleObject* value) : kind(Kind::MODULE) { payload.object = value; }
+    Value(NativeHandleObject* value) : kind(Kind::NATIVE_HANDLE) {
+        payload.object = value;
+    }
 
     bool isNumber() const { return kind == Kind::NUMBER; }
     bool isSignedInt() const { return kind == Kind::SIGNED_INT; }
@@ -314,6 +333,7 @@ struct Value {
     bool isSet() const { return kind == Kind::SET; }
     bool isIterator() const { return kind == Kind::ITERATOR; }
     bool isModule() const { return kind == Kind::MODULE; }
+    bool isNativeHandle() const { return kind == Kind::NATIVE_HANDLE; }
 
     double asNumber() const { return payload.number; }
     int64_t asSignedInt() const { return payload.signedInt; }
@@ -356,6 +376,9 @@ struct Value {
     }
     ModuleObject* asModule() const {
         return static_cast<ModuleObject*>(payload.object);
+    }
+    NativeHandleObject* asNativeHandle() const {
+        return static_cast<NativeHandleObject*>(payload.object);
     }
 };
 
@@ -405,6 +428,8 @@ inline uintptr_t valuePointerBits(const Value& value) {
             return reinterpret_cast<uintptr_t>(value.asIterator());
         case Value::Kind::MODULE:
             return reinterpret_cast<uintptr_t>(value.asModule());
+        case Value::Kind::NATIVE_HANDLE:
+            return reinterpret_cast<uintptr_t>(value.asNativeHandle());
         default:
             return 0;
     }
@@ -723,6 +748,10 @@ inline void printValueInternal(std::ostream& stream, const Value& value,
     } else if (value.isModule()) {
         auto module = value.asModule();
         stream << "<module " << module->path << ">";
+    } else if (value.isNativeHandle()) {
+        auto handle = value.asNativeHandle();
+        stream << "<native handle " << handle->packageId << ":"
+               << handle->typeName << ">";
     } else if (value.isString()) {
         stream << value.asString();
     } else {

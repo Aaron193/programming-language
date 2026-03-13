@@ -333,6 +333,22 @@ void NativeFunctionObject::trace(GC& gc) { (void)gc; }
 
 void StringObject::trace(GC& gc) { (void)gc; }
 
+void NativeHandleObject::trace(GC& gc) { (void)gc; }
+
+void NativeHandleObject::release() {
+    if (handleData == nullptr || finalizer == nullptr) {
+        handleData = nullptr;
+        finalizer = nullptr;
+        return;
+    }
+
+    finalizer(handleData);
+    handleData = nullptr;
+    finalizer = nullptr;
+}
+
+NativeHandleObject::~NativeHandleObject() { release(); }
+
 void UpvalueObject::trace(GC& gc) {
     if (isClosed) {
         gc.markValue(closed);

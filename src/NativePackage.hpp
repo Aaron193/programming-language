@@ -50,6 +50,8 @@ struct NativePackageDescriptor {
 
 struct NativePackageBinding {
     std::string packageId;
+    std::string packageNamespace;
+    std::string packageName;
     const ExprPackageFunctionExport* function = nullptr;
 };
 

@@ -74,6 +74,18 @@ set_target_properties(examples_mismatch_package PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/packages/examples/mismatch"
 )
 
+add_library(examples_counter_package MODULE
+    packages/examples/counter/package.cpp
+)
+target_include_directories(examples_counter_package
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+set_target_properties(examples_counter_package PROPERTIES
+    PREFIX ""
+    OUTPUT_NAME "package"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/packages/examples/counter"
+)
+
 if(ENABLE_VM_TRACE)
     target_compile_definitions(interpreter PRIVATE VM_TRACE)
 endif()

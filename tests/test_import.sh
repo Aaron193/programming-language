@@ -23,6 +23,7 @@ SUCCESS_FILES=(
     "$SCRIPT_DIR/sample_import_native_package.expr"
     "$SCRIPT_DIR/sample_import_native_named.expr"
     "$SCRIPT_DIR/sample_import_native_legacy.expr"
+    "$SCRIPT_DIR/sample_import_native_handle.expr"
 )
 
 for file in "${SUCCESS_FILES[@]}"; do
@@ -38,7 +39,33 @@ for file in "${SUCCESS_FILES[@]}"; do
         FAIL=$((FAIL + 1))
     fi
     echo
- done
+done
+
+HANDLE_FILE="$SCRIPT_DIR/sample_import_native_handle.expr"
+echo "========================================"
+echo "Running handle finalizer check: $HANDLE_FILE"
+echo "----------------------------------------"
+
+set +e
+HANDLE_OUTPUT="$($INTERPRETER "$HANDLE_FILE" 2>&1)"
+HANDLE_STATUS=$?
+set -e
+
+if [[ $HANDLE_STATUS -ne 0 ]]; then
+    echo "[FAIL] handle sample exited with failure"
+    echo "$HANDLE_OUTPUT"
+    FAIL=$((FAIL + 1))
+else
+    RELEASE_COUNT=$(grep -c "counter_handle_released" <<< "$HANDLE_OUTPUT")
+    if [[ $RELEASE_COUNT -eq 2 ]]; then
+        echo "[PASS] native handle finalizers executed twice"
+        PASS=$((PASS + 1))
+    else
+        echo "[FAIL] expected native handle finalizer twice, got $RELEASE_COUNT"
+        echo "$HANDLE_OUTPUT"
+        FAIL=$((FAIL + 1))
+    fi
+fi
 
 CACHE_FILE="$SCRIPT_DIR/sample_import_cache.expr"
 echo "========================================"
@@ -153,6 +180,21 @@ if "$INTERPRETER" "$MISMATCH_FILE"; then
     FAIL=$((FAIL + 1))
 else
     echo "[PASS] native package metadata mismatch failed as expected"
+    PASS=$((PASS + 1))
+fi
+
+echo
+
+FOREIGN_HANDLE_FILE="$SCRIPT_DIR/fail_import_native_handle_foreign.expr"
+echo "========================================"
+echo "Running (expect runtime error): $FOREIGN_HANDLE_FILE"
+echo "----------------------------------------"
+
+if "$INTERPRETER" "$FOREIGN_HANDLE_FILE"; then
+    echo "[FAIL] expected runtime error for foreign native handle"
+    FAIL=$((FAIL + 1))
+else
+    echo "[PASS] foreign native handle failed as expected"
     PASS=$((PASS + 1))
 fi
 

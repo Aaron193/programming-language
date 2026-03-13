@@ -25,6 +25,7 @@ enum class TypeKind : uint8_t {
     VOID,
     ANY,
     CLASS,
+    NATIVE_HANDLE,
     FUNCTION,
     ARRAY,
     DICT,
@@ -40,6 +41,8 @@ struct TypeInfo {
 
     std::string className;
     ClassObject* classPtr = nullptr;
+    std::string nativeHandlePackageId;
+    std::string nativeHandleTypeName;
 
     std::vector<TypeRef> paramTypes;
     TypeRef returnType;
@@ -68,6 +71,8 @@ struct TypeInfo {
     static TypeRef makeVoid();
     static TypeRef makeNull();
     static TypeRef makeClass(const std::string& name);
+    static TypeRef makeNativeHandle(const std::string& packageId,
+                                    const std::string& typeName);
     static TypeRef makeFunction(std::vector<TypeRef> params, TypeRef ret);
     static TypeRef makeArray(TypeRef element);
     static TypeRef makeDict(TypeRef key, TypeRef value);
@@ -82,6 +87,7 @@ struct TypeInfo {
     bool isAny() const { return kind == TypeKind::ANY; }
     bool isVoid() const { return kind == TypeKind::VOID; }
     bool isClass() const { return kind == TypeKind::CLASS; }
+    bool isNativeHandle() const { return kind == TypeKind::NATIVE_HANDLE; }
     bool isOptional() const { return kind == TypeKind::OPTIONAL; }
 
     std::string toString() const;

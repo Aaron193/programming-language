@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <exception>
@@ -158,6 +159,7 @@ static std::string valueTypeName(const Value& value) {
     if (value.isSet()) return "set";
     if (value.isIterator()) return "iterator";
     if (value.isModule()) return "module";
+    if (value.isNativeHandle()) return "native_handle";
     if (value.isClass()) return "class";
     if (value.isInstance()) return "instance";
     if (value.isNative()) return "native";
@@ -292,6 +294,26 @@ enum class BuiltinNativeKind : uint8_t {
 
 static const ExprHostApi kExprHostApi = {EXPR_HOST_API_ABI_VERSION};
 
+static std::string makePackageId(std::string_view packageNamespace,
+                                 std::string_view packageName) {
+    return std::string(packageNamespace) + ":" + std::string(packageName);
+}
+
+static bool isValidHandleTypeName(std::string_view text) {
+    if (text.empty()) {
+        return false;
+    }
+
+    for (char ch : text) {
+        if (std::isalnum(static_cast<unsigned char>(ch)) || ch == '_') {
+            continue;
+        }
+        return false;
+    }
+
+    return true;
+}
+
 static bool valueToPackageValue(const Value& value, ExprPackageValue& out) {
     out = ExprPackageValue{};
     if (value.isNil()) {
@@ -324,6 +346,22 @@ static bool valueToPackageValue(const Value& value, ExprPackageValue& out) {
         out.as.string_value.length = value.asString().size();
         return true;
     }
+    if (value.isNativeHandle()) {
+        NativeHandleObject* handle = value.asNativeHandle();
+        if (handle == nullptr || handle->handleData == nullptr ||
+            handle->finalizer == nullptr || handle->packageNamespace.empty() ||
+            handle->packageName.empty() || handle->typeName.empty()) {
+            return false;
+        }
+
+        out.kind = EXPR_PACKAGE_VALUE_HANDLE;
+        out.as.handle_value.package_namespace = handle->packageNamespace.c_str();
+        out.as.handle_value.package_name = handle->packageName.c_str();
+        out.as.handle_value.type_name = handle->typeName.c_str();
+        out.as.handle_value.handle_data = handle->handleData;
+        out.as.handle_value.finalizer = handle->finalizer;
+        return true;
+    }
 
     return false;
 }
@@ -354,6 +392,37 @@ bool packageValueToValue(VirtualMachine& vm, const ExprPackageValue& value,
                             value.as.string_value.length);
             }
             outValue = vm.makeStringValue(std::move(text));
+            return true;
+        }
+        case EXPR_PACKAGE_VALUE_HANDLE: {
+            const ExprPackageHandleValue& handleValue = value.as.handle_value;
+            if (handleValue.package_namespace == nullptr ||
+                handleValue.package_namespace[0] == '\0' ||
+                handleValue.package_name == nullptr ||
+                handleValue.package_name[0] == '\0' ||
+                handleValue.type_name == nullptr ||
+                handleValue.type_name[0] == '\0' ||
+                handleValue.handle_data == nullptr ||
+                handleValue.finalizer == nullptr) {
+                outError = "Native package returned invalid handle metadata.";
+                return false;
+            }
+
+            if (!isValidHandleTypeName(handleValue.type_name)) {
+                outError = "Native package returned handle with invalid type "
+                           "name.";
+                return false;
+            }
+
+            auto* handle = vm.gcAlloc<NativeHandleObject>();
+            handle->packageNamespace = handleValue.package_namespace;
+            handle->packageName = handleValue.package_name;
+            handle->packageId =
+                makePackageId(handle->packageNamespace, handle->packageName);
+            handle->typeName = handleValue.type_name;
+            handle->handleData = handleValue.handle_data;
+            handle->finalizer = handleValue.finalizer;
+            outValue = Value(handle);
             return true;
         }
         default:
@@ -580,6 +649,13 @@ static TypeRef inferRuntimeType(const Value& value) {
     if (value.isNil()) {
         return TypeInfo::makeNull();
     }
+    if (value.isNativeHandle()) {
+        auto* handle = value.asNativeHandle();
+        if (handle != nullptr) {
+            return TypeInfo::makeNativeHandle(handle->packageId,
+                                              handle->typeName);
+        }
+    }
     if (value.isInstance() && value.asInstance() && value.asInstance()->klass) {
         return TypeInfo::makeClass(value.asInstance()->klass->name);
     }
@@ -644,10 +720,25 @@ static bool valueMatchesType(const Value& value, const TypeRef& expected) {
     }
 
     if (expected->kind == TypeKind::CLASS) {
+        if (value.isNativeHandle()) {
+            auto* handle = value.asNativeHandle();
+            return handle != nullptr && handle->typeName == expected->className;
+        }
         if (!value.isInstance()) {
             return false;
         }
         return isInstanceOfClass(value.asInstance(), expected->className);
+    }
+
+    if (expected->kind == TypeKind::NATIVE_HANDLE) {
+        if (!value.isNativeHandle()) {
+            return false;
+        }
+
+        auto* handle = value.asNativeHandle();
+        return handle != nullptr &&
+               handle->packageId == expected->nativeHandlePackageId &&
+               handle->typeName == expected->nativeHandleTypeName;
     }
 
     if (expected->kind == TypeKind::ARRAY) {
@@ -1136,6 +1227,16 @@ Status invokePackageNative(VirtualMachine& vm, const NativeFunctionObject& nativ
     const size_t argBase = calleeIndex + 1;
     for (uint8_t index = 0; index < argumentCount; ++index) {
         const Value& arg = vm.m_stack.getAt(argBase + static_cast<size_t>(index));
+        if (arg.isNativeHandle()) {
+            NativeHandleObject* handle = arg.asNativeHandle();
+            if (handle == nullptr || handle->packageId != binding->packageId) {
+                return vm.runtimeError("Native package function '" +
+                                       binding->packageId + "." + native.name +
+                                       "' cannot accept a foreign native "
+                                       "handle.");
+            }
+        }
+
         if (!valueToPackageValue(arg, packageArgs[index])) {
             return vm.runtimeError("Native package function '" + native.name +
                                    "' cannot accept runtime value of type '" +
@@ -1157,6 +1258,19 @@ Status invokePackageNative(VirtualMachine& vm, const NativeFunctionObject& nativ
                       std::string(errorView.data, errorView.length);
         }
         return vm.runtimeError(message);
+    }
+
+    if (resultValue.kind == EXPR_PACKAGE_VALUE_HANDLE) {
+        const ExprPackageHandleValue& handleValue = resultValue.as.handle_value;
+        if (handleValue.package_namespace == nullptr ||
+            handleValue.package_name == nullptr ||
+            binding->packageNamespace != handleValue.package_namespace ||
+            binding->packageName != handleValue.package_name) {
+            return vm.runtimeError("Native package function '" +
+                                   binding->packageId + "." + native.name +
+                                   "' returned a handle owned by a different "
+                                   "package.");
+        }
     }
 
     Value result;
@@ -3325,6 +3439,8 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                     nativeFn->callback = invokePackageNative;
                     auto& binding = m_nativePackageBindings.emplace_back();
                     binding.packageId = packageDescriptor.packageId;
+                    binding.packageNamespace = packageDescriptor.packageNamespace;
+                    binding.packageName = packageDescriptor.packageName;
                     binding.function = functionDescriptor.callback;
                     nativeFn->userdata = &binding;
                     module->exports[functionDescriptor.name] = Value(nativeFn);
@@ -3772,11 +3888,34 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 #undef VM_CASE
 
 VirtualMachine::~VirtualMachine() {
+    resetRuntimeState();
+}
+
+void VirtualMachine::unloadNativeLibraries() {
     for (void* handle : m_loadedNativeLibraryHandles) {
         if (handle != nullptr) {
             dlclose(handle);
         }
     }
+    m_loadedNativeLibraryHandles.clear();
+}
+
+void VirtualMachine::resetRuntimeState() {
+    m_stack.reset();
+    m_frameCount = 0;
+    m_activeFrame = nullptr;
+    m_openUpvaluesHead = nullptr;
+    m_globalNames.clear();
+    m_globalTypes.clear();
+    m_globalValues.clear();
+    m_globalDefined.clear();
+    m_nativeGlobals.clear();
+    m_moduleCache.clear();
+    m_importStack.clear();
+    m_nativePackageBindings.clear();
+    m_currentModule = nullptr;
+    m_gc.sweep();
+    unloadNativeLibraries();
 }
 
 Status VirtualMachine::interpret(std::string_view source, bool printReturnValue,
@@ -3785,16 +3924,7 @@ Status VirtualMachine::interpret(std::string_view source, bool printReturnValue,
                                  bool strictMode) {
     std::string_view compileSource = stripStrictDirectiveLine(source);
     Chunk chunk;
-    m_stack.reset();
-    m_frameCount = 0;
-    m_activeFrame = nullptr;
-    m_openUpvaluesHead = nullptr;
-    m_nativeGlobals.clear();
-    m_moduleCache.clear();
-    m_importStack.clear();
-    m_loadedNativeLibraryHandles.clear();
-    m_nativePackageBindings.clear();
-    m_currentModule = nullptr;
+    resetRuntimeState();
     m_defaultStrictMode = strictMode || hasStrictDirective(source);
     m_compiler.setGC(&m_gc);
     m_compiler.setPackageSearchPaths(m_packageSearchPaths);

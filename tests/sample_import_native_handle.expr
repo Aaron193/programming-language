@@ -1,0 +1,5 @@
+import counter from "examples:counter";
+
+print(counter.PACKAGE_ID);
+print(counter.read(counter.create(10i64)));
+print(counter.add(counter.create(10i64), 5i64));

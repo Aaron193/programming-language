@@ -63,6 +63,21 @@ bool isValidPackageIdPart(std::string_view text) {
     return true;
 }
 
+bool isValidHandleTypeName(std::string_view text) {
+    if (text.empty()) {
+        return false;
+    }
+
+    for (char ch : text) {
+        if (std::isalnum(static_cast<unsigned char>(ch)) || ch == '_') {
+            continue;
+        }
+        return false;
+    }
+
+    return true;
+}
+
 std::string makePackageId(std::string_view packageNamespace,
                           std::string_view packageName) {
     return std::string(packageNamespace) + ":" + std::string(packageName);
@@ -298,6 +313,54 @@ class TypeStringParser {
                 return nullptr;
             }
             type = TypeInfo::makeSet(elementType);
+        } else if (identifier == "handle") {
+            if (!consume('<', outError)) {
+                return nullptr;
+            }
+
+            skipWhitespace();
+            size_t specStart = m_position;
+            while (!isAtEnd() && m_text[m_position] != '>') {
+                ++m_position;
+            }
+
+            if (isAtEnd()) {
+                outError = "Expected '>' in handle type.";
+                return nullptr;
+            }
+
+            std::string spec(m_text.substr(specStart, m_position - specStart));
+            ++m_position;
+
+            size_t firstColon = spec.find(':');
+            size_t secondColon =
+                firstColon == std::string::npos ? std::string::npos
+                                                : spec.find(':', firstColon + 1);
+            if (firstColon == std::string::npos ||
+                secondColon == std::string::npos ||
+                spec.find(':', secondColon + 1) != std::string::npos) {
+                outError = "Handle type must use handle<namespace:name:Type>.";
+                return nullptr;
+            }
+
+            std::string_view packageNamespace(spec.data(), firstColon);
+            std::string_view packageName(spec.data() + firstColon + 1,
+                                         secondColon - firstColon - 1);
+            std::string_view typeName(spec.data() + secondColon + 1,
+                                      spec.size() - secondColon - 1);
+
+            if (!isValidPackageIdPart(packageNamespace) ||
+                !isValidPackageIdPart(packageName) ||
+                !isValidHandleTypeName(typeName)) {
+                outError =
+                    "Handle type must use lowercase package IDs and an "
+                    "alphanumeric type name.";
+                return nullptr;
+            }
+
+            type = TypeInfo::makeNativeHandle(
+                makePackageId(packageNamespace, packageName),
+                std::string(typeName));
         } else {
             type = TypeInfo::makeClass(identifier);
         }
@@ -344,6 +407,8 @@ bool packageValueMatchesType(const ExprPackageValue& value,
             return type->kind == TypeKind::F64;
         case EXPR_PACKAGE_VALUE_STR:
             return type->kind == TypeKind::STR;
+        case EXPR_PACKAGE_VALUE_HANDLE:
+            return false;
         default:
             return false;
     }
@@ -546,7 +611,9 @@ bool loadNativePackageDescriptor(const std::string& libraryPath,
     const ExprPackageConstantExport* constants = nullptr;
     size_t constantCount = 0;
 
-    if (registrationHeader->abi_version == EXPR_NATIVE_PACKAGE_ABI_VERSION) {
+    if (registrationHeader->abi_version == EXPR_NATIVE_PACKAGE_ABI_VERSION ||
+        registrationHeader->abi_version ==
+            EXPR_NATIVE_PACKAGE_NAMESPACED_ABI_VERSION) {
         if (registration->package_namespace == nullptr ||
             registration->package_namespace[0] == '\0') {
             outError = "Native package '" + libraryPath +
@@ -604,6 +671,8 @@ bool loadNativePackageDescriptor(const std::string& libraryPath,
                    std::to_string(registrationHeader->abi_version) +
                    ", expected " +
                    std::to_string(EXPR_NATIVE_PACKAGE_ABI_VERSION) + " or " +
+                   std::to_string(EXPR_NATIVE_PACKAGE_NAMESPACED_ABI_VERSION) +
+                   " or " +
                    std::to_string(EXPR_NATIVE_PACKAGE_LEGACY_ABI_VERSION) + ".";
         closeHandle();
         return false;

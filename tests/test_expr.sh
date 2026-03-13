@@ -31,6 +31,9 @@ for file in "${FILES[@]}"; do
     fi
 
     base_name="$(basename "$file")"
+    if [[ "$base_name" == fail_* ]]; then
+        continue
+    fi
     if [[ "$base_name" == sample_native_error_* ]]; then
         continue
     fi

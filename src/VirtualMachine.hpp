@@ -105,6 +105,8 @@ class VirtualMachine {
     void closeUpvalues(size_t fromStackIndex);
     void markRoots();
     void collectGarbage();
+    void unloadNativeLibraries();
+    void resetRuntimeState();
 
     template <typename T, typename... Args>
     T* gcAlloc(Args&&... args) {

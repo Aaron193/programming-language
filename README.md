@@ -219,3 +219,14 @@ declares its functions/constants using the ABI in `src/NativePackageAPI.hpp`.
 This repository includes a namespaced reference package in
 `packages/examples/math/` and a legacy compatibility package in
 `packages/example_math/`.
+
+Native packages can now return opaque native handles through signatures such as
+`fn() -> handle<examples:counter:CounterHandle>`. Handles are GC-managed by the
+VM and invoke the package-provided finalizer when released. A reference handle
+package lives in `packages/examples/counter/`.
+
+Current limitation:
+
+- source files do not yet have first-class type syntax for declaring opaque
+  handle variables, so handles are easiest to use inline or via inferred flows
+  between native package calls

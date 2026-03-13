@@ -5,7 +5,8 @@
 #include <stdint.h>
 
 #define EXPR_HOST_API_ABI_VERSION 1u
-#define EXPR_NATIVE_PACKAGE_ABI_VERSION 2u
+#define EXPR_NATIVE_PACKAGE_ABI_VERSION 3u
+#define EXPR_NATIVE_PACKAGE_NAMESPACED_ABI_VERSION 2u
 #define EXPR_NATIVE_PACKAGE_LEGACY_ABI_VERSION 1u
 
 typedef enum ExprPackageValueKind {
@@ -15,12 +16,23 @@ typedef enum ExprPackageValueKind {
     EXPR_PACKAGE_VALUE_U64 = 3,
     EXPR_PACKAGE_VALUE_F64 = 4,
     EXPR_PACKAGE_VALUE_STR = 5,
+    EXPR_PACKAGE_VALUE_HANDLE = 6,
 } ExprPackageValueKind;
 
 typedef struct ExprPackageStringView {
     const char* data;
     size_t length;
 } ExprPackageStringView;
+
+typedef void (*ExprPackageHandleFinalizer)(void* handle_data);
+
+typedef struct ExprPackageHandleValue {
+    const char* package_namespace;
+    const char* package_name;
+    const char* type_name;
+    void* handle_data;
+    ExprPackageHandleFinalizer finalizer;
+} ExprPackageHandleValue;
 
 typedef struct ExprPackageValue {
     ExprPackageValueKind kind;
@@ -30,6 +42,7 @@ typedef struct ExprPackageValue {
         uint64_t u64_value;
         double f64_value;
         ExprPackageStringView string_value;
+        ExprPackageHandleValue handle_value;
     } as;
 } ExprPackageValue;
 

@@ -29,6 +29,8 @@ void GC::markValue(const Value& value) {
         markObject(value.asIterator());
     } else if (value.isModule()) {
         markObject(value.asModule());
+    } else if (value.isNativeHandle()) {
+        markObject(value.asNativeHandle());
     }
 }
 
