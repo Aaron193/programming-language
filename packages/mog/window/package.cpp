@@ -224,6 +224,44 @@ bool closeWindow(const ExprHostApi* hostApi, const ExprPackageValue* args,
     return true;
 }
 
+bool showWindow(const ExprHostApi* hostApi, const ExprPackageValue* args,
+                size_t argc, ExprPackageValue* outResult,
+                ExprPackageStringView* outError) {
+    (void)hostApi;
+    if (argc != 1 || args == nullptr || outResult == nullptr) {
+        setError(outError, "expected exactly 1 argument");
+        return false;
+    }
+
+    WindowHandle* windowHandle = nullptr;
+    if (!expectOpenWindowHandle(args[0], windowHandle, outError)) {
+        return false;
+    }
+
+    SDL_ShowWindow(windowHandle->window);
+    outResult->kind = EXPR_PACKAGE_VALUE_NULL;
+    return true;
+}
+
+bool hideWindow(const ExprHostApi* hostApi, const ExprPackageValue* args,
+                size_t argc, ExprPackageValue* outResult,
+                ExprPackageStringView* outError) {
+    (void)hostApi;
+    if (argc != 1 || args == nullptr || outResult == nullptr) {
+        setError(outError, "expected exactly 1 argument");
+        return false;
+    }
+
+    WindowHandle* windowHandle = nullptr;
+    if (!expectOpenWindowHandle(args[0], windowHandle, outError)) {
+        return false;
+    }
+
+    SDL_HideWindow(windowHandle->window);
+    outResult->kind = EXPR_PACKAGE_VALUE_NULL;
+    return true;
+}
+
 bool pollEvent(const ExprHostApi* hostApi, const ExprPackageValue* args,
                size_t argc, ExprPackageValue* outResult,
                ExprPackageStringView* outError) {
@@ -468,6 +506,8 @@ constexpr ExprPackageFunctionExport kFunctions[] = {
     {"create", "fn(str, i64, i64) -> handle<mog:window:WindowHandle>", 3,
      createWindow},
     {"close", "fn(handle<mog:window:WindowHandle>) -> void", 1, closeWindow},
+    {"show", "fn(handle<mog:window:WindowHandle>) -> void", 1, showWindow},
+    {"hide", "fn(handle<mog:window:WindowHandle>) -> void", 1, hideWindow},
     {"pollEvent",
      "fn(handle<mog:window:WindowHandle>) -> handle<mog:window:EventHandle>?",
      1, pollEvent},

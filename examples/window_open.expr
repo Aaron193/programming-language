@@ -1,0 +1,22 @@
+import window from "mog:window";
+
+const handle<mog:window:WindowHandle> win =
+    window.create("mog:window visible demo", 800i64, 600i64);
+
+window.show(win);
+window.clear(win);
+window.present(win);
+
+bool running = true;
+f64 start = clock();
+
+while (running and (clock() - start) < 5) {
+    const handle<mog:window:EventHandle>? evt = window.pollEvent(win);
+    if (evt != null) {
+        if (window.eventKind(evt) == "quit") {
+            running = false;
+        }
+    }
+}
+
+window.close(win);

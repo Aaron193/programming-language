@@ -71,6 +71,19 @@ Or start REPL:
 ./build/interpreter
 ```
 
+## Examples
+
+Manual runnable demos live under `examples/`. These are intended for developer
+validation and interactive exploration, not for automated CI coverage.
+
+The visible `mog:window` demos require SDL2 to be present so the optional
+package is built:
+
+```bash
+./build/interpreter examples/window_open.expr
+./build/interpreter examples/window_events.expr
+```
+
 ## Tests
 
 Run expression samples:
@@ -240,6 +253,8 @@ Official runtime-maintained packages use the reserved `mog:*` namespace. The
 first official package is `mog:window`, built only when SDL2 is available at
 configure time:
 
+Headless smoke usage for tests:
+
 ```expr
 import window from "mog:window";
 
@@ -250,6 +265,9 @@ window.clear(win);
 window.present(win);
 window.close(win);
 ```
+
+Visible manual demos live under `examples/` and call `window.show(win)` after
+creation so the current hidden-by-default behavior remains stable for tests.
 
 If SDL2 is not installed, the interpreter still builds normally and simply
 skips the optional `mog:window` package target.

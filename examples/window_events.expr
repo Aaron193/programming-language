@@ -1,0 +1,34 @@
+import window from "mog:window";
+
+const handle<mog:window:WindowHandle> win =
+    window.create("mog:window event demo", 800i64, 600i64);
+
+window.show(win);
+window.clear(win);
+window.present(win);
+
+print("Close the window or press Escape to exit.");
+
+bool running = true;
+
+while (running) {
+    const handle<mog:window:EventHandle>? evt = window.pollEvent(win);
+    if (evt != null) {
+        str kind = window.eventKind(evt);
+        print(kind);
+
+        if (kind == "quit") {
+            running = false;
+        } else {
+            if (kind == "key_down") {
+                i64 keyCode = window.eventKeyCode(evt);
+                print(keyCode);
+                if (keyCode == 27i64) {
+                    running = false;
+                }
+            }
+        }
+    }
+}
+
+window.close(win);
