@@ -127,12 +127,19 @@ Token Scanner::nextToken() {
         case '!':
             return match('=') ? createToken(TokenType::BANG_EQUAL)
                               : createToken(TokenType::BANG);
+        case '~':
+            return createToken(TokenType::TILDE);
         case '&':
-            return match('&') ? createToken(TokenType::LOGICAL_AND)
-                              : createErrorToken("Unexpected Token.");
+            if (match('&')) return createToken(TokenType::LOGICAL_AND);
+            return match('=') ? createToken(TokenType::AMPERSAND_EQUAL)
+                              : createToken(TokenType::AMPERSAND);
         case '|':
-            return match('|') ? createToken(TokenType::LOGICAL_OR)
-                              : createErrorToken("Unexpected Token.");
+            if (match('|')) return createToken(TokenType::LOGICAL_OR);
+            return match('=') ? createToken(TokenType::PIPE_EQUAL)
+                              : createToken(TokenType::PIPE);
+        case '^':
+            return match('=') ? createToken(TokenType::CARET_EQUAL)
+                              : createToken(TokenType::CARET);
         case '+':
             if (match('+')) return createToken(TokenType::PLUS_PLUS);
             return match('=') ? createToken(TokenType::PLUS_EQUAL)

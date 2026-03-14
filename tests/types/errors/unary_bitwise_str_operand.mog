@@ -1,0 +1,3 @@
+#!strict
+str text = "hello";
+print(~text);

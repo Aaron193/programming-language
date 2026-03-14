@@ -6,6 +6,13 @@
 enum TokenType {
     BANG,
     BANG_EQUAL,
+    TILDE,
+    AMPERSAND,
+    AMPERSAND_EQUAL,
+    CARET,
+    CARET_EQUAL,
+    PIPE,
+    PIPE_EQUAL,
     PLUS,
     PLUS_PLUS,
     PLUS_EQUAL,

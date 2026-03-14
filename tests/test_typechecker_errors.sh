@@ -94,6 +94,30 @@ run_expect_compile_error \
     "cannot assign to const variable 'total'." || failed=1
 
 run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/compound_bitwise_to_const.mog" \
+    "cannot assign to const variable 'total'." || failed=1
+
+run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/bitwise_bool_operand.mog" \
+    "bitwise operators require integer operands" || failed=1
+
+run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/bitwise_float_operand.mog" \
+    "bitwise operators require integer operands" || failed=1
+
+run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/unary_bitwise_str_operand.mog" \
+    "unary '~' expects an integer operand" || failed=1
+
+run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/shift_float_rhs.mog" \
+    "shift operators require integer operands" || failed=1
+
+run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/compound_bitwise_result_unassignable.mog" \
+    "result of compound assignment is not assignable to 'u8'" || failed=1
+
+run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/update_const.mog" \
     "cannot assign to const variable 'count'." || failed=1
 

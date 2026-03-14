@@ -1,0 +1,4 @@
+#!strict
+u8 mask = 240u8;
+u16 other = 255u16;
+mask &= other;

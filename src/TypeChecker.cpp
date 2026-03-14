@@ -46,6 +46,9 @@ bool isAssignmentOperator(TokenType type) {
         case TokenType::MINUS_EQUAL:
         case TokenType::STAR_EQUAL:
         case TokenType::SLASH_EQUAL:
+        case TokenType::AMPERSAND_EQUAL:
+        case TokenType::CARET_EQUAL:
+        case TokenType::PIPE_EQUAL:
         case TokenType::SHIFT_LEFT_EQUAL:
         case TokenType::SHIFT_RIGHT_EQUAL:
         case TokenType::PLUS_PLUS:
@@ -70,6 +73,29 @@ bool isComparisonOperator(TokenType type) {
 
 bool isEqualityOperator(TokenType type) {
     return type == TokenType::EQUAL_EQUAL || type == TokenType::BANG_EQUAL;
+}
+
+bool isArithmeticCompoundAssignment(TokenType type) {
+    switch (type) {
+        case TokenType::PLUS_EQUAL:
+        case TokenType::MINUS_EQUAL:
+        case TokenType::STAR_EQUAL:
+        case TokenType::SLASH_EQUAL:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool isBitwiseCompoundAssignment(TokenType type) {
+    switch (type) {
+        case TokenType::AMPERSAND_EQUAL:
+        case TokenType::CARET_EQUAL:
+        case TokenType::PIPE_EQUAL:
+            return true;
+        default:
+            return false;
+    }
 }
 
 bool isCollectionTypeNameText(std::string_view name) {
@@ -339,6 +365,38 @@ class CheckerImpl {
             return rhs;
         }
         return TypeInfo::makeAny();
+    }
+
+    TypeRef bitwiseIntegerResultType(const TypeRef& lhs,
+                                     const TypeRef& rhs) const {
+        if (!lhs || !rhs || !lhs->isInteger() || !rhs->isInteger()) {
+            return nullptr;
+        }
+
+        int width = std::max(lhs->bitWidth(), rhs->bitWidth());
+        if (lhs->isSigned() && rhs->isSigned()) {
+            switch (width) {
+                case 8:
+                    return TypeInfo::makeI8();
+                case 16:
+                    return TypeInfo::makeI16();
+                case 32:
+                    return TypeInfo::makeI32();
+                default:
+                    return TypeInfo::makeI64();
+            }
+        }
+
+        switch (width) {
+            case 8:
+                return TypeInfo::makeU8();
+            case 16:
+                return TypeInfo::makeU16();
+            case 32:
+                return TypeInfo::makeU32();
+            default:
+                return TypeInfo::makeU64();
+        }
     }
 
     void addError(size_t line, const std::string& message) {
@@ -1197,19 +1255,55 @@ class CheckerImpl {
             return ExprInfo{targetType, false, false, lhs.name, line};
         }
 
-        if (!(targetType->isNumeric() && rhs.type->isNumeric())) {
-            addError(
-                line,
-                "Type error: compound assignment requires numeric operands.");
-            return ExprInfo{TypeInfo::makeAny(), false, false, lhs.name, line};
+        if (isArithmeticCompoundAssignment(assignmentType)) {
+            if (!(targetType->isNumeric() && rhs.type->isNumeric())) {
+                addError(
+                    line,
+                    "Type error: compound assignment requires numeric operands.");
+                return ExprInfo{TypeInfo::makeAny(), false, false, lhs.name,
+                                line};
+            }
+
+            TypeRef promoted = numericPromotion(targetType, rhs.type);
+            if (!promoted || !isAssignableType(promoted, targetType)) {
+                addError(line,
+                         "Type error: result of compound assignment is not "
+                         "assignable to '" +
+                             targetType->toString() + "'.");
+            }
+
+            return ExprInfo{targetType, false, false, lhs.name, line};
         }
 
-        TypeRef promoted = numericPromotion(targetType, rhs.type);
-        if (!promoted || !isAssignableType(promoted, targetType)) {
-            addError(line,
-                     "Type error: result of compound assignment is not "
-                     "assignable to '" +
-                         targetType->toString() + "'.");
+        if (assignmentType == TokenType::SHIFT_LEFT_EQUAL ||
+            assignmentType == TokenType::SHIFT_RIGHT_EQUAL) {
+            if (!(targetType->isInteger() && rhs.type->isInteger())) {
+                addError(
+                    line,
+                    "Type error: shift operators require integer operands.");
+                return ExprInfo{TypeInfo::makeAny(), false, false, lhs.name,
+                                line};
+            }
+
+            return ExprInfo{targetType, false, false, lhs.name, line};
+        }
+
+        if (isBitwiseCompoundAssignment(assignmentType)) {
+            if (!(targetType->isInteger() && rhs.type->isInteger())) {
+                addError(
+                    line,
+                    "Type error: bitwise operators require integer operands.");
+                return ExprInfo{TypeInfo::makeAny(), false, false, lhs.name,
+                                line};
+            }
+
+            TypeRef resultType = bitwiseIntegerResultType(targetType, rhs.type);
+            if (!resultType || !isAssignableType(resultType, targetType)) {
+                addError(line,
+                         "Type error: result of compound assignment is not "
+                         "assignable to '" +
+                             targetType->toString() + "'.");
+            }
         }
 
         return ExprInfo{targetType, false, false, lhs.name, line};
@@ -1263,11 +1357,11 @@ class CheckerImpl {
     }
 
     ExprInfo parseComparison() {
-        ExprInfo expr = parseShift();
+        ExprInfo expr = parseBitwiseOr();
         while (isComparisonOperator(m_current.type())) {
             size_t line = m_current.line();
             advance();
-            ExprInfo rhs = parseShift();
+            ExprInfo rhs = parseBitwiseOr();
 
             bool lhsOk = expr.type->isAny() || expr.type->isNumeric();
             bool rhsOk = rhs.type->isAny() || rhs.type->isNumeric();
@@ -1281,6 +1375,75 @@ class CheckerImpl {
         return expr;
     }
 
+    ExprInfo parseBitwiseOr() {
+        ExprInfo expr = parseBitwiseXor();
+        while (match(TokenType::PIPE)) {
+            size_t line = m_previous.line();
+            ExprInfo rhs = parseBitwiseXor();
+            if (expr.type->isAny() || rhs.type->isAny()) {
+                expr = ExprInfo{TypeInfo::makeAny(), false, false, "", line};
+                continue;
+            }
+
+            TypeRef resultType = bitwiseIntegerResultType(expr.type, rhs.type);
+            if (!resultType) {
+                addError(line,
+                         "Type error: bitwise operators require integer operands.");
+                expr = ExprInfo{TypeInfo::makeAny(), false, false, "", line};
+                continue;
+            }
+
+            expr = ExprInfo{resultType, false, false, "", line};
+        }
+        return expr;
+    }
+
+    ExprInfo parseBitwiseXor() {
+        ExprInfo expr = parseBitwiseAnd();
+        while (match(TokenType::CARET)) {
+            size_t line = m_previous.line();
+            ExprInfo rhs = parseBitwiseAnd();
+            if (expr.type->isAny() || rhs.type->isAny()) {
+                expr = ExprInfo{TypeInfo::makeAny(), false, false, "", line};
+                continue;
+            }
+
+            TypeRef resultType = bitwiseIntegerResultType(expr.type, rhs.type);
+            if (!resultType) {
+                addError(line,
+                         "Type error: bitwise operators require integer operands.");
+                expr = ExprInfo{TypeInfo::makeAny(), false, false, "", line};
+                continue;
+            }
+
+            expr = ExprInfo{resultType, false, false, "", line};
+        }
+        return expr;
+    }
+
+    ExprInfo parseBitwiseAnd() {
+        ExprInfo expr = parseShift();
+        while (match(TokenType::AMPERSAND)) {
+            size_t line = m_previous.line();
+            ExprInfo rhs = parseShift();
+            if (expr.type->isAny() || rhs.type->isAny()) {
+                expr = ExprInfo{TypeInfo::makeAny(), false, false, "", line};
+                continue;
+            }
+
+            TypeRef resultType = bitwiseIntegerResultType(expr.type, rhs.type);
+            if (!resultType) {
+                addError(line,
+                         "Type error: bitwise operators require integer operands.");
+                expr = ExprInfo{TypeInfo::makeAny(), false, false, "", line};
+                continue;
+            }
+
+            expr = ExprInfo{resultType, false, false, "", line};
+        }
+        return expr;
+    }
+
     ExprInfo parseShift() {
         ExprInfo expr = parseTerm();
         while (check(TokenType::SHIFT_LEFT_TOKEN) ||
@@ -1288,14 +1451,14 @@ class CheckerImpl {
             size_t line = m_current.line();
             advance();
             ExprInfo rhs = parseTerm();
-            bool lhsOk = expr.type->isNumeric() || expr.type->isAny();
-            bool rhsOk = rhs.type->isNumeric() || rhs.type->isAny();
+            bool lhsOk = expr.type->isInteger() || expr.type->isAny();
+            bool rhsOk = rhs.type->isInteger() || rhs.type->isAny();
             if (!lhsOk || !rhsOk) {
                 addError(
                     line,
                     "Type error: shift operators require integer operands.");
             }
-            expr = ExprInfo{TypeInfo::makeAny(), false, false, "", line};
+            expr = ExprInfo{expr.type, false, false, "", line};
         }
         return expr;
     }
@@ -1376,6 +1539,15 @@ class CheckerImpl {
             if (!(operand.type->isNumeric() || operand.type->isAny())) {
                 addError(m_previous.line(),
                          "Type error: unary '-' expects a numeric operand.");
+            }
+            return ExprInfo{operand.type, false, false, "", m_previous.line()};
+        }
+
+        if (match(TokenType::TILDE)) {
+            ExprInfo operand = parseUnary();
+            if (!(operand.type->isInteger() || operand.type->isAny())) {
+                addError(m_previous.line(),
+                         "Type error: unary '~' expects an integer operand.");
             }
             return ExprInfo{operand.type, false, false, "", m_previous.line()};
         }

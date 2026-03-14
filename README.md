@@ -8,8 +8,8 @@ This project is a bytecode-compiled, stack-based interpreter implemented in C++.
 - Arithmetic: `+`, `-`, `*`, `/`
 - Comparison/equality: `>`, `>=`, `<`, `<=`, `==`, `!=`
 - Logical operators: `!`, `&&`, `||` (short-circuiting)
-- Bit shifts: `<<`, `>>`
-- Variables: explicit typed declarations (with required initializer), `const` immutable bindings, assignment, compound assignment (`+=`, `-=`, `*=`, `/=`, `<<=`, `>>=`), lexical scope
+- Bitwise operators: `&`, `|`, `^`, `~`, `<<`, `>>`
+- Variables: explicit typed declarations (with required initializer), `const` immutable bindings, assignment, compound assignment (`+=`, `-=`, `*=`, `/=`, `&=`, `|=`, `^=`, `<<=`, `>>=`), lexical scope
 - Update operators: `++`, `--`
 - Control flow: `if`/`else`, `while`, `for`, foreach (`for (Type x : collection)`)
 - Functions: declarations, parameters, return values, recursion

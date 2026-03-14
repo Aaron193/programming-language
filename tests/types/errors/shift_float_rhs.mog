@@ -1,0 +1,4 @@
+#!strict
+i32 value = 1;
+f64 amount = 2.0;
+print(value << amount);

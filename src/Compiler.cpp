@@ -20,6 +20,48 @@ bool isCollectionTypeNameText(std::string_view name) {
 
 bool isHandleTypeNameText(std::string_view name) { return name == "handle"; }
 
+bool isBitwiseAssignmentOperator(TokenType type) {
+    switch (type) {
+        case TokenType::AMPERSAND_EQUAL:
+        case TokenType::CARET_EQUAL:
+        case TokenType::PIPE_EQUAL:
+            return true;
+        default:
+            return false;
+    }
+}
+
+TypeRef bitwiseResultType(const TypeRef& lhs, const TypeRef& rhs) {
+    if (!lhs || !rhs || !lhs->isInteger() || !rhs->isInteger()) {
+        return nullptr;
+    }
+
+    int width = std::max(lhs->bitWidth(), rhs->bitWidth());
+    if (lhs->isSigned() && rhs->isSigned()) {
+        switch (width) {
+            case 8:
+                return TypeInfo::makeI8();
+            case 16:
+                return TypeInfo::makeI16();
+            case 32:
+                return TypeInfo::makeI32();
+            default:
+                return TypeInfo::makeI64();
+        }
+    }
+
+    switch (width) {
+        case 8:
+            return TypeInfo::makeU8();
+        case 16:
+            return TypeInfo::makeU16();
+        case 32:
+            return TypeInfo::makeU32();
+        default:
+            return TypeInfo::makeU64();
+    }
+}
+
 bool hasStrictDirective(std::string_view source) {
     return source.rfind("#!strict", 0) == 0;
 }
@@ -462,6 +504,9 @@ bool Compiler::isAssignmentOperator(TokenType type) const {
         case TokenType::MINUS_EQUAL:
         case TokenType::STAR_EQUAL:
         case TokenType::SLASH_EQUAL:
+        case TokenType::AMPERSAND_EQUAL:
+        case TokenType::CARET_EQUAL:
+        case TokenType::PIPE_EQUAL:
         case TokenType::SHIFT_LEFT_EQUAL:
         case TokenType::SHIFT_RIGHT_EQUAL:
         case TokenType::PLUS_PLUS:
@@ -713,6 +758,15 @@ bool Compiler::emitCompoundBinary(TokenType assignmentType,
         case TokenType::SLASH_EQUAL:
             emitByte(arithmeticOpcode(assignmentType, arithmeticType));
             return true;
+        case TokenType::AMPERSAND_EQUAL:
+            emitByte(OpCode::BITWISE_AND);
+            return true;
+        case TokenType::CARET_EQUAL:
+            emitByte(OpCode::BITWISE_XOR);
+            return true;
+        case TokenType::PIPE_EQUAL:
+            emitByte(OpCode::BITWISE_OR);
+            return true;
         case TokenType::SHIFT_LEFT_EQUAL:
             emitByte(OpCode::SHIFT_LEFT);
             return true;
@@ -853,6 +907,9 @@ void Compiler::namedVariable(const Token& name, bool canAssign) {
             assignmentType == TokenType::MINUS_EQUAL ||
             assignmentType == TokenType::STAR_EQUAL ||
             assignmentType == TokenType::SLASH_EQUAL ||
+            assignmentType == TokenType::AMPERSAND_EQUAL ||
+            assignmentType == TokenType::CARET_EQUAL ||
+            assignmentType == TokenType::PIPE_EQUAL ||
             assignmentType == TokenType::SHIFT_LEFT_EQUAL ||
             assignmentType == TokenType::SHIFT_RIGHT_EQUAL) {
             if (resolved.isConst) {
@@ -870,7 +927,15 @@ void Compiler::namedVariable(const Token& name, bool canAssign) {
             expression();
             TypeRef rhsType = popExprType();
             emitCompoundBinary(assignmentType, declaredType, rhsType);
-            TypeRef resultType = numericPromotion(declaredType, rhsType);
+            TypeRef resultType = declaredType;
+            if (assignmentType == TokenType::PLUS_EQUAL ||
+                assignmentType == TokenType::MINUS_EQUAL ||
+                assignmentType == TokenType::STAR_EQUAL ||
+                assignmentType == TokenType::SLASH_EQUAL) {
+                resultType = numericPromotion(declaredType, rhsType);
+            } else if (isBitwiseAssignmentOperator(assignmentType)) {
+                resultType = bitwiseResultType(declaredType, rhsType);
+            }
             emitCoerceToType(resultType ? resultType : declaredType,
                              declaredType);
             emitBytes(setOp, arg);
@@ -2428,6 +2493,7 @@ Compiler::ParseRule Compiler::getRule(TokenType type) {
                 nullptr, PREC_NONE};
 
         case TokenType::BANG:
+        case TokenType::TILDE:
             return ParseRule{[this](bool canAssign) { unary(canAssign); },
                              nullptr, PREC_NONE};
         case TokenType::PLUS_PLUS:
@@ -2465,6 +2531,18 @@ Compiler::ParseRule Compiler::getRule(TokenType type) {
             return ParseRule{nullptr,
                              [this](bool canAssign) { binary(canAssign); },
                              PREC_SHIFT};
+        case TokenType::AMPERSAND:
+            return ParseRule{nullptr,
+                             [this](bool canAssign) { binary(canAssign); },
+                             PREC_BITWISE_AND};
+        case TokenType::CARET:
+            return ParseRule{nullptr,
+                             [this](bool canAssign) { binary(canAssign); },
+                             PREC_BITWISE_XOR};
+        case TokenType::PIPE:
+            return ParseRule{nullptr,
+                             [this](bool canAssign) { binary(canAssign); },
+                             PREC_BITWISE_OR};
         case TokenType::EQUAL_EQUAL:
         case TokenType::BANG_EQUAL:
             return ParseRule{nullptr,
@@ -2751,6 +2829,10 @@ void Compiler::unary(bool canAssign) {
             emitByte(OpCode::NOT);
             resultType = TypeInfo::makeBool();
             break;
+        case TokenType::TILDE:
+            emitByte(OpCode::BITWISE_NOT);
+            resultType = operandType;
+            break;
         case TokenType::MINUS:
             if (m_strictMode && operandType && operandType->isInteger()) {
                 emitByte(OpCode::INT_NEGATE);
@@ -2939,6 +3021,18 @@ void Compiler::binary(bool canAssign) {
             emitByte(OpCode::SHIFT_RIGHT);
             resultType = leftType;
             break;
+        case TokenType::AMPERSAND:
+            emitByte(OpCode::BITWISE_AND);
+            resultType = bitwiseResultType(leftType, rightType);
+            break;
+        case TokenType::CARET:
+            emitByte(OpCode::BITWISE_XOR);
+            resultType = bitwiseResultType(leftType, rightType);
+            break;
+        case TokenType::PIPE:
+            emitByte(OpCode::BITWISE_OR);
+            resultType = bitwiseResultType(leftType, rightType);
+            break;
         case TokenType::EQUAL_EQUAL:
             emitByte(OpCode::EQUAL_OP);
             resultType = TypeInfo::makeBool();
@@ -3047,6 +3141,9 @@ void Compiler::dot(bool canAssign) {
             assignmentType == TokenType::MINUS_EQUAL ||
             assignmentType == TokenType::STAR_EQUAL ||
             assignmentType == TokenType::SLASH_EQUAL ||
+            assignmentType == TokenType::AMPERSAND_EQUAL ||
+            assignmentType == TokenType::CARET_EQUAL ||
+            assignmentType == TokenType::PIPE_EQUAL ||
             assignmentType == TokenType::SHIFT_LEFT_EQUAL ||
             assignmentType == TokenType::SHIFT_RIGHT_EQUAL) {
             advance();
@@ -3121,6 +3218,9 @@ void Compiler::subscript(bool canAssign) {
         assignmentType == TokenType::MINUS_EQUAL ||
         assignmentType == TokenType::STAR_EQUAL ||
         assignmentType == TokenType::SLASH_EQUAL ||
+        assignmentType == TokenType::AMPERSAND_EQUAL ||
+        assignmentType == TokenType::CARET_EQUAL ||
+        assignmentType == TokenType::PIPE_EQUAL ||
         assignmentType == TokenType::SHIFT_LEFT_EQUAL ||
         assignmentType == TokenType::SHIFT_RIGHT_EQUAL) {
         advance();

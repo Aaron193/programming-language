@@ -73,6 +73,15 @@ static bool valueToBitwiseUnsignedInt(const Value& value, uint64_t& out) {
     return false;
 }
 
+static bool valueToBitwiseShiftAmount(const Value& value, uint32_t& out) {
+    uint64_t raw = 0;
+    if (!valueToBitwiseUnsignedInt(value, raw)) {
+        return false;
+    }
+    out = static_cast<uint32_t>(raw) & 63u;
+    return true;
+}
+
 static bool valueToDouble(const Value& value, double& out) {
     if (value.isNumber()) {
         out = value.asNumber();
@@ -3619,21 +3628,19 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
         VM_CASE(SHIFT_LEFT) {
             Value b = m_stack.pop();
             Value a = m_stack.pop();
-            int64_t shift = 0;
-            if (!valueToSignedInt(b, shift)) {
-                return runtimeError("Operands must be numbers for '<<'.");
+            uint32_t amount = 0;
+            if (!valueToBitwiseShiftAmount(b, amount)) {
+                return runtimeError("Operands must be integers for '<<'.");
             }
 
-            uint32_t amount = static_cast<uint32_t>(shift) & 63u;
             if (a.isUnsignedInt()) {
                 m_stack.push(Value(a.asUnsignedInt() << amount));
-            } else {
-                int64_t lhs = 0;
-                if (!valueToSignedInt(a, lhs)) {
-                    return runtimeError("Operands must be numbers for '<<'.");
-                }
+            } else if (a.isSignedInt()) {
+                int64_t lhs = a.asSignedInt();
                 m_stack.push(Value(static_cast<int64_t>(
                     static_cast<uint64_t>(lhs) << amount)));
+            } else {
+                return runtimeError("Operands must be integers for '<<'.");
             }
             DISPATCH();
         }
@@ -3641,64 +3648,87 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
         VM_CASE(SHIFT_RIGHT) {
             Value b = m_stack.pop();
             Value a = m_stack.pop();
-            int64_t shift = 0;
-            if (!valueToSignedInt(b, shift)) {
-                return runtimeError("Operands must be numbers for '>>'.");
+            uint32_t amount = 0;
+            if (!valueToBitwiseShiftAmount(b, amount)) {
+                return runtimeError("Operands must be integers for '>>'.");
             }
 
-            uint32_t amount = static_cast<uint32_t>(shift) & 63u;
             if (a.isUnsignedInt()) {
                 m_stack.push(Value(a.asUnsignedInt() >> amount));
+            } else if (a.isSignedInt()) {
+                m_stack.push(Value(a.asSignedInt() >> amount));
             } else {
-                int64_t lhs = 0;
-                if (!valueToSignedInt(a, lhs)) {
-                    return runtimeError("Operands must be numbers for '>>'.");
-                }
-                m_stack.push(Value(lhs >> amount));
+                return runtimeError("Operands must be integers for '>>'.");
             }
             DISPATCH();
         }
 
         VM_CASE(BITWISE_AND) {
+            Value rhsValue = m_stack.pop();
+            Value lhsValue = m_stack.pop();
             uint64_t rhs = 0;
             uint64_t lhs = 0;
-            if (!valueToBitwiseUnsignedInt(m_stack.pop(), rhs) ||
-                !valueToBitwiseUnsignedInt(m_stack.pop(), lhs)) {
+            if (!valueToBitwiseUnsignedInt(rhsValue, rhs) ||
+                !valueToBitwiseUnsignedInt(lhsValue, lhs)) {
                 return runtimeError("Operands must be integers for '&'.");
             }
-            m_stack.push(Value(lhs & rhs));
+            uint64_t result = lhs & rhs;
+            if (lhsValue.isSignedInt() && rhsValue.isSignedInt()) {
+                m_stack.push(Value(static_cast<int64_t>(result)));
+            } else {
+                m_stack.push(Value(result));
+            }
             DISPATCH();
         }
 
         VM_CASE(BITWISE_OR) {
+            Value rhsValue = m_stack.pop();
+            Value lhsValue = m_stack.pop();
             uint64_t rhs = 0;
             uint64_t lhs = 0;
-            if (!valueToBitwiseUnsignedInt(m_stack.pop(), rhs) ||
-                !valueToBitwiseUnsignedInt(m_stack.pop(), lhs)) {
+            if (!valueToBitwiseUnsignedInt(rhsValue, rhs) ||
+                !valueToBitwiseUnsignedInt(lhsValue, lhs)) {
                 return runtimeError("Operands must be integers for '|'.");
             }
-            m_stack.push(Value(lhs | rhs));
+            uint64_t result = lhs | rhs;
+            if (lhsValue.isSignedInt() && rhsValue.isSignedInt()) {
+                m_stack.push(Value(static_cast<int64_t>(result)));
+            } else {
+                m_stack.push(Value(result));
+            }
             DISPATCH();
         }
 
         VM_CASE(BITWISE_XOR) {
+            Value rhsValue = m_stack.pop();
+            Value lhsValue = m_stack.pop();
             uint64_t rhs = 0;
             uint64_t lhs = 0;
-            if (!valueToBitwiseUnsignedInt(m_stack.pop(), rhs) ||
-                !valueToBitwiseUnsignedInt(m_stack.pop(), lhs)) {
+            if (!valueToBitwiseUnsignedInt(rhsValue, rhs) ||
+                !valueToBitwiseUnsignedInt(lhsValue, lhs)) {
                 return runtimeError("Operands must be integers for '^'.");
             }
-            m_stack.push(Value(lhs ^ rhs));
+            uint64_t result = lhs ^ rhs;
+            if (lhsValue.isSignedInt() && rhsValue.isSignedInt()) {
+                m_stack.push(Value(static_cast<int64_t>(result)));
+            } else {
+                m_stack.push(Value(result));
+            }
             DISPATCH();
         }
 
         VM_CASE(BITWISE_NOT) {
-            uint64_t value = 0;
-            if (!valueToBitwiseUnsignedInt(m_stack.pop(), value)) {
-                return runtimeError("Operand must be an integer for '~'.");
+            Value value = m_stack.pop();
+            if (value.isSignedInt()) {
+                m_stack.push(Value(static_cast<int64_t>(
+                    ~static_cast<uint64_t>(value.asSignedInt()))));
+                DISPATCH();
             }
-            m_stack.push(Value(~value));
-            DISPATCH();
+            if (value.isUnsignedInt()) {
+                m_stack.push(Value(~value.asUnsignedInt()));
+                DISPATCH();
+            }
+            return runtimeError("Operand must be an integer for '~'.");
         }
 
         VM_CASE(WIDEN_INT) {
