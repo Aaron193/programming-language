@@ -11,7 +11,7 @@ if [[ ! -x "$INTERPRETER" ]]; then
     exit 1
 fi
 
-PASS_FILE="$SCRIPT_DIR/sample_inherit_field.expr"
+PASS_FILE="$SCRIPT_DIR/sample_inherit_field.mog"
 
 if ! "$INTERPRETER" "$PASS_FILE" >/tmp/property_access_pass.out 2>/tmp/property_access_pass.err; then
     echo "[FAIL] Expected inherited field access to succeed: $PASS_FILE"

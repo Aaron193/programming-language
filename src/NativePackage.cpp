@@ -44,7 +44,7 @@ bool looksLikeSourceModuleSpecifier(const std::string& rawImportPath) {
         return true;
     }
 
-    return path.extension() == ".expr";
+    return path.extension().string() == kSourceModuleExtension;
 }
 
 }  // namespace
@@ -472,6 +472,13 @@ bool resolveImportTarget(const std::string& importerPath,
     outTarget.rawSpecifier = rawImportPath;
 
     if (looksLikeSourceModuleSpecifier(rawImportPath)) {
+        if (!hasSourceModuleExtension(rawImportPath)) {
+            outError = "Source module imports must use the " +
+                       std::string(kSourceModuleExtension) + " extension: '" +
+                       rawImportPath + "'.";
+            return false;
+        }
+
         std::string resolvedPath = resolveImportPath(importerPath, rawImportPath);
         if (resolvedPath.empty()) {
             outError = "Cannot find module '" + rawImportPath + "'.";

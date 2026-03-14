@@ -1,5 +1,0 @@
-import first from "./modules/cache_target.expr";
-import second from "./modules/cache_target.expr";
-
-print(first.VALUE);
-print(second.VALUE);

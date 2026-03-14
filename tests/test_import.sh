@@ -15,16 +15,16 @@ PASS=0
 FAIL=0
 
 SUCCESS_FILES=(
-    "$SCRIPT_DIR/sample_import_basic.expr"
-    "$SCRIPT_DIR/sample_import_named.expr"
-    "$SCRIPT_DIR/sample_import_alias.expr"
-    "$SCRIPT_DIR/sample_import_class.expr"
-    "$SCRIPT_DIR/sample_import_nested.expr"
-    "$SCRIPT_DIR/sample_import_native_package.expr"
-    "$SCRIPT_DIR/sample_import_native_named.expr"
-    "$SCRIPT_DIR/sample_import_native_legacy.expr"
-    "$SCRIPT_DIR/sample_import_native_handle.expr"
-    "$SCRIPT_DIR/sample_import_native_handle_typed.expr"
+    "$SCRIPT_DIR/sample_import_basic.mog"
+    "$SCRIPT_DIR/sample_import_named.mog"
+    "$SCRIPT_DIR/sample_import_alias.mog"
+    "$SCRIPT_DIR/sample_import_class.mog"
+    "$SCRIPT_DIR/sample_import_nested.mog"
+    "$SCRIPT_DIR/sample_import_native_package.mog"
+    "$SCRIPT_DIR/sample_import_native_named.mog"
+    "$SCRIPT_DIR/sample_import_native_legacy.mog"
+    "$SCRIPT_DIR/sample_import_native_handle.mog"
+    "$SCRIPT_DIR/sample_import_native_handle_typed.mog"
 )
 
 for file in "${SUCCESS_FILES[@]}"; do
@@ -42,7 +42,7 @@ for file in "${SUCCESS_FILES[@]}"; do
     echo
 done
 
-HANDLE_FILE="$SCRIPT_DIR/sample_import_native_handle.expr"
+HANDLE_FILE="$SCRIPT_DIR/sample_import_native_handle.mog"
 echo "========================================"
 echo "Running handle finalizer check: $HANDLE_FILE"
 echo "----------------------------------------"
@@ -68,7 +68,7 @@ else
     fi
 fi
 
-CACHE_FILE="$SCRIPT_DIR/sample_import_cache.expr"
+CACHE_FILE="$SCRIPT_DIR/sample_import_cache.mog"
 echo "========================================"
 echo "Running cache check: $CACHE_FILE"
 echo "----------------------------------------"
@@ -96,7 +96,7 @@ fi
 
 echo
 
-CYCLE_FILE="$SCRIPT_DIR/sample_import_cycle.expr"
+CYCLE_FILE="$SCRIPT_DIR/sample_import_cycle.mog"
 echo "========================================"
 echo "Running (expect runtime error): $CYCLE_FILE"
 echo "----------------------------------------"
@@ -111,7 +111,7 @@ fi
 
 echo
 
-SCOPED_EXPORT_FILE="$SCRIPT_DIR/sample_export_scoped_error.expr"
+SCOPED_EXPORT_FILE="$SCRIPT_DIR/sample_export_scoped_error.mog"
 echo "========================================"
 echo "Running (expect compile error): $SCOPED_EXPORT_FILE"
 echo "----------------------------------------"
@@ -126,7 +126,7 @@ fi
 
 echo
 
-MISSING_NATIVE_FILE="$SCRIPT_DIR/sample_import_native_missing.expr"
+MISSING_NATIVE_FILE="$SCRIPT_DIR/sample_import_native_missing.mog"
 echo "========================================"
 echo "Running (expect compile error): $MISSING_NATIVE_FILE"
 echo "----------------------------------------"
@@ -141,7 +141,7 @@ fi
 
 echo
 
-TYPE_MISMATCH_FILE="$SCRIPT_DIR/sample_import_native_type_mismatch.expr"
+TYPE_MISMATCH_FILE="$SCRIPT_DIR/sample_import_native_type_mismatch.mog"
 echo "========================================"
 echo "Running (expect compile error): $TYPE_MISMATCH_FILE"
 echo "----------------------------------------"
@@ -156,7 +156,7 @@ fi
 
 echo
 
-INVALID_ID_FILE="$SCRIPT_DIR/sample_import_native_invalid_id.expr"
+INVALID_ID_FILE="$SCRIPT_DIR/sample_import_native_invalid_id.mog"
 echo "========================================"
 echo "Running (expect compile error): $INVALID_ID_FILE"
 echo "----------------------------------------"
@@ -171,7 +171,7 @@ fi
 
 echo
 
-MISMATCH_FILE="$SCRIPT_DIR/sample_import_native_metadata_mismatch.expr"
+MISMATCH_FILE="$SCRIPT_DIR/sample_import_native_metadata_mismatch.mog"
 echo "========================================"
 echo "Running (expect compile error): $MISMATCH_FILE"
 echo "----------------------------------------"
@@ -186,7 +186,7 @@ fi
 
 echo
 
-FOREIGN_HANDLE_FILE="$SCRIPT_DIR/fail_import_native_handle_foreign.expr"
+FOREIGN_HANDLE_FILE="$SCRIPT_DIR/fail_import_native_handle_foreign.mog"
 echo "========================================"
 echo "Running (expect runtime error): $FOREIGN_HANDLE_FILE"
 echo "----------------------------------------"
@@ -201,10 +201,34 @@ fi
 
 echo
 
+INVALID_SOURCE_EXTENSION_FILE="$SCRIPT_DIR/fail_import_expr_extension.mog"
+echo "========================================"
+echo "Running (expect compile error): $INVALID_SOURCE_EXTENSION_FILE"
+echo "----------------------------------------"
+
+set +e
+INVALID_SOURCE_EXTENSION_OUTPUT="$($INTERPRETER "$INVALID_SOURCE_EXTENSION_FILE" 2>&1)"
+INVALID_SOURCE_EXTENSION_STATUS=$?
+set -e
+
+if [[ $INVALID_SOURCE_EXTENSION_STATUS -eq 0 ]]; then
+    echo "[FAIL] expected compile error for .expr source-module import"
+    FAIL=$((FAIL + 1))
+elif grep -q "Source module imports must use the .mog extension" <<< "$INVALID_SOURCE_EXTENSION_OUTPUT"; then
+    echo "[PASS] .expr source-module import rejected with extension error"
+    PASS=$((PASS + 1))
+else
+    echo "[FAIL] missing .mog extension error for .expr source-module import"
+    echo "$INVALID_SOURCE_EXTENSION_OUTPUT"
+    FAIL=$((FAIL + 1))
+fi
+
+echo
+
 WINDOW_PACKAGE_SO="$PROJECT_ROOT/build/packages/mog/window/package.so"
 WINDOW_PACKAGE_DYLIB="$PROJECT_ROOT/build/packages/mog/window/package.dylib"
 if [[ -f "$WINDOW_PACKAGE_SO" || -f "$WINDOW_PACKAGE_DYLIB" ]]; then
-    WINDOW_FILE="$SCRIPT_DIR/sample_mog_window.expr"
+    WINDOW_FILE="$SCRIPT_DIR/sample_mog_window.mog"
     echo "========================================"
     echo "Running SDL window smoke test: $WINDOW_FILE"
     echo "----------------------------------------"
@@ -218,7 +242,7 @@ if [[ -f "$WINDOW_PACKAGE_SO" || -f "$WINDOW_PACKAGE_DYLIB" ]]; then
     fi
     echo
 
-    WINDOW_RENDER_FILE="$SCRIPT_DIR/sample_mog_window_render.expr"
+    WINDOW_RENDER_FILE="$SCRIPT_DIR/sample_mog_window_render.mog"
     echo "========================================"
     echo "Running SDL render smoke test: $WINDOW_RENDER_FILE"
     echo "----------------------------------------"

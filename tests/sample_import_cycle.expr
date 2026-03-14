@@ -1,3 +1,0 @@
-import cyc from "./modules/cycle_a.expr";
-
-print(cyc.A);

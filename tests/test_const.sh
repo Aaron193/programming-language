@@ -4,8 +4,8 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 INTERPRETER="$PROJECT_ROOT/build/interpreter"
-POSITIVE_TARGET="$SCRIPT_DIR/sample_const.expr"
-NEGATIVE_TARGET="$SCRIPT_DIR/types/errors/assign_to_const.expr"
+POSITIVE_TARGET="$SCRIPT_DIR/sample_const.mog"
+NEGATIVE_TARGET="$SCRIPT_DIR/types/errors/assign_to_const.mog"
 
 if [[ ! -x "$INTERPRETER" ]]; then
     echo "Interpreter not found at $INTERPRETER"

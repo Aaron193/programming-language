@@ -1,0 +1,3 @@
+import { Counter } from "./modules/class_mod.mog";
+
+print(Counter() != null);

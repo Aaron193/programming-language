@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "ModuleResolver.hpp"
 #include "PackageManifest.hpp"
 #include "VirtualMachine.hpp"
 
@@ -24,7 +25,7 @@ static void printUsage(const char* executable) {
         << " [--trace] [--show-return] [--disassemble] [--strict]"
         << " [--package-path <dir>|--package-path=<dir>]"
         << " [--validate-package <dir>|--validate-package=<dir>]"
-        << " [source file]"
+        << " [source.mog file]"
         << std::endl;
 }
 
@@ -112,6 +113,12 @@ static int runValidatePackage(const CliOptions& options) {
 }
 
 static int runFile(const CliOptions& options) {
+    if (!hasSourceModuleExtension(options.sourceFile)) {
+        std::cerr << "Error: Source files must use the " << kSourceModuleExtension
+                  << " extension: " << options.sourceFile << std::endl;
+        return 1;
+    }
+
     std::ifstream file(options.sourceFile);
     if (!file) {
         std::cerr << "Error: Could not open source file " << options.sourceFile

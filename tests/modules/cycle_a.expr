@@ -1,3 +1,0 @@
-import b from "./cycle_b.expr";
-
-export i32 A = b.B + 1;

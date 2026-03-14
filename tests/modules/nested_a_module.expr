@@ -1,3 +1,0 @@
-import { B } from "./nested_b.expr";
-
-export i32 A = B + 1;

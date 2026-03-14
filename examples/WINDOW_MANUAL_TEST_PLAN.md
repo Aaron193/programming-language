@@ -12,8 +12,8 @@ Implemented:
 
 - `window.show(win) -> void`
 - `window.hide(win) -> void`
-- `examples/window_open.expr`
-- `examples/window_events.expr`
+- `examples/window_open.mog`
+- `examples/window_events.mog`
 - `examples/README.md`
 - main `README.md` updates that distinguish headless tests from manual demos
 
@@ -21,18 +21,18 @@ Verified in this environment:
 
 - `./build.sh`
 - `bash tests/test_import.sh`
-- `env SDL_VIDEODRIVER=dummy ./build/interpreter examples/window_open.expr`
+- `env SDL_VIDEODRIVER=dummy ./build/interpreter examples/window_open.mog`
 
 Still pending:
 
-- manual desktop validation that `examples/window_open.expr` opens a visible OS
+- manual desktop validation that `examples/window_open.mog` opens a visible OS
   window
-- manual desktop validation that `examples/window_events.expr` exits cleanly on
+- manual desktop validation that `examples/window_events.mog` exits cleanly on
   window close and Escape in a real interactive session
 
 ## Current State
 
-- `tests/sample_mog_window.expr` exercises package loading and basic calls.
+- `tests/sample_mog_window.mog` exercises package loading and basic calls.
 - The native package currently creates windows with `SDL_WINDOW_HIDDEN`.
 - The existing SDL smoke path is correct for CI/headless testing, but it does
   not verify that a developer can actually see and interact with a real window.
@@ -59,15 +59,15 @@ demos.
 
 Recommended first files:
 
-- `examples/window_open.expr`
-- `examples/window_events.expr`
+- `examples/window_open.mog`
+- `examples/window_events.mog`
 - `examples/README.md`
 
 Example responsibilities:
 
-- `window_open.expr`: create, show, clear, present, wait briefly via
+- `window_open.mog`: create, show, clear, present, wait briefly via
   `clock()`, close
-- `window_events.expr`: create, show, poll events in a loop, print event kinds,
+- `window_events.mog`: create, show, poll events in a loop, print event kinds,
   exit on `"quit"` or Escape
 - `examples/README.md`: explain how to run visible-window examples on a machine
   with SDL2 installed
@@ -77,14 +77,14 @@ Example responsibilities:
 1. Extend `packages/mog/window/package.cpp` with `show` and `hide`
    functions using SDL window visibility APIs.
 2. Add the new exported signatures to the package registration metadata.
-3. Keep `window.create(...)` hidden by default so `tests/sample_mog_window.expr`
+3. Keep `window.create(...)` hidden by default so `tests/sample_mog_window.mog`
    and CI remain stable.
-4. Create `examples/window_open.expr` as the first visible manual validation
+4. Create `examples/window_open.mog` as the first visible manual validation
    script.
-5. Create `examples/window_events.expr` as the first interactive event-loop
+5. Create `examples/window_events.mog` as the first interactive event-loop
    demo.
 6. Add `examples/README.md` with run instructions:
-   `./build/interpreter examples/window_open.expr`
+   `./build/interpreter examples/window_open.mog`
 7. Update the main `README.md` to distinguish:
    automated headless tests in `tests/`
    manual visible demos in `examples/`
@@ -95,9 +95,9 @@ Example responsibilities:
 
 - `./build.sh` still works with SDL2 present.
 - `bash tests/test_import.sh` still passes in headless mode.
-- Running `./build/interpreter examples/window_open.expr` opens a visible
+- Running `./build/interpreter examples/window_open.mog` opens a visible
   window on a developer machine.
-- Running `./build/interpreter examples/window_events.expr` shows a visible
+- Running `./build/interpreter examples/window_events.mog` shows a visible
   window and exits cleanly when the user closes it.
 - No visible-window requirement is added to CI or headless automated tests.
 

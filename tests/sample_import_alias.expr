@@ -1,3 +1,0 @@
-import { add as sum } from "./modules/math.expr";
-
-print(sum(10, 5));

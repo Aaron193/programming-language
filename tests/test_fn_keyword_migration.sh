@@ -4,7 +4,7 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 INTERPRETER="$PROJECT_ROOT/build/interpreter"
-TARGET="$SCRIPT_DIR/types/errors/legacy_function_keyword.expr"
+TARGET="$SCRIPT_DIR/types/errors/legacy_function_keyword.mog"
 
 if [[ ! -x "$INTERPRETER" ]]; then
     echo "Interpreter not found at $INTERPRETER"

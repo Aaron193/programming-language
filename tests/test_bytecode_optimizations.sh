@@ -4,7 +4,7 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 INTERPRETER="$PROJECT_ROOT/build/interpreter"
-TARGET="$SCRIPT_DIR/sample_strict_loop_optimizations.expr"
+TARGET="$SCRIPT_DIR/sample_strict_loop_optimizations.mog"
 
 if [[ ! -x "$INTERPRETER" ]]; then
     echo "Interpreter not found at $INTERPRETER"

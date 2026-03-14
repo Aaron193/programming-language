@@ -12,9 +12,9 @@ if [[ ! -x "$INTERPRETER" ]]; then
 fi
 
 FILES=(
-    "$SCRIPT_DIR/sample_native_error_len.expr"
-    "$SCRIPT_DIR/sample_native_error_sqrt.expr"
-    "$SCRIPT_DIR/sample_native_error_num.expr"
+    "$SCRIPT_DIR/sample_native_error_len.mog"
+    "$SCRIPT_DIR/sample_native_error_sqrt.mog"
+    "$SCRIPT_DIR/sample_native_error_num.mog"
 )
 
 passed=0

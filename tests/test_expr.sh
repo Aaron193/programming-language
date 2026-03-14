@@ -11,14 +11,14 @@ if [[ ! -x "$INTERPRETER" ]]; then
     exit 1
 fi
 
-FILTER="${1:-$SCRIPT_DIR/*.expr}"
+FILTER="${1:-$SCRIPT_DIR/*.mog}"
 
 shopt -s nullglob
 FILES=( $FILTER )
 shopt -u nullglob
 
 if [[ ${#FILES[@]} -eq 0 ]]; then
-    echo "No expr files matched: $FILTER"
+    echo "No .mog files matched: $FILTER"
     exit 1
 fi
 
@@ -26,7 +26,7 @@ passed=0
 failed=0
 
 for file in "${FILES[@]}"; do
-    if [[ ! -f "$file" || "${file##*.}" != "expr" ]]; then
+    if [[ ! -f "$file" || "${file##*.}" != "mog" ]]; then
         continue
     fi
 
@@ -37,10 +37,10 @@ for file in "${FILES[@]}"; do
     if [[ "$base_name" == sample_native_error_* ]]; then
         continue
     fi
-    if [[ "$base_name" == "sample_compile_multi_error.expr" || "$base_name" == "sample_runtime_stacktrace.expr" || "$base_name" == "sample_legacy_logical_keywords.expr" ]]; then
+    if [[ "$base_name" == "sample_compile_multi_error.mog" || "$base_name" == "sample_runtime_stacktrace.mog" || "$base_name" == "sample_legacy_logical_keywords.mog" ]]; then
         continue
     fi
-    if [[ "$base_name" == "sample_import_cycle.expr" || "$base_name" == "sample_export_scoped_error.expr" || "$base_name" == "sample_import_native_missing.expr" || "$base_name" == "sample_import_native_type_mismatch.expr" || "$base_name" == "sample_import_native_invalid_id.expr" || "$base_name" == "sample_import_native_metadata_mismatch.expr" ]]; then
+    if [[ "$base_name" == "sample_import_cycle.mog" || "$base_name" == "sample_export_scoped_error.mog" || "$base_name" == "sample_import_native_missing.mog" || "$base_name" == "sample_import_native_type_mismatch.mog" || "$base_name" == "sample_import_native_invalid_id.mog" || "$base_name" == "sample_import_native_metadata_mismatch.mog" ]]; then
         continue
     fi
 

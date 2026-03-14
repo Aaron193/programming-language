@@ -8,7 +8,7 @@ INTERPRETER_A="$ROOT_DIR/build/interpreter"
 INTERPRETER_B=""
 LABEL_A="A"
 LABEL_B="B"
-FILTER="$BENCH_DIR/bench_*.expr"
+FILTER="$BENCH_DIR/bench_*.mog"
 ITERATIONS=7
 WARMUP=1
 QUIET=0
@@ -23,7 +23,7 @@ Options:
   --interpreter-b PATH   Interpreter for side B (optional)
   --label-a NAME         Label for side A (default: A)
   --label-b NAME         Label for side B (default: B)
-  --filter GLOB          Benchmark file glob (default: benchmarks/bench_*.expr)
+  --filter GLOB          Benchmark file glob (default: benchmarks/bench_*.mog)
   --iterations N         Timed runs per benchmark (default: 7)
   --warmup N             Warmup runs per benchmark (default: 1)
   --quiet                Suppress progress logs

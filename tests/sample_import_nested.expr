@@ -1,3 +1,0 @@
-import nested from "./modules/nested_a_module.expr";
-
-print(nested.A);

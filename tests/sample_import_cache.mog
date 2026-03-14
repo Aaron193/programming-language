@@ -1,0 +1,5 @@
+import first from "./modules/cache_target.mog";
+import second from "./modules/cache_target.mog";
+
+print(first.VALUE);
+print(second.VALUE);

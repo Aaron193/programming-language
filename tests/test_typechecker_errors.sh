@@ -42,67 +42,67 @@ run_expect_compile_error() {
 failed=0
 
 run_expect_compile_error \
-    "$SCRIPT_DIR/types/errors/assign_str_to_i32.expr" \
+    "$SCRIPT_DIR/types/errors/assign_str_to_i32.mog" \
     "cannot assign 'str' to variable 'age' of type 'i32'" || failed=1
 
 run_expect_compile_error \
-    "$SCRIPT_DIR/types/errors/function_arg_type_mismatch.expr" \
+    "$SCRIPT_DIR/types/errors/function_arg_type_mismatch.mog" \
     "function argument 1 expects 'i32', got 'str'" || failed=1
 
 run_expect_compile_error \
-    "$SCRIPT_DIR/types/errors/return_type_mismatch.expr" \
+    "$SCRIPT_DIR/types/errors/return_type_mismatch.mog" \
     "cannot return 'str' from function returning 'i32'" || failed=1
 
 run_expect_compile_error \
-    "$SCRIPT_DIR/types/errors/invalid_cast_str_to_i32.expr" \
+    "$SCRIPT_DIR/types/errors/invalid_cast_str_to_i32.mog" \
     "cannot cast 'str' to 'i32'" || failed=1
 
 run_expect_compile_error \
-    "$SCRIPT_DIR/types/errors/subtype_assignment_invalid.expr" \
+    "$SCRIPT_DIR/types/errors/subtype_assignment_invalid.mog" \
     "cannot assign 'Animal' to variable 'd' of type 'Dog'" || failed=1
 
 run_expect_compile_error \
-    "$SCRIPT_DIR/types/errors/assign_array_str_to_array_i32.expr" \
+    "$SCRIPT_DIR/types/errors/assign_array_str_to_array_i32.mog" \
     "cannot assign 'Array<str>' to variable 'nums' of type 'Array<i32>'" || failed=1
 
 run_expect_compile_error \
-    "$SCRIPT_DIR/types/errors/assign_dict_value_str_to_bool.expr" \
+    "$SCRIPT_DIR/types/errors/assign_dict_value_str_to_bool.mog" \
     "cannot assign 'Dict<str, str>' to variable 'flags' of type 'Dict<str, bool>'" || failed=1
 
 run_expect_compile_error \
-    "$SCRIPT_DIR/types/errors/assign_null_to_non_optional.expr" \
+    "$SCRIPT_DIR/types/errors/assign_null_to_non_optional.mog" \
     "cannot assign 'null' to variable 'name' of type 'str'" || failed=1
 
 run_expect_compile_error \
-    "$SCRIPT_DIR/types/errors/optional_member_access_without_check.expr" \
+    "$SCRIPT_DIR/types/errors/optional_member_access_without_check.mog" \
     "cannot access members on optional value of type 'Dog?' without a null check" || failed=1
 
 run_expect_compile_error \
-    "$SCRIPT_DIR/types/errors/optional_call_without_check.expr" \
+    "$SCRIPT_DIR/types/errors/optional_call_without_check.mog" \
     "cannot call optional value of type 'Dog?' without a null check" || failed=1
 
 run_expect_compile_error \
-    "$SCRIPT_DIR/types/errors/function_closure_param_count_mismatch.expr" \
+    "$SCRIPT_DIR/types/errors/function_closure_param_count_mismatch.mog" \
     "closure parameter count mismatch: expected 1, got 2." || failed=1
 
 run_expect_compile_error \
-    "$SCRIPT_DIR/types/errors/assign_to_const.expr" \
+    "$SCRIPT_DIR/types/errors/assign_to_const.mog" \
     "cannot assign to const variable 'value'." || failed=1
 
 run_expect_compile_error \
-    "$SCRIPT_DIR/types/errors/compound_assign_to_const.expr" \
+    "$SCRIPT_DIR/types/errors/compound_assign_to_const.mog" \
     "cannot assign to const variable 'total'." || failed=1
 
 run_expect_compile_error \
-    "$SCRIPT_DIR/types/errors/update_const.expr" \
+    "$SCRIPT_DIR/types/errors/update_const.mog" \
     "cannot assign to const variable 'count'." || failed=1
 
 run_expect_compile_error \
-    "$SCRIPT_DIR/types/errors/closure_assign_to_const.expr" \
+    "$SCRIPT_DIR/types/errors/closure_assign_to_const.mog" \
     "cannot assign to const variable 'value'." || failed=1
 
 run_expect_compile_error \
-    "$SCRIPT_DIR/types/errors/assign_handle_foreign_type.expr" \
+    "$SCRIPT_DIR/types/errors/assign_handle_foreign_type.mog" \
     "cannot assign 'handle<examples:counter:CounterHandle>' to variable 'bad' of type 'handle<examples:math:CounterHandle>'" || failed=1
 
 if [[ $failed -ne 0 ]]; then

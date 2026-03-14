@@ -1,3 +1,0 @@
-import { Counter } from "./modules/class_mod.expr";
-
-print(Counter() != null);

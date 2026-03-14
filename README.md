@@ -56,13 +56,13 @@ GCC or Clang is required to build the project.
 ## Run
 
 ```bash
-./build/interpreter path/to/program.expr
+./build/interpreter path/to/program.mog
 ```
 
 Add extra native package roots if needed:
 
 ```bash
-./build/interpreter --package-path /path/to/packages path/to/program.expr
+./build/interpreter --package-path /path/to/packages path/to/program.mog
 ```
 
 Or start REPL:
@@ -80,8 +80,8 @@ The visible `mog:window` demos require SDL2 to be present so the optional
 package is built:
 
 ```bash
-./build/interpreter examples/window_open.expr
-./build/interpreter examples/window_events.expr
+./build/interpreter examples/window_open.mog
+./build/interpreter examples/window_events.mog
 ```
 
 ## Tests
@@ -99,6 +99,7 @@ Run additional suites:
 ./tests/test_compile_recovery.sh
 ./tests/test_runtime_stacktrace.sh
 ./tests/test_cli_flags.sh
+./tests/test_source_extension.sh
 ./tests/test_repl.sh
 ./tests/test_import.sh
 ./tests/test_const.sh
@@ -148,8 +149,8 @@ Build an optimized binary with debug symbols and frame pointers:
 Profile a program or benchmark:
 
 ```bash
-./scripts/profile_callgrind.sh benchmarks/bench_feature_mix.expr
-./scripts/profile_callgrind.sh --inclusive --tree benchmarks/bench_fibonacci.expr
+./scripts/profile_callgrind.sh benchmarks/bench_feature_mix.mog
+./scripts/profile_callgrind.sh --inclusive --tree benchmarks/bench_fibonacci.mog
 ```
 
 Re-annotate an existing Callgrind output without rerunning the program:
@@ -166,9 +167,9 @@ callgrind_annotate --auto=yes build/callgrind/<profile>.out
 
 Recommended profiling targets:
 
-- `benchmarks/bench_fibonacci.expr` for call overhead and dispatch-heavy recursion
-- `benchmarks/bench_sort.expr` and `benchmarks/bench_matrix.expr` for arithmetic and container traffic
-- `benchmarks/bench_feature_mix.expr` for a broader mixed workload
+- `benchmarks/bench_fibonacci.mog` for call overhead and dispatch-heavy recursion
+- `benchmarks/bench_sort.mog` and `benchmarks/bench_matrix.mog` for arithmetic and container traffic
+- `benchmarks/bench_feature_mix.mog` for a broader mixed workload
 
 Notes:
 
@@ -177,7 +178,7 @@ Notes:
 - Linux `perf` is lower overhead, but it only works on machines where perf events are enabled. On such a machine, use:
 
 ```bash
-perf record -g -- ./build/interpreter benchmarks/bench_feature_mix.expr
+perf record -g -- ./build/interpreter benchmarks/bench_feature_mix.mog
 perf report
 ```
 
@@ -194,7 +195,7 @@ export class Vector {}
 Namespace import:
 
 ```expr
-import math from "./math.expr";
+import math from "./math.mog";
 print(math.PI);
 print(math.add(1, 2));
 ```
@@ -202,8 +203,8 @@ print(math.add(1, 2));
 Named import and aliasing:
 
 ```expr
-import { add, PI } from "./math.expr";
-import { add as sum } from "./math.expr";
+import { add, PI } from "./math.mog";
+import { add as sum } from "./math.mog";
 ```
 
 Notes:
@@ -275,7 +276,7 @@ For simple realtime graphics, `mog:window` also exposes:
 - `KEY_SPACE`
 - `KEY_ESCAPE`
 
-See `examples/flappy_bird.expr` for a playable rectangle-rendered demo built
+See `examples/flappy_bird.mog` for a playable rectangle-rendered demo built
 entirely in the language on top of those primitives.
 
 Visible manual demos live under `examples/` and call `window.show(win)` after

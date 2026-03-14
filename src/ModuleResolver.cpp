@@ -2,9 +2,18 @@
 
 #include <filesystem>
 
+bool hasSourceModuleExtension(const std::string& pathText) {
+    if (pathText.empty()) {
+        return false;
+    }
+
+    return std::filesystem::path(pathText).extension().string() ==
+           kSourceModuleExtension;
+}
+
 std::string resolveImportPath(const std::string& importerPath,
                               const std::string& rawImportPath) {
-    if (rawImportPath.empty()) {
+    if (rawImportPath.empty() || !hasSourceModuleExtension(rawImportPath)) {
         return "";
     }
 
@@ -33,5 +42,10 @@ std::string resolveImportPath(const std::string& importerPath,
         return "";
     }
 
-    return resolved.string();
+    std::string resolvedPath = resolved.string();
+    if (!hasSourceModuleExtension(resolvedPath)) {
+        return "";
+    }
+
+    return resolvedPath;
 }
