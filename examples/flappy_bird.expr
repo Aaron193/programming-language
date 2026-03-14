@@ -251,7 +251,8 @@ window.show(win);
 
 GameState state = resetGame();
 bool appRunning = true;
-bool wasSpaceDown = false;
+bool spaceHeld = false;
+bool pendingFlap = false;
 bool announcedDeath = false;
 f64 accumulator = 0.0;
 f64 lastTime = clock();
@@ -265,24 +266,31 @@ while (appRunning) {
         if (kind == "quit") {
             appRunning = false;
         } else {
-            if (kind == "key_down" &&
-                window.eventKeyCode(evt) == window.KEY_ESCAPE) {
-                appRunning = false;
+            if (kind == "key_down") {
+                i64 keyCode = window.eventKeyCode(evt);
+                if (keyCode == window.KEY_ESCAPE) {
+                    appRunning = false;
+                }
+                if (keyCode == window.KEY_SPACE && (spaceHeld == false)) {
+                    pendingFlap = true;
+                    spaceHeld = true;
+                }
+            } else {
+                if (kind == "key_up" &&
+                    window.eventKeyCode(evt) == window.KEY_SPACE) {
+                    spaceHeld = false;
+                }
             }
         }
 
         evt = window.pollEvent(win);
     }
 
-    bool spaceDown = window.isKeyDown(win, window.KEY_SPACE);
-    bool flapPressed = spaceDown && (wasSpaceDown == false);
-    wasSpaceDown = spaceDown;
-
-    if (state.dead && flapPressed) {
+    if (state.dead && pendingFlap) {
         state = resetGame();
         accumulator = 0.0;
         announcedDeath = false;
-        flapPressed = false;
+        pendingFlap = false;
     }
 
     f64 now = clock();
@@ -293,14 +301,12 @@ while (appRunning) {
         frameTime = 0.25;
     }
 
-    accumulator = accumulator + frameTime;
-    bool consumedFlap = false;
+    accumulator += frameTime;
 
     while (accumulator >= FIXED_DT) {
-        bool stepFlap = false;
-        if (flapPressed && (consumedFlap == false)) {
-            stepFlap = true;
-            consumedFlap = true;
+        bool stepFlap = pendingFlap;
+        if (pendingFlap) {
+            pendingFlap = false;
         }
 
         stepGame(state, stepFlap, FIXED_DT);
