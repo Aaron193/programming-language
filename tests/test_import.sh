@@ -22,7 +22,6 @@ SUCCESS_FILES=(
     "$SCRIPT_DIR/sample_import_nested.mog"
     "$SCRIPT_DIR/sample_import_native_package.mog"
     "$SCRIPT_DIR/sample_import_native_named.mog"
-    "$SCRIPT_DIR/sample_import_native_legacy.mog"
     "$SCRIPT_DIR/sample_import_native_handle.mog"
     "$SCRIPT_DIR/sample_import_native_handle_typed.mog"
 )
@@ -166,6 +165,21 @@ if "$INTERPRETER" "$INVALID_ID_FILE"; then
     FAIL=$((FAIL + 1))
 else
     echo "[PASS] invalid native package ID failed as expected"
+    PASS=$((PASS + 1))
+fi
+
+echo
+
+BARE_ID_FILE="$SCRIPT_DIR/sample_import_native_bare_invalid.mog"
+echo "========================================"
+echo "Running (expect compile error): $BARE_ID_FILE"
+echo "----------------------------------------"
+
+if "$INTERPRETER" "$BARE_ID_FILE"; then
+    echo "[FAIL] expected compile error for bare native package ID"
+    FAIL=$((FAIL + 1))
+else
+    echo "[PASS] bare native package ID failed as expected"
     PASS=$((PASS + 1))
 fi
 

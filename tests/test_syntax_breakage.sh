@@ -45,29 +45,9 @@ run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/semicolon_statement.mog" \
     "Semicolons are only allowed inside 'for (...)' clauses." || failed=1
 
-run_expect_compile_error \
-    "$SCRIPT_DIR/types/errors/legacy_class_keyword.mog" \
-    "Keyword 'class' was removed; use 'type Name struct { ... }'." || failed=1
-
-run_expect_compile_error \
-    "$SCRIPT_DIR/types/errors/legacy_import_statement.mog" \
-    "Statement 'import ... from' was removed; use '@import(...)' in a binding." || failed=1
-
-run_expect_compile_error \
-    "$SCRIPT_DIR/types/errors/legacy_function_literal_keyword.mog" \
-    "Keyword 'function' was removed; use 'fn'." || failed=1
-
-run_expect_compile_error \
-    "$SCRIPT_DIR/types/errors/legacy_typed_class_member.mog" \
-    "Legacy typed class members were removed; use 'name Type' fields and 'fn Name(...) Ret'." || failed=1
-
-run_expect_compile_error \
-    "$SCRIPT_DIR/types/errors/legacy_method_missing_fn.mog" \
-    "Methods must start with 'fn'." || failed=1
-
 if [[ $failed -ne 0 ]]; then
     exit 1
 fi
 
-echo "[PASS] syntax breakage tests"
+echo "[PASS] syntax validation tests"
 exit 0

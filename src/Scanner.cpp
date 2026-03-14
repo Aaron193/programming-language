@@ -149,7 +149,6 @@ Token Scanner::nextToken() {
 
         case '-':
             if (match('-')) return createToken(TokenType::MINUS_MINUS);
-            if (match('>')) return createToken(TokenType::ARROW);
             return match('=') ? createToken(TokenType::MINUS_EQUAL)
                               : createToken(TokenType::MINUS);
 
@@ -253,13 +252,11 @@ TokenType Scanner::getIdentifier() {
             break;
 
         case 'c':
-            if (matchKeyword("class", 5)) return TokenType::CLASS;
             if (matchKeyword("const", 5)) return TokenType::CONST;
             break;
 
         case 'e':
             if (matchKeyword("else", 4)) return TokenType::ELSE;
-            if (matchKeyword("export", 6)) return TokenType::EXPORT;
             break;
 
         case 'f':
@@ -268,8 +265,6 @@ TokenType Scanner::getIdentifier() {
             if (matchKeyword("fn", 2)) return TokenType::TYPE_FN;
             if (matchKeyword("false", 5)) return TokenType::FALSE;
             if (matchKeyword("for", 3)) return TokenType::FOR;
-            if (matchKeyword("from", 4)) return TokenType::FROM;
-            if (matchKeyword("function", 8)) return TokenType::FUNCTION;
             break;
 
         case 'i':
@@ -278,7 +273,6 @@ TokenType Scanner::getIdentifier() {
             if (matchKeyword("i32", 3)) return TokenType::TYPE_I32;
             if (matchKeyword("i64", 3)) return TokenType::TYPE_I64;
             if (matchKeyword("if", 2)) return TokenType::IF;
-            if (matchKeyword("import", 6)) return TokenType::IMPORT;
             break;
 
         case 'n':

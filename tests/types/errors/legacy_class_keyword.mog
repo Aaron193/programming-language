@@ -1,3 +1,0 @@
-class Box {
-  value i32
-}

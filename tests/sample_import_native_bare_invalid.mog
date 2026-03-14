@@ -1,0 +1,3 @@
+const nativeMath = @import("example_math")
+
+print(nativeMath.MEANING_OF_LIFE)

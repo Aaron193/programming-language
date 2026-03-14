@@ -139,7 +139,8 @@ class Compiler {
     void rejectStraySemicolon();
     bool recoverLineLeadingContinuation(
         std::initializer_list<TokenType> terminators = {});
-    void skipInvalidLegacyConstruct();
+    bool rejectUnexpectedTrailingToken(
+        std::initializer_list<TokenType> allowedTerminators = {});
     void errorAtCurrent(const std::string& message);
     void errorAt(const Token& token, const std::string& message);
     void consume(TokenType type, const std::string& message);

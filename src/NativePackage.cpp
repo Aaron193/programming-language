@@ -528,25 +528,6 @@ bool resolveImportTarget(const std::string& importerPath,
         return false;
     }
 
-    for (const auto& root :
-         normalizePackageSearchPaths(packageSearchPaths, importerPath)) {
-        std::filesystem::path libraryPath =
-            std::filesystem::path(root) / rawImportPath / kPackageLibraryFileName;
-        std::string resolvedLibraryPath = weaklyCanonicalOrEmpty(libraryPath);
-        if (resolvedLibraryPath.empty()) {
-            continue;
-        }
-
-        outTarget.kind = ImportTargetKind::NATIVE_PACKAGE;
-        outTarget.canonicalId =
-            std::string(kNativeImportPrefix) + resolvedLibraryPath;
-        outTarget.resolvedPath = resolvedLibraryPath;
-        outTarget.displayName = rawImportPath;
-        outTarget.packageName = rawImportPath;
-        outTarget.isLegacyBarePackage = true;
-        return true;
-    }
-
     outError = "Cannot find module or native package '" + rawImportPath + "'.";
     return false;
 }
@@ -657,25 +638,6 @@ bool loadNativePackageDescriptor(const std::string& libraryPath,
         functionCount = registration->function_count;
         constants = registration->constants;
         constantCount = registration->constant_count;
-    } else if (registrationHeader->abi_version ==
-               EXPR_NATIVE_PACKAGE_LEGACY_ABI_VERSION) {
-        const auto* legacyRegistration =
-            reinterpret_cast<const ExprPackageRegistrationV1*>(registration);
-        if (legacyRegistration->package_name == nullptr ||
-            legacyRegistration->package_name[0] == '\0') {
-            outError = "Native package '" + libraryPath +
-                       "' did not declare a package name.";
-            closeHandle();
-            return false;
-        }
-
-        outDescriptor.packageName = legacyRegistration->package_name;
-        outDescriptor.packageId = outDescriptor.packageName;
-        outDescriptor.isLegacyAbi = true;
-        functions = legacyRegistration->functions;
-        functionCount = legacyRegistration->function_count;
-        constants = legacyRegistration->constants;
-        constantCount = legacyRegistration->constant_count;
     } else {
         outError = "Native package '" + libraryPath +
                    "' has ABI version " +
@@ -683,8 +645,7 @@ bool loadNativePackageDescriptor(const std::string& libraryPath,
                    ", expected " +
                    std::to_string(EXPR_NATIVE_PACKAGE_ABI_VERSION) + " or " +
                    std::to_string(EXPR_NATIVE_PACKAGE_NAMESPACED_ABI_VERSION) +
-                   " or " +
-                   std::to_string(EXPR_NATIVE_PACKAGE_LEGACY_ABI_VERSION) + ".";
+                   ".";
         closeHandle();
         return false;
     }

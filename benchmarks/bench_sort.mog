@@ -13,7 +13,7 @@ while (i < arr.size()) {
   var j i32 = i - 1
   var shifting bool = true
 
-  while (j >= 0 and shifting) {
+  while (j >= 0 && shifting) {
     if (arr[j] > key) {
       arr[j + 1] = arr[j]
       j = j - 1

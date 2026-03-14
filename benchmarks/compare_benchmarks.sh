@@ -9,6 +9,8 @@ INTERPRETER_B=""
 LABEL_A="A"
 LABEL_B="B"
 FILTER="$BENCH_DIR/bench_*.mog"
+FILTER_A=""
+FILTER_B=""
 ITERATIONS=7
 WARMUP=1
 QUIET=0
@@ -23,7 +25,9 @@ Options:
   --interpreter-b PATH   Interpreter for side B (optional)
   --label-a NAME         Label for side A (default: A)
   --label-b NAME         Label for side B (default: B)
-  --filter GLOB          Benchmark file glob (default: benchmarks/bench_*.mog)
+  --filter GLOB          Benchmark file glob for both sides
+  --filter-a GLOB        Benchmark file glob for side A
+  --filter-b GLOB        Benchmark file glob for side B
   --iterations N         Timed runs per benchmark (default: 7)
   --warmup N             Warmup runs per benchmark (default: 1)
   --quiet                Suppress progress logs
@@ -33,6 +37,25 @@ Notes:
   - Benchmarks are expected to print elapsed time on the last line.
   - If --interpreter-b is omitted, only side A statistics are reported.
 EOF
+}
+
+resolve_executable() {
+  local value="$1"
+  if [[ "$value" == */* ]]; then
+    if [[ -x "$value" ]]; then
+      printf '%s\n' "$value"
+      return 0
+    fi
+  else
+    local resolved
+    resolved="$(command -v "$value" 2>/dev/null || true)"
+    if [[ -n "$resolved" && -x "$resolved" ]]; then
+      printf '%s\n' "$resolved"
+      return 0
+    fi
+  fi
+
+  return 1
 }
 
 while [[ $# -gt 0 ]]; do
@@ -55,6 +78,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --filter)
       FILTER="$2"
+      shift 2
+      ;;
+    --filter-a)
+      FILTER_A="$2"
+      shift 2
+      ;;
+    --filter-b)
+      FILTER_B="$2"
       shift 2
       ;;
     --iterations)
@@ -81,12 +112,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ ! -x "$INTERPRETER_A" ]]; then
+if ! INTERPRETER_A="$(resolve_executable "$INTERPRETER_A")"; then
   echo "Interpreter A not found/executable: $INTERPRETER_A" >&2
   exit 1
 fi
 
-if [[ -n "$INTERPRETER_B" && ! -x "$INTERPRETER_B" ]]; then
+if [[ -n "$INTERPRETER_B" ]] && ! INTERPRETER_B="$(resolve_executable "$INTERPRETER_B")"; then
   echo "Interpreter B not found/executable: $INTERPRETER_B" >&2
   exit 1
 fi
@@ -101,10 +132,26 @@ if ! [[ "$WARMUP" =~ ^[0-9]+$ ]]; then
   exit 1
 fi
 
-mapfile -t BENCH_FILES < <(compgen -G "$FILTER" | sort)
-if [[ ${#BENCH_FILES[@]} -eq 0 ]]; then
-  echo "No benchmark files matched: $FILTER" >&2
+if [[ -z "$FILTER_A" ]]; then
+  FILTER_A="$FILTER"
+fi
+
+if [[ -z "$FILTER_B" ]]; then
+  FILTER_B="$FILTER"
+fi
+
+mapfile -t BENCH_FILES_A < <(compgen -G "$FILTER_A" | sort)
+if [[ ${#BENCH_FILES_A[@]} -eq 0 ]]; then
+  echo "No benchmark files matched for side A: $FILTER_A" >&2
   exit 1
+fi
+
+if [[ -n "$INTERPRETER_B" ]]; then
+  mapfile -t BENCH_FILES_B < <(compgen -G "$FILTER_B" | sort)
+  if [[ ${#BENCH_FILES_B[@]} -eq 0 ]]; then
+    echo "No benchmark files matched for side B: $FILTER_B" >&2
+    exit 1
+  fi
 fi
 
 TMP_DIR="$(mktemp -d)"
@@ -117,6 +164,46 @@ sanitize_name() {
   value="${value//[^A-Za-z0-9_.-]/_}"
   printf '%s' "$value"
 }
+
+benchmark_key() {
+  local bench="$1"
+  local name
+  name="$(basename "$bench")"
+  printf '%s\n' "${name%.*}"
+}
+
+BENCH_NAMES=()
+declare -a BENCH_LIST_A=()
+declare -a BENCH_LIST_B=()
+declare -A BENCH_MAP_A=()
+declare -A BENCH_MAP_B=()
+
+for bench in "${BENCH_FILES_A[@]}"; do
+  bench_name="$(benchmark_key "$bench")"
+  BENCH_NAMES+=("$bench_name")
+  BENCH_LIST_A+=("$bench")
+  BENCH_MAP_A["$bench_name"]="$bench"
+done
+
+if [[ -n "$INTERPRETER_B" ]]; then
+  for bench in "${BENCH_FILES_B[@]}"; do
+    bench_name="$(benchmark_key "$bench")"
+    BENCH_MAP_B["$bench_name"]="$bench"
+  done
+
+  if [[ ${#BENCH_FILES_A[@]} -ne ${#BENCH_FILES_B[@]} ]]; then
+    echo "Benchmark file counts differ between side A and side B" >&2
+    exit 1
+  fi
+
+  for bench_name in "${BENCH_NAMES[@]}"; do
+    if [[ -z "${BENCH_MAP_B[$bench_name]:-}" ]]; then
+      echo "Missing side B benchmark for: $bench_name" >&2
+      exit 1
+    fi
+    BENCH_LIST_B+=("${BENCH_MAP_B[$bench_name]}")
+  done
+fi
 
 run_once() {
   local interpreter="$1"
@@ -145,13 +232,15 @@ run_once() {
 collect_samples() {
   local label="$1"
   local interpreter="$2"
-  local total="${#BENCH_FILES[@]}"
+  shift 2
+  local bench_files=("$@")
+  local total="${#bench_files[@]}"
   local index=0
 
-  for bench in "${BENCH_FILES[@]}"; do
+  for bench in "${bench_files[@]}"; do
     index=$((index + 1))
     local bench_name
-    bench_name="$(basename "$bench")"
+    bench_name="$(benchmark_key "$bench")"
     local sample_file="$TMP_DIR/$(sanitize_name "$label")__$(sanitize_name "$bench_name").samples"
     local bench_start
     bench_start="$(date +%s)"
@@ -223,21 +312,20 @@ if [[ "$QUIET" -eq 0 ]]; then
   if [[ -n "$INTERPRETER_B" ]]; then
     side_count=2
   fi
-  total_runs=$((runs_per_side * ${#BENCH_FILES[@]} * side_count))
-  echo "[bench] starting: benchmarks=${#BENCH_FILES[@]} warmup=$WARMUP runs=$ITERATIONS sides=$side_count total_program_runs=$total_runs" >&2
+  total_runs=$((runs_per_side * ${#BENCH_LIST_A[@]} * side_count))
+  echo "[bench] starting: benchmarks=${#BENCH_LIST_A[@]} warmup=$WARMUP runs=$ITERATIONS sides=$side_count total_program_runs=$total_runs" >&2
 fi
 
-collect_samples "$LABEL_A" "$INTERPRETER_A"
+collect_samples "$LABEL_A" "$INTERPRETER_A" "${BENCH_LIST_A[@]}"
 if [[ -n "$INTERPRETER_B" ]]; then
-  collect_samples "$LABEL_B" "$INTERPRETER_B"
+  collect_samples "$LABEL_B" "$INTERPRETER_B" "${BENCH_LIST_B[@]}"
 fi
 
 if [[ -n "$INTERPRETER_B" ]]; then
   printf "%-32s %12s %12s %12s %12s %12s %12s %10s\n" \
     "benchmark" "${LABEL_A}_mean" "${LABEL_A}_med" "${LABEL_A}_std" \
     "${LABEL_B}_mean" "${LABEL_B}_med" "${LABEL_B}_std" "A/B"
-  for bench in "${BENCH_FILES[@]}"; do
-    bench_name="$(basename "$bench")"
+  for bench_name in "${BENCH_NAMES[@]}"; do
     file_a="$TMP_DIR/$(sanitize_name "$LABEL_A")__$(sanitize_name "$bench_name").samples"
     file_b="$TMP_DIR/$(sanitize_name "$LABEL_B")__$(sanitize_name "$bench_name").samples"
 
@@ -253,8 +341,7 @@ else
   printf "%-32s %12s %12s %12s %12s %12s\n" \
     "benchmark" "${LABEL_A}_mean" "${LABEL_A}_med" "${LABEL_A}_std" \
     "${LABEL_A}_min" "${LABEL_A}_max"
-  for bench in "${BENCH_FILES[@]}"; do
-    bench_name="$(basename "$bench")"
+  for bench_name in "${BENCH_NAMES[@]}"; do
     file_a="$TMP_DIR/$(sanitize_name "$LABEL_A")__$(sanitize_name "$bench_name").samples"
     read -r _ a_mean a_median a_stddev a_min a_max < <(compute_stats "$file_a")
 

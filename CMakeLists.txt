@@ -38,18 +38,6 @@ file(GLOB_RECURSE SOURCES
 add_executable(interpreter ${SOURCES})
 target_include_directories(interpreter PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
-add_library(example_math_package MODULE
-    packages/example_math/package.cpp
-)
-target_include_directories(example_math_package
-    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
-)
-set_target_properties(example_math_package PROPERTIES
-    PREFIX ""
-    OUTPUT_NAME "package"
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/packages/example_math"
-)
-
 add_library(examples_math_package MODULE
     packages/examples/math/package.cpp
 )

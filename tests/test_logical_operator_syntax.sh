@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 INTERPRETER="$PROJECT_ROOT/build/interpreter"
 IDENTIFIER_TARGET="$SCRIPT_DIR/sample_logical_identifiers.mog"
-LEGACY_TARGET="$SCRIPT_DIR/sample_legacy_logical_keywords.mog"
+INVALID_TARGET="$SCRIPT_DIR/sample_invalid_logical_word_sequence.mog"
 
 if [[ ! -x "$INTERPRETER" ]]; then
     echo "Interpreter not found at $INTERPRETER"
@@ -28,14 +28,14 @@ if ! grep -q "^true$" <<< "$IDENTIFIER_OUTPUT" || \
 fi
 
 set +e
-LEGACY_OUTPUT="$($INTERPRETER "$LEGACY_TARGET" 2>&1)"
-LEGACY_STATUS=$?
+INVALID_OUTPUT="$($INTERPRETER "$INVALID_TARGET" 2>&1)"
+INVALID_STATUS=$?
 set -e
 
-if [[ $LEGACY_STATUS -eq 0 ]]; then
-    echo "[FAIL] expected legacy 'and' syntax to fail"
+if [[ $INVALID_STATUS -eq 0 ]]; then
+    echo "[FAIL] expected invalid word-based logical operator syntax to fail"
     exit 1
 fi
 
-echo "[PASS] logical operators require &&/|| and legacy keywords fail."
+echo "[PASS] logical operators require &&/||."
 exit 0

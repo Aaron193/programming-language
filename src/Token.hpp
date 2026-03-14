@@ -56,8 +56,6 @@ enum TokenType {
     // reserved
     PRINT,
     VAR,
-    FUNCTION,
-    CLASS,
     CONST,
     TYPE,
     STRUCT,
@@ -72,9 +70,6 @@ enum TokenType {
     THIS,
     _RETURN,
     IMPORT,
-    EXPORT,
-    FROM,
-    AS,
 
     // type-system keywords/operators (phase 1)
     TYPE_I8,
@@ -94,7 +89,6 @@ enum TokenType {
     TYPE_VOID,
     TYPE_NULL_KW,
     AS_KW,
-    ARROW,
 
     END_OF_FILE,
     ERROR,

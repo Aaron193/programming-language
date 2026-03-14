@@ -157,6 +157,12 @@ Run each benchmark once:
 ./benchmarks/run_benchmarks.sh
 ```
 
+Run the Python equivalents once:
+
+```bash
+./benchmarks/run_python_benchmarks.sh
+```
+
 Run repeated statistical benchmarking (mean/median/stddev):
 
 ```bash
@@ -171,6 +177,20 @@ Compare two interpreter binaries (A/B):
   --interpreter-b /path/to/interpreter_b \
   --label-a baseline \
   --label-b candidate \
+  --iterations 7 \
+  --warmup 1
+```
+
+Compare Mog benchmarks against the Python equivalents:
+
+```bash
+./benchmarks/compare_benchmarks.sh \
+  --interpreter-a ./build/interpreter \
+  --filter-a 'benchmarks/bench_*.mog' \
+  --label-a mog \
+  --interpreter-b python3 \
+  --filter-b 'benchmarks/python/bench_*.py' \
+  --label-b python \
   --iterations 7 \
   --warmup 1
 ```
@@ -264,8 +284,7 @@ const { addI64, greet } = @import("examples:math")
 ```
 
 Namespaced package imports use `namespace:name` and resolve to nested package
-directories such as `packages/examples/math/package.so`. Bare package imports
-like `"example_math"` still work for legacy packages.
+directories such as `packages/examples/math/package.so`.
 
 The interpreter searches for native packages in:
 
@@ -276,8 +295,7 @@ The interpreter searches for native packages in:
 Each package is a shared library that exports `exprRegisterPackage()` and
 declares its functions/constants using the ABI in `src/NativePackageAPI.hpp`.
 This repository includes a namespaced reference package in
-`packages/examples/math/` and a legacy compatibility package in
-`packages/example_math/`.
+`packages/examples/math/`.
 
 Native packages can now return opaque native handles through signatures such as
 `fn() handle<examples:counter:CounterHandle>`. Handles are GC-managed by the

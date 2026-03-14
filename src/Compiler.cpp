@@ -170,16 +170,8 @@ bool validateNativePackageImport(const ImportTarget& importTarget,
                                  std::string& outError) {
     outError.clear();
 
-    if (importTarget.kind != ImportTargetKind::NATIVE_PACKAGE ||
-        importTarget.isLegacyBarePackage) {
+    if (importTarget.kind != ImportTargetKind::NATIVE_PACKAGE) {
         return true;
-    }
-
-    if (descriptor.isLegacyAbi) {
-        outError = "Native package '" + importTarget.rawSpecifier +
-                   "' uses legacy ABI metadata and cannot satisfy a "
-                   "namespaced import.";
-        return false;
     }
 
     if (descriptor.packageNamespace != importTarget.packageNamespace ||
@@ -1585,10 +1577,7 @@ bool Compiler::isRecoveryBoundaryToken(TokenType type) const {
         case TokenType::VAR:
         case TokenType::CONST:
         case TokenType::TYPE_FN:
-        case TokenType::CLASS:
-        case TokenType::FUNCTION:
         case TokenType::IMPORT:
-        case TokenType::EXPORT:
         case TokenType::FOR:
         case TokenType::IF:
         case TokenType::WHILE:
@@ -1674,57 +1663,43 @@ bool Compiler::recoverLineLeadingContinuation(
     return true;
 }
 
-void Compiler::skipInvalidLegacyConstruct() {
-    int parenDepth = 0;
-    int bracketDepth = 0;
-    int braceDepth = 0;
-    bool consumedAny = false;
+bool Compiler::rejectUnexpectedTrailingToken(
+    std::initializer_list<TokenType> allowedTerminators) {
+    if (m_parser->current.type() == TokenType::END_OF_FILE ||
+        m_parser->current.type() == TokenType::CLOSE_CURLY ||
+        hasLineBreakBeforeCurrent() ||
+        m_parser->current.type() == TokenType::SEMI_COLON) {
+        return false;
+    }
 
-    while (m_parser->current.type() != TokenType::END_OF_FILE) {
-        if (consumedAny && parenDepth == 0 && bracketDepth == 0 &&
-            braceDepth == 0) {
-            if (m_parser->current.type() == TokenType::SEMI_COLON) {
-                advance();
-                return;
-            }
-            if (isRecoveryBoundaryToken(m_parser->current.type())) {
-                return;
+    for (TokenType terminator : allowedTerminators) {
+        if (m_parser->current.type() == terminator) {
+            return false;
+        }
+    }
+
+    errorAtCurrent("Unexpected token.");
+
+    while (m_parser->current.type() != TokenType::END_OF_FILE &&
+           !hasLineBreakBeforeCurrent()) {
+        bool reachedTerminator = false;
+        for (TokenType terminator : allowedTerminators) {
+            if (m_parser->current.type() == terminator) {
+                reachedTerminator = true;
+                break;
             }
         }
 
-        switch (m_parser->current.type()) {
-            case TokenType::OPEN_PAREN:
-                ++parenDepth;
-                break;
-            case TokenType::CLOSE_PAREN:
-                if (parenDepth > 0) {
-                    --parenDepth;
-                }
-                break;
-            case TokenType::OPEN_BRACKET:
-                ++bracketDepth;
-                break;
-            case TokenType::CLOSE_BRACKET:
-                if (bracketDepth > 0) {
-                    --bracketDepth;
-                }
-                break;
-            case TokenType::OPEN_CURLY:
-                ++braceDepth;
-                break;
-            case TokenType::CLOSE_CURLY:
-                if (braceDepth == 0) {
-                    return;
-                }
-                --braceDepth;
-                break;
-            default:
-                break;
+        if (reachedTerminator || m_parser->current.type() == TokenType::SEMI_COLON ||
+            m_parser->current.type() == TokenType::CLOSE_CURLY ||
+            isRecoveryBoundaryToken(m_parser->current.type())) {
+            break;
         }
 
-        consumedAny = true;
         advance();
     }
+
+    return true;
 }
 
 void Compiler::errorAtCurrent(const std::string& message) {
@@ -1771,29 +1746,10 @@ void Compiler::declaration() {
     if (m_parser->current.type() == TokenType::TYPE) {
         advance();
         typeDeclaration();
-    } else if (m_parser->current.type() == TokenType::CLASS) {
-        errorAtCurrent(
-            "Keyword 'class' was removed; use 'type Name struct { ... }'.");
-        advance();
-        skipInvalidLegacyConstruct();
-    } else if (m_parser->current.type() == TokenType::IMPORT) {
-        errorAtCurrent(
-            "Statement 'import ... from' was removed; use '@import(...)' in a binding.");
-        advance();
-        skipInvalidLegacyConstruct();
-    } else if (m_parser->current.type() == TokenType::EXPORT) {
-        errorAtCurrent(
-            "Keyword 'export' was removed; public top-level names use capitalization.");
-        advance();
-        skipInvalidLegacyConstruct();
     } else if (m_parser->current.type() == TokenType::TYPE_FN &&
                peekNextToken().type() == TokenType::IDENTIFIER) {
         advance();
         functionDeclaration();
-    } else if (m_parser->current.type() == TokenType::FUNCTION) {
-        errorAtCurrent("Keyword 'function' was removed; use 'fn'.");
-        advance();
-        skipInvalidLegacyConstruct();
     } else if (m_parser->current.type() == TokenType::CONST ||
                m_parser->current.type() == TokenType::VAR) {
         typedVarDeclaration();
@@ -1904,27 +1860,10 @@ void Compiler::classMemberDeclaration() {
         return;
     }
 
-    if (m_parser->current.type() == TokenType::FUNCTION) {
-        errorAtCurrent("Keyword 'function' was removed; use 'fn'.");
-        advance();
-        skipInvalidLegacyConstruct();
-        return;
-    }
-
     if (isTypeToken(m_parser->current.type()) &&
         m_parser->current.type() != TokenType::TYPE_FN) {
-        errorAtCurrent(
-            "Legacy typed class members were removed; use 'name Type' fields and 'fn Name(...) Ret'.");
+        errorAtCurrent("Expected struct field name or method.");
         advance();
-        skipInvalidLegacyConstruct();
-        return;
-    }
-
-    if (m_parser->current.type() == TokenType::IDENTIFIER &&
-        peekNextToken().type() == TokenType::OPEN_PAREN) {
-        errorAtCurrent("Methods must start with 'fn'.");
-        advance();
-        skipInvalidLegacyConstruct();
         return;
     }
 
@@ -2283,6 +2222,7 @@ void Compiler::returnStatement() {
 
     expression();
     recoverLineLeadingContinuation();
+    rejectUnexpectedTrailingToken();
     TypeRef expressionType = popExprType();
     if (expectedReturnType && expectedReturnType->isVoid()) {
         errorAtCurrent(
@@ -2298,6 +2238,7 @@ void Compiler::returnStatement() {
 void Compiler::expressionStatement() {
     expression();
     recoverLineLeadingContinuation();
+    rejectUnexpectedTrailingToken();
     popExprType();
     rejectStraySemicolon();
     emitByte(OpCode::POP);
@@ -2320,8 +2261,7 @@ void Compiler::typedVarDeclaration(Token* declaredName) {
         }
 
         consume(TokenType::AT, "Expected '@' before import.");
-        if (m_parser->current.type() != TokenType::IDENTIFIER &&
-            m_parser->current.type() != TokenType::IMPORT) {
+        if (m_parser->current.type() != TokenType::IDENTIFIER) {
             errorAtCurrent("Expected import directive after '@'.");
             return ImportTarget{};
         }
@@ -2353,8 +2293,7 @@ void Compiler::typedVarDeclaration(Token* declaredName) {
             return ImportTarget{};
         }
 
-        if (importTarget.kind == ImportTargetKind::NATIVE_PACKAGE &&
-            !importTarget.isLegacyBarePackage) {
+        if (importTarget.kind == ImportTargetKind::NATIVE_PACKAGE) {
             NativePackageDescriptor packageDescriptor;
             std::string packageError;
             if (!loadNativePackageDescriptor(importTarget.resolvedPath,
@@ -2466,8 +2405,7 @@ void Compiler::typedVarDeclaration(Token* declaredName) {
     if (m_parser->current.type() == TokenType::EQUAL) {
         omittedType = true;
         if (peekNextToken().type() != TokenType::AT ||
-            (peekToken(2).type() != TokenType::IDENTIFIER &&
-             peekToken(2).type() != TokenType::IMPORT) ||
+            peekToken(2).type() != TokenType::IDENTIFIER ||
             std::string_view(peekToken(2).start(), peekToken(2).length()) != "import") {
             errorAt(nameToken,
                     "Variables require an explicit type unless initialized from '@import(...)'.");
@@ -2506,6 +2444,7 @@ void Compiler::typedVarDeclaration(Token* declaredName) {
     } else {
         expression();
         recoverLineLeadingContinuation();
+        rejectUnexpectedTrailingToken();
         initializerType = popExprType();
     }
     if (!omittedType) {
@@ -2624,17 +2563,6 @@ Compiler::ParseRule Compiler::getRule(TokenType type) {
             return ParseRule{
                 [this](bool canAssign) { functionLiteral(canAssign); }, nullptr,
                 PREC_NONE};
-        case TokenType::FUNCTION:
-            return ParseRule{
-                [this](bool canAssign) {
-                    errorAt(m_parser->previous,
-                            "Keyword 'function' was removed; use 'fn'.");
-                    skipInvalidLegacyConstruct();
-                    emitByte(OpCode::NIL);
-                    pushExprType(TypeInfo::makeAny());
-                },
-                nullptr, PREC_NONE};
-
         case TokenType::BANG:
         case TokenType::TILDE:
             return ParseRule{[this](bool canAssign) { unary(canAssign); },
@@ -2850,8 +2778,7 @@ void Compiler::atExpression(bool canAssign) {
         return;
     }
 
-    if (m_parser->current.type() != TokenType::IDENTIFIER &&
-        m_parser->current.type() != TokenType::IMPORT) {
+    if (m_parser->current.type() != TokenType::IDENTIFIER) {
         errorAtCurrent("Expected directive name after '@'.");
         pushExprType(TypeInfo::makeAny());
         return;
@@ -2885,8 +2812,7 @@ void Compiler::atExpression(bool canAssign) {
         return;
     }
 
-    if (importTarget.kind == ImportTargetKind::NATIVE_PACKAGE &&
-        !importTarget.isLegacyBarePackage) {
+    if (importTarget.kind == ImportTargetKind::NATIVE_PACKAGE) {
         NativePackageDescriptor packageDescriptor;
         std::string packageError;
         if (!loadNativePackageDescriptor(importTarget.resolvedPath,

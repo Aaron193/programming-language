@@ -37,10 +37,10 @@ for file in "${FILES[@]}"; do
     if [[ "$base_name" == sample_native_error_* ]]; then
         continue
     fi
-    if [[ "$base_name" == "sample_compile_multi_error.mog" || "$base_name" == "sample_runtime_stacktrace.mog" || "$base_name" == "sample_legacy_logical_keywords.mog" ]]; then
+    if [[ "$base_name" == "sample_compile_multi_error.mog" || "$base_name" == "sample_runtime_stacktrace.mog" || "$base_name" == "sample_invalid_logical_word_sequence.mog" ]]; then
         continue
     fi
-    if [[ "$base_name" == "sample_import_cycle.mog" || "$base_name" == "sample_export_scoped_error.mog" || "$base_name" == "sample_import_native_missing.mog" || "$base_name" == "sample_import_native_type_mismatch.mog" || "$base_name" == "sample_import_native_invalid_id.mog" || "$base_name" == "sample_import_native_metadata_mismatch.mog" ]]; then
+    if [[ "$base_name" == "sample_import_cycle.mog" || "$base_name" == "sample_export_scoped_error.mog" || "$base_name" == "sample_import_native_missing.mog" || "$base_name" == "sample_import_native_type_mismatch.mog" || "$base_name" == "sample_import_native_invalid_id.mog" || "$base_name" == "sample_import_native_bare_invalid.mog" || "$base_name" == "sample_import_native_metadata_mismatch.mog" ]]; then
         continue
     fi
 

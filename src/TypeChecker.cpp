@@ -589,6 +589,42 @@ class CheckerImpl {
         return true;
     }
 
+    bool rejectUnexpectedTrailingToken(
+        std::initializer_list<TokenType> allowedTerminators = {}) {
+        if (check(TokenType::END_OF_FILE) || hasLineBreakBeforeCurrent() ||
+            check(TokenType::SEMI_COLON)) {
+            return false;
+        }
+
+        for (TokenType terminator : allowedTerminators) {
+            if (check(terminator)) {
+                return false;
+            }
+        }
+
+        addError(m_current.line(), "Type error: unexpected token.");
+
+        while (!check(TokenType::END_OF_FILE) && !hasLineBreakBeforeCurrent()) {
+            bool reachedTerminator = false;
+            for (TokenType terminator : allowedTerminators) {
+                if (check(terminator)) {
+                    reachedTerminator = true;
+                    break;
+                }
+            }
+
+            if (reachedTerminator || check(TokenType::SEMI_COLON) ||
+                check(TokenType::CLOSE_CURLY) ||
+                isRecoveryBoundaryToken(m_current.type())) {
+                break;
+            }
+
+            advance();
+        }
+
+        return true;
+    }
+
     bool recoverLineLeadingContinuation(
         std::initializer_list<TokenType> terminators = {}) {
         if (!hasLineBreakBeforeCurrent() ||
@@ -659,10 +695,7 @@ class CheckerImpl {
             case TokenType::VAR:
             case TokenType::CONST:
             case TokenType::TYPE_FN:
-            case TokenType::CLASS:
-            case TokenType::FUNCTION:
             case TokenType::IMPORT:
-            case TokenType::EXPORT:
             case TokenType::FOR:
             case TokenType::IF:
             case TokenType::WHILE:
@@ -684,59 +717,6 @@ class CheckerImpl {
         addError(m_current.line(),
                  "Type error: semicolons are only allowed inside 'for (...)' clauses.");
         advance();
-    }
-
-    void skipInvalidLegacyConstruct() {
-        int parenDepth = 0;
-        int bracketDepth = 0;
-        int braceDepth = 0;
-        bool consumedAny = false;
-
-        while (!check(TokenType::END_OF_FILE)) {
-            if (consumedAny && parenDepth == 0 && bracketDepth == 0 &&
-                braceDepth == 0) {
-                if (check(TokenType::SEMI_COLON)) {
-                    advance();
-                    return;
-                }
-                if (isRecoveryBoundaryToken(m_current.type())) {
-                    return;
-                }
-            }
-
-            switch (m_current.type()) {
-                case TokenType::OPEN_PAREN:
-                    ++parenDepth;
-                    break;
-                case TokenType::CLOSE_PAREN:
-                    if (parenDepth > 0) {
-                        --parenDepth;
-                    }
-                    break;
-                case TokenType::OPEN_BRACKET:
-                    ++bracketDepth;
-                    break;
-                case TokenType::CLOSE_BRACKET:
-                    if (bracketDepth > 0) {
-                        --bracketDepth;
-                    }
-                    break;
-                case TokenType::OPEN_CURLY:
-                    ++braceDepth;
-                    break;
-                case TokenType::CLOSE_CURLY:
-                    if (braceDepth == 0) {
-                        return;
-                    }
-                    --braceDepth;
-                    break;
-                default:
-                    break;
-            }
-
-            consumedAny = true;
-            advance();
-        }
     }
 
     void advance() {
@@ -2177,16 +2157,8 @@ class CheckerImpl {
             return parseFunctionLiteralExpr();
         }
 
-        if (match(TokenType::FUNCTION)) {
-            addError(m_previous.line(),
-                     "Type error: keyword 'function' was removed; use 'fn'.");
-            skipInvalidLegacyConstruct();
-            return ExprInfo{TypeInfo::makeAny(), false, false, "",
-                            m_previous.line()};
-        }
-
         if (match(TokenType::AT)) {
-            if (!check(TokenType::IDENTIFIER) && !check(TokenType::IMPORT)) {
+            if (!check(TokenType::IDENTIFIER)) {
                 addError(m_current.line(),
                          "Type error: expected directive name after '@'.");
                 return ExprInfo{TypeInfo::makeAny(), false, false, "",
@@ -2345,6 +2317,7 @@ class CheckerImpl {
     void parseExpressionStatement() {
         parseExpression();
         recoverLineLeadingContinuation();
+        rejectUnexpectedTrailingToken();
         rejectStraySemicolon();
     }
 
@@ -2372,6 +2345,7 @@ class CheckerImpl {
 
         ExprInfo value = parseExpression();
         recoverLineLeadingContinuation();
+        rejectUnexpectedTrailingToken();
         rejectStraySemicolon();
 
         if (!m_functionContexts.empty()) {
@@ -2549,7 +2523,7 @@ class CheckerImpl {
 
         auto parseImportExpr = [&]() -> ExprInfo {
             consume(TokenType::AT, "Expected '@' before import.");
-            if (!check(TokenType::IDENTIFIER) && !check(TokenType::IMPORT)) {
+            if (!check(TokenType::IDENTIFIER)) {
                 addError(m_current.line(),
                          "Type error: expected directive after '@'.");
                 return ExprInfo{TypeInfo::makeAny(), false, false, "",
@@ -2606,8 +2580,7 @@ class CheckerImpl {
         if (check(TokenType::EQUAL)) {
             omittedType = true;
             if (peekToken().type() != TokenType::AT ||
-                (tokenAt(2).type() != TokenType::IDENTIFIER &&
-                 tokenAt(2).type() != TokenType::IMPORT) ||
+                tokenAt(2).type() != TokenType::IDENTIFIER ||
                 tokenText(tokenAt(2)) != "import") {
                 addError(nameToken.line(),
                          "Type error: variables require an explicit type unless initialized from '@import(...)'.");
@@ -2636,6 +2609,7 @@ class CheckerImpl {
             initializer = check(TokenType::AT) ? parseImportExpr()
                                                : parseExpression();
             recoverLineLeadingContinuation();
+            rejectUnexpectedTrailingToken();
         }
 
         if (!omittedType && !isAssignableType(initializer.type, declaredType)) {
@@ -2815,30 +2789,11 @@ class CheckerImpl {
                 continue;
             }
 
-            if (check(TokenType::FUNCTION)) {
-                addError(m_current.line(),
-                         "Type error: keyword 'function' was removed; use 'fn'.");
-                advance();
-                skipInvalidLegacyConstruct();
-                continue;
-            }
-
             if (isTypeToken(m_current.type()) &&
                 m_current.type() != TokenType::TYPE_FN) {
-                addError(
-                    m_current.line(),
-                    "Type error: legacy typed class members were removed; use 'name Type' fields and 'fn Name(...) Ret'.");
-                advance();
-                skipInvalidLegacyConstruct();
-                continue;
-            }
-
-            if (check(TokenType::IDENTIFIER) &&
-                peekToken().type() == TokenType::OPEN_PAREN) {
                 addError(m_current.line(),
-                         "Type error: methods must start with 'fn'.");
+                         "Type error: expected struct field name or method.");
                 advance();
-                skipInvalidLegacyConstruct();
                 continue;
             }
 
@@ -2969,38 +2924,10 @@ class CheckerImpl {
             return;
         }
 
-        if (match(TokenType::CLASS)) {
-            addError(m_previous.line(),
-                     "Type error: keyword 'class' was removed; use 'type Name struct { ... }'.");
-            skipInvalidLegacyConstruct();
-            return;
-        }
-
-        if (match(TokenType::IMPORT)) {
-            addError(m_previous.line(),
-                     "Type error: statement 'import ... from' was removed; use '@import(...)' in a binding.");
-            skipInvalidLegacyConstruct();
-            return;
-        }
-
-        if (match(TokenType::EXPORT)) {
-            addError(m_previous.line(),
-                     "Type error: keyword 'export' was removed; public top-level names use capitalization.");
-            skipInvalidLegacyConstruct();
-            return;
-        }
-
         if (check(TokenType::TYPE_FN) &&
             peekToken().type() == TokenType::IDENTIFIER) {
             advance();
             parseFunctionDeclaration();
-            return;
-        }
-
-        if (match(TokenType::FUNCTION)) {
-            addError(m_previous.line(),
-                     "Type error: keyword 'function' was removed; use 'fn'.");
-            skipInvalidLegacyConstruct();
             return;
         }
 

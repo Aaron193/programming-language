@@ -415,13 +415,6 @@ bool validatePackageDirectory(const std::string& packageDir,
         return false;
     }
 
-    if (descriptor.isLegacyAbi) {
-        outError = "Validated package '" +
-                   makePackageId(manifest.packageNamespace, manifest.packageName) +
-                   "' uses legacy ABI metadata.";
-        return false;
-    }
-
     if (descriptor.packageNamespace != manifest.packageNamespace ||
         descriptor.packageName != manifest.packageName) {
         outError = "Manifest declares '" +

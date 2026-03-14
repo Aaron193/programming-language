@@ -1,3 +1,0 @@
-type Box struct {
-  i32 value
-}

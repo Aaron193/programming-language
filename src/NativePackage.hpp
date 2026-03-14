@@ -21,7 +21,6 @@ struct ImportTarget {
     std::string displayName;
     std::string packageNamespace;
     std::string packageName;
-    bool isLegacyBarePackage = false;
 };
 
 struct NativePackageConstantDescriptor {
@@ -43,7 +42,6 @@ struct NativePackageDescriptor {
     std::string packageName;
     std::string packageId;
     std::string libraryPath;
-    bool isLegacyAbi = false;
     std::unordered_map<std::string, TypeRef> exportTypes;
     std::vector<NativePackageFunctionDescriptor> functions;
     std::vector<NativePackageConstantDescriptor> constants;
