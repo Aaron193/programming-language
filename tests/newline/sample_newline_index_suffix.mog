@@ -1,0 +1,5 @@
+var values Array<i32> = [1i32, 2i32]
+
+print(values[
+  1
+])

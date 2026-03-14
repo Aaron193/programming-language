@@ -1,0 +1,9 @@
+var x i32 = 1
+
+++
+x
+print(x)
+
+x
+++
+print(x)

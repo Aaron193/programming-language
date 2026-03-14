@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <initializer_list>
 #include <limits>
 #include <string>
 #include <unordered_set>
@@ -74,6 +75,12 @@ bool isComparisonOperator(TokenType type) {
 
 bool isEqualityOperator(TokenType type) {
     return type == TokenType::EQUAL_EQUAL || type == TokenType::BANG_EQUAL;
+}
+
+std::string lineLeadingContinuationMessage(TokenType type) {
+    return "Type error: Continuation token '" +
+           std::string(continuationTokenText(type)) +
+           "' must stay on the previous line.";
 }
 
 bool isArithmeticCompoundAssignment(TokenType type) {
@@ -579,6 +586,70 @@ class CheckerImpl {
             return false;
         }
         advance();
+        return true;
+    }
+
+    bool recoverLineLeadingContinuation(
+        std::initializer_list<TokenType> terminators = {}) {
+        if (!hasLineBreakBeforeCurrent() ||
+            !isLineContinuationToken(m_current.type())) {
+            return false;
+        }
+
+        addError(m_current.line(),
+                 lineLeadingContinuationMessage(m_current.type()));
+
+        int parenDepth = 0;
+        int bracketDepth = 0;
+        int braceDepth = 0;
+
+        while (!check(TokenType::END_OF_FILE)) {
+            if (parenDepth == 0 && bracketDepth == 0 && braceDepth == 0) {
+                for (TokenType terminator : terminators) {
+                    if (check(terminator)) {
+                        return true;
+                    }
+                }
+
+                if (check(TokenType::SEMI_COLON) ||
+                    check(TokenType::CLOSE_CURLY) ||
+                    isRecoveryBoundaryToken(m_current.type())) {
+                    return true;
+                }
+            }
+
+            switch (m_current.type()) {
+                case TokenType::OPEN_PAREN:
+                    ++parenDepth;
+                    break;
+                case TokenType::CLOSE_PAREN:
+                    if (parenDepth > 0) {
+                        --parenDepth;
+                    }
+                    break;
+                case TokenType::OPEN_BRACKET:
+                    ++bracketDepth;
+                    break;
+                case TokenType::CLOSE_BRACKET:
+                    if (bracketDepth > 0) {
+                        --bracketDepth;
+                    }
+                    break;
+                case TokenType::OPEN_CURLY:
+                    ++braceDepth;
+                    break;
+                case TokenType::CLOSE_CURLY:
+                    if (braceDepth > 0) {
+                        --braceDepth;
+                    }
+                    break;
+                default:
+                    break;
+            }
+
+            advance();
+        }
+
         return true;
     }
 
@@ -2273,6 +2344,7 @@ class CheckerImpl {
 
     void parseExpressionStatement() {
         parseExpression();
+        recoverLineLeadingContinuation();
         rejectStraySemicolon();
     }
 
@@ -2299,6 +2371,7 @@ class CheckerImpl {
         }
 
         ExprInfo value = parseExpression();
+        recoverLineLeadingContinuation();
         rejectStraySemicolon();
 
         if (!m_functionContexts.empty()) {
@@ -2315,6 +2388,7 @@ class CheckerImpl {
     void parseIfStatement() {
         consume(TokenType::OPEN_PAREN, "Expected '(' after 'if'.");
         ExprInfo cond = parseExpression();
+        recoverLineLeadingContinuation({TokenType::CLOSE_PAREN});
         if (!(cond.type->kind == TypeKind::BOOL || cond.type->isAny())) {
             addError(cond.line ? cond.line : m_previous.line(),
                      "Type error: if condition must be bool.");
@@ -2329,6 +2403,7 @@ class CheckerImpl {
     void parseWhileStatement() {
         consume(TokenType::OPEN_PAREN, "Expected '(' after 'while'.");
         ExprInfo cond = parseExpression();
+        recoverLineLeadingContinuation({TokenType::CLOSE_PAREN});
         if (!(cond.type->kind == TypeKind::BOOL || cond.type->isAny())) {
             addError(cond.line ? cond.line : m_previous.line(),
                      "Type error: while condition must be bool.");
@@ -2363,6 +2438,7 @@ class CheckerImpl {
 
             if (match(TokenType::COLON)) {
                 ExprInfo iterable = parseExpression();
+                recoverLineLeadingContinuation({TokenType::CLOSE_PAREN});
                 consume(TokenType::CLOSE_PAREN,
                         "Expected ')' after foreach iterable expression.");
 
@@ -2410,6 +2486,7 @@ class CheckerImpl {
                     "Expected '=' in loop variable declaration "
                     "(initializer is required).");
             ExprInfo initializer = parseExpression();
+            recoverLineLeadingContinuation({TokenType::SEMI_COLON});
             if (!isAssignableType(initializer.type, declaredType)) {
                 addError(variableLine, "Type error: cannot assign '" +
                                            initializer.type->toString() +
@@ -2424,12 +2501,14 @@ class CheckerImpl {
                                   isConst);
         } else {
             parseExpression();
+            recoverLineLeadingContinuation({TokenType::SEMI_COLON});
             consume(TokenType::SEMI_COLON,
                     "Expected ';' after loop initializer.");
         }
 
         if (!check(TokenType::SEMI_COLON)) {
             ExprInfo cond = parseExpression();
+            recoverLineLeadingContinuation({TokenType::SEMI_COLON});
             if (!(cond.type->kind == TypeKind::BOOL || cond.type->isAny())) {
                 addError(cond.line ? cond.line : m_previous.line(),
                          "Type error: for condition must be bool.");
@@ -2439,6 +2518,7 @@ class CheckerImpl {
 
         if (!check(TokenType::CLOSE_PAREN)) {
             parseExpression();
+            recoverLineLeadingContinuation({TokenType::CLOSE_PAREN});
         }
         consume(TokenType::CLOSE_PAREN, "Expected ')' after for clauses.");
 
@@ -2555,6 +2635,7 @@ class CheckerImpl {
         } else {
             initializer = check(TokenType::AT) ? parseImportExpr()
                                                : parseExpression();
+            recoverLineLeadingContinuation();
         }
 
         if (!omittedType && !isAssignableType(initializer.type, declaredType)) {
@@ -2842,6 +2923,7 @@ class CheckerImpl {
         if (match(TokenType::PRINT)) {
             consume(TokenType::OPEN_PAREN, "Expected '(' after 'print'.");
             parseExpression();
+            recoverLineLeadingContinuation({TokenType::CLOSE_PAREN});
             consume(TokenType::CLOSE_PAREN,
                     "Expected ')' after print argument.");
             rejectStraySemicolon();

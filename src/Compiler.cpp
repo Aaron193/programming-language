@@ -61,6 +61,12 @@ bool hasStrictDirective(std::string_view source) {
     return source.rfind("#!strict", 0) == 0;
 }
 
+std::string lineLeadingContinuationMessage(TokenType type) {
+    return "Continuation token '" +
+           std::string(continuationTokenText(type)) +
+           "' must stay on the previous line.";
+}
+
 std::string_view stripStrictDirectiveLine(std::string_view source) {
     if (!hasStrictDirective(source)) {
         return source;
@@ -1605,6 +1611,69 @@ void Compiler::rejectStraySemicolon() {
     advance();
 }
 
+bool Compiler::recoverLineLeadingContinuation(
+    std::initializer_list<TokenType> terminators) {
+    if (!hasLineBreakBeforeCurrent() ||
+        !isLineContinuationToken(m_parser->current.type())) {
+        return false;
+    }
+
+    errorAtCurrent(lineLeadingContinuationMessage(m_parser->current.type()));
+
+    int parenDepth = 0;
+    int bracketDepth = 0;
+    int braceDepth = 0;
+
+    while (m_parser->current.type() != TokenType::END_OF_FILE) {
+        if (parenDepth == 0 && bracketDepth == 0 && braceDepth == 0) {
+            for (TokenType terminator : terminators) {
+                if (m_parser->current.type() == terminator) {
+                    return true;
+                }
+            }
+
+            if (m_parser->current.type() == TokenType::SEMI_COLON ||
+                m_parser->current.type() == TokenType::CLOSE_CURLY ||
+                isRecoveryBoundaryToken(m_parser->current.type())) {
+                return true;
+            }
+        }
+
+        switch (m_parser->current.type()) {
+            case TokenType::OPEN_PAREN:
+                ++parenDepth;
+                break;
+            case TokenType::CLOSE_PAREN:
+                if (parenDepth > 0) {
+                    --parenDepth;
+                }
+                break;
+            case TokenType::OPEN_BRACKET:
+                ++bracketDepth;
+                break;
+            case TokenType::CLOSE_BRACKET:
+                if (bracketDepth > 0) {
+                    --bracketDepth;
+                }
+                break;
+            case TokenType::OPEN_CURLY:
+                ++braceDepth;
+                break;
+            case TokenType::CLOSE_CURLY:
+                if (braceDepth > 0) {
+                    --braceDepth;
+                }
+                break;
+            default:
+                break;
+        }
+
+        advance();
+    }
+
+    return true;
+}
+
 void Compiler::skipInvalidLegacyConstruct() {
     int parenDepth = 0;
     int bracketDepth = 0;
@@ -2035,6 +2104,7 @@ void Compiler::block() {
 void Compiler::ifStatement() {
     consume(TokenType::OPEN_PAREN, "Expected '(' after 'if'.");
     expression();
+    recoverLineLeadingContinuation({TokenType::CLOSE_PAREN});
     popExprType();
     consume(TokenType::CLOSE_PAREN, "Expected ')' after condition.");
 
@@ -2055,6 +2125,7 @@ void Compiler::whileStatement() {
 
     consume(TokenType::OPEN_PAREN, "Expected '(' after 'while'.");
     expression();
+    recoverLineLeadingContinuation({TokenType::CLOSE_PAREN});
     popExprType();
     consume(TokenType::CLOSE_PAREN, "Expected ')' after condition.");
 
@@ -2096,6 +2167,7 @@ void Compiler::forStatement() {
                 static_cast<uint8_t>(currentContext().locals.size() - 1);
 
             expression();
+            recoverLineLeadingContinuation({TokenType::CLOSE_PAREN});
             popExprType();
             consume(TokenType::CLOSE_PAREN,
                     "Expected ')' after foreach iterable.");
@@ -2121,6 +2193,7 @@ void Compiler::forStatement() {
                 "Expected '=' in loop variable declaration "
                 "(initializer is required).");
         expression();
+        recoverLineLeadingContinuation({TokenType::SEMI_COLON});
         TypeRef initializerType = popExprType();
         emitCoerceToType(initializerType, declaredType);
         emitCheckInstanceType(declaredType);
@@ -2129,6 +2202,7 @@ void Compiler::forStatement() {
         defineVariable(0);
     } else {
         expression();
+        recoverLineLeadingContinuation({TokenType::SEMI_COLON});
         popExprType();
         consume(TokenType::SEMI_COLON, "Expected ';' after loop initializer.");
         emitByte(OpCode::POP);
@@ -2139,6 +2213,7 @@ void Compiler::forStatement() {
 
     if (m_parser->current.type() != TokenType::SEMI_COLON) {
         expression();
+        recoverLineLeadingContinuation({TokenType::SEMI_COLON});
         popExprType();
         consume(TokenType::SEMI_COLON, "Expected ';' after loop condition.");
         exitJump = emitJump(OpCode::JUMP_IF_FALSE_POP);
@@ -2151,6 +2226,7 @@ void Compiler::forStatement() {
         int incrementStart = currentChunk()->count();
 
         expression();
+        recoverLineLeadingContinuation({TokenType::CLOSE_PAREN});
         popExprType();
         emitByte(OpCode::POP);
         consume(TokenType::CLOSE_PAREN, "Expected ')' after for clauses.");
@@ -2175,6 +2251,7 @@ void Compiler::forStatement() {
 void Compiler::printStatement() {
     consume(TokenType::OPEN_PAREN, "Expected '(' after 'print'.");
     expression();
+    recoverLineLeadingContinuation({TokenType::CLOSE_PAREN});
     consume(TokenType::CLOSE_PAREN, "Expected ')' after print argument.");
     popExprType();
     rejectStraySemicolon();
@@ -2205,6 +2282,7 @@ void Compiler::returnStatement() {
     }
 
     expression();
+    recoverLineLeadingContinuation();
     TypeRef expressionType = popExprType();
     if (expectedReturnType && expectedReturnType->isVoid()) {
         errorAtCurrent(
@@ -2219,6 +2297,7 @@ void Compiler::returnStatement() {
 
 void Compiler::expressionStatement() {
     expression();
+    recoverLineLeadingContinuation();
     popExprType();
     rejectStraySemicolon();
     emitByte(OpCode::POP);
@@ -2426,6 +2505,7 @@ void Compiler::typedVarDeclaration(Token* declaredName) {
         initializerType = emitFunctionLiteral(declaredType);
     } else {
         expression();
+        recoverLineLeadingContinuation();
         initializerType = popExprType();
     }
     if (!omittedType) {

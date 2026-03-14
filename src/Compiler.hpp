@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <initializer_list>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -136,6 +137,8 @@ class Compiler {
     void synchronize();
     bool isRecoveryBoundaryToken(TokenType type) const;
     void rejectStraySemicolon();
+    bool recoverLineLeadingContinuation(
+        std::initializer_list<TokenType> terminators = {});
     void skipInvalidLegacyConstruct();
     void errorAtCurrent(const std::string& message);
     void errorAt(const Token& token, const std::string& message);

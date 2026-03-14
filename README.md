@@ -25,6 +25,38 @@ Notes:
 - Local declarations still require explicit types except for `@import(...)` bindings.
 - `type ... struct` is currently class-backed syntax, not a separate value-type runtime.
 - Supported operator annotations are currently limited to `+`, `-`, `*`, `/`, `==`, `!=`, `<`, `<=`, `>`, `>=`.
+- Newline continuation is explicit: `(`, `[`, `.`, `as`, assignment operators, and binary operators must stay on the same line as the expression they continue.
+- After the continuation token is consumed, the rest of the call/index/member access may span later lines.
+- A newline before `++` or `--` starts a new prefix expression; it does not continue a postfix update.
+- Trailing commas in call argument lists are currently not supported.
+
+Examples:
+
+```expr
+print(add(
+  1,
+  2
+))
+
+print(box.
+get())
+
+print(1 +
+2)
+```
+
+These forms are rejected because the continuation token moved to the next line:
+
+```expr
+print(value
+(1))
+
+print(value
+.field)
+
+print(1
++ 2)
+```
 
 ## Runtime / Engine Features
 
@@ -114,6 +146,7 @@ Run additional suites:
 ./tests/test_logical_operator_syntax.sh
 ./tests/test_package_validation.sh
 ./tests/test_syntax_breakage.sh
+./tests/test_newline_syntax.sh
 ```
 
 ## Benchmarks

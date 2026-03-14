@@ -1,0 +1,7 @@
+fn id(x i32) i32 {
+  return x
+}
+
+var f fn(i32) i32 = id
+print(f
+(1))
