@@ -1,16 +1,16 @@
-class Counter {
-  i32 value;
+type Counter struct {
+  value i32;
 
-  bump() -> Counter {
+  fn bump() Counter {
     this.value = this.value + 1;
     return this;
   }
 
-  get() -> i32 {
+  fn get() i32 {
     return this.value;
   }
 }
 
-Counter c = Counter();
+var c Counter = Counter();
 c.value = 0;
 print(c.bump().bump().bump().get());

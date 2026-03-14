@@ -1,1 +1,1 @@
-str name = null;
+var name str = null;

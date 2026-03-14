@@ -1,46 +1,46 @@
-import window from "mog:window";
-i64 WINDOW_WIDTH = 800i64;
-i64 WINDOW_HEIGHT = 600i64;
-i64 BIRD_X = 160i64;
-i64 BIRD_WIDTH = 34i64;
-i64 BIRD_HEIGHT = 24i64;
-i64 PIPE_WIDTH = 80i64;
-i64 PIPE_GAP = 180i64;
-i64 GROUND_HEIGHT = 100i64;
+const window = @import("mog:window");
+var WINDOW_WIDTH i64 = 800i64;
+var WINDOW_HEIGHT i64 = 600i64;
+var BIRD_X i64 = 160i64;
+var BIRD_WIDTH i64 = 34i64;
+var BIRD_HEIGHT i64 = 24i64;
+var PIPE_WIDTH i64 = 80i64;
+var PIPE_GAP i64 = 180i64;
+var GROUND_HEIGHT i64 = 100i64;
 
-f64 FIXED_DT = 1.0 / 60.0;
-f64 GRAVITY = 1400.0;
-f64 FLAP_IMPULSE = -350.0;
-f64 PIPE_SPEED = 180.0;
-f64 SPAWN_INTERVAL = 1.4;
+var FIXED_DT f64 = 1.0 / 60.0;
+var GRAVITY f64 = 1400.0;
+var FLAP_IMPULSE f64 = -350.0;
+var PIPE_SPEED f64 = 180.0;
+var SPAWN_INTERVAL f64 = 1.4;
 
-class Pipe {
-    f64 x;
-    f64 gapY;
-    bool passed;
+type Pipe struct {
+    x f64;
+    gapY f64;
+    passed bool;
 }
 
-class GameState {
-    f64 birdY;
-    f64 birdVelocity;
-    Array<Pipe> pipes;
-    f64 spawnTimer;
-    i32 spawnIndex;
-    i32 score;
-    bool running;
-    bool dead;
+type GameState struct {
+    birdY f64;
+    birdVelocity f64;
+    pipes Array<Pipe>;
+    spawnTimer f64;
+    spawnIndex i32;
+    score i32;
+    running bool;
+    dead bool;
 }
 
-fn makePipe(f64 x, f64 gapY) -> Pipe {
-    Pipe pipe = Pipe();
+fn makePipe(x f64, gapY f64) Pipe {
+    var pipe Pipe = Pipe();
     pipe.x = x;
     pipe.gapY = gapY;
     pipe.passed = false;
     return pipe;
 }
 
-fn nextGapY(i32 spawnIndex) -> f64 {
-    i32 cycle = spawnIndex;
+fn nextGapY(spawnIndex i32) f64 {
+    var cycle i32 = spawnIndex;
     while (cycle >= 8) {
         cycle = cycle - 8;
     }
@@ -70,20 +70,20 @@ fn nextGapY(i32 spawnIndex) -> f64 {
     return 280.0;
 }
 
-fn spawnPipe(GameState state, f64 x) -> void {
-    Pipe pipe = makePipe(x, nextGapY(state.spawnIndex));
+fn spawnPipe(state GameState, x f64) void {
+    var pipe Pipe = makePipe(x, nextGapY(state.spawnIndex));
     state.spawnIndex = state.spawnIndex + 1;
     state.pipes.push(pipe);
 }
 
-fn seedInitialPipes(GameState state) -> void {
+fn seedInitialPipes(state GameState) void {
     spawnPipe(state, 500.0);
     spawnPipe(state, 500.0 + (PIPE_SPEED * SPAWN_INTERVAL));
 }
 
-fn resetGame() -> GameState {
-    GameState state = GameState();
-    Array<Pipe> pipes = [];
+fn resetGame() GameState {
+    var state GameState = GameState();
+    var pipes Array<Pipe> = [];
 
     state.birdY = 220.0;
     state.birdVelocity = 0.0;
@@ -98,7 +98,7 @@ fn resetGame() -> GameState {
     return state;
 }
 
-fn updateBird(GameState state, bool flapPressed, f64 dt) -> void {
+fn updateBird(state GameState, flapPressed bool, dt f64) void {
     if (flapPressed) {
         state.birdVelocity = FLAP_IMPULSE;
     }
@@ -107,12 +107,12 @@ fn updateBird(GameState state, bool flapPressed, f64 dt) -> void {
     state.birdY = state.birdY + (state.birdVelocity * dt);
 }
 
-fn updatePipes(GameState state, f64 dt) -> void {
-    Array<Pipe> activePipes = [];
-    i32 index = 0;
+fn updatePipes(state GameState, dt f64) void {
+    var activePipes Array<Pipe> = [];
+    var index i32 = 0;
 
     while ((index as f64) < state.pipes.size()) {
-        Pipe pipe = state.pipes[index];
+        var pipe Pipe = state.pipes[index];
         pipe.x = pipe.x - (PIPE_SPEED * dt);
         if ((pipe.x + (PIPE_WIDTH as f64)) > 0.0) {
             activePipes.push(pipe);
@@ -130,10 +130,10 @@ fn updatePipes(GameState state, f64 dt) -> void {
     }
 }
 
-fn updateScore(GameState state) -> void {
-    i32 index = 0;
+fn updateScore(state GameState) void {
+    var index i32 = 0;
     while ((index as f64) < state.pipes.size()) {
-        Pipe pipe = state.pipes[index];
+        var pipe Pipe = state.pipes[index];
         if (pipe.passed == false &&
             (pipe.x + (PIPE_WIDTH as f64)) < (BIRD_X as f64)) {
             pipe.passed = true;
@@ -144,13 +144,13 @@ fn updateScore(GameState state) -> void {
     }
 }
 
-fn checkCollisions(GameState state) -> bool {
-    f64 birdLeft = BIRD_X as f64;
-    f64 birdRight = birdLeft + (BIRD_WIDTH as f64);
-    f64 birdTop = state.birdY;
-    f64 birdBottom = state.birdY + (BIRD_HEIGHT as f64);
-    f64 groundTop = (WINDOW_HEIGHT - GROUND_HEIGHT) as f64;
-    f64 halfGap = (PIPE_GAP as f64) / 2.0;
+fn checkCollisions(state GameState) bool {
+    var birdLeft f64 = BIRD_X as f64;
+    var birdRight f64 = birdLeft + (BIRD_WIDTH as f64);
+    var birdTop f64 = state.birdY;
+    var birdBottom f64 = state.birdY + (BIRD_HEIGHT as f64);
+    var groundTop f64 = (WINDOW_HEIGHT - GROUND_HEIGHT) as f64;
+    var halfGap f64 = (PIPE_GAP as f64) / 2.0;
 
     if (birdTop < 0.0) {
         return true;
@@ -160,14 +160,14 @@ fn checkCollisions(GameState state) -> bool {
         return true;
     }
 
-    i32 index = 0;
+    var index i32 = 0;
     while ((index as f64) < state.pipes.size()) {
-        Pipe pipe = state.pipes[index];
-        f64 pipeLeft = pipe.x;
-        f64 pipeRight = pipe.x + (PIPE_WIDTH as f64);
+        var pipe Pipe = state.pipes[index];
+        var pipeLeft f64 = pipe.x;
+        var pipeRight f64 = pipe.x + (PIPE_WIDTH as f64);
         if (birdRight > pipeLeft && birdLeft < pipeRight) {
-            f64 gapTop = pipe.gapY - halfGap;
-            f64 gapBottom = pipe.gapY + halfGap;
+            var gapTop f64 = pipe.gapY - halfGap;
+            var gapBottom f64 = pipe.gapY + halfGap;
             if (birdTop < gapTop || birdBottom > gapBottom) {
                 return true;
             }
@@ -179,7 +179,7 @@ fn checkCollisions(GameState state) -> bool {
     return false;
 }
 
-fn stepGame(GameState state, bool flapPressed, f64 dt) -> void {
+fn stepGame(state GameState, flapPressed bool, dt f64) void {
     if (state.running == false) {
         return;
     }
@@ -195,17 +195,16 @@ fn stepGame(GameState state, bool flapPressed, f64 dt) -> void {
     }
 }
 
-fn renderPipes(handle<mog:window:WindowHandle> win,
-               Array<Pipe> pipes) -> void {
-    i64 groundTop = WINDOW_HEIGHT - GROUND_HEIGHT;
-    f64 halfGap = (PIPE_GAP as f64) / 2.0;
-    i32 index = 0;
+fn renderPipes(win handle<mog:window:WindowHandle>, pipes Array<Pipe>) void {
+    var groundTop i64 = WINDOW_HEIGHT - GROUND_HEIGHT;
+    var halfGap f64 = (PIPE_GAP as f64) / 2.0;
+    var index i32 = 0;
     while ((index as f64) < pipes.size()) {
-        Pipe pipe = pipes[index];
-        i64 pipeX = floor(pipe.x) as i64;
-        i64 topHeight = floor(pipe.gapY - halfGap) as i64;
-        i64 bottomY = floor(pipe.gapY + halfGap) as i64;
-        i64 bottomHeight = groundTop - bottomY;
+        var pipe Pipe = pipes[index];
+        var pipeX i64 = floor(pipe.x) as i64;
+        var topHeight i64 = floor(pipe.gapY - halfGap) as i64;
+        var bottomY i64 = floor(pipe.gapY + halfGap) as i64;
+        var bottomHeight i64 = groundTop - bottomY;
 
         window.fillRect(win, pipeX, 0i64, PIPE_WIDTH, topHeight,
                         94i64, 201i64, 72i64);
@@ -216,13 +215,12 @@ fn renderPipes(handle<mog:window:WindowHandle> win,
     }
 }
 
-fn renderBird(handle<mog:window:WindowHandle> win,
-              GameState state) -> void {
-    i64 birdY = floor(state.birdY) as i64;
-    i64 birdEyeX = BIRD_X + BIRD_WIDTH - 10i64;
-    i64 birdEyeY = birdY + 6i64;
-    i64 birdBeakX = BIRD_X + BIRD_WIDTH - 2i64;
-    i64 birdBeakY = birdY + 8i64;
+fn renderBird(win handle<mog:window:WindowHandle>, state GameState) void {
+    var birdY i64 = floor(state.birdY) as i64;
+    var birdEyeX i64 = BIRD_X + BIRD_WIDTH - 10i64;
+    var birdEyeY i64 = birdY + 6i64;
+    var birdBeakX i64 = BIRD_X + BIRD_WIDTH - 2i64;
+    var birdBeakY i64 = birdY + 8i64;
 
     window.fillRect(win, BIRD_X, birdY, BIRD_WIDTH,
                     BIRD_HEIGHT, 255i64, 230i64, 64i64);
@@ -232,9 +230,8 @@ fn renderBird(handle<mog:window:WindowHandle> win,
                     255i64, 140i64, 0i64);
 }
 
-fn renderFrame(handle<mog:window:WindowHandle> win,
-               GameState state) -> void {
-    i64 groundTop = WINDOW_HEIGHT - GROUND_HEIGHT;
+fn renderFrame(win handle<mog:window:WindowHandle>, state GameState) void {
+    var groundTop i64 = WINDOW_HEIGHT - GROUND_HEIGHT;
 
     window.clearRgb(win, 135i64, 206i64, 235i64);
     renderPipes(win, state.pipes);
@@ -244,30 +241,30 @@ fn renderFrame(handle<mog:window:WindowHandle> win,
     window.present(win);
 }
 
-const handle<mog:window:WindowHandle> win =
+const win handle<mog:window:WindowHandle> =
     window.create("Flappy Mog", WINDOW_WIDTH, WINDOW_HEIGHT);
 
 window.show(win);
 
-GameState state = resetGame();
-bool appRunning = true;
-bool spaceHeld = false;
-bool pendingFlap = false;
-bool announcedDeath = false;
-f64 accumulator = 0.0;
-f64 lastTime = clock();
+var state GameState = resetGame();
+var appRunning bool = true;
+var spaceHeld bool = false;
+var pendingFlap bool = false;
+var announcedDeath bool = false;
+var accumulator f64 = 0.0;
+var lastTime f64 = clock();
 
 print("Press Space to flap. Escape closes the window.");
 
 while (appRunning) {
-    handle<mog:window:EventHandle>? evt = window.pollEvent(win);
+    var evt handle<mog:window:EventHandle>? = window.pollEvent(win);
     while (evt != null) {
-        str kind = window.eventKind(evt);
+        var kind str = window.eventKind(evt);
         if (kind == "quit") {
             appRunning = false;
         } else {
             if (kind == "key_down") {
-                i64 keyCode = window.eventKeyCode(evt);
+                var keyCode i64 = window.eventKeyCode(evt);
                 if (keyCode == window.KEY_ESCAPE) {
                     appRunning = false;
                 }
@@ -293,8 +290,8 @@ while (appRunning) {
         pendingFlap = false;
     }
 
-    f64 now = clock();
-    f64 frameTime = now - lastTime;
+    var now f64 = clock();
+    var frameTime f64 = now - lastTime;
     lastTime = now;
 
     if (frameTime > 0.25) {
@@ -304,7 +301,7 @@ while (appRunning) {
     accumulator += frameTime;
 
     while (accumulator >= FIXED_DT) {
-        bool stepFlap = pendingFlap;
+        var stepFlap bool = pendingFlap;
         if (pendingFlap) {
             pendingFlap = false;
         }

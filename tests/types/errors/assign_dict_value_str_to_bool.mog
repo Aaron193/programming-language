@@ -1,1 +1,1 @@
-Dict<str, bool> flags = {"ready": "yes"};
+var flags Dict<str, bool> = {"ready": "yes"};

@@ -1,3 +1,3 @@
-import broken from "examples:mismatch";
+const broken = @import("examples:mismatch");
 
 print(broken.identity(42i64));

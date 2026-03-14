@@ -1,12 +1,12 @@
-i32 i = 0;
+var i i32 = 0;
 while (i < 40000) {
-  Array<i32> a = [];
+  var a Array<i32> = [];
   a.push(i);
 
-  Dict<str, i32> d = {};
+  var d Dict<str, i32> = {};
   d["i"] = i;
 
-  Set<i32> s = Set();
+  var s Set<i32> = Set();
   s.add(i);
 
   i = i + 1;

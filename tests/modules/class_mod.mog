@@ -1,7 +1,7 @@
-export class Counter {
-    i32 value;
+type Counter struct {
+    value i32;
 
-    inc() -> i32 {
+    fn inc() i32 {
         this.value = this.value + 1;
         return this.value;
     }

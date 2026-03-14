@@ -1,4 +1,4 @@
-import nativeMath from "example_math";
+const nativeMath = @import("example_math");
 
 print(nativeMath.PACKAGE_NAME);
 print(nativeMath.MEANING_OF_LIFE);

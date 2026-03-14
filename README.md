@@ -9,15 +9,16 @@ This project is a bytecode-compiled, stack-based interpreter implemented in C++.
 - Comparison/equality: `>`, `>=`, `<`, `<=`, `==`, `!=`
 - Logical operators: `!`, `&&`, `||` (short-circuiting)
 - Bitwise operators: `&`, `|`, `^`, `~`, `<<`, `>>`
-- Variables: explicit typed declarations (with required initializer), `const` immutable bindings, assignment, compound assignment (`+=`, `-=`, `*=`, `/=`, `&=`, `|=`, `^=`, `<<=`, `>>=`), lexical scope
+- Variables: `var name Type = value`, `const name Type = value`, `const name = @import(...)`, assignment, compound assignment (`+=`, `-=`, `*=`, `/=`, `&=`, `|=`, `^=`, `<<=`, `>>=`), lexical scope
 - Update operators: `++`, `--`
-- Control flow: `if`/`else`, `while`, `for`, foreach (`for (Type x : collection)`)
-- Functions: declarations, parameters, return values, recursion
+- Control flow: `if`/`else`, `while`, `for`, foreach (`for (var x Type : collection)`)
+- Functions: `fn name(param Type, ...) ReturnType { ... }`, function literals, recursion
 - Closures: nested functions with captured/upvalue variables
-- Classes: class declarations, fields, methods, `this`
-- Inheritance: subclassing with `<` and `super.method()` calls
-- Modules: `import` / `export` with runtime module cache and circular import detection
-- Native packages: runtime-loadable C++ shared libraries imported through `import`
+- Types: `type Name struct { ... }`, aliases via `type Alias ExistingType`, fields/methods, `this`
+- Inheritance: `type Child struct < Parent { ... }` with `super.method()` calls
+- Modules: `@import(...)` bindings with capitalization-based exports
+- Operator annotations: `@operator(\"+\")` lowers annotated method calls at compile time
+- Native packages: runtime-loadable C++ shared libraries imported through `@import(...)`
 
 ## Runtime / Engine Features
 
@@ -187,38 +188,39 @@ perf report
 Top-level exports:
 
 ```expr
-export fn add(a, b) { return a + b; }
-export const f64 PI = 3.14159;
-export class Vector {}
+fn Add(a i32, b i32) i32 { return a + b; }
+const PI f64 = 3.14159;
+type Vector struct {}
 ```
 
 Namespace import:
 
 ```expr
-import math from "./math.mog";
+const math = @import("./math.mog");
 print(math.PI);
-print(math.add(1, 2));
+print(math.Add(1, 2));
 ```
 
 Named import and aliasing:
 
 ```expr
-import { add, PI } from "./math.mog";
-import { add as sum } from "./math.mog";
+const { Add, PI } = @import("./math.mog");
+const { Add as sum } = @import("./math.mog");
 ```
 
 Notes:
 - Import paths must be string literals and include full filename.
 - Relative paths are resolved from the importing file's directory.
-- REPL mode does not allow `import` statements.
+- REPL mode does not allow `@import(...)`.
+- Capitalized top-level names are public module exports; lowercase names are private.
 
 ## Native Packages
 
 Source modules and native packages share the same import syntax:
 
 ```expr
-import nativeMath from "examples:math";
-import { addI64, greet } from "examples:math";
+const nativeMath = @import("examples:math");
+const { addI64, greet } = @import("examples:math");
 ```
 
 Namespaced package imports use `namespace:name` and resolve to nested package
@@ -238,16 +240,16 @@ This repository includes a namespaced reference package in
 `packages/example_math/`.
 
 Native packages can now return opaque native handles through signatures such as
-`fn() -> handle<examples:counter:CounterHandle>`. Handles are GC-managed by the
+`fn() handle<examples:counter:CounterHandle>`. Handles are GC-managed by the
 VM and invoke the package-provided finalizer when released. A reference handle
 package lives in `packages/examples/counter/`.
 
 Source files can declare native handles directly:
 
 ```expr
-import counter from "examples:counter";
+const counter = @import("examples:counter");
 
-const handle<examples:counter:CounterHandle> c = counter.create(10i64);
+const c handle<examples:counter:CounterHandle> = counter.create(10i64);
 print(counter.read(c));
 ```
 
@@ -258,11 +260,11 @@ configure time:
 Headless smoke usage for tests:
 
 ```expr
-import window from "mog:window";
+const window = @import("mog:window");
 
-const handle<mog:window:WindowHandle> win =
+const win handle<mog:window:WindowHandle> =
     window.create("Demo", 800i64, 600i64);
-const handle<mog:window:EventHandle>? evt = window.pollEvent(win);
+const evt handle<mog:window:EventHandle>? = window.pollEvent(win);
 window.clear(win);
 window.present(win);
 window.close(win);

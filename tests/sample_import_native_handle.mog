@@ -1,4 +1,4 @@
-import counter from "examples:counter";
+const counter = @import("examples:counter");
 
 print(counter.PACKAGE_ID);
 print(counter.read(counter.create(10i64)));

@@ -1,2 +1,2 @@
-const i32 value = 1;
+const value i32 = 1;
 value = 2;

@@ -1,8 +1,8 @@
-import window from "mog:window";
+const window = @import("mog:window");
 
-const handle<mog:window:WindowHandle> win =
+const win handle<mog:window:WindowHandle> =
     window.create("Demo", 64i64, 64i64);
-const handle<mog:window:EventHandle>? evt = window.pollEvent(win);
+const evt handle<mog:window:EventHandle>? = window.pollEvent(win);
 
 window.clear(win);
 window.present(win);

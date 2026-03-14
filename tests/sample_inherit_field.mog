@@ -1,16 +1,16 @@
-class Base {
-  i32 x;
+type Base struct {
+  x i32;
 }
 
-class Derived < Base {
-  i32 y;
+type Derived struct < Base {
+  y i32;
 
-  sum() -> i32 {
+  fn sum() i32 {
     return this.x + this.y;
   }
 }
 
-Derived item = Derived();
+var item Derived = Derived();
 item.x = 3;
 item.y = 4;
 

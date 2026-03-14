@@ -105,11 +105,14 @@ class Compiler {
     GC* m_gc = nullptr;
     std::unordered_map<std::string, uint8_t> m_globalSlots;
     std::unordered_set<std::string> m_classNames;
+    std::unordered_map<std::string, TypeRef> m_typeAliases;
     std::unordered_map<std::string, TypeRef> m_functionSignatures;
     std::unordered_map<std::string, std::unordered_map<std::string, TypeRef>>
         m_classFieldTypes;
     std::unordered_map<std::string, std::unordered_map<std::string, TypeRef>>
         m_classMethodSignatures;
+    std::unordered_map<std::string, std::unordered_map<int, std::string>>
+        m_classOperatorMethods;
     std::unordered_map<std::string, std::string> m_superclassOf;
     std::unordered_map<std::string, TypeRef> m_checkerTopLevelSymbolTypes;
     std::vector<TypeCheckerDeclarationType> m_checkerDeclarationTypes;
@@ -199,6 +202,7 @@ class Compiler {
         std::unordered_map<std::string, TypeRef>& outExportTypes,
         std::string& outError);
     TypeRef tokenToType(const Token& token) const;
+    void typeDeclaration(Token* declaredName = nullptr);
     void classDeclaration();
     void classMemberDeclaration();
     void typedClassMemberDeclaration();
@@ -231,6 +235,7 @@ class Compiler {
     void superExpression(bool canAssign);
     void literal(bool canAssign);
     void stringLiteral(bool canAssign);
+    void atExpression(bool canAssign);
     void grouping(bool canAssign);
     void arrayLiteral(bool canAssign);
     void dictLiteral(bool canAssign);

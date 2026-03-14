@@ -1,8 +1,8 @@
-const i32 base = 10;
+const base i32 = 10;
 
-fn readBase() -> i32 {
-  const i32 offset = 2;
-  fn inner() -> i32 {
+fn readBase() i32 {
+  const offset i32 = 2;
+  fn inner() i32 {
     return base + offset;
   }
   return inner();

@@ -1,14 +1,14 @@
-Array<Array<i32> > a = [[1, 2], [3, 4]];
+var a Array<Array<i32> > = [[1, 2], [3, 4]];
 print(a);
 
-Dict<str, i32> d = {"b": 2, "a": 1, "c": 9};
+var d Dict<str, i32> = {"b": 2, "a": 1, "c": 9};
 print(d);
 print(d.keys());
 print(d.values());
 
-Set<i32> s = Set(3, 1, 2, 2);
+var s Set<i32> = Set(3, 1, 2, 2);
 print(s);
 
-Array<i32> r = [];
+var r Array<i32> = [];
 r.push(5);
 print(r);

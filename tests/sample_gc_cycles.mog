@@ -1,9 +1,9 @@
-class Node {
-  Node? next;
+type Node struct {
+  next Node?;
 }
 
-Node a = Node();
-Node b = Node();
+var a Node = Node();
+var b Node = Node();
 a.next = b;
 b.next = a;
 

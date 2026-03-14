@@ -1,8 +1,8 @@
-i64 big = 1000000;
-i32 small = big as i32;
-str text = small as str;
+var big i64 = 1000000;
+var small i32 = big as i32;
+var text str = small as str;
 print(text + "!");
 
-f64 ratio = small as f64;
-i32 truncated = ratio as i32;
+var ratio f64 = small as f64;
+var truncated i32 = ratio as i32;
 print(truncated);

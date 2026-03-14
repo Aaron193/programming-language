@@ -1,10 +1,10 @@
-class Dog {
-    bark() -> str {
+type Dog struct {
+    fn bark() str {
         return "woof";
     }
 }
 
-Dog? maybeDog = Dog();
+var maybeDog Dog? = Dog();
 
 if (maybeDog != null) {
     print("dog present");

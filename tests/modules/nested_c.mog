@@ -1,1 +1,1 @@
-export i32 C = 40;
+const C i32 = 40;

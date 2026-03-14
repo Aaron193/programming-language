@@ -1,8 +1,8 @@
-fn outer() -> i32 {
-  i32 a = 1;
-  fn middle() -> i32 {
-    i32 b = 2;
-    fn inner() -> i32 {
+fn outer() i32 {
+  var a i32 = 1;
+  fn middle() i32 {
+    var b i32 = 2;
+    fn inner() i32 {
       return a + b;
     }
     return inner();

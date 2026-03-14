@@ -20,6 +20,11 @@ bool isCollectionTypeNameText(std::string_view name) {
 
 bool isHandleTypeNameText(std::string_view name) { return name == "handle"; }
 
+bool isPublicSymbolName(std::string_view name) {
+    return !name.empty() &&
+           name.front() >= 'A' && name.front() <= 'Z';
+}
+
 bool isBitwiseAssignmentOperator(TokenType type) {
     switch (type) {
         case TokenType::AMPERSAND_EQUAL:
@@ -198,23 +203,26 @@ bool Compiler::compile(std::string_view source, Chunk& chunk,
     m_chunk = &chunk;
     m_sourcePath = sourcePath;
     m_classNames.clear();
+    m_typeAliases.clear();
     m_functionSignatures.clear();
     m_classFieldTypes.clear();
     m_classMethodSignatures.clear();
+    m_classOperatorMethods.clear();
     m_superclassOf.clear();
     m_checkerTopLevelSymbolTypes.clear();
     m_checkerDeclarationTypes.clear();
     registerStandardLibraryTypeSignatures(m_functionSignatures);
     TypeChecker typeChecker;
     if (!typeChecker.collectSymbols(source, m_classNames,
-                                    m_functionSignatures)) {
+                                    m_functionSignatures, &m_typeAliases)) {
         return false;
     }
 
     std::vector<TypeError> typeErrors;
     TypeCheckerMetadata typeMetadata;
     if (m_strictMode &&
-        !typeChecker.check(source, m_classNames, m_functionSignatures,
+        !typeChecker.check(source, m_classNames, m_typeAliases,
+                           m_functionSignatures,
                            typeErrors, &typeMetadata)) {
         for (const auto& error : typeErrors) {
             std::cerr << "[error][compile][line " << error.line << "] "
@@ -310,6 +318,10 @@ TypeRef Compiler::tokenToType(const Token& token) const {
             return TypeInfo::makeNull();
         case TokenType::IDENTIFIER: {
             std::string className(token.start(), token.length());
+            auto aliasIt = m_typeAliases.find(className);
+            if (aliasIt != m_typeAliases.end()) {
+                return aliasIt->second;
+            }
             if (m_classNames.find(className) != m_classNames.end()) {
                 return TypeInfo::makeClass(className);
             }
@@ -1167,13 +1179,7 @@ bool Compiler::isTypedTypeAnnotationStart() {
         return next.type() == TokenType::LESS;
     }
 
-    std::string typeName(m_parser->current.start(), m_parser->current.length());
-    if (m_classNames.find(typeName) == m_classNames.end()) {
-        return false;
-    }
-
-    return next.type() == TokenType::IDENTIFIER ||
-           next.type() == TokenType::QUESTION;
+    return tokenToType(m_parser->current) != nullptr;
 }
 
 bool Compiler::parseTypeExpr() { return parseTypeExprType() != nullptr; }
@@ -1220,8 +1226,6 @@ TypeRef Compiler::parseTypeExprType() {
 
         consume(TokenType::CLOSE_PAREN,
                 "Expected ')' after function type parameters.");
-        consume(TokenType::ARROW,
-                "Expected '->' after function type parameters.");
         TypeRef returnType = parseTypeExprType();
         if (!returnType) {
             errorAtCurrent("Expected function return type.");
@@ -1369,13 +1373,9 @@ bool Compiler::isTypedVarDeclarationStart() {
         return next.type() == TokenType::LESS;
     }
 
-    std::string typeName(m_parser->current.start(), m_parser->current.length());
-    if (m_classNames.find(typeName) == m_classNames.end()) {
-        return false;
-    }
-
-    return next.type() == TokenType::IDENTIFIER ||
-           next.type() == TokenType::QUESTION;
+    return tokenToType(m_parser->current) != nullptr &&
+           (next.type() == TokenType::IDENTIFIER ||
+            next.type() == TokenType::QUESTION);
 }
 
 void Compiler::advance() {
@@ -1452,11 +1452,6 @@ bool Compiler::parseTypeLookahead(size_t& offset) {
                 }
                 break;
             }
-        }
-
-        ++offset;
-        if (tokenAt(offset).type() != TokenType::ARROW) {
-            return false;
         }
 
         ++offset;
@@ -1650,13 +1645,22 @@ void Compiler::consume(TokenType type, const std::string& message) {
 void Compiler::expression() { parsePrecedence(PREC_ASSIGNMENT); }
 
 void Compiler::declaration() {
-    if (m_parser->current.type() == TokenType::CLASS) {
+    if (m_parser->current.type() == TokenType::TYPE) {
+        advance();
+        typeDeclaration();
+    } else if (m_parser->current.type() == TokenType::CLASS) {
+        errorAtCurrent(
+            "Keyword 'class' was removed; use 'type Name struct { ... }'.");
         advance();
         classDeclaration();
     } else if (m_parser->current.type() == TokenType::IMPORT) {
+        errorAtCurrent(
+            "Statement 'import ... from' was removed; use '@import(...)' in a binding.");
         advance();
         importDeclaration();
     } else if (m_parser->current.type() == TokenType::EXPORT) {
+        errorAtCurrent(
+            "Keyword 'export' was removed; public top-level names use capitalization.");
         advance();
         exportDeclaration();
     } else if (m_parser->current.type() == TokenType::TYPE_FN &&
@@ -1669,7 +1673,7 @@ void Compiler::declaration() {
         advance();
         functionDeclaration();
     } else if (m_parser->current.type() == TokenType::CONST ||
-               isTypedVarDeclarationStart()) {
+               m_parser->current.type() == TokenType::VAR) {
         typedVarDeclaration();
     } else {
         statement();
@@ -1691,268 +1695,66 @@ void Compiler::emitExportName(const Token& nameToken) {
 }
 
 void Compiler::exportDeclaration() {
-    if (currentContext().scopeDepth != 0) {
-        errorAtCurrent("'export' is only allowed at the top level.");
-    }
-
-    if (m_parser->current.type() == TokenType::TYPE_FN &&
-        peekNextToken().type() == TokenType::IDENTIFIER) {
+    while (m_parser->current.type() != TokenType::SEMI_COLON &&
+           m_parser->current.type() != TokenType::END_OF_FILE &&
+           m_parser->current.type() != TokenType::CLOSE_CURLY) {
         advance();
-        if (m_parser->current.type() != TokenType::IDENTIFIER) {
-            errorAtCurrent("Expected function name.");
-            return;
-        }
-        Token exportName = m_parser->current;
-        functionDeclaration();
-        emitExportName(exportName);
-        return;
     }
-
-    if (m_parser->current.type() == TokenType::FUNCTION) {
-        errorAtCurrent("Keyword 'function' was removed; use 'fn'.");
+    if (m_parser->current.type() == TokenType::SEMI_COLON) {
         advance();
-        if (m_parser->current.type() != TokenType::IDENTIFIER) {
-            errorAtCurrent("Expected function name.");
-            return;
-        }
-        Token exportName = m_parser->current;
-        functionDeclaration();
-        emitExportName(exportName);
-        return;
     }
-
-    if (m_parser->current.type() == TokenType::CONST ||
-        isTypedVarDeclarationStart()) {
-        Token exportName;
-        typedVarDeclaration(&exportName);
-        emitExportName(exportName);
-        return;
-    }
-
-    if (m_parser->current.type() == TokenType::CLASS) {
-        advance();
-        if (m_parser->current.type() != TokenType::IDENTIFIER) {
-            errorAtCurrent("Expected class name.");
-            return;
-        }
-        Token exportName = m_parser->current;
-        classDeclaration();
-        emitExportName(exportName);
-        return;
-    }
-
-    errorAtCurrent(
-        "Expected 'fn', typed variable declaration, or 'class' after "
-        "'export'.");
 }
 
 void Compiler::importDeclaration() {
-    if (m_sourcePath.empty()) {
-        errorAtCurrent(
-            "Import statements are not allowed in interactive mode.");
-        return;
-    }
-
-    auto emitImportPath = [&](const std::string& resolvedPath) {
-        emitBytes(OpCode::IMPORT_MODULE,
-                  makeConstant(makeStringValue(resolvedPath)));
-    };
-
-    auto parseAndResolvePath = [&]() -> ImportTarget {
-        consume(TokenType::FROM, "Expected 'from' in import declaration.");
-        consume(TokenType::STRING,
-                "Expected string literal module path in import declaration.");
-
-        std::string pathText(m_parser->previous.start(),
-                             m_parser->previous.length());
-        if (pathText.length() < 2) {
-            errorAt(m_parser->previous, "Invalid import path.");
-            return ImportTarget{};
-        }
-
-        std::string rawPath = pathText.substr(1, pathText.length() - 2);
-        ImportTarget importTarget;
-        std::string resolveError;
-        if (!resolveImportTarget(m_sourcePath, rawPath, m_packageSearchPaths,
-                                 importTarget, resolveError)) {
-            errorAt(m_parser->previous, resolveError);
-            return ImportTarget{};
-        }
-
-        if (importTarget.kind == ImportTargetKind::NATIVE_PACKAGE &&
-            !importTarget.isLegacyBarePackage) {
-            NativePackageDescriptor packageDescriptor;
-            std::string packageError;
-            if (!loadNativePackageDescriptor(importTarget.resolvedPath,
-                                             packageDescriptor, packageError,
-                                             false, nullptr)) {
-                errorAt(m_parser->previous, packageError);
-                return ImportTarget{};
-            }
-
-            if (!validateNativePackageImport(importTarget, packageDescriptor,
-                                             packageError)) {
-                errorAt(m_parser->previous, packageError);
-                return ImportTarget{};
-            }
-        }
-
-        return importTarget;
-    };
-
-    if (m_parser->current.type() == TokenType::OPEN_CURLY) {
-        struct NamedBinding {
-            Token exportName;
-            Token localName;
-            TypeRef expectedType;
-            TypeRef resolvedType;
-        };
-
+    while (m_parser->current.type() != TokenType::SEMI_COLON &&
+           m_parser->current.type() != TokenType::END_OF_FILE &&
+           m_parser->current.type() != TokenType::CLOSE_CURLY) {
         advance();
-        std::vector<NamedBinding> bindings;
-
-        if (m_parser->current.type() != TokenType::CLOSE_CURLY) {
-            do {
-                consume(TokenType::IDENTIFIER,
-                        "Expected export name in named import list.");
-                Token exportName = m_parser->previous;
-                Token localName = exportName;
-
-                if (m_parser->current.type() == TokenType::AS ||
-                    m_parser->current.type() == TokenType::AS_KW) {
-                    advance();
-                    consume(TokenType::IDENTIFIER,
-                            "Expected local alias after 'as'.");
-                    localName = m_parser->previous;
-                }
-
-                TypeRef expectedType = nullptr;
-                if (m_parser->current.type() == TokenType::COLON) {
-                    advance();
-                    expectedType = parseTypeExprType();
-                    if (!expectedType) {
-                        errorAtCurrent("Expected type annotation after ':'.");
-                    }
-                }
-
-                bindings.push_back(
-                    NamedBinding{exportName, localName, expectedType, nullptr});
-
-                if (m_parser->current.type() != TokenType::COMMA) {
-                    break;
-                }
-                advance();
-            } while (true);
-        }
-
-        consume(TokenType::CLOSE_CURLY,
-                "Expected '}' after named import list.");
-        ImportTarget importTarget = parseAndResolvePath();
-        consume(TokenType::SEMI_COLON,
-                "Expected ';' after import declaration.");
-
-        if (importTarget.canonicalId.empty()) {
-            return;
-        }
-
-        std::unordered_map<std::string, TypeRef> moduleExportTypes;
-        std::string moduleTypeError;
-        if (!resolveImportExportTypes(importTarget, moduleExportTypes,
-                                      moduleTypeError)) {
-            errorAtCurrent(moduleTypeError);
-            return;
-        }
-
-        for (auto& binding : bindings) {
-            std::string exportName(binding.exportName.start(),
-                                   binding.exportName.length());
-            auto exportedTypeIt = moduleExportTypes.find(exportName);
-            if (exportedTypeIt == moduleExportTypes.end()) {
-                errorAt(binding.exportName, "Module or native package does not "
-                                           "export '" +
-                                               exportName + "'.");
-                binding.resolvedType = TypeInfo::makeAny();
-                continue;
-            }
-
-            TypeRef exportedType = exportedTypeIt->second;
-            if (binding.expectedType) {
-                if (!isAssignable(exportedType, binding.expectedType)) {
-                    std::string localName(binding.localName.start(),
-                                          binding.localName.length());
-                    errorAt(binding.localName,
-                            "Type error: imported symbol '" + localName +
-                                "' expects '" +
-                                binding.expectedType->toString() +
-                                "' but module exports '" + exportName +
-                                "' as '" + exportedType->toString() + "'.");
-                }
-                binding.resolvedType = binding.expectedType;
-            } else {
-                binding.resolvedType = exportedType;
-            }
-        }
-
-        emitImportPath(importTarget.canonicalId);
-        for (const auto& binding : bindings) {
-            emitByte(OpCode::DUP);
-            emitBytes(OpCode::GET_PROPERTY,
-                      identifierConstant(binding.exportName));
-
-            uint8_t variable = 0;
-            if (currentContext().scopeDepth > 0) {
-                addLocal(binding.localName, binding.resolvedType
-                                                ? binding.resolvedType
-                                                : TypeInfo::makeAny());
-            } else {
-                variable = globalSlot(binding.localName);
-                if (variable < m_globalTypes.size()) {
-                    m_globalTypes[variable] = binding.resolvedType
-                                                  ? binding.resolvedType
-                                                  : TypeInfo::makeAny();
-                }
-            }
-            defineVariable(variable);
-        }
-        emitByte(OpCode::POP);
-        return;
     }
-
-    consume(TokenType::IDENTIFIER,
-            "Expected module alias or named import list after 'import'.");
-    Token aliasName = m_parser->previous;
-
-    ImportTarget importTarget = parseAndResolvePath();
-    consume(TokenType::SEMI_COLON, "Expected ';' after import declaration.");
-
-    if (importTarget.canonicalId.empty()) {
-        return;
+    if (m_parser->current.type() == TokenType::SEMI_COLON) {
+        advance();
     }
-
-    emitImportPath(importTarget.canonicalId);
-
-    uint8_t variable = 0;
-    if (currentContext().scopeDepth > 0) {
-        addLocal(aliasName);
-    } else {
-        variable = globalSlot(aliasName);
-    }
-    defineVariable(variable);
 }
 
-void Compiler::classDeclaration() {
+void Compiler::typeDeclaration(Token* declaredName) {
+    if (currentContext().scopeDepth != 0) {
+        errorAtCurrent("Type declarations are only allowed at the top level.");
+    }
+
+    consume(TokenType::IDENTIFIER, "Expected type name.");
+    Token nameToken = m_parser->previous;
+    if (declaredName != nullptr) {
+        *declaredName = nameToken;
+    }
+
+    if (m_parser->current.type() != TokenType::STRUCT &&
+        m_parser->current.type() != TokenType::LESS &&
+        m_parser->current.type() != TokenType::OPEN_CURLY) {
+        TypeRef aliasedType = parseTypeExprType();
+        if (!aliasedType) {
+            errorAtCurrent("Expected aliased type or 'struct' after type name.");
+            return;
+        }
+        m_typeAliases[std::string(nameToken.start(), nameToken.length())] =
+            aliasedType;
+        if (m_parser->current.type() == TokenType::SEMI_COLON) {
+            advance();
+        }
+        return;
+    }
+
+    if (m_parser->current.type() == TokenType::STRUCT) {
+        advance();
+    }
+
     ClassContext classContext;
     classContext.hasSuperclass = false;
     classContext.enclosing = m_currentClass;
-    classContext.className.clear();
-    m_currentClass = &classContext;
-
-    consume(TokenType::IDENTIFIER, "Expected class name.");
-    Token nameToken = m_parser->previous;
     classContext.className = std::string(nameToken.start(), nameToken.length());
+    m_currentClass = &classContext;
     m_superclassOf[classContext.className] = "";
-    uint8_t nameConstant = identifierConstant(nameToken);
 
+    uint8_t nameConstant = identifierConstant(nameToken);
     uint8_t variable = 0;
     if (currentContext().scopeDepth > 0) {
         addLocal(nameToken);
@@ -1962,7 +1764,6 @@ void Compiler::classDeclaration() {
 
     emitBytes(OpCode::CLASS_OP, nameConstant);
     defineVariable(variable);
-
     namedVariable(nameToken, false);
 
     if (m_parser->current.type() == TokenType::LESS) {
@@ -1971,7 +1772,7 @@ void Compiler::classDeclaration() {
         Token superclassName = m_parser->previous;
 
         if (identifiersEqual(nameToken, superclassName)) {
-            errorAt(superclassName, "A class cannot inherit from itself.");
+            errorAt(superclassName, "A type cannot inherit from itself.");
         }
 
         m_superclassOf[classContext.className] =
@@ -1982,94 +1783,148 @@ void Compiler::classDeclaration() {
         classContext.hasSuperclass = true;
     }
 
-    consume(TokenType::OPEN_CURLY, "Expected '{' before class body.");
+    consume(TokenType::OPEN_CURLY, "Expected '{' before struct body.");
     while (m_parser->current.type() != TokenType::CLOSE_CURLY &&
            m_parser->current.type() != TokenType::END_OF_FILE) {
         classMemberDeclaration();
     }
-    consume(TokenType::CLOSE_CURLY, "Expected '}' after class body.");
+    consume(TokenType::CLOSE_CURLY, "Expected '}' after struct body.");
     emitByte(OpCode::POP);
+
+    if (currentContext().scopeDepth == 0 &&
+        isPublicSymbolName(std::string_view(nameToken.start(),
+                                            nameToken.length()))) {
+        emitExportName(nameToken);
+    }
 
     m_currentClass = m_currentClass->enclosing;
 }
 
-void Compiler::classMemberDeclaration() {
-    if (isTypedTypeAnnotationStart()) {
-        typedClassMemberDeclaration();
-        return;
+void Compiler::classDeclaration() {
+    consume(TokenType::IDENTIFIER, "Expected class name.");
+    while (m_parser->current.type() != TokenType::OPEN_CURLY &&
+           m_parser->current.type() != TokenType::END_OF_FILE) {
+        advance();
     }
-
-    methodDeclaration();
+    if (m_parser->current.type() == TokenType::OPEN_CURLY) {
+        int depth = 1;
+        advance();
+        while (depth > 0 && m_parser->current.type() != TokenType::END_OF_FILE) {
+            if (m_parser->current.type() == TokenType::OPEN_CURLY) {
+                depth++;
+            } else if (m_parser->current.type() == TokenType::CLOSE_CURLY) {
+                depth--;
+            }
+            advance();
+        }
+    }
 }
 
-void Compiler::typedClassMemberDeclaration() {
-    TypeRef declaredType = parseTypeExprType();
-    if (!declaredType) {
-        errorAtCurrent("Expected class member type.");
+void Compiler::classMemberDeclaration() {
+    std::vector<int> annotatedOperators;
+    auto parseOperatorToken = [](std::string_view op) -> int {
+        if (op == "+") return TokenType::PLUS;
+        if (op == "-") return TokenType::MINUS;
+        if (op == "*") return TokenType::STAR;
+        if (op == "/") return TokenType::SLASH;
+        if (op == "==") return TokenType::EQUAL_EQUAL;
+        if (op == "!=") return TokenType::BANG_EQUAL;
+        if (op == "<") return TokenType::LESS;
+        if (op == "<=") return TokenType::LESS_EQUAL;
+        if (op == ">") return TokenType::GREATER;
+        if (op == ">=") return TokenType::GREATER_EQUAL;
+        return -1;
+    };
+
+    while (m_parser->current.type() == TokenType::AT) {
+        advance();
+        consume(TokenType::IDENTIFIER, "Expected annotation name after '@'.");
+        std::string annotationName(m_parser->previous.start(),
+                                   m_parser->previous.length());
+        if (annotationName != "operator") {
+            errorAt(m_parser->previous, "Unknown annotation '@" +
+                                             annotationName + "'.");
+        }
+        consume(TokenType::OPEN_PAREN, "Expected '(' after annotation name.");
+        consume(TokenType::STRING, "Expected string literal annotation value.");
+        std::string literal(m_parser->previous.start(), m_parser->previous.length());
+        consume(TokenType::CLOSE_PAREN, "Expected ')' after annotation value.");
+        if (literal.size() >= 2) {
+            int op = parseOperatorToken(
+                std::string_view(literal.data() + 1, literal.size() - 2));
+            if (op == -1) {
+                errorAt(m_parser->previous,
+                        "Unsupported operator annotation.");
+            } else {
+                annotatedOperators.push_back(op);
+            }
+        }
+    }
+
+    if (m_parser->current.type() == TokenType::TYPE_FN) {
+        advance();
+        consume(TokenType::IDENTIFIER, "Expected method name.");
+        Token nameToken = m_parser->previous;
+        std::string methodName(nameToken.start(), nameToken.length());
+        uint8_t nameConstant = identifierConstant(nameToken);
+
+        CompiledFunction compiled =
+            compileFunction(methodName, true);
+        if (m_currentClass && !m_currentClass->className.empty()) {
+            m_classMethodSignatures[m_currentClass->className][methodName] =
+                TypeInfo::makeFunction(compiled.parameterTypes,
+                                       compiled.returnType
+                                           ? compiled.returnType
+                                           : TypeInfo::makeAny());
+            for (int op : annotatedOperators) {
+                m_classOperatorMethods[m_currentClass->className][op] =
+                    methodName;
+            }
+        }
+
+        emitBytes(OpCode::CLOSURE, makeConstant(Value(compiled.function)));
+        for (const auto& upvalue : compiled.upvalues) {
+            emitByte(static_cast<uint8_t>(upvalue.isLocal ? 1 : 0));
+            emitByte(upvalue.index);
+        }
+        emitBytes(OpCode::METHOD, nameConstant);
         return;
     }
 
-    consume(TokenType::IDENTIFIER, "Expected class member name.");
+    if (!annotatedOperators.empty()) {
+        errorAtCurrent("@operator can only annotate a method.");
+    }
+
+    consume(TokenType::IDENTIFIER, "Expected struct field name or method.");
     Token memberName = m_parser->previous;
     std::string memberNameText(memberName.start(), memberName.length());
     std::string className = m_currentClass ? m_currentClass->className : "";
 
-    if (m_parser->current.type() == TokenType::SEMI_COLON) {
-        if (declaredType->isVoid()) {
-            errorAt(memberName, "Class field '" + memberNameText +
-                                    "' cannot have type 'void'.");
-        }
-        if (!className.empty()) {
-            m_classFieldTypes[className][memberNameText] = declaredType;
-        }
-        advance();
+    TypeRef declaredType = parseTypeExprType();
+    if (!declaredType) {
+        errorAtCurrent("Expected field type after member name.");
         return;
     }
 
-    if (m_parser->current.type() != TokenType::OPEN_PAREN) {
-        errorAtCurrent("Expected ';' after typed field or '(' for method.");
-        return;
+    if (declaredType->isVoid()) {
+        errorAt(memberName, "Struct field '" + memberNameText +
+                                "' cannot have type 'void'.");
     }
-
-    uint8_t nameConstant = identifierConstant(memberName);
-    CompiledFunction compiled =
-        compileFunction(std::string(memberName.start(), memberName.length()),
-                        true, declaredType);
-
     if (!className.empty()) {
-        m_classMethodSignatures[className][memberNameText] =
-            TypeInfo::makeFunction(compiled.parameterTypes, declaredType);
+        m_classFieldTypes[className][memberNameText] = declaredType;
     }
+    if (m_parser->current.type() == TokenType::SEMI_COLON) {
+        advance();
+    }
+}
 
-    emitBytes(OpCode::CLOSURE, makeConstant(Value(compiled.function)));
-    for (const auto& upvalue : compiled.upvalues) {
-        emitByte(static_cast<uint8_t>(upvalue.isLocal ? 1 : 0));
-        emitByte(upvalue.index);
-    }
-    emitBytes(OpCode::METHOD, nameConstant);
+void Compiler::typedClassMemberDeclaration() {
+    errorAtCurrent(
+        "Legacy typed class members were removed; use 'name Type' fields and 'fn Name(...) Ret'.");
 }
 
 void Compiler::methodDeclaration() {
-    consume(TokenType::IDENTIFIER, "Expected method name.");
-    Token nameToken = m_parser->previous;
-    std::string methodName(nameToken.start(), nameToken.length());
-    uint8_t nameConstant = identifierConstant(nameToken);
-
-    CompiledFunction compiled = compileFunction(
-        std::string(nameToken.start(), nameToken.length()), true);
-
-    if (m_currentClass && !m_currentClass->className.empty()) {
-        m_classMethodSignatures[m_currentClass->className][methodName] =
-            TypeInfo::makeFunction(compiled.parameterTypes,
-                                   TypeInfo::makeAny());
-    }
-
-    emitBytes(OpCode::CLOSURE, makeConstant(Value(compiled.function)));
-    for (const auto& upvalue : compiled.upvalues) {
-        emitByte(static_cast<uint8_t>(upvalue.isLocal ? 1 : 0));
-        emitByte(upvalue.index);
-    }
-    emitBytes(OpCode::METHOD, nameConstant);
+    errorAtCurrent("Methods must start with 'fn'.");
 }
 
 void Compiler::statement() {
@@ -2143,6 +1998,12 @@ void Compiler::functionDeclaration() {
         emitByte(upvalue.index);
     }
     defineVariable(variable);
+
+    if (currentContext().scopeDepth == 0 &&
+        isPublicSymbolName(std::string_view(nameToken.start(),
+                                            nameToken.length()))) {
+        emitExportName(nameToken);
+    }
 }
 
 void Compiler::block() {
@@ -2196,23 +2057,25 @@ void Compiler::forStatement() {
 
     if (m_parser->current.type() == TokenType::SEMI_COLON) {
         advance();
-    } else if (isTypedVarDeclarationStart()) {
+    } else if (m_parser->current.type() == TokenType::VAR ||
+               m_parser->current.type() == TokenType::CONST) {
+        bool isConst = m_parser->current.type() == TokenType::CONST;
+        advance();
+        consume(TokenType::IDENTIFIER, "Expected loop variable name.");
+        Token loopVariable = m_parser->previous;
         TypeRef declaredType = parseTypeExprType();
         if (!declaredType) {
-            errorAtCurrent("Expected type in loop variable declaration.");
+            errorAtCurrent("Expected type after loop variable name.");
             declaredType = TypeInfo::makeAny();
         }
         if (declaredType->isVoid()) {
             errorAtCurrent("Variables cannot be declared with type 'void'.");
         }
 
-        consume(TokenType::IDENTIFIER, "Expected variable name after type.");
-        Token loopVariable = m_parser->previous;
-
         if (m_parser->current.type() == TokenType::COLON) {
             advance();
 
-            addLocal(loopVariable, declaredType);
+            addLocal(loopVariable, declaredType, isConst);
             emitByte(OpCode::NIL);
             markInitialized();
             uint8_t loopVariableSlot =
@@ -2239,9 +2102,9 @@ void Compiler::forStatement() {
             return;
         }
 
-        addLocal(loopVariable, declaredType);
+        addLocal(loopVariable, declaredType, isConst);
         consume(TokenType::EQUAL,
-                "Expected '=' in typed loop variable declaration "
+                "Expected '=' in loop variable declaration "
                 "(initializer is required).");
         expression();
         TypeRef initializerType = popExprType();
@@ -2350,33 +2213,217 @@ void Compiler::expressionStatement() {
 }
 
 void Compiler::typedVarDeclaration(Token* declaredName) {
-    bool isConst = false;
-    if (m_parser->current.type() == TokenType::CONST) {
-        isConst = true;
-        advance();
-    }
-
-    TypeRef declaredType = parseTypeExprType();
-    if (!declaredType) {
-        errorAtCurrent("Expected type in typed variable declaration.");
+    if (m_parser->current.type() != TokenType::CONST &&
+        m_parser->current.type() != TokenType::VAR) {
+        errorAtCurrent("Expected 'var' or 'const'.");
         return;
     }
 
-    if (declaredType->isVoid()) {
-        errorAtCurrent("Variables cannot be declared with type 'void'.");
+    bool isConst = m_parser->current.type() == TokenType::CONST;
+    advance();
+
+    auto isAtImportStart = [this]() {
+        if (m_parser->current.type() != TokenType::AT) {
+            return false;
+        }
+        const Token& nameToken = peekNextToken();
+        if (nameToken.type() != TokenType::IDENTIFIER &&
+            nameToken.type() != TokenType::IMPORT) {
+            return false;
+        }
+        std::string_view name(nameToken.start(), nameToken.length());
+        return name == "import";
+    };
+
+    auto parseImportTarget = [this]() -> ImportTarget {
+        if (m_sourcePath.empty()) {
+            errorAtCurrent("@import(...) is not allowed in interactive mode.");
+            return ImportTarget{};
+        }
+
+        consume(TokenType::AT, "Expected '@' before import.");
+        if (m_parser->current.type() != TokenType::IDENTIFIER &&
+            m_parser->current.type() != TokenType::IMPORT) {
+            errorAtCurrent("Expected import directive after '@'.");
+            return ImportTarget{};
+        }
+        advance();
+        std::string directive(m_parser->previous.start(),
+                              m_parser->previous.length());
+        if (directive != "import") {
+            errorAt(m_parser->previous, "Unknown '@" + directive + "' directive.");
+            return ImportTarget{};
+        }
+        consume(TokenType::OPEN_PAREN, "Expected '(' after '@import'.");
+        consume(TokenType::STRING, "Expected string literal import path.");
+
+        std::string pathText(m_parser->previous.start(),
+                             m_parser->previous.length());
+        consume(TokenType::CLOSE_PAREN, "Expected ')' after import path.");
+
+        if (pathText.length() < 2) {
+            errorAt(m_parser->previous, "Invalid import path.");
+            return ImportTarget{};
+        }
+
+        std::string rawPath = pathText.substr(1, pathText.length() - 2);
+        ImportTarget importTarget;
+        std::string resolveError;
+        if (!resolveImportTarget(m_sourcePath, rawPath, m_packageSearchPaths,
+                                 importTarget, resolveError)) {
+            errorAt(m_parser->previous, resolveError);
+            return ImportTarget{};
+        }
+
+        if (importTarget.kind == ImportTargetKind::NATIVE_PACKAGE &&
+            !importTarget.isLegacyBarePackage) {
+            NativePackageDescriptor packageDescriptor;
+            std::string packageError;
+            if (!loadNativePackageDescriptor(importTarget.resolvedPath,
+                                             packageDescriptor, packageError,
+                                             false, nullptr)) {
+                errorAt(m_parser->previous, packageError);
+                return ImportTarget{};
+            }
+
+            if (!validateNativePackageImport(importTarget, packageDescriptor,
+                                             packageError)) {
+                errorAt(m_parser->previous, packageError);
+                return ImportTarget{};
+            }
+        }
+
+        return importTarget;
+    };
+
+    if (m_parser->current.type() == TokenType::OPEN_CURLY) {
+        struct NamedBinding {
+            Token exportName;
+            Token localName;
+            TypeRef resolvedType;
+        };
+
+        advance();
+        std::vector<NamedBinding> bindings;
+        if (m_parser->current.type() != TokenType::CLOSE_CURLY) {
+            do {
+                consume(TokenType::IDENTIFIER,
+                        "Expected export name in destructured import.");
+                Token exportName = m_parser->previous;
+                Token localName = exportName;
+                if (m_parser->current.type() == TokenType::AS_KW) {
+                    advance();
+                    consume(TokenType::IDENTIFIER,
+                            "Expected local alias after 'as'.");
+                    localName = m_parser->previous;
+                }
+                bindings.push_back(NamedBinding{exportName, localName,
+                                                TypeInfo::makeAny()});
+                if (m_parser->current.type() != TokenType::COMMA) {
+                    break;
+                }
+                advance();
+            } while (true);
+        }
+        consume(TokenType::CLOSE_CURLY, "Expected '}' after binding list.");
+        consume(TokenType::EQUAL, "Expected '=' after destructured binding.");
+        ImportTarget importTarget = parseImportTarget();
+        if (m_parser->current.type() == TokenType::SEMI_COLON) {
+            advance();
+        }
+        if (importTarget.canonicalId.empty()) {
+            return;
+        }
+
+        std::unordered_map<std::string, TypeRef> moduleExportTypes;
+        std::string moduleTypeError;
+        if (!resolveImportExportTypes(importTarget, moduleExportTypes,
+                                      moduleTypeError)) {
+            errorAtCurrent(moduleTypeError);
+            return;
+        }
+
+        emitBytes(OpCode::IMPORT_MODULE,
+                  makeConstant(makeStringValue(importTarget.canonicalId)));
+        for (auto& binding : bindings) {
+            std::string exportName(binding.exportName.start(),
+                                   binding.exportName.length());
+            auto exportedTypeIt = moduleExportTypes.find(exportName);
+            if (exportedTypeIt != moduleExportTypes.end()) {
+                binding.resolvedType = exportedTypeIt->second;
+            } else {
+                errorAt(binding.exportName,
+                        "Module or native package does not export '" +
+                            exportName + "'.");
+            }
+
+            emitByte(OpCode::DUP);
+            emitBytes(OpCode::GET_PROPERTY,
+                      identifierConstant(binding.exportName));
+
+            uint8_t variable = 0;
+            if (currentContext().scopeDepth > 0) {
+                addLocal(binding.localName, binding.resolvedType, true);
+            } else {
+                variable = globalSlot(binding.localName);
+                if (variable < m_globalTypes.size()) {
+                    m_globalTypes[variable] = binding.resolvedType;
+                }
+                if (variable < m_globalConstness.size()) {
+                    m_globalConstness[variable] = true;
+                }
+            }
+            defineVariable(variable);
+        }
+        emitByte(OpCode::POP);
+        return;
     }
 
-    uint8_t global =
-        parseVariable("Expected variable name after type.", declaredType,
-                      isConst);
+    consume(TokenType::IDENTIFIER, "Expected variable name after mutability.");
+    Token nameToken = m_parser->previous;
     if (declaredName != nullptr) {
-        *declaredName = m_parser->previous;
+        *declaredName = nameToken;
+    }
+
+    TypeRef declaredType = TypeInfo::makeAny();
+    bool omittedType = false;
+    if (m_parser->current.type() == TokenType::EQUAL) {
+        omittedType = true;
+        if (peekNextToken().type() != TokenType::AT ||
+            (peekToken(2).type() != TokenType::IDENTIFIER &&
+             peekToken(2).type() != TokenType::IMPORT) ||
+            std::string_view(peekToken(2).start(), peekToken(2).length()) != "import") {
+            errorAt(nameToken,
+                    "Variables require an explicit type unless initialized from '@import(...)'.");
+        }
+    } else {
+        declaredType = parseTypeExprType();
+        if (!declaredType) {
+            errorAtCurrent("Expected type after variable name.");
+            return;
+        }
+        if (declaredType->isVoid()) {
+            errorAtCurrent("Variables cannot be declared with type 'void'.");
+        }
+    }
+
+    uint8_t global = 0;
+    if (currentContext().scopeDepth > 0) {
+        addLocal(nameToken, declaredType, isConst);
+    } else {
+        global = globalSlot(nameToken);
+        if (global < m_globalTypes.size()) {
+            m_globalTypes[global] = declaredType;
+        }
+        if (global < m_globalConstness.size()) {
+            m_globalConstness[global] = isConst;
+        }
     }
     consume(TokenType::EQUAL,
-            "Expected '=' in typed variable declaration (initializer is "
-            "required).");
+            "Expected '=' in variable declaration (initializer is required).");
+
     TypeRef initializerType = TypeInfo::makeAny();
-    if (declaredType->kind == TypeKind::FUNCTION &&
+    if (!omittedType && declaredType && declaredType->kind == TypeKind::FUNCTION &&
         (m_parser->current.type() == TokenType::TYPE_FN ||
          m_parser->current.type() == TokenType::FUNCTION)) {
         if (m_parser->current.type() == TokenType::FUNCTION) {
@@ -2388,12 +2435,26 @@ void Compiler::typedVarDeclaration(Token* declaredName) {
         expression();
         initializerType = popExprType();
     }
-    emitCoerceToType(initializerType, declaredType);
-    emitCheckInstanceType(declaredType);
+    if (!omittedType) {
+        emitCoerceToType(initializerType, declaredType);
+        emitCheckInstanceType(declaredType);
+    } else {
+        declaredType = initializerType;
+        if (currentContext().scopeDepth == 0 && global < m_globalTypes.size()) {
+            m_globalTypes[global] = declaredType;
+        }
+    }
 
-    consume(TokenType::SEMI_COLON,
-            "Expected ';' after typed variable declaration.");
+    if (m_parser->current.type() == TokenType::SEMI_COLON) {
+        advance();
+    }
     defineVariable(global);
+
+    if (currentContext().scopeDepth == 0 &&
+        isPublicSymbolName(std::string_view(nameToken.start(),
+                                            nameToken.length()))) {
+        emitExportName(nameToken);
+    }
 }
 
 void Compiler::parsePrecedence(Precedence precedence) {
@@ -2428,6 +2489,10 @@ void Compiler::parsePrecedence(Precedence precedence) {
 
 Compiler::ParseRule Compiler::getRule(TokenType type) {
     switch (type) {
+        case TokenType::AT:
+            return ParseRule{
+                [this](bool canAssign) { atExpression(canAssign); }, nullptr,
+                PREC_NONE};
         case TokenType::OPEN_PAREN:
             return ParseRule{[this](bool canAssign) { grouping(canAssign); },
                              [this](bool canAssign) { call(canAssign); },
@@ -2446,6 +2511,7 @@ Compiler::ParseRule Compiler::getRule(TokenType type) {
             return ParseRule{[this](bool canAssign) { number(canAssign); },
                              nullptr, PREC_NONE};
         case TokenType::IDENTIFIER:
+        case TokenType::TYPE:
         case TokenType::TYPE_I8:
         case TokenType::TYPE_I16:
         case TokenType::TYPE_I32:
@@ -2697,6 +2763,71 @@ void Compiler::stringLiteral(bool canAssign) {
     pushExprType(TypeInfo::makeStr());
 }
 
+void Compiler::atExpression(bool canAssign) {
+    (void)canAssign;
+
+    if (m_sourcePath.empty()) {
+        errorAt(m_parser->previous,
+                "@import(...) is not allowed in interactive mode.");
+        pushExprType(TypeInfo::makeAny());
+        return;
+    }
+
+    if (m_parser->current.type() != TokenType::IDENTIFIER &&
+        m_parser->current.type() != TokenType::IMPORT) {
+        errorAtCurrent("Expected directive name after '@'.");
+        pushExprType(TypeInfo::makeAny());
+        return;
+    }
+    advance();
+    std::string directive(m_parser->previous.start(), m_parser->previous.length());
+    if (directive != "import") {
+        errorAt(m_parser->previous, "Unknown '@" + directive + "' directive.");
+        pushExprType(TypeInfo::makeAny());
+        return;
+    }
+
+    consume(TokenType::OPEN_PAREN, "Expected '(' after '@import'.");
+    consume(TokenType::STRING, "Expected string literal import path.");
+    std::string pathText(m_parser->previous.start(), m_parser->previous.length());
+    consume(TokenType::CLOSE_PAREN, "Expected ')' after import path.");
+
+    if (pathText.length() < 2) {
+        errorAt(m_parser->previous, "Invalid import path.");
+        pushExprType(TypeInfo::makeAny());
+        return;
+    }
+
+    std::string rawPath = pathText.substr(1, pathText.length() - 2);
+    ImportTarget importTarget;
+    std::string resolveError;
+    if (!resolveImportTarget(m_sourcePath, rawPath, m_packageSearchPaths,
+                             importTarget, resolveError)) {
+        errorAt(m_parser->previous, resolveError);
+        pushExprType(TypeInfo::makeAny());
+        return;
+    }
+
+    if (importTarget.kind == ImportTargetKind::NATIVE_PACKAGE &&
+        !importTarget.isLegacyBarePackage) {
+        NativePackageDescriptor packageDescriptor;
+        std::string packageError;
+        if (!loadNativePackageDescriptor(importTarget.resolvedPath,
+                                         packageDescriptor, packageError, false,
+                                         nullptr) ||
+            !validateNativePackageImport(importTarget, packageDescriptor,
+                                         packageError)) {
+            errorAt(m_parser->previous, packageError);
+            pushExprType(TypeInfo::makeAny());
+            return;
+        }
+    }
+
+    emitBytes(OpCode::IMPORT_MODULE,
+              makeConstant(makeStringValue(importTarget.canonicalId)));
+    pushExprType(TypeInfo::makeAny());
+}
+
 void Compiler::grouping(bool canAssign) {
     (void)canAssign;
     expression();
@@ -2932,6 +3063,25 @@ void Compiler::binary(bool canAssign) {
     ParseRule rule = getRule(operatorType);
     parsePrecedence(static_cast<Precedence>(rule.precedence + 1));
     TypeRef rightType = popExprType();
+
+    if (leftType && leftType->kind == TypeKind::CLASS) {
+        auto classIt = m_classOperatorMethods.find(leftType->className);
+        if (classIt != m_classOperatorMethods.end()) {
+            auto opIt = classIt->second.find(operatorType);
+            if (opIt != classIt->second.end()) {
+                TypeRef methodType =
+                    lookupClassMethodType(leftType->className, opIt->second);
+                emitByte(OpCode::INVOKE);
+                emitByte(
+                    makeConstant(makeStringValue(opIt->second)));
+                emitByte(1);
+                pushExprType(methodType && methodType->returnType
+                                 ? methodType->returnType
+                                 : TypeInfo::makeAny());
+                return;
+            }
+        }
+    }
 
     TypeRef resultType = TypeInfo::makeAny();
     TypeRef promotedNumeric = numericPromotion(leftType, rightType);
@@ -3323,9 +3473,10 @@ Compiler::CompiledFunction Compiler::compileFunction(
             Token parameterNameToken;
             size_t parameterIndex = parameterTypes.size();
 
+            consume(TokenType::IDENTIFIER, "Expected parameter name.");
+            parameterNameToken = m_parser->previous;
+
             if (!isTypedTypeAnnotationStart()) {
-                consume(TokenType::IDENTIFIER, "Expected parameter name.");
-                parameterNameToken = m_parser->previous;
                 if (hasExpectedFunctionType &&
                     parameterIndex < expectedParams.size() &&
                     expectedParams[parameterIndex] &&
@@ -3345,9 +3496,6 @@ Compiler::CompiledFunction Compiler::compileFunction(
                     errorAtCurrent("Expected parameter type annotation.");
                     parameterType = TypeInfo::makeAny();
                 }
-
-                consume(TokenType::IDENTIFIER, "Expected parameter name.");
-                parameterNameToken = m_parser->previous;
             }
 
             if (parameterType && parameterType->isVoid()) {
@@ -3385,11 +3533,10 @@ Compiler::CompiledFunction Compiler::compileFunction(
     const bool hasDeclaredReturnType =
         declaredReturnType && !declaredReturnType->isAny();
 
-    if (m_parser->current.type() == TokenType::ARROW) {
-        advance();
+    if (isTypedTypeAnnotationStart()) {
         TypeRef parsedReturnType = parseTypeExprType();
         if (!parsedReturnType) {
-            errorAtCurrent("Expected return type after '->'.");
+            errorAtCurrent("Expected return type after parameter list.");
         } else {
             currentContext().returnType = parsedReturnType;
         }
@@ -3398,7 +3545,7 @@ Compiler::CompiledFunction Compiler::compileFunction(
         currentContext().returnType = expectedFunctionType->returnType;
     } else if (!isInitializer && !hasDeclaredReturnType) {
         errorAtCurrent("Function '" + name +
-                       "' must declare a return type with '->'.");
+                       "' must declare a return type.");
     }
 
     consume(TokenType::OPEN_CURLY, "Expected '{' before function body.");

@@ -1,11 +1,11 @@
-i32 count = 41;
+var count i32 = 41;
 
-fn inc(i32 value) -> i32 {
+fn inc(value i32) i32 {
     return value + 1;
 }
 
-class Dog {}
-Dog dog = Dog();
+type Dog struct {}
+var dog Dog = Dog();
 
 print(inc(count));
 print(dog != null);

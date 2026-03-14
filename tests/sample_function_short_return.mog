@@ -1,4 +1,4 @@
-fn check(i32 v) -> str {
+fn check(v i32) str {
   if (v > 0) return "pos";
   return "non-pos";
 }

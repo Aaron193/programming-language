@@ -1,5 +1,5 @@
-export fn add(i32 a, i32 b) -> i32 {
+fn Add(a i32, b i32) i32 {
     return a + b;
 }
 
-export f64 PI = 3.14159;
+const PI f64 = 3.14159;

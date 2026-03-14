@@ -1,4 +1,4 @@
-Dict<str, i32> d = {"x": 1, "2": 3};
+var d Dict<str, i32> = {"x": 1, "2": 3};
 print(d["x"]);
 print(d["2"]);
 

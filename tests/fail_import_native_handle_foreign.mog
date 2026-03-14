@@ -1,4 +1,4 @@
-import counter from "examples:counter";
-import math from "examples:math";
+const counter = @import("examples:counter");
+const math = @import("examples:math");
 
 print(math.greet(counter.create(1i64)));

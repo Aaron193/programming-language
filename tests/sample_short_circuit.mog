@@ -1,8 +1,8 @@
-bool a = false;
-bool b = false;
+var a bool = false;
+var b bool = false;
 a && (b = true);
 print(b);
-bool c = true;
-bool d = false;
+var c bool = true;
+var d bool = false;
 c || (d = true);
 print(d);

@@ -1,4 +1,4 @@
-class Animal {}
-class Dog < Animal {}
+type Animal struct {}
+type Dog struct < Animal {}
 
-Dog d = Animal();
+var d Dog = Animal();

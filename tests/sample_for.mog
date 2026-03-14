@@ -1,1 +1,1 @@
-for (i32 j = 0; j < 3; j = j + 1) print(j);
+for (var j i32 = 0; j < 3; j = j + 1) print(j);

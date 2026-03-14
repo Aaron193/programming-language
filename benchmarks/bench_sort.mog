@@ -1,17 +1,17 @@
-i32 n = 5000;
-Array<i32> arr = [];
+var n i32 = 5000;
+var arr Array<i32> = [];
 
-for (i32 value = n; value > 0; value--) {
+for (var value i32 = n; value > 0; value--) {
   arr.push(value);
 }
 
-f64 start = clock();
+var start f64 = clock();
 
-i32 i = 1;
+var i i32 = 1;
 while (i < arr.size()) {
-  i32 key = arr[i];
-  i32 j = i - 1;
-  bool shifting = true;
+  var key i32 = arr[i];
+  var j i32 = i - 1;
+  var shifting bool = true;
 
   while (j >= 0 and shifting) {
     if (arr[j] > key) {
@@ -26,7 +26,7 @@ while (i < arr.size()) {
   i = i + 1;
 }
 
-f64 elapsed = clock() - start;
+var elapsed f64 = clock() - start;
 
 print(arr[0]);
 print(arr[n - 1]);

@@ -1,12 +1,12 @@
 #!strict
-i32 sum = 0;
-Array<i32> nums = [1, 2, 3];
+var sum i32 = 0;
+var nums Array<i32> = [1, 2, 3];
 
-for (i32 n : nums) {
+for (var n i32 : nums) {
     sum += n;
 }
 
-i32 i = 0;
+var i i32 = 0;
 while (i < 2) {
     sum += i;
     i += 1;

@@ -1,15 +1,15 @@
-Array<i32> nums = [1, 2, 3];
-for (i32 n : nums) {
+var nums Array<i32> = [1, 2, 3];
+for (var n i32 : nums) {
   print(n);
 }
 
-Dict<str, i32> dict = {"b": 2, "a": 1};
-for (str key : dict) {
+var dict Dict<str, i32> = {"b": 2, "a": 1};
+for (var key str : dict) {
   print(key);
   print(dict[key]);
 }
 
-Set<i32> set = Set(4, 5, 4);
-for (i32 item : set) {
+var set Set<i32> = Set(4, 5, 4);
+for (var item i32 : set) {
   print(item);
 }

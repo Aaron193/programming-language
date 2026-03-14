@@ -1,2 +1,2 @@
-bool y = true;
+var y bool = true;
 print(y);

@@ -104,6 +104,11 @@ bool isCollectionTypeNameText(std::string_view name) {
 
 bool isHandleTypeNameText(std::string_view name) { return name == "handle"; }
 
+bool isPublicSymbolName(std::string_view name) {
+    return !name.empty() &&
+           name.front() >= 'A' && name.front() <= 'Z';
+}
+
 class CheckerImpl {
    private:
     struct ExprInfo {
@@ -134,6 +139,7 @@ class CheckerImpl {
     std::deque<Token> m_bufferedTokens;
 
     const std::unordered_set<std::string>& m_classNames;
+    std::unordered_map<std::string, TypeRef> m_typeAliases;
     const std::unordered_map<std::string, TypeRef>& m_functionSignatures;
     std::vector<TypeError>& m_errors;
 
@@ -145,6 +151,8 @@ class CheckerImpl {
         m_classFieldTypes;
     std::unordered_map<std::string, std::unordered_map<std::string, TypeRef>>
         m_classMethodSignatures;
+    std::unordered_map<std::string, std::unordered_map<int, std::string>>
+        m_classOperatorMethods;
     std::vector<FunctionCtx> m_functionContexts;
     std::vector<ClassCtx> m_classContexts;
 
@@ -182,12 +190,8 @@ class CheckerImpl {
         }
 
         std::string typeName = tokenText(m_current);
-        if (m_classNames.find(typeName) == m_classNames.end()) {
-            return false;
-        }
-
-        return lookahead.type() == TokenType::IDENTIFIER ||
-               lookahead.type() == TokenType::QUESTION;
+        return m_typeAliases.find(typeName) != m_typeAliases.end() ||
+               m_classNames.find(typeName) != m_classNames.end();
     }
 
     TypeRef inferNumberLiteralType(const Token& token) {
@@ -458,11 +462,6 @@ class CheckerImpl {
             }
 
             ++offset;
-            if (tokenAt(offset).type() != TokenType::ARROW) {
-                return false;
-            }
-
-            ++offset;
             if (!parseTypeLookahead(offset)) {
                 return false;
             }
@@ -558,8 +557,14 @@ class CheckerImpl {
             return true;
         }
 
-        consumeOptionalSuffix();
-        return true;
+        auto aliasIt = m_typeAliases.find(std::string(name));
+        if (aliasIt != m_typeAliases.end() ||
+            m_classNames.find(std::string(name)) != m_classNames.end()) {
+            consumeOptionalSuffix();
+            return true;
+        }
+
+        return false;
     }
 
     bool looksLikeFunctionTypeDeclarationStart() {
@@ -780,6 +785,50 @@ class CheckerImpl {
         return nullptr;
     }
 
+    TypeRef lookupOperatorResultType(const TypeRef& receiverType, TokenType op,
+                                     const TypeRef& rhs, size_t line) {
+        if (!receiverType || receiverType->kind != TypeKind::CLASS) {
+            return nullptr;
+        }
+
+        auto classIt = m_classOperatorMethods.find(receiverType->className);
+        if (classIt == m_classOperatorMethods.end()) {
+            return nullptr;
+        }
+
+        auto opIt = classIt->second.find(op);
+        if (opIt == classIt->second.end()) {
+            return nullptr;
+        }
+
+        TypeRef methodType =
+            lookupClassMethodType(receiverType->className, opIt->second);
+        if (!methodType || methodType->kind != TypeKind::FUNCTION) {
+            addError(line, "Type error: operator method '" + opIt->second +
+                               "' is not callable.");
+            return TypeInfo::makeAny();
+        }
+
+        if (methodType->paramTypes.size() != 1) {
+            addError(line, "Type error: operator method '" + opIt->second +
+                               "' must take exactly one argument.");
+            return methodType->returnType ? methodType->returnType
+                                          : TypeInfo::makeAny();
+        }
+
+        TypeRef expected = methodType->paramTypes[0]
+                               ? methodType->paramTypes[0]
+                               : TypeInfo::makeAny();
+        if (!isAssignableType(rhs, expected)) {
+            addError(line, "Type error: operator '" + opIt->second +
+                               "' expects '" + expected->toString() +
+                               "', got '" + rhs->toString() + "'.");
+        }
+
+        return methodType->returnType ? methodType->returnType
+                                      : TypeInfo::makeAny();
+    }
+
     TypeRef collectionMemberType(const TypeRef& receiverType,
                                  const std::string& memberName, size_t line) {
         if (!receiverType) {
@@ -953,10 +1002,6 @@ class CheckerImpl {
             consume(TokenType::CLOSE_PAREN,
                     "Type error: expected ')' after function type "
                     "parameters.");
-            consume(TokenType::ARROW,
-                    "Type error: expected '->' after function type "
-                    "parameters.");
-
             TypeRef returnType = parseTypeExprType();
             if (!returnType) {
                 addError(m_current.line(),
@@ -1129,6 +1174,11 @@ class CheckerImpl {
                 advance();
                 return applyOptionalSuffix(TypeInfo::makeClass(className));
             }
+            auto aliasIt = m_typeAliases.find(className);
+            if (aliasIt != m_typeAliases.end()) {
+                advance();
+                return applyOptionalSuffix(aliasIt->second);
+            }
         }
 
         return nullptr;
@@ -1159,12 +1209,10 @@ class CheckerImpl {
         }
 
         std::string typeName = tokenText(m_current);
-        if (m_classNames.find(typeName) == m_classNames.end()) {
-            return false;
-        }
-
-        return lookahead.type() == TokenType::IDENTIFIER ||
-               lookahead.type() == TokenType::QUESTION;
+        return (m_classNames.find(typeName) != m_classNames.end() ||
+                m_typeAliases.find(typeName) != m_typeAliases.end()) &&
+               (lookahead.type() == TokenType::IDENTIFIER ||
+                lookahead.type() == TokenType::QUESTION);
     }
 
     ExprInfo parseExpression() { return parseAssignment(); }
@@ -1342,9 +1390,15 @@ class CheckerImpl {
     ExprInfo parseEquality() {
         ExprInfo expr = parseComparison();
         while (isEqualityOperator(m_current.type())) {
+            TokenType op = m_current.type();
             size_t line = m_current.line();
             advance();
             ExprInfo rhs = parseComparison();
+            if (TypeRef overloaded = lookupOperatorResultType(expr.type, op,
+                                                              rhs.type, line)) {
+                expr = ExprInfo{overloaded, false, false, "", line};
+                continue;
+            }
             if (!(isAssignableType(expr.type, rhs.type) ||
                   isAssignableType(rhs.type, expr.type))) {
                 addError(
@@ -1359,9 +1413,16 @@ class CheckerImpl {
     ExprInfo parseComparison() {
         ExprInfo expr = parseBitwiseOr();
         while (isComparisonOperator(m_current.type())) {
+            TokenType op = m_current.type();
             size_t line = m_current.line();
             advance();
             ExprInfo rhs = parseBitwiseOr();
+
+            if (TypeRef overloaded = lookupOperatorResultType(expr.type, op,
+                                                              rhs.type, line)) {
+                expr = ExprInfo{overloaded, false, false, "", line};
+                continue;
+            }
 
             bool lhsOk = expr.type->isAny() || expr.type->isNumeric();
             bool rhsOk = rhs.type->isAny() || rhs.type->isNumeric();
@@ -1471,6 +1532,12 @@ class CheckerImpl {
             advance();
             ExprInfo rhs = parseFactor();
 
+            if (TypeRef overloaded = lookupOperatorResultType(expr.type, op,
+                                                              rhs.type, line)) {
+                expr = ExprInfo{overloaded, false, false, "", line};
+                continue;
+            }
+
             if (op == TokenType::PLUS && expr.type->kind == TypeKind::STR &&
                 rhs.type->kind == TypeKind::STR) {
                 expr = ExprInfo{TypeInfo::makeStr(), false, false, "", line};
@@ -1502,9 +1569,16 @@ class CheckerImpl {
     ExprInfo parseFactor() {
         ExprInfo expr = parseUnary();
         while (check(TokenType::STAR) || check(TokenType::SLASH)) {
+            TokenType op = m_current.type();
             size_t line = m_current.line();
             advance();
             ExprInfo rhs = parseUnary();
+
+            if (TypeRef overloaded = lookupOperatorResultType(expr.type, op,
+                                                              rhs.type, line)) {
+                expr = ExprInfo{overloaded, false, false, "", line};
+                continue;
+            }
             bool lhsOk = expr.type->isNumeric() || expr.type->isAny();
             bool rhsOk = rhs.type->isNumeric() || rhs.type->isAny();
             if (!lhsOk || !rhsOk) {
@@ -1814,14 +1888,13 @@ class CheckerImpl {
 
         if (!check(TokenType::CLOSE_PAREN)) {
             do {
-                TypeRef paramType = nullptr;
                 std::string paramName;
                 size_t paramIndex = paramTypes.size();
+                consume(TokenType::IDENTIFIER, "Expected parameter name.");
+                paramName = tokenText(m_previous);
 
+                TypeRef paramType = nullptr;
                 if (!isTypedTypeAnnotationStart()) {
-                    consume(TokenType::IDENTIFIER, "Expected parameter name.");
-                    paramName = tokenText(m_previous);
-
                     if (hasExpectedFunctionType &&
                         paramIndex < expectedParams.size() &&
                         expectedParams[paramIndex] &&
@@ -1837,13 +1910,9 @@ class CheckerImpl {
                     paramType = parseTypeExprType();
                     if (!paramType) {
                         addError(m_current.line(),
-                                 "Type error: expected parameter type "
-                                 "annotation.");
+                                 "Type error: expected parameter type annotation.");
                         paramType = TypeInfo::makeAny();
                     }
-
-                    consume(TokenType::IDENTIFIER, "Expected parameter name.");
-                    paramName = tokenText(m_previous);
                 }
 
                 if (paramType && paramType->isVoid()) {
@@ -1871,12 +1940,12 @@ class CheckerImpl {
 
         TypeRef returnType = TypeInfo::makeAny();
         bool hasExplicitReturnType = false;
-        if (match(TokenType::ARROW)) {
+        if (isTypedTypeAnnotationStart()) {
             hasExplicitReturnType = true;
             TypeRef parsedReturnType = parseTypeExprType();
             if (!parsedReturnType) {
                 addError(m_previous.line(),
-                         "Type error: expected return type after '->'.");
+                         "Type error: expected return type after parameter list.");
             } else {
                 returnType = parsedReturnType;
             }
@@ -1888,7 +1957,7 @@ class CheckerImpl {
         if (!hasExplicitReturnType && (!returnType || returnType->isAny())) {
             addError(m_current.line(),
                      "Type error: function '<closure>' must declare a return "
-                     "type with '->'.");
+                     "type.");
         }
 
         consume(TokenType::OPEN_CURLY, "Expected '{' before function body.");
@@ -1948,6 +2017,26 @@ class CheckerImpl {
             addError(m_previous.line(),
                      "Type error: keyword 'function' was removed; use 'fn'.");
             return parseFunctionLiteralExpr();
+        }
+
+        if (match(TokenType::AT)) {
+            if (!check(TokenType::IDENTIFIER) && !check(TokenType::IMPORT)) {
+                addError(m_current.line(),
+                         "Type error: expected directive name after '@'.");
+                return ExprInfo{TypeInfo::makeAny(), false, false, "",
+                                m_current.line()};
+            }
+            advance();
+            if (tokenText(m_previous) != "import") {
+                addError(m_previous.line(),
+                         "Type error: unknown '@" + tokenText(m_previous) +
+                             "' directive.");
+            }
+            consume(TokenType::OPEN_PAREN, "Expected '(' after '@import'.");
+            consume(TokenType::STRING, "Expected string literal import path.");
+            consume(TokenType::CLOSE_PAREN, "Expected ')' after import path.");
+            return ExprInfo{TypeInfo::makeAny(), false, false, "",
+                            m_previous.line()};
         }
 
         if (match(TokenType::THIS)) {
@@ -2059,7 +2148,8 @@ class CheckerImpl {
                 false, false, "", m_previous.line()};
         }
 
-        if (check(TokenType::IDENTIFIER) || isTypeToken(m_current.type())) {
+        if (check(TokenType::IDENTIFIER) || check(TokenType::TYPE) ||
+            isTypeToken(m_current.type())) {
             Token token = m_current;
             advance();
             std::string name(token.start(), token.length());
@@ -2157,22 +2247,24 @@ class CheckerImpl {
         consume(TokenType::OPEN_PAREN, "Expected '(' after 'for'.");
 
         if (match(TokenType::SEMI_COLON)) {
-        } else if (isTypedVarDeclarationStart()) {
+        } else if (check(TokenType::VAR) || check(TokenType::CONST)) {
+            bool isConst = match(TokenType::CONST);
+            if (!isConst) {
+                consume(TokenType::VAR, "Expected 'var' or 'const'.");
+            }
+            consume(TokenType::IDENTIFIER, "Expected loop variable name.");
+            std::string variableName = tokenText(m_previous);
+            size_t variableLine = m_previous.line();
             TypeRef declaredType = parseTypeExprType();
             if (!declaredType) {
                 addError(m_current.line(),
-                         "Type error: expected type in loop variable "
-                         "declaration.");
+                         "Type error: expected type after loop variable name.");
                 declaredType = TypeInfo::makeAny();
             }
             if (declaredType->isVoid()) {
                 addError(m_current.line(),
                          "Type error: variables cannot have type 'void'.");
             }
-
-            consume(TokenType::IDENTIFIER, "Expected variable name after type.");
-            std::string variableName = tokenText(m_previous);
-            size_t variableLine = m_previous.line();
 
             if (match(TokenType::COLON)) {
                 ExprInfo iterable = parseExpression();
@@ -2213,14 +2305,14 @@ class CheckerImpl {
 
                 defineSymbol(variableName, declaredType);
                 recordDeclarationType(variableName, declaredType,
-                                      variableLine);
+                                      variableLine, isConst);
                 statement();
                 endScope();
                 return;
             }
 
             consume(TokenType::EQUAL,
-                    "Expected '=' in typed loop variable declaration "
+                    "Expected '=' in loop variable declaration "
                     "(initializer is required).");
             ExprInfo initializer = parseExpression();
             if (!isAssignableType(initializer.type, declaredType)) {
@@ -2232,8 +2324,9 @@ class CheckerImpl {
             }
             consume(TokenType::SEMI_COLON,
                     "Expected ';' after loop initializer.");
-            defineSymbol(variableName, declaredType);
-            recordDeclarationType(variableName, declaredType, variableLine);
+            defineSymbol(variableName, declaredType, isConst);
+            recordDeclarationType(variableName, declaredType, variableLine,
+                                  isConst);
         } else {
             parseExpression();
             consume(TokenType::SEMI_COLON,
@@ -2269,42 +2362,113 @@ class CheckerImpl {
     }
 
     void parseTypedVarDeclaration() {
-        bool isConst = match(TokenType::CONST);
-        TypeRef declaredType = parseTypeExprType();
-        if (!declaredType) {
-            addError(
-                m_current.line(),
-                "Type error: expected type in typed variable declaration.");
+        if (!check(TokenType::CONST) && !check(TokenType::VAR)) {
+            addError(m_current.line(), "Type error: expected 'var' or 'const'.");
             return;
         }
 
-        if (declaredType->isVoid()) {
-            addError(m_current.line(),
-                     "Type error: variables cannot have type 'void'.");
+        bool isConst = match(TokenType::CONST);
+        if (!isConst) {
+            consume(TokenType::VAR, "Expected 'var' or 'const'.");
         }
 
-        consume(TokenType::IDENTIFIER, "Expected variable name after type.");
+        auto parseImportExpr = [&]() -> ExprInfo {
+            consume(TokenType::AT, "Expected '@' before import.");
+            if (!check(TokenType::IDENTIFIER) && !check(TokenType::IMPORT)) {
+                addError(m_current.line(),
+                         "Type error: expected directive after '@'.");
+                return ExprInfo{TypeInfo::makeAny(), false, false, "",
+                                m_current.line()};
+            }
+            advance();
+            if (tokenText(m_previous) != "import") {
+                addError(m_previous.line(),
+                         "Type error: unknown '@" + tokenText(m_previous) +
+                             "' directive.");
+            }
+            consume(TokenType::OPEN_PAREN, "Expected '(' after '@import'.");
+            consume(TokenType::STRING, "Expected string literal import path.");
+            consume(TokenType::CLOSE_PAREN, "Expected ')' after import path.");
+            return ExprInfo{TypeInfo::makeAny(), false, false, "",
+                            m_previous.line()};
+        };
+
+        if (match(TokenType::OPEN_CURLY)) {
+            std::vector<std::pair<std::string, size_t>> bindings;
+            if (!check(TokenType::CLOSE_CURLY)) {
+                do {
+                    consume(TokenType::IDENTIFIER,
+                            "Expected export name in destructured import.");
+                    std::string localName = tokenText(m_previous);
+                    size_t line = m_previous.line();
+                    if (match(TokenType::AS_KW)) {
+                        consume(TokenType::IDENTIFIER,
+                                "Expected local alias after 'as'.");
+                        localName = tokenText(m_previous);
+                        line = m_previous.line();
+                    }
+                    bindings.emplace_back(localName, line);
+                } while (match(TokenType::COMMA));
+            }
+            consume(TokenType::CLOSE_CURLY, "Expected '}' after binding list.");
+            consume(TokenType::EQUAL, "Expected '=' after destructured binding.");
+            parseImportExpr();
+            if (check(TokenType::SEMI_COLON)) {
+                advance();
+            }
+            for (const auto& binding : bindings) {
+                defineSymbol(binding.first, TypeInfo::makeAny(), true);
+                recordDeclarationType(binding.first, TypeInfo::makeAny(),
+                                      binding.second, true);
+            }
+            return;
+        }
+
+        consume(TokenType::IDENTIFIER, "Expected variable name after mutability.");
         Token nameToken = m_previous;
         std::string name = tokenText(nameToken);
 
+        TypeRef declaredType = TypeInfo::makeAny();
+        bool omittedType = false;
+        if (check(TokenType::EQUAL)) {
+            omittedType = true;
+            if (peekToken().type() != TokenType::AT ||
+                (tokenAt(2).type() != TokenType::IDENTIFIER &&
+                 tokenAt(2).type() != TokenType::IMPORT) ||
+                tokenText(tokenAt(2)) != "import") {
+                addError(nameToken.line(),
+                         "Type error: variables require an explicit type unless initialized from '@import(...)'.");
+            }
+        } else {
+            declaredType = parseTypeExprType();
+            if (!declaredType) {
+                addError(m_current.line(),
+                         "Type error: expected type after variable name.");
+                return;
+            }
+            if (declaredType->isVoid()) {
+                addError(m_current.line(),
+                         "Type error: variables cannot have type 'void'.");
+            }
+        }
+
         consume(TokenType::EQUAL,
-                "Expected '=' in typed variable declaration (initializer is "
-                "required).");
+                "Expected '=' in variable declaration (initializer is required).");
         ExprInfo initializer;
-        if (declaredType->kind == TypeKind::FUNCTION &&
+        if (!omittedType && declaredType && declaredType->kind == TypeKind::FUNCTION &&
             (check(TokenType::TYPE_FN) || check(TokenType::FUNCTION))) {
             if (check(TokenType::FUNCTION)) {
-                addError(
-                    m_current.line(),
-                    "Type error: keyword 'function' was removed; use 'fn'.");
+                addError(m_current.line(),
+                         "Type error: keyword 'function' was removed; use 'fn'.");
             }
             advance();
             initializer = parseFunctionLiteralExpr(declaredType);
         } else {
-            initializer = parseExpression();
+            initializer = check(TokenType::AT) ? parseImportExpr()
+                                               : parseExpression();
         }
 
-        if (!isAssignableType(initializer.type, declaredType)) {
+        if (!omittedType && !isAssignableType(initializer.type, declaredType)) {
             addError(nameToken.line(), "Type error: cannot assign '" +
                                            initializer.type->toString() +
                                            "' to variable '" + name +
@@ -2312,10 +2476,12 @@ class CheckerImpl {
                                            declaredType->toString() + "'.");
         }
 
-        consume(TokenType::SEMI_COLON,
-                "Expected ';' after typed variable declaration.");
-        defineSymbol(name, declaredType, isConst);
-        recordDeclarationType(name, declaredType, nameToken.line(), isConst);
+        if (check(TokenType::SEMI_COLON)) {
+            advance();
+        }
+        TypeRef finalType = omittedType ? initializer.type : declaredType;
+        defineSymbol(name, finalType, isConst);
+        recordDeclarationType(name, finalType, nameToken.line(), isConst);
     }
 
     void parseFunctionCommon(const std::string& functionName,
@@ -2325,12 +2491,12 @@ class CheckerImpl {
         std::vector<std::pair<std::string, TypeRef>> params;
         if (!check(TokenType::CLOSE_PAREN)) {
             do {
-                TypeRef paramType = nullptr;
                 std::string paramName;
+                consume(TokenType::IDENTIFIER, "Expected parameter name.");
+                paramName = tokenText(m_previous);
 
+                TypeRef paramType = nullptr;
                 if (!isTypedTypeAnnotationStart()) {
-                    consume(TokenType::IDENTIFIER, "Expected parameter name.");
-                    paramName = tokenText(m_previous);
                     addError(m_previous.line(),
                              "Type error: parameter '" + paramName +
                                  "' must have a type annotation.");
@@ -2339,13 +2505,9 @@ class CheckerImpl {
                     paramType = parseTypeExprType();
                     if (!paramType) {
                         addError(m_current.line(),
-                                 "Type error: expected parameter type "
-                                 "annotation.");
+                                 "Type error: expected parameter type annotation.");
                         paramType = TypeInfo::makeAny();
                     }
-
-                    consume(TokenType::IDENTIFIER, "Expected parameter name.");
-                    paramName = tokenText(m_previous);
                 }
 
                 if (paramType && paramType->isVoid()) {
@@ -2363,12 +2525,12 @@ class CheckerImpl {
 
         TypeRef returnType = TypeInfo::makeAny();
         bool hasExplicitReturnType = false;
-        if (match(TokenType::ARROW)) {
+        if (isTypedTypeAnnotationStart()) {
             hasExplicitReturnType = true;
             TypeRef parsedReturnType = parseTypeExprType();
             if (!parsedReturnType) {
                 addError(m_previous.line(),
-                         "Type error: expected return type after '->'.");
+                         "Type error: expected return type after parameter list.");
             } else {
                 returnType = parsedReturnType;
             }
@@ -2387,7 +2549,19 @@ class CheckerImpl {
             !isInitializer) {
             addError(m_current.line(),
                      "Type error: function '" + functionName +
-                         "' must declare a return type with '->'.");
+                         "' must declare a return type.");
+        }
+
+        if (isMethod && !m_classContexts.empty()) {
+            std::vector<TypeRef> paramTypes;
+            paramTypes.reserve(params.size());
+            for (const auto& param : params) {
+                paramTypes.push_back(param.second ? param.second
+                                                 : TypeInfo::makeAny());
+            }
+            m_classMethodSignatures[m_classContexts.back().className]
+                                   [functionName] =
+                TypeInfo::makeFunction(paramTypes, returnType);
         }
 
         consume(TokenType::OPEN_CURLY, "Expected '{' before function body.");
@@ -2425,100 +2599,155 @@ class CheckerImpl {
         parseFunctionCommon(name, functionType, false);
     }
 
-    void parseClassDeclaration() {
-        consume(TokenType::IDENTIFIER, "Expected class name.");
-        size_t classLine = m_previous.line();
-        std::string className = tokenText(m_previous);
-        defineSymbol(className, TypeInfo::makeClass(className));
-        recordDeclarationType(className, TypeInfo::makeClass(className),
-                              classLine);
+    void parseTypeDeclaration() {
+        consume(TokenType::IDENTIFIER, "Expected type name.");
+        size_t typeLine = m_previous.line();
+        std::string typeName = tokenText(m_previous);
 
-        m_classContexts.push_back(ClassCtx{className});
+        if (!check(TokenType::STRUCT) && !check(TokenType::LESS) &&
+            !check(TokenType::OPEN_CURLY)) {
+            TypeRef aliasedType = parseTypeExprType();
+            if (!aliasedType) {
+                addError(m_current.line(),
+                         "Type error: expected aliased type or 'struct'.");
+                return;
+            }
+            m_typeAliases[typeName] = aliasedType;
+            if (check(TokenType::SEMI_COLON)) {
+                advance();
+            }
+            return;
+        }
+
+        if (match(TokenType::STRUCT)) {
+        }
+
+        defineSymbol(typeName, TypeInfo::makeClass(typeName));
+        recordDeclarationType(typeName, TypeInfo::makeClass(typeName),
+                              typeLine);
+        m_classContexts.push_back(ClassCtx{typeName});
 
         if (match(TokenType::LESS)) {
             consume(TokenType::IDENTIFIER, "Expected superclass name.");
             std::string superclassName = tokenText(m_previous);
-
-            if (superclassName == className) {
+            if (superclassName == typeName) {
                 addError(m_previous.line(),
-                         "Type error: a class cannot inherit from itself.");
+                         "Type error: a type cannot inherit from itself.");
             }
-
             if (m_classNames.find(superclassName) == m_classNames.end()) {
                 addError(m_previous.line(), "Type error: unknown superclass '" +
                                                 superclassName + "'.");
             }
-
-            m_superclassOf[className] = superclassName;
+            m_superclassOf[typeName] = superclassName;
         }
 
-        consume(TokenType::OPEN_CURLY, "Expected '{' before class body.");
-
-        bool seenMethodBody = false;
-
+        consume(TokenType::OPEN_CURLY, "Expected '{' before struct body.");
         while (!check(TokenType::CLOSE_CURLY) &&
                !check(TokenType::END_OF_FILE)) {
-            bool typedHead = false;
-            TypeRef memberType = nullptr;
+            std::vector<int> annotatedOperators;
+            auto parseOperatorToken = [](std::string_view op) -> int {
+                if (op == "+") return TokenType::PLUS;
+                if (op == "-") return TokenType::MINUS;
+                if (op == "*") return TokenType::STAR;
+                if (op == "/") return TokenType::SLASH;
+                if (op == "==") return TokenType::EQUAL_EQUAL;
+                if (op == "!=") return TokenType::BANG_EQUAL;
+                if (op == "<") return TokenType::LESS;
+                if (op == "<=") return TokenType::LESS_EQUAL;
+                if (op == ">") return TokenType::GREATER;
+                if (op == ">=") return TokenType::GREATER_EQUAL;
+                return -1;
+            };
 
-            if (isTypedTypeAnnotationStart()) {
-                typedHead = true;
-                memberType = parseTypeExprType();
+            while (match(TokenType::AT)) {
+                consume(TokenType::IDENTIFIER,
+                        "Expected annotation name after '@'.");
+                if (tokenText(m_previous) != "operator") {
+                    addError(m_previous.line(),
+                             "Type error: unknown annotation '@" +
+                                 tokenText(m_previous) + "'.");
+                }
+                consume(TokenType::OPEN_PAREN,
+                        "Expected '(' after annotation name.");
+                consume(TokenType::STRING,
+                        "Expected string literal annotation value.");
+                std::string literal = tokenText(m_previous);
+                consume(TokenType::CLOSE_PAREN,
+                        "Expected ')' after annotation value.");
+                if (literal.size() >= 2) {
+                    int op = parseOperatorToken(
+                        std::string_view(literal.data() + 1, literal.size() - 2));
+                    if (op == -1) {
+                        addError(m_previous.line(),
+                                 "Type error: unsupported operator annotation.");
+                    } else {
+                        annotatedOperators.push_back(op);
+                    }
+                }
             }
 
-            if (typedHead) {
-                consume(TokenType::IDENTIFIER, "Expected class member name.");
+            if (match(TokenType::TYPE_FN)) {
+                consume(TokenType::IDENTIFIER, "Expected method name.");
                 std::string memberName = tokenText(m_previous);
-
-                if (match(TokenType::SEMI_COLON)) {
-                    if (seenMethodBody) {
-                        addError(m_previous.line(),
-                                 "Type error: class fields must be declared "
-                                 "before method declarations.");
-                    }
-                    if (memberType && memberType->isVoid()) {
-                        addError(m_previous.line(),
-                                 "Type error: class field '" + memberName +
-                                     "' cannot have type 'void'.");
-                    }
-                    m_classFieldTypes[className][memberName] =
-                        memberType ? memberType : TypeInfo::makeAny();
-                    continue;
-                }
-
-                if (check(TokenType::OPEN_PAREN)) {
-                    seenMethodBody = true;
-                    TypeRef sig = TypeInfo::makeFunction(
-                        {}, memberType ? memberType : TypeInfo::makeAny());
-                    m_classMethodSignatures[className][memberName] = sig;
-                    parseFunctionCommon(memberName, sig, true);
-                    continue;
-                }
-
-                addError(
-                    m_current.line(),
-                    "Type error: expected ';' for field or '(' for method.");
-                continue;
-            }
-
-            if (check(TokenType::IDENTIFIER) &&
-                peekToken().type() == TokenType::OPEN_PAREN) {
-                advance();
-                std::string memberName = tokenText(m_previous);
-                seenMethodBody = true;
-                m_classMethodSignatures[className][memberName] =
+                TypeRef placeholder =
                     TypeInfo::makeFunction({}, TypeInfo::makeAny());
-                parseFunctionCommon(
-                    memberName, TypeInfo::makeFunction({}, TypeInfo::makeAny()),
-                    true);
+                m_classMethodSignatures[typeName][memberName] = placeholder;
+                parseFunctionCommon(memberName, placeholder, true);
+                auto methodIt =
+                    m_functionSignatures.find(memberName);  // unused fallback
+                (void)methodIt;
+                for (int op : annotatedOperators) {
+                    m_classOperatorMethods[typeName][op] = memberName;
+                }
                 continue;
             }
 
-            advance();
+            if (!annotatedOperators.empty()) {
+                addError(m_current.line(),
+                         "Type error: @operator can only annotate a method.");
+            }
+
+            consume(TokenType::IDENTIFIER, "Expected struct field name.");
+            std::string memberName = tokenText(m_previous);
+            TypeRef memberType = parseTypeExprType();
+            if (!memberType) {
+                addError(m_current.line(),
+                         "Type error: expected field type after member name.");
+                continue;
+            }
+            if (memberType->isVoid()) {
+                addError(m_previous.line(),
+                         "Type error: struct field '" + memberName +
+                             "' cannot have type 'void'.");
+            }
+            m_classFieldTypes[typeName][memberName] =
+                memberType ? memberType : TypeInfo::makeAny();
+            if (check(TokenType::SEMI_COLON)) {
+                advance();
+            }
         }
 
-        consume(TokenType::CLOSE_CURLY, "Expected '}' after class body.");
+        consume(TokenType::CLOSE_CURLY, "Expected '}' after struct body.");
         m_classContexts.pop_back();
+    }
+
+    void parseClassDeclaration() {
+        consume(TokenType::IDENTIFIER, "Expected class name.");
+        while (!check(TokenType::OPEN_CURLY) && !check(TokenType::END_OF_FILE)) {
+            advance();
+        }
+        if (match(TokenType::OPEN_CURLY)) {
+            int depth = 1;
+            while (depth > 0 && !check(TokenType::END_OF_FILE)) {
+                if (match(TokenType::OPEN_CURLY)) {
+                    depth++;
+                } else if (match(TokenType::CLOSE_CURLY)) {
+                    depth--;
+                } else {
+                    advance();
+                }
+            }
+        }
     }
 
     void parseImportDeclaration() {
@@ -2532,33 +2761,14 @@ class CheckerImpl {
     }
 
     void parseExportDeclaration() {
-        if (check(TokenType::TYPE_FN) &&
-            peekToken().type() == TokenType::IDENTIFIER) {
+        while (!check(TokenType::SEMI_COLON) &&
+               !check(TokenType::END_OF_FILE) &&
+               !check(TokenType::CLOSE_CURLY)) {
             advance();
-            parseFunctionDeclaration();
-            return;
         }
-
-        if (check(TokenType::FUNCTION) &&
-            peekToken().type() == TokenType::IDENTIFIER) {
+        if (check(TokenType::SEMI_COLON)) {
             advance();
-            addError(m_previous.line(),
-                     "Type error: keyword 'function' was removed; use 'fn'.");
-            parseFunctionDeclaration();
-            return;
         }
-
-        if (match(TokenType::CLASS)) {
-            parseClassDeclaration();
-            return;
-        }
-
-        if (check(TokenType::CONST) || isTypedVarDeclarationStart()) {
-            parseTypedVarDeclaration();
-            return;
-        }
-
-        parseExpressionStatement();
     }
 
     void statement() {
@@ -2602,17 +2812,28 @@ class CheckerImpl {
     }
 
     void declaration() {
+        if (match(TokenType::TYPE)) {
+            parseTypeDeclaration();
+            return;
+        }
+
         if (match(TokenType::CLASS)) {
+            addError(m_previous.line(),
+                     "Type error: keyword 'class' was removed; use 'type Name struct { ... }'.");
             parseClassDeclaration();
             return;
         }
 
         if (match(TokenType::IMPORT)) {
+            addError(m_previous.line(),
+                     "Type error: statement 'import ... from' was removed; use '@import(...)' in a binding.");
             parseImportDeclaration();
             return;
         }
 
         if (match(TokenType::EXPORT)) {
+            addError(m_previous.line(),
+                     "Type error: keyword 'export' was removed; public top-level names use capitalization.");
             parseExportDeclaration();
             return;
         }
@@ -2631,7 +2852,7 @@ class CheckerImpl {
             return;
         }
 
-        if (check(TokenType::CONST) || isTypedVarDeclarationStart()) {
+        if (check(TokenType::CONST) || check(TokenType::VAR)) {
             parseTypedVarDeclaration();
             return;
         }
@@ -2643,10 +2864,12 @@ class CheckerImpl {
     CheckerImpl(
         std::string_view source,
         const std::unordered_set<std::string>& classNames,
+        const std::unordered_map<std::string, TypeRef>& typeAliases,
         const std::unordered_map<std::string, TypeRef>& functionSignatures,
         std::vector<TypeError>& out)
         : m_scanner(source),
           m_classNames(classNames),
+          m_typeAliases(typeAliases),
           m_functionSignatures(functionSignatures),
           m_errors(out) {
         m_scopes.emplace_back();
@@ -2685,8 +2908,12 @@ class CheckerImpl {
 
 bool TypeChecker::collectSymbols(
     std::string_view source, std::unordered_set<std::string>& outClassNames,
-    std::unordered_map<std::string, TypeRef>& outFunctionSignatures) {
+    std::unordered_map<std::string, TypeRef>& outFunctionSignatures,
+    std::unordered_map<std::string, TypeRef>* outTypeAliases) {
     outClassNames.clear();
+    if (outTypeAliases != nullptr) {
+        outTypeAliases->clear();
+    }
 
     {
         Scanner scanner(source);
@@ -2696,7 +2923,7 @@ bool TypeChecker::collectSymbols(
                 break;
             }
 
-            if (token.type() != TokenType::CLASS) {
+            if (token.type() != TokenType::TYPE) {
                 continue;
             }
 
@@ -2705,8 +2932,19 @@ bool TypeChecker::collectSymbols(
                 name = scanner.nextToken();
             }
 
-            if (name.type() == TokenType::IDENTIFIER) {
-                outClassNames.emplace(name.start(), name.length());
+            if (name.type() != TokenType::IDENTIFIER) {
+                continue;
+            }
+
+            std::string typeName(name.start(), name.length());
+            Token next = scanner.nextToken();
+            while (next.type() == TokenType::ERROR) {
+                next = scanner.nextToken();
+            }
+
+            if (next.type() == TokenType::STRUCT || next.type() == TokenType::LESS ||
+                next.type() == TokenType::OPEN_CURLY) {
+                outClassNames.emplace(typeName);
             }
         }
     }
@@ -2767,6 +3005,12 @@ bool TypeChecker::collectSymbols(
                 return TypeInfo::makeNull();
             case TokenType::IDENTIFIER: {
                 std::string className(token.start(), token.length());
+                if (outTypeAliases != nullptr) {
+                    auto aliasIt = outTypeAliases->find(className);
+                    if (aliasIt != outTypeAliases->end()) {
+                        return aliasIt->second;
+                    }
+                }
                 if (outClassNames.find(className) != outClassNames.end()) {
                     return TypeInfo::makeClass(className);
                 }
@@ -2821,11 +3065,7 @@ bool TypeChecker::collectSymbols(
             }
 
             Token arrow = nextToken();
-            if (arrow.type() != TokenType::ARROW) {
-                return nullptr;
-            }
-
-            TypeRef returnType = parseTypeFromToken(nextToken());
+            TypeRef returnType = parseTypeFromToken(arrow);
             if (!returnType) {
                 return nullptr;
             }
@@ -2934,6 +3174,13 @@ bool TypeChecker::collectSymbols(
             return applyOptionalSuffix(TypeInfo::makeClass(name));
         }
 
+        if (outTypeAliases != nullptr) {
+            auto aliasIt = outTypeAliases->find(name);
+            if (aliasIt != outTypeAliases->end()) {
+                return applyOptionalSuffix(aliasIt->second);
+            }
+        }
+
         return nullptr;
     };
 
@@ -2952,6 +3199,29 @@ bool TypeChecker::collectSymbols(
         if (token.type() == TokenType::CLOSE_CURLY) {
             if (classDepth > 0) {
                 classDepth--;
+            }
+            continue;
+        }
+
+        if (classDepth == 0 && token.type() == TokenType::TYPE) {
+            Token typeName = nextToken();
+            if (typeName.type() != TokenType::IDENTIFIER) {
+                continue;
+            }
+
+            Token shape = nextToken();
+            if (shape.type() == TokenType::STRUCT || shape.type() == TokenType::LESS ||
+                shape.type() == TokenType::OPEN_CURLY) {
+                if (shape.type() == TokenType::OPEN_CURLY) {
+                    classDepth++;
+                }
+                continue;
+            }
+
+            TypeRef aliasedType = parseTypeFromToken(shape);
+            if (aliasedType && outTypeAliases != nullptr) {
+                (*outTypeAliases)[std::string(typeName.start(), typeName.length())] =
+                    aliasedType;
             }
             continue;
         }
@@ -2986,24 +3256,22 @@ bool TypeChecker::collectSymbols(
             while (true) {
                 TypeRef parameterType = nullptr;
 
-                if (isTypeToken(current.type()) ||
-                    current.type() == TokenType::IDENTIFIER ||
-                    current.type() == TokenType::TYPE_FN) {
-                    parameterType = parseTypeFromToken(current);
+                Token nameToken = current;
+                if (nameToken.type() != TokenType::IDENTIFIER) {
+                    break;
+                }
+
+                Token typeToken = nextToken();
+                if (isTypeToken(typeToken.type()) ||
+                    typeToken.type() == TokenType::IDENTIFIER ||
+                    typeToken.type() == TokenType::TYPE_FN) {
+                    parameterType = parseTypeFromToken(typeToken);
                     if (!parameterType) {
                         parameterType = TypeInfo::makeAny();
                     }
-
-                    Token nameToken = nextToken();
-                    if (nameToken.type() != TokenType::IDENTIFIER) {
-                        break;
-                    }
                 } else {
-                    Token nameToken = current;
-                    if (nameToken.type() != TokenType::IDENTIFIER) {
-                        break;
-                    }
                     parameterType = TypeInfo::makeAny();
+                    break;
                 }
 
                 params.push_back(parameterType);
@@ -3024,10 +3292,10 @@ bool TypeChecker::collectSymbols(
         }
 
         TypeRef returnType = TypeInfo::makeAny();
-        Token maybeArrow = nextToken();
-        if (maybeArrow.type() == TokenType::ARROW) {
-            Token returnToken = nextToken();
-            TypeRef typedReturn = parseTypeFromToken(returnToken);
+        Token maybeReturn = nextToken();
+        if (maybeReturn.type() != TokenType::OPEN_CURLY &&
+            maybeReturn.type() != TokenType::END_OF_FILE) {
+            TypeRef typedReturn = parseTypeFromToken(maybeReturn);
             if (typedReturn) {
                 returnType = typedReturn;
             }
@@ -3042,9 +3310,11 @@ bool TypeChecker::collectSymbols(
 
 bool TypeChecker::check(
     std::string_view source, const std::unordered_set<std::string>& classNames,
+    const std::unordered_map<std::string, TypeRef>& typeAliases,
     const std::unordered_map<std::string, TypeRef>& functionSignatures,
     std::vector<TypeError>& out, TypeCheckerMetadata* outMetadata) {
-    CheckerImpl checker(source, classNames, functionSignatures, out);
+    CheckerImpl checker(source, classNames, typeAliases, functionSignatures,
+                        out);
     checker.run();
     if (outMetadata) {
         *outMetadata = checker.metadata();

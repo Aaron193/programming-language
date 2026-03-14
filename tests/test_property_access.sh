@@ -19,15 +19,15 @@ if ! "$INTERPRETER" "$PASS_FILE" >/tmp/property_access_pass.out 2>/tmp/property_
     exit 1
 fi
 
-FAIL_FILE="$(mktemp)"
+FAIL_FILE="$(mktemp --suffix=.mog)"
 trap 'rm -f "$FAIL_FILE"' EXIT
 
 cat <<'EOF' >"$FAIL_FILE"
-class Box {
-  i32 value;
+type Box struct {
+  value i32;
 }
 
-Box box = Box();
+var box Box = Box();
 print(box.value);
 EOF
 

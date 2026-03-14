@@ -1,4 +1,4 @@
-i32 x = 10;
+var x i32 = 10;
 x += 5;
 print(x);
 
@@ -29,10 +29,10 @@ print(x);
 --x;
 print(x);
 
-class Box {
-	i32 value;
+type Box struct {
+	value i32;
 }
-Box b = Box();
+var b Box = Box();
 b.value = 7;
 b.value += 5;
 print(b.value);

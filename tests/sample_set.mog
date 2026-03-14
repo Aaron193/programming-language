@@ -1,4 +1,4 @@
-Set<i32> s = Set(1, 2, 2, 3);
+var s Set<i32> = Set(1, 2, 2, 3);
 print(s.size());
 print(s.has(2));
 
@@ -10,5 +10,5 @@ print(s.remove(3));
 print(s.has(3));
 print(s[4]);
 
-Array<i32> arr = s.toArray();
+var arr Array<i32> = s.toArray();
 print(arr.size());

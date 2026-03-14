@@ -4,6 +4,7 @@
 
 // Some tokens start with "_" because they are namespace conflicts
 enum TokenType {
+    AT,
     BANG,
     BANG_EQUAL,
     TILDE,
@@ -54,9 +55,12 @@ enum TokenType {
 
     // reserved
     PRINT,
+    VAR,
     FUNCTION,
     CLASS,
     CONST,
+    TYPE,
+    STRUCT,
     SUPER,
     FOR,
     WHILE,

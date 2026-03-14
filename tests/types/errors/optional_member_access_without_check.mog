@@ -1,8 +1,8 @@
-class Dog {
+type Dog struct {
     str bark() {
         return "woof";
     }
 }
 
-Dog? d = Dog();
+var d Dog? = Dog();
 print(d.bark());

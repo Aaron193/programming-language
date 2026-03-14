@@ -121,6 +121,8 @@ Token Scanner::nextToken() {
     }
 
     switch (c) {
+        case '@':
+            return createToken(TokenType::AT);
         case '=':
             return match('=') ? createToken(TokenType::EQUAL_EQUAL)
                               : createToken(TokenType::EQUAL);
@@ -293,10 +295,12 @@ TokenType Scanner::getIdentifier() {
 
         case 's':
             if (matchKeyword("str", 3)) return TokenType::TYPE_STR;
+            if (matchKeyword("struct", 6)) return TokenType::STRUCT;
             if (matchKeyword("super", 5)) return TokenType::SUPER;
             break;
 
         case 't':
+            if (matchKeyword("type", 4)) return TokenType::TYPE;
             if (matchKeyword("true", 4)) return TokenType::TRUE;
             if (matchKeyword("this", 4)) return TokenType::THIS;
             break;
@@ -310,6 +314,7 @@ TokenType Scanner::getIdentifier() {
             break;
 
         case 'v':
+            if (matchKeyword("var", 3)) return TokenType::VAR;
             if (matchKeyword("void", 4)) return TokenType::TYPE_VOID;
             break;
 

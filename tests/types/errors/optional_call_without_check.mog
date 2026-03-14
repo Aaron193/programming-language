@@ -1,6 +1,6 @@
-class Dog {
+type Dog struct {
     bark() { return "woof"; }
 }
 
-Dog? maybeDog = Dog();
+var maybeDog Dog? = Dog();
 maybeDog();

@@ -1,2 +1,2 @@
 print("cache_target_loaded");
-export i32 VALUE = 42;
+const VALUE i32 = 42;

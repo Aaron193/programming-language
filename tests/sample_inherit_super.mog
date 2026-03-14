@@ -1,19 +1,19 @@
-class A {
-  greet() -> str {
+type A struct {
+  fn greet() str {
     return "A";
   }
 
-  id() -> str {
+  fn id() str {
     return "idA";
   }
 }
 
-class B < A {
-  greet() -> str {
+type B struct < A {
+  fn greet() str {
     return super.greet() + "B";
   }
 }
 
-B b = B();
+var b B = B();
 print(b.greet());
 print(b.id());

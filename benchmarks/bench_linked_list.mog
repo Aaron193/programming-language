@@ -1,31 +1,31 @@
-class Node {
-  i32 value;
-  Node next;
+type Node struct {
+  value i32;
+  next Node;
 }
 
-f64 start = clock();
+var start f64 = clock();
 
-Node head = Node();
+var head Node = Node();
 head.value = 1;
 head.next = head;
 
-Node tail = head;
-for (i32 i = 2; i <= 100000; i++) {
-  Node node = Node();
+var tail Node = head;
+for (var i i32 = 2; i <= 100000; i++) {
+  var node Node = Node();
   node.value = i;
   node.next = head;
   tail.next = node;
   tail = node;
 }
 
-i64 sum = 0;
-Node current = head;
-for (i32 steps = 0; steps < 100000; steps++) {
+var sum i64 = 0;
+var current Node = head;
+for (var steps i32 = 0; steps < 100000; steps++) {
   sum += current.value;
   current = current.next;
 }
 
-f64 elapsed = clock() - start;
+var elapsed f64 = clock() - start;
 
 print(sum);
 print(elapsed);

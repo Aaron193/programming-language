@@ -1,9 +1,9 @@
-class Bag {
-	i32 value;
-	str label;
+type Bag struct {
+	value i32;
+	label str;
 }
 
-Bag bag = Bag();
+var bag Bag = Bag();
 bag.value = 42;
 print(bag.value);
 
