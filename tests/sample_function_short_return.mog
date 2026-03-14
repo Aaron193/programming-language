@@ -1,6 +1,6 @@
 fn check(v i32) str {
-  if (v > 0) return "pos";
-  return "non-pos";
+  if (v > 0) return "pos"
+  return "non-pos"
 }
-print(check(5));
-print(check(-1));
+print(check(5))
+print(check(-1))

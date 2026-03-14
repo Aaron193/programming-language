@@ -1,4 +1,4 @@
 type Animal struct {}
 type Dog struct < Animal {}
 
-var d Dog = Animal();
+var d Dog = Animal()

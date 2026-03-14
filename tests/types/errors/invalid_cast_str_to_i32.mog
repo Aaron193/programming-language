@@ -1,2 +1,2 @@
-var label str = "123";
-var n i32 = label as i32;
+var label str = "123"
+var n i32 = label as i32

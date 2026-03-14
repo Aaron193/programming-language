@@ -1,12 +1,12 @@
-const base i32 = 10;
+const base i32 = 10
 
 fn readBase() i32 {
-  const offset i32 = 2;
+  const offset i32 = 2
   fn inner() i32 {
-    return base + offset;
+    return base + offset
   }
-  return inner();
+  return inner()
 }
 
-print(base);
-print(readBase());
+print(base)
+print(readBase())

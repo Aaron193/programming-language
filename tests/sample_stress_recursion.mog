@@ -1,6 +1,6 @@
 fn countDown(n i32) i32 {
-  if (n == 0) return 0;
-  return countDown(n - 1);
+  if (n == 0) return 0
+  return countDown(n - 1)
 }
 
-print(countDown(120));
+print(countDown(120))

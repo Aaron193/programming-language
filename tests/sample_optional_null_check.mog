@@ -1,17 +1,17 @@
 type Dog struct {
     fn bark() str {
-        return "woof";
+        return "woof"
     }
 }
 
-var maybeDog Dog? = Dog();
+var maybeDog Dog? = Dog()
 
 if (maybeDog != null) {
-    print("dog present");
+    print("dog present")
 }
 
-maybeDog = null;
+maybeDog = null
 
 if (maybeDog == null) {
-    print("dog missing");
+    print("dog missing")
 }

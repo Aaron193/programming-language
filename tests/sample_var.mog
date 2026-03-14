@@ -1,2 +1,2 @@
-var x i32 = 41;
-print(x + 1);
+var x i32 = 41
+print(x + 1)

@@ -1,15 +1,15 @@
-const window = @import("mog:window");
+const window = @import("mog:window")
 
 const win handle<mog:window:WindowHandle> =
-    window.create("Demo", 64i64, 64i64);
-const evt handle<mog:window:EventHandle>? = window.pollEvent(win);
+    window.create("Demo", 64i64, 64i64)
+const evt handle<mog:window:EventHandle>? = window.pollEvent(win)
 
-window.clear(win);
-window.present(win);
+window.clear(win)
+window.present(win)
 
-print(evt == null);
-print(window.mouseX(win) >= 0i64);
-print(window.mouseY(win) >= 0i64);
-print(window.isKeyDown(win, 13i64));
+print(evt == null)
+print(window.mouseX(win) >= 0i64)
+print(window.mouseY(win) >= 0i64)
+print(window.isKeyDown(win, 13i64))
 
-window.close(win);
+window.close(win)

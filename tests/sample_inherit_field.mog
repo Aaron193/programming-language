@@ -1,19 +1,19 @@
 type Base struct {
-  x i32;
+  x i32
 }
 
 type Derived struct < Base {
-  y i32;
+  y i32
 
   fn sum() i32 {
-    return this.x + this.y;
+    return this.x + this.y
   }
 }
 
-var item Derived = Derived();
-item.x = 3;
-item.y = 4;
+var item Derived = Derived()
+item.x = 3
+item.y = 4
 
-print(item.x);
-print(item.y);
-print(item.sum());
+print(item.x)
+print(item.y)
+print(item.sum())

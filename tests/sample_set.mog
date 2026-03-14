@@ -1,14 +1,14 @@
-var s Set<i32> = Set(1, 2, 2, 3);
-print(s.size());
-print(s.has(2));
+var s Set<i32> = Set(1, 2, 2, 3)
+print(s.size())
+print(s.has(2))
 
-print(s.add(2));
-print(s.add(4));
-print(s.size());
+print(s.add(2))
+print(s.add(4))
+print(s.size())
 
-print(s.remove(3));
-print(s.has(3));
-print(s[4]);
+print(s.remove(3))
+print(s.has(3))
+print(s[4])
 
-var arr Array<i32> = s.toArray();
-print(arr.size());
+var arr Array<i32> = s.toArray()
+print(arr.size())

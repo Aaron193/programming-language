@@ -1,4 +1,4 @@
 #!strict
-var value i32 = 1;
-var amount f64 = 2.0;
-print(value << amount);
+var value i32 = 1
+var amount f64 = 2.0
+print(value << amount)

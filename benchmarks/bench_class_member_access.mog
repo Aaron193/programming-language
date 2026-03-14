@@ -1,36 +1,36 @@
 type Particle struct {
-  x i32;
-  y i32;
+  x i32
+  y i32
 
   fn move(dx i32, dy i32) i32 {
-    this.x = this.x + dx;
-    this.y = this.y + dy;
-    return this.x + this.y;
+    this.x = this.x + dx
+    this.y = this.y + dy
+    return this.x + this.y
   }
 }
 
-var particles Array<Particle> = [];
+var particles Array<Particle> = []
 for (var i i32 = 0; i < 50000; i++) {
-  var p Particle = Particle();
-  p.x = i;
-  p.y = i * 2;
-  particles.push(p);
+  var p Particle = Particle()
+  p.x = i
+  p.y = i * 2
+  particles.push(p)
 }
 
-var start f64 = clock();
+var start f64 = clock()
 
-var checksum i64 = 0;
+var checksum i64 = 0
 for (var round i32 = 0; round < 10; round++) {
   for (var i i32 = 0; i < particles.size(); i++) {
-    var p Particle = particles[i];
-    checksum += p.move(1, 2);
-    checksum += p.x;
-    checksum += p.y;
+    var p Particle = particles[i]
+    checksum += p.move(1, 2)
+    checksum += p.x
+    checksum += p.y
   }
 }
 
-var elapsed f64 = clock() - start;
+var elapsed f64 = clock() - start
 
-print(checksum);
-print(particles.size());
-print(elapsed);
+print(checksum)
+print(particles.size())
+print(elapsed)

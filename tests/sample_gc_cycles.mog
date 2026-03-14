@@ -1,13 +1,13 @@
 type Node struct {
-  next Node?;
+  next Node?
 }
 
-var a Node = Node();
-var b Node = Node();
-a.next = b;
-b.next = a;
+var a Node = Node()
+var b Node = Node()
+a.next = b
+b.next = a
 
-print(a.next == b);
-print(b.next == a);
-print(a != null);
-print(b != null);
+print(a.next == b)
+print(b.next == a)
+print(a != null)
+print(b != null)

@@ -1,15 +1,15 @@
-var key Array<i32> = [1, 2];
+var key Array<i32> = [1, 2]
 
-var d Dict<Array<i32>, i32> = {};
-d[key] = 42;
-print(d[key]);
-print(d.has(key));
-print(d.keys().size());
-print(d.values().size());
+var d Dict<Array<i32>, i32> = {}
+d[key] = 42
+print(d[key])
+print(d.has(key))
+print(d.keys().size())
+print(d.values().size())
 
-var s Set<Array<i32> > = Set();
-print(s.add(key));
-print(s.has(key));
-print(s.add(key));
-print(s.remove(key));
-print(s.has(key));
+var s Set<Array<i32> > = Set()
+print(s.add(key))
+print(s.has(key))
+print(s.add(key))
+print(s.remove(key))
+print(s.has(key))

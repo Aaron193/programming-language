@@ -12,6 +12,7 @@
 
 #include "NativePackage.hpp"
 #include "Scanner.hpp"
+#include "SyntaxRules.hpp"
 
 namespace {
 
@@ -96,17 +97,6 @@ bool isBitwiseCompoundAssignment(TokenType type) {
         default:
             return false;
     }
-}
-
-bool isCollectionTypeNameText(std::string_view name) {
-    return name == "Array" || name == "Dict" || name == "Set";
-}
-
-bool isHandleTypeNameText(std::string_view name) { return name == "handle"; }
-
-bool isPublicSymbolName(std::string_view name) {
-    return !name.empty() &&
-           name.front() >= 'A' && name.front() <= 'Z';
 }
 
 class CheckerImpl {
@@ -578,6 +568,104 @@ class CheckerImpl {
         }
 
         return tokenAt(offset).type() == TokenType::IDENTIFIER;
+    }
+
+    bool hasLineBreakBeforeCurrent() const {
+        return m_previous.line() != 0 && m_current.line() > m_previous.line();
+    }
+
+    bool matchSameLine(TokenType type) {
+        if (!check(type) || hasLineBreakBeforeCurrent()) {
+            return false;
+        }
+        advance();
+        return true;
+    }
+
+    bool isRecoveryBoundaryToken(TokenType type) const {
+        switch (type) {
+            case TokenType::TYPE:
+            case TokenType::VAR:
+            case TokenType::CONST:
+            case TokenType::TYPE_FN:
+            case TokenType::CLASS:
+            case TokenType::FUNCTION:
+            case TokenType::IMPORT:
+            case TokenType::EXPORT:
+            case TokenType::FOR:
+            case TokenType::IF:
+            case TokenType::WHILE:
+            case TokenType::PRINT:
+            case TokenType::_RETURN:
+            case TokenType::CLOSE_CURLY:
+            case TokenType::END_OF_FILE:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    void rejectStraySemicolon() {
+        if (!check(TokenType::SEMI_COLON)) {
+            return;
+        }
+
+        addError(m_current.line(),
+                 "Type error: semicolons are only allowed inside 'for (...)' clauses.");
+        advance();
+    }
+
+    void skipInvalidLegacyConstruct() {
+        int parenDepth = 0;
+        int bracketDepth = 0;
+        int braceDepth = 0;
+        bool consumedAny = false;
+
+        while (!check(TokenType::END_OF_FILE)) {
+            if (consumedAny && parenDepth == 0 && bracketDepth == 0 &&
+                braceDepth == 0) {
+                if (check(TokenType::SEMI_COLON)) {
+                    advance();
+                    return;
+                }
+                if (isRecoveryBoundaryToken(m_current.type())) {
+                    return;
+                }
+            }
+
+            switch (m_current.type()) {
+                case TokenType::OPEN_PAREN:
+                    ++parenDepth;
+                    break;
+                case TokenType::CLOSE_PAREN:
+                    if (parenDepth > 0) {
+                        --parenDepth;
+                    }
+                    break;
+                case TokenType::OPEN_BRACKET:
+                    ++bracketDepth;
+                    break;
+                case TokenType::CLOSE_BRACKET:
+                    if (bracketDepth > 0) {
+                        --bracketDepth;
+                    }
+                    break;
+                case TokenType::OPEN_CURLY:
+                    ++braceDepth;
+                    break;
+                case TokenType::CLOSE_CURLY:
+                    if (braceDepth == 0) {
+                        return;
+                    }
+                    --braceDepth;
+                    break;
+                default:
+                    break;
+            }
+
+            consumedAny = true;
+            advance();
+        }
     }
 
     void advance() {
@@ -1220,7 +1308,7 @@ class CheckerImpl {
     ExprInfo parseAssignment() {
         ExprInfo lhs = parseOr();
 
-        if (!isAssignmentOperator(m_current.type())) {
+        if (hasLineBreakBeforeCurrent() || !isAssignmentOperator(m_current.type())) {
             return lhs;
         }
 
@@ -1359,7 +1447,7 @@ class CheckerImpl {
 
     ExprInfo parseOr() {
         ExprInfo expr = parseAnd();
-        while (match(TokenType::LOGICAL_OR)) {
+        while (matchSameLine(TokenType::LOGICAL_OR)) {
             ExprInfo rhs = parseAnd();
             if (!(expr.type->kind == TypeKind::BOOL || expr.type->isAny()) ||
                 !(rhs.type->kind == TypeKind::BOOL || rhs.type->isAny())) {
@@ -1374,7 +1462,7 @@ class CheckerImpl {
 
     ExprInfo parseAnd() {
         ExprInfo expr = parseEquality();
-        while (match(TokenType::LOGICAL_AND)) {
+        while (matchSameLine(TokenType::LOGICAL_AND)) {
             ExprInfo rhs = parseEquality();
             if (!(expr.type->kind == TypeKind::BOOL || expr.type->isAny()) ||
                 !(rhs.type->kind == TypeKind::BOOL || rhs.type->isAny())) {
@@ -1389,7 +1477,8 @@ class CheckerImpl {
 
     ExprInfo parseEquality() {
         ExprInfo expr = parseComparison();
-        while (isEqualityOperator(m_current.type())) {
+        while (!hasLineBreakBeforeCurrent() &&
+               isEqualityOperator(m_current.type())) {
             TokenType op = m_current.type();
             size_t line = m_current.line();
             advance();
@@ -1412,7 +1501,8 @@ class CheckerImpl {
 
     ExprInfo parseComparison() {
         ExprInfo expr = parseBitwiseOr();
-        while (isComparisonOperator(m_current.type())) {
+        while (!hasLineBreakBeforeCurrent() &&
+               isComparisonOperator(m_current.type())) {
             TokenType op = m_current.type();
             size_t line = m_current.line();
             advance();
@@ -1438,7 +1528,7 @@ class CheckerImpl {
 
     ExprInfo parseBitwiseOr() {
         ExprInfo expr = parseBitwiseXor();
-        while (match(TokenType::PIPE)) {
+        while (matchSameLine(TokenType::PIPE)) {
             size_t line = m_previous.line();
             ExprInfo rhs = parseBitwiseXor();
             if (expr.type->isAny() || rhs.type->isAny()) {
@@ -1461,7 +1551,7 @@ class CheckerImpl {
 
     ExprInfo parseBitwiseXor() {
         ExprInfo expr = parseBitwiseAnd();
-        while (match(TokenType::CARET)) {
+        while (matchSameLine(TokenType::CARET)) {
             size_t line = m_previous.line();
             ExprInfo rhs = parseBitwiseAnd();
             if (expr.type->isAny() || rhs.type->isAny()) {
@@ -1484,7 +1574,7 @@ class CheckerImpl {
 
     ExprInfo parseBitwiseAnd() {
         ExprInfo expr = parseShift();
-        while (match(TokenType::AMPERSAND)) {
+        while (matchSameLine(TokenType::AMPERSAND)) {
             size_t line = m_previous.line();
             ExprInfo rhs = parseShift();
             if (expr.type->isAny() || rhs.type->isAny()) {
@@ -1507,8 +1597,9 @@ class CheckerImpl {
 
     ExprInfo parseShift() {
         ExprInfo expr = parseTerm();
-        while (check(TokenType::SHIFT_LEFT_TOKEN) ||
-               check(TokenType::SHIFT_RIGHT_TOKEN)) {
+        while (!hasLineBreakBeforeCurrent() &&
+               (check(TokenType::SHIFT_LEFT_TOKEN) ||
+                check(TokenType::SHIFT_RIGHT_TOKEN))) {
             size_t line = m_current.line();
             advance();
             ExprInfo rhs = parseTerm();
@@ -1526,7 +1617,8 @@ class CheckerImpl {
 
     ExprInfo parseTerm() {
         ExprInfo expr = parseFactor();
-        while (check(TokenType::PLUS) || check(TokenType::MINUS)) {
+        while (!hasLineBreakBeforeCurrent() &&
+               (check(TokenType::PLUS) || check(TokenType::MINUS))) {
             TokenType op = m_current.type();
             size_t line = m_current.line();
             advance();
@@ -1568,7 +1660,8 @@ class CheckerImpl {
 
     ExprInfo parseFactor() {
         ExprInfo expr = parseUnary();
-        while (check(TokenType::STAR) || check(TokenType::SLASH)) {
+        while (!hasLineBreakBeforeCurrent() &&
+               (check(TokenType::STAR) || check(TokenType::SLASH))) {
             TokenType op = m_current.type();
             size_t line = m_current.line();
             advance();
@@ -1646,7 +1739,7 @@ class CheckerImpl {
 
     ExprInfo parseCast() {
         ExprInfo expr = parseCall();
-        while (match(TokenType::AS_KW)) {
+        while (matchSameLine(TokenType::AS_KW)) {
             size_t line = m_previous.line();
             TypeRef target = parseTypeExprType();
             if (!target) {
@@ -1668,7 +1761,7 @@ class CheckerImpl {
         ExprInfo expr = parsePrimary();
 
         while (true) {
-            if (match(TokenType::OPEN_PAREN)) {
+            if (matchSameLine(TokenType::OPEN_PAREN)) {
                 std::vector<ExprInfo> args;
                 if (!check(TokenType::CLOSE_PAREN)) {
                     do {
@@ -1738,7 +1831,7 @@ class CheckerImpl {
                 continue;
             }
 
-            if (match(TokenType::DOT)) {
+            if (matchSameLine(TokenType::DOT)) {
                 ExprInfo receiver = expr;
                 if (expr.type && expr.type->isOptional()) {
                     addError(m_previous.line(),
@@ -1792,7 +1885,7 @@ class CheckerImpl {
                 continue;
             }
 
-            if (match(TokenType::OPEN_BRACKET)) {
+            if (matchSameLine(TokenType::OPEN_BRACKET)) {
                 ExprInfo indexExpr = parseExpression();
                 consume(TokenType::CLOSE_BRACKET,
                         "Expected ']' after index expression.");
@@ -2016,7 +2109,9 @@ class CheckerImpl {
         if (match(TokenType::FUNCTION)) {
             addError(m_previous.line(),
                      "Type error: keyword 'function' was removed; use 'fn'.");
-            return parseFunctionLiteralExpr();
+            skipInvalidLegacyConstruct();
+            return ExprInfo{TypeInfo::makeAny(), false, false, "",
+                            m_previous.line()};
         }
 
         if (match(TokenType::AT)) {
@@ -2178,9 +2273,7 @@ class CheckerImpl {
 
     void parseExpressionStatement() {
         parseExpression();
-        if (check(TokenType::SEMI_COLON)) {
-            advance();
-        }
+        rejectStraySemicolon();
     }
 
     void parseReturnStatement() {
@@ -2189,7 +2282,11 @@ class CheckerImpl {
             addError(line, "Type error: cannot return from top-level code.");
         }
 
-        if (match(TokenType::SEMI_COLON)) {
+        if (check(TokenType::SEMI_COLON) || check(TokenType::CLOSE_CURLY) ||
+            check(TokenType::END_OF_FILE)) {
+            if (check(TokenType::SEMI_COLON)) {
+                rejectStraySemicolon();
+            }
             if (!m_functionContexts.empty()) {
                 TypeRef expected = m_functionContexts.back().returnType;
                 if (expected && !expected->isVoid()) {
@@ -2202,9 +2299,7 @@ class CheckerImpl {
         }
 
         ExprInfo value = parseExpression();
-        if (check(TokenType::SEMI_COLON)) {
-            advance();
-        }
+        rejectStraySemicolon();
 
         if (!m_functionContexts.empty()) {
             TypeRef expected = m_functionContexts.back().returnType;
@@ -2413,9 +2508,7 @@ class CheckerImpl {
             consume(TokenType::CLOSE_CURLY, "Expected '}' after binding list.");
             consume(TokenType::EQUAL, "Expected '=' after destructured binding.");
             parseImportExpr();
-            if (check(TokenType::SEMI_COLON)) {
-                advance();
-            }
+            rejectStraySemicolon();
             for (const auto& binding : bindings) {
                 defineSymbol(binding.first, TypeInfo::makeAny(), true);
                 recordDeclarationType(binding.first, TypeInfo::makeAny(),
@@ -2456,11 +2549,7 @@ class CheckerImpl {
                 "Expected '=' in variable declaration (initializer is required).");
         ExprInfo initializer;
         if (!omittedType && declaredType && declaredType->kind == TypeKind::FUNCTION &&
-            (check(TokenType::TYPE_FN) || check(TokenType::FUNCTION))) {
-            if (check(TokenType::FUNCTION)) {
-                addError(m_current.line(),
-                         "Type error: keyword 'function' was removed; use 'fn'.");
-            }
+            check(TokenType::TYPE_FN)) {
             advance();
             initializer = parseFunctionLiteralExpr(declaredType);
         } else {
@@ -2476,9 +2565,7 @@ class CheckerImpl {
                                            declaredType->toString() + "'.");
         }
 
-        if (check(TokenType::SEMI_COLON)) {
-            advance();
-        }
+        rejectStraySemicolon();
         TypeRef finalType = omittedType ? initializer.type : declaredType;
         defineSymbol(name, finalType, isConst);
         recordDeclarationType(name, finalType, nameToken.line(), isConst);
@@ -2613,9 +2700,7 @@ class CheckerImpl {
                 return;
             }
             m_typeAliases[typeName] = aliasedType;
-            if (check(TokenType::SEMI_COLON)) {
-                advance();
-            }
+            rejectStraySemicolon();
             return;
         }
 
@@ -2644,20 +2729,39 @@ class CheckerImpl {
         consume(TokenType::OPEN_CURLY, "Expected '{' before struct body.");
         while (!check(TokenType::CLOSE_CURLY) &&
                !check(TokenType::END_OF_FILE)) {
+            if (check(TokenType::SEMI_COLON)) {
+                rejectStraySemicolon();
+                continue;
+            }
+
+            if (check(TokenType::FUNCTION)) {
+                addError(m_current.line(),
+                         "Type error: keyword 'function' was removed; use 'fn'.");
+                advance();
+                skipInvalidLegacyConstruct();
+                continue;
+            }
+
+            if (isTypeToken(m_current.type()) &&
+                m_current.type() != TokenType::TYPE_FN) {
+                addError(
+                    m_current.line(),
+                    "Type error: legacy typed class members were removed; use 'name Type' fields and 'fn Name(...) Ret'.");
+                advance();
+                skipInvalidLegacyConstruct();
+                continue;
+            }
+
+            if (check(TokenType::IDENTIFIER) &&
+                peekToken().type() == TokenType::OPEN_PAREN) {
+                addError(m_current.line(),
+                         "Type error: methods must start with 'fn'.");
+                advance();
+                skipInvalidLegacyConstruct();
+                continue;
+            }
+
             std::vector<int> annotatedOperators;
-            auto parseOperatorToken = [](std::string_view op) -> int {
-                if (op == "+") return TokenType::PLUS;
-                if (op == "-") return TokenType::MINUS;
-                if (op == "*") return TokenType::STAR;
-                if (op == "/") return TokenType::SLASH;
-                if (op == "==") return TokenType::EQUAL_EQUAL;
-                if (op == "!=") return TokenType::BANG_EQUAL;
-                if (op == "<") return TokenType::LESS;
-                if (op == "<=") return TokenType::LESS_EQUAL;
-                if (op == ">") return TokenType::GREATER;
-                if (op == ">=") return TokenType::GREATER_EQUAL;
-                return -1;
-            };
 
             while (match(TokenType::AT)) {
                 consume(TokenType::IDENTIFIER,
@@ -2675,7 +2779,7 @@ class CheckerImpl {
                 consume(TokenType::CLOSE_PAREN,
                         "Expected ')' after annotation value.");
                 if (literal.size() >= 2) {
-                    int op = parseOperatorToken(
+                    int op = parseOperatorAnnotationToken(
                         std::string_view(literal.data() + 1, literal.size() - 2));
                     if (op == -1) {
                         addError(m_previous.line(),
@@ -2722,64 +2826,25 @@ class CheckerImpl {
             }
             m_classFieldTypes[typeName][memberName] =
                 memberType ? memberType : TypeInfo::makeAny();
-            if (check(TokenType::SEMI_COLON)) {
-                advance();
-            }
+            rejectStraySemicolon();
         }
 
         consume(TokenType::CLOSE_CURLY, "Expected '}' after struct body.");
         m_classContexts.pop_back();
     }
 
-    void parseClassDeclaration() {
-        consume(TokenType::IDENTIFIER, "Expected class name.");
-        while (!check(TokenType::OPEN_CURLY) && !check(TokenType::END_OF_FILE)) {
-            advance();
-        }
-        if (match(TokenType::OPEN_CURLY)) {
-            int depth = 1;
-            while (depth > 0 && !check(TokenType::END_OF_FILE)) {
-                if (match(TokenType::OPEN_CURLY)) {
-                    depth++;
-                } else if (match(TokenType::CLOSE_CURLY)) {
-                    depth--;
-                } else {
-                    advance();
-                }
-            }
-        }
-    }
-
-    void parseImportDeclaration() {
-        while (!check(TokenType::SEMI_COLON) &&
-               !check(TokenType::END_OF_FILE)) {
-            advance();
-        }
-        if (check(TokenType::SEMI_COLON)) {
-            advance();
-        }
-    }
-
-    void parseExportDeclaration() {
-        while (!check(TokenType::SEMI_COLON) &&
-               !check(TokenType::END_OF_FILE) &&
-               !check(TokenType::CLOSE_CURLY)) {
-            advance();
-        }
-        if (check(TokenType::SEMI_COLON)) {
-            advance();
-        }
-    }
-
     void statement() {
+        if (check(TokenType::SEMI_COLON)) {
+            rejectStraySemicolon();
+            return;
+        }
+
         if (match(TokenType::PRINT)) {
             consume(TokenType::OPEN_PAREN, "Expected '(' after 'print'.");
             parseExpression();
             consume(TokenType::CLOSE_PAREN,
                     "Expected ')' after print argument.");
-            if (check(TokenType::SEMI_COLON)) {
-                advance();
-            }
+            rejectStraySemicolon();
             return;
         }
 
@@ -2812,6 +2877,11 @@ class CheckerImpl {
     }
 
     void declaration() {
+        if (check(TokenType::SEMI_COLON)) {
+            rejectStraySemicolon();
+            return;
+        }
+
         if (match(TokenType::TYPE)) {
             parseTypeDeclaration();
             return;
@@ -2820,21 +2890,21 @@ class CheckerImpl {
         if (match(TokenType::CLASS)) {
             addError(m_previous.line(),
                      "Type error: keyword 'class' was removed; use 'type Name struct { ... }'.");
-            parseClassDeclaration();
+            skipInvalidLegacyConstruct();
             return;
         }
 
         if (match(TokenType::IMPORT)) {
             addError(m_previous.line(),
                      "Type error: statement 'import ... from' was removed; use '@import(...)' in a binding.");
-            parseImportDeclaration();
+            skipInvalidLegacyConstruct();
             return;
         }
 
         if (match(TokenType::EXPORT)) {
             addError(m_previous.line(),
                      "Type error: keyword 'export' was removed; public top-level names use capitalization.");
-            parseExportDeclaration();
+            skipInvalidLegacyConstruct();
             return;
         }
 
@@ -2848,7 +2918,7 @@ class CheckerImpl {
         if (match(TokenType::FUNCTION)) {
             addError(m_previous.line(),
                      "Type error: keyword 'function' was removed; use 'fn'.");
-            parseFunctionDeclaration();
+            skipInvalidLegacyConstruct();
             return;
         }
 
@@ -3226,9 +3296,7 @@ bool TypeChecker::collectSymbols(
             continue;
         }
 
-        if (classDepth != 0 ||
-            (token.type() != TokenType::FUNCTION &&
-             token.type() != TokenType::TYPE_FN)) {
+        if (classDepth != 0 || token.type() != TokenType::TYPE_FN) {
             continue;
         }
 

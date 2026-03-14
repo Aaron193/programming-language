@@ -1,4 +1,4 @@
 #!strict
-var flag bool = true;
-var mask i32 = 1;
-print(flag & mask);
+var flag bool = true
+var mask i32 = 1
+print(flag & mask)

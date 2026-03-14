@@ -1,11 +1,11 @@
 type Bag struct {
-	value i32;
-	label str;
+	value i32
+	label str
 }
 
-var bag Bag = Bag();
-bag.value = 42;
-print(bag.value);
+var bag Bag = Bag()
+bag.value = 42
+print(bag.value)
 
-bag.label = "ok";
-print(bag.label);
+bag.label = "ok"
+print(bag.label)

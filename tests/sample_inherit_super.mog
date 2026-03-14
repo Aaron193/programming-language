@@ -1,19 +1,19 @@
 type A struct {
   fn greet() str {
-    return "A";
+    return "A"
   }
 
   fn id() str {
-    return "idA";
+    return "idA"
   }
 }
 
 type B struct < A {
   fn greet() str {
-    return super.greet() + "B";
+    return super.greet() + "B"
   }
 }
 
-var b B = B();
-print(b.greet());
-print(b.id());
+var b B = B()
+print(b.greet())
+print(b.id())

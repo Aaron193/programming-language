@@ -1,3 +1,3 @@
-const math = @import("./modules/math.expr");
+const math = @import("./modules/math.expr")
 
-print(math.PI);
+print(math.PI)

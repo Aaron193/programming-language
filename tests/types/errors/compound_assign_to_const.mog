@@ -1,2 +1,2 @@
-const total i32 = 1;
-total += 2;
+const total i32 = 1
+total += 2

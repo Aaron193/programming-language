@@ -1,13 +1,13 @@
 fn c() f64 {
-  return num("x");
+  return num("x")
 }
 
 fn b() f64 {
-  return c();
+  return c()
 }
 
 fn a() f64 {
-  return b();
+  return b()
 }
 
-print(a());
+print(a())

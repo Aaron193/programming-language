@@ -1,8 +1,8 @@
-const nativeMath = @import("examples:math");
+const nativeMath = @import("examples:math")
 
-print(nativeMath.PACKAGE_NAMESPACE);
-print(nativeMath.PACKAGE_NAME);
-print(nativeMath.PACKAGE_ID);
-print(nativeMath.MEANING_OF_LIFE);
-print(nativeMath.addI64(20i64, 22i64));
-print(nativeMath.greet("Ada"));
+print(nativeMath.PACKAGE_NAMESPACE)
+print(nativeMath.PACKAGE_NAME)
+print(nativeMath.PACKAGE_ID)
+print(nativeMath.MEANING_OF_LIFE)
+print(nativeMath.addI64(20i64, 22i64))
+print(nativeMath.greet("Ada"))

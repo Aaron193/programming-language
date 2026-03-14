@@ -10,21 +10,11 @@
 
 #include "Chunk.hpp"
 #include "ModuleResolver.hpp"
+#include "SyntaxRules.hpp"
 #include "StdLib.hpp"
 #include "TypeChecker.hpp"
 
 namespace {
-bool isCollectionTypeNameText(std::string_view name) {
-    return name == "Array" || name == "Dict" || name == "Set";
-}
-
-bool isHandleTypeNameText(std::string_view name) { return name == "handle"; }
-
-bool isPublicSymbolName(std::string_view name) {
-    return !name.empty() &&
-           name.front() >= 'A' && name.front() <= 'Z';
-}
-
 bool isBitwiseAssignmentOperator(TokenType type) {
     switch (type) {
         case TokenType::AMPERSAND_EQUAL:
@@ -1566,45 +1556,104 @@ bool Compiler::looksLikeFunctionTypeDeclarationStart() {
     return tokenAt(offset).type() == TokenType::IDENTIFIER;
 }
 
+bool Compiler::hasLineBreakBeforeCurrent() const {
+    return m_parser->previous.line() != 0 &&
+           m_parser->current.line() > m_parser->previous.line();
+}
+
 void Compiler::synchronize() {
     m_parser->panicMode = false;
 
     while (m_parser->current.type() != TokenType::END_OF_FILE) {
-        if (m_parser->previous.type() == TokenType::SEMI_COLON) {
+        if (isRecoveryBoundaryToken(m_parser->current.type())) {
             return;
         }
 
-        switch (m_parser->current.type()) {
-            case TokenType::CLASS:
-            case TokenType::FUNCTION:
-            case TokenType::TYPE_I8:
-            case TokenType::TYPE_I16:
-            case TokenType::TYPE_I32:
-            case TokenType::TYPE_I64:
-            case TokenType::TYPE_U8:
-            case TokenType::TYPE_U16:
-            case TokenType::TYPE_U32:
-            case TokenType::TYPE_U64:
-            case TokenType::TYPE_USIZE:
-            case TokenType::TYPE_F32:
-            case TokenType::TYPE_F64:
-            case TokenType::TYPE_BOOL:
-            case TokenType::TYPE_STR:
-            case TokenType::TYPE_FN:
-            case TokenType::TYPE_VOID:
-            case TokenType::TYPE_NULL_KW:
-            case TokenType::IMPORT:
-            case TokenType::EXPORT:
-            case TokenType::FOR:
-            case TokenType::IF:
-            case TokenType::WHILE:
-            case TokenType::PRINT:
-            case TokenType::_RETURN:
+        advance();
+    }
+}
+
+bool Compiler::isRecoveryBoundaryToken(TokenType type) const {
+    switch (type) {
+        case TokenType::TYPE:
+        case TokenType::VAR:
+        case TokenType::CONST:
+        case TokenType::TYPE_FN:
+        case TokenType::CLASS:
+        case TokenType::FUNCTION:
+        case TokenType::IMPORT:
+        case TokenType::EXPORT:
+        case TokenType::FOR:
+        case TokenType::IF:
+        case TokenType::WHILE:
+        case TokenType::PRINT:
+        case TokenType::_RETURN:
+        case TokenType::CLOSE_CURLY:
+        case TokenType::END_OF_FILE:
+            return true;
+        default:
+            return false;
+    }
+}
+
+void Compiler::rejectStraySemicolon() {
+    if (m_parser->current.type() != TokenType::SEMI_COLON) {
+        return;
+    }
+
+    errorAtCurrent("Semicolons are only allowed inside 'for (...)' clauses.");
+    advance();
+}
+
+void Compiler::skipInvalidLegacyConstruct() {
+    int parenDepth = 0;
+    int bracketDepth = 0;
+    int braceDepth = 0;
+    bool consumedAny = false;
+
+    while (m_parser->current.type() != TokenType::END_OF_FILE) {
+        if (consumedAny && parenDepth == 0 && bracketDepth == 0 &&
+            braceDepth == 0) {
+            if (m_parser->current.type() == TokenType::SEMI_COLON) {
+                advance();
                 return;
+            }
+            if (isRecoveryBoundaryToken(m_parser->current.type())) {
+                return;
+            }
+        }
+
+        switch (m_parser->current.type()) {
+            case TokenType::OPEN_PAREN:
+                ++parenDepth;
+                break;
+            case TokenType::CLOSE_PAREN:
+                if (parenDepth > 0) {
+                    --parenDepth;
+                }
+                break;
+            case TokenType::OPEN_BRACKET:
+                ++bracketDepth;
+                break;
+            case TokenType::CLOSE_BRACKET:
+                if (bracketDepth > 0) {
+                    --bracketDepth;
+                }
+                break;
+            case TokenType::OPEN_CURLY:
+                ++braceDepth;
+                break;
+            case TokenType::CLOSE_CURLY:
+                if (braceDepth == 0) {
+                    return;
+                }
+                --braceDepth;
+                break;
             default:
                 break;
         }
 
+        consumedAny = true;
         advance();
     }
 }
@@ -1645,6 +1694,11 @@ void Compiler::consume(TokenType type, const std::string& message) {
 void Compiler::expression() { parsePrecedence(PREC_ASSIGNMENT); }
 
 void Compiler::declaration() {
+    if (m_parser->current.type() == TokenType::SEMI_COLON) {
+        rejectStraySemicolon();
+        return;
+    }
+
     if (m_parser->current.type() == TokenType::TYPE) {
         advance();
         typeDeclaration();
@@ -1652,26 +1706,25 @@ void Compiler::declaration() {
         errorAtCurrent(
             "Keyword 'class' was removed; use 'type Name struct { ... }'.");
         advance();
-        classDeclaration();
+        skipInvalidLegacyConstruct();
     } else if (m_parser->current.type() == TokenType::IMPORT) {
         errorAtCurrent(
             "Statement 'import ... from' was removed; use '@import(...)' in a binding.");
         advance();
-        importDeclaration();
+        skipInvalidLegacyConstruct();
     } else if (m_parser->current.type() == TokenType::EXPORT) {
         errorAtCurrent(
             "Keyword 'export' was removed; public top-level names use capitalization.");
         advance();
-        exportDeclaration();
+        skipInvalidLegacyConstruct();
     } else if (m_parser->current.type() == TokenType::TYPE_FN &&
                peekNextToken().type() == TokenType::IDENTIFIER) {
         advance();
         functionDeclaration();
-    } else if (m_parser->current.type() == TokenType::FUNCTION &&
-               peekNextToken().type() == TokenType::IDENTIFIER) {
+    } else if (m_parser->current.type() == TokenType::FUNCTION) {
         errorAtCurrent("Keyword 'function' was removed; use 'fn'.");
         advance();
-        functionDeclaration();
+        skipInvalidLegacyConstruct();
     } else if (m_parser->current.type() == TokenType::CONST ||
                m_parser->current.type() == TokenType::VAR) {
         typedVarDeclaration();
@@ -1692,28 +1745,6 @@ void Compiler::emitExportName(const Token& nameToken) {
     emitBytes(OpCode::GET_GLOBAL_SLOT, slot);
     emitBytes(OpCode::EXPORT_NAME, identifierConstant(nameToken));
     emitByte(OpCode::POP);
-}
-
-void Compiler::exportDeclaration() {
-    while (m_parser->current.type() != TokenType::SEMI_COLON &&
-           m_parser->current.type() != TokenType::END_OF_FILE &&
-           m_parser->current.type() != TokenType::CLOSE_CURLY) {
-        advance();
-    }
-    if (m_parser->current.type() == TokenType::SEMI_COLON) {
-        advance();
-    }
-}
-
-void Compiler::importDeclaration() {
-    while (m_parser->current.type() != TokenType::SEMI_COLON &&
-           m_parser->current.type() != TokenType::END_OF_FILE &&
-           m_parser->current.type() != TokenType::CLOSE_CURLY) {
-        advance();
-    }
-    if (m_parser->current.type() == TokenType::SEMI_COLON) {
-        advance();
-    }
 }
 
 void Compiler::typeDeclaration(Token* declaredName) {
@@ -1737,9 +1768,7 @@ void Compiler::typeDeclaration(Token* declaredName) {
         }
         m_typeAliases[std::string(nameToken.start(), nameToken.length())] =
             aliasedType;
-        if (m_parser->current.type() == TokenType::SEMI_COLON) {
-            advance();
-        }
+        rejectStraySemicolon();
         return;
     }
 
@@ -1800,41 +1829,37 @@ void Compiler::typeDeclaration(Token* declaredName) {
     m_currentClass = m_currentClass->enclosing;
 }
 
-void Compiler::classDeclaration() {
-    consume(TokenType::IDENTIFIER, "Expected class name.");
-    while (m_parser->current.type() != TokenType::OPEN_CURLY &&
-           m_parser->current.type() != TokenType::END_OF_FILE) {
-        advance();
-    }
-    if (m_parser->current.type() == TokenType::OPEN_CURLY) {
-        int depth = 1;
-        advance();
-        while (depth > 0 && m_parser->current.type() != TokenType::END_OF_FILE) {
-            if (m_parser->current.type() == TokenType::OPEN_CURLY) {
-                depth++;
-            } else if (m_parser->current.type() == TokenType::CLOSE_CURLY) {
-                depth--;
-            }
-            advance();
-        }
-    }
-}
-
 void Compiler::classMemberDeclaration() {
+    if (m_parser->current.type() == TokenType::SEMI_COLON) {
+        rejectStraySemicolon();
+        return;
+    }
+
+    if (m_parser->current.type() == TokenType::FUNCTION) {
+        errorAtCurrent("Keyword 'function' was removed; use 'fn'.");
+        advance();
+        skipInvalidLegacyConstruct();
+        return;
+    }
+
+    if (isTypeToken(m_parser->current.type()) &&
+        m_parser->current.type() != TokenType::TYPE_FN) {
+        errorAtCurrent(
+            "Legacy typed class members were removed; use 'name Type' fields and 'fn Name(...) Ret'.");
+        advance();
+        skipInvalidLegacyConstruct();
+        return;
+    }
+
+    if (m_parser->current.type() == TokenType::IDENTIFIER &&
+        peekNextToken().type() == TokenType::OPEN_PAREN) {
+        errorAtCurrent("Methods must start with 'fn'.");
+        advance();
+        skipInvalidLegacyConstruct();
+        return;
+    }
+
     std::vector<int> annotatedOperators;
-    auto parseOperatorToken = [](std::string_view op) -> int {
-        if (op == "+") return TokenType::PLUS;
-        if (op == "-") return TokenType::MINUS;
-        if (op == "*") return TokenType::STAR;
-        if (op == "/") return TokenType::SLASH;
-        if (op == "==") return TokenType::EQUAL_EQUAL;
-        if (op == "!=") return TokenType::BANG_EQUAL;
-        if (op == "<") return TokenType::LESS;
-        if (op == "<=") return TokenType::LESS_EQUAL;
-        if (op == ">") return TokenType::GREATER;
-        if (op == ">=") return TokenType::GREATER_EQUAL;
-        return -1;
-    };
 
     while (m_parser->current.type() == TokenType::AT) {
         advance();
@@ -1850,7 +1875,7 @@ void Compiler::classMemberDeclaration() {
         std::string literal(m_parser->previous.start(), m_parser->previous.length());
         consume(TokenType::CLOSE_PAREN, "Expected ')' after annotation value.");
         if (literal.size() >= 2) {
-            int op = parseOperatorToken(
+            int op = parseOperatorAnnotationToken(
                 std::string_view(literal.data() + 1, literal.size() - 2));
             if (op == -1) {
                 errorAt(m_parser->previous,
@@ -1913,18 +1938,7 @@ void Compiler::classMemberDeclaration() {
     if (!className.empty()) {
         m_classFieldTypes[className][memberNameText] = declaredType;
     }
-    if (m_parser->current.type() == TokenType::SEMI_COLON) {
-        advance();
-    }
-}
-
-void Compiler::typedClassMemberDeclaration() {
-    errorAtCurrent(
-        "Legacy typed class members were removed; use 'name Type' fields and 'fn Name(...) Ret'.");
-}
-
-void Compiler::methodDeclaration() {
-    errorAtCurrent("Methods must start with 'fn'.");
+    rejectStraySemicolon();
 }
 
 void Compiler::statement() {
@@ -2163,9 +2177,7 @@ void Compiler::printStatement() {
     expression();
     consume(TokenType::CLOSE_PAREN, "Expected ')' after print argument.");
     popExprType();
-    if (m_parser->current.type() == TokenType::SEMI_COLON) {
-        advance();
-    }
+    rejectStraySemicolon();
     emitByte(OpCode::PRINT_OP);
 }
 
@@ -2176,13 +2188,17 @@ void Compiler::returnStatement() {
 
     TypeRef expectedReturnType = currentContext().returnType;
 
-    if (m_parser->current.type() == TokenType::SEMI_COLON) {
+    if (m_parser->current.type() == TokenType::SEMI_COLON ||
+        m_parser->current.type() == TokenType::CLOSE_CURLY ||
+        m_parser->current.type() == TokenType::END_OF_FILE) {
+        if (m_parser->current.type() == TokenType::SEMI_COLON) {
+            rejectStraySemicolon();
+        }
         if (expectedReturnType && !expectedReturnType->isAny() &&
             !expectedReturnType->isVoid()) {
             errorAtCurrent("Return statement requires a value of type '" +
                            expectedReturnType->toString() + "'.");
         }
-        advance();
         emitByte(OpCode::NIL);
         emitByte(OpCode::RETURN);
         return;
@@ -2197,18 +2213,14 @@ void Compiler::returnStatement() {
     }
     emitCoerceToType(expressionType, expectedReturnType);
     emitCheckInstanceType(expectedReturnType);
-    if (m_parser->current.type() == TokenType::SEMI_COLON) {
-        advance();
-    }
+    rejectStraySemicolon();
     emitByte(OpCode::RETURN);
 }
 
 void Compiler::expressionStatement() {
     expression();
     popExprType();
-    if (m_parser->current.type() == TokenType::SEMI_COLON) {
-        advance();
-    }
+    rejectStraySemicolon();
     emitByte(OpCode::POP);
 }
 
@@ -2221,19 +2233,6 @@ void Compiler::typedVarDeclaration(Token* declaredName) {
 
     bool isConst = m_parser->current.type() == TokenType::CONST;
     advance();
-
-    auto isAtImportStart = [this]() {
-        if (m_parser->current.type() != TokenType::AT) {
-            return false;
-        }
-        const Token& nameToken = peekNextToken();
-        if (nameToken.type() != TokenType::IDENTIFIER &&
-            nameToken.type() != TokenType::IMPORT) {
-            return false;
-        }
-        std::string_view name(nameToken.start(), nameToken.length());
-        return name == "import";
-    };
 
     auto parseImportTarget = [this]() -> ImportTarget {
         if (m_sourcePath.empty()) {
@@ -2328,9 +2327,7 @@ void Compiler::typedVarDeclaration(Token* declaredName) {
         consume(TokenType::CLOSE_CURLY, "Expected '}' after binding list.");
         consume(TokenType::EQUAL, "Expected '=' after destructured binding.");
         ImportTarget importTarget = parseImportTarget();
-        if (m_parser->current.type() == TokenType::SEMI_COLON) {
-            advance();
-        }
+        rejectStraySemicolon();
         if (importTarget.canonicalId.empty()) {
             return;
         }
@@ -2424,11 +2421,7 @@ void Compiler::typedVarDeclaration(Token* declaredName) {
 
     TypeRef initializerType = TypeInfo::makeAny();
     if (!omittedType && declaredType && declaredType->kind == TypeKind::FUNCTION &&
-        (m_parser->current.type() == TokenType::TYPE_FN ||
-         m_parser->current.type() == TokenType::FUNCTION)) {
-        if (m_parser->current.type() == TokenType::FUNCTION) {
-            errorAtCurrent("Keyword 'function' was removed; use 'fn'.");
-        }
+        m_parser->current.type() == TokenType::TYPE_FN) {
         advance();
         initializerType = emitFunctionLiteral(declaredType);
     } else {
@@ -2445,9 +2438,7 @@ void Compiler::typedVarDeclaration(Token* declaredName) {
         }
     }
 
-    if (m_parser->current.type() == TokenType::SEMI_COLON) {
-        advance();
-    }
+    rejectStraySemicolon();
     defineVariable(global);
 
     if (currentContext().scopeDepth == 0 &&
@@ -2470,12 +2461,16 @@ void Compiler::parsePrecedence(Precedence precedence) {
     prefixRule(canAssign);
 
     while (precedence <= getRule(m_parser->current.type()).precedence) {
+        if (hasLineBreakBeforeCurrent()) {
+            break;
+        }
         advance();
         ParseFn infixRule = getRule(m_parser->previous.type()).infix;
         infixRule(canAssign);
     }
 
-    if (canAssign && isAssignmentOperator(m_parser->current.type())) {
+    if (canAssign && !hasLineBreakBeforeCurrent() &&
+        isAssignmentOperator(m_parser->current.type())) {
         TokenType assignmentType = m_parser->current.type();
         errorAtCurrent("Invalid assignment target.");
         advance();
@@ -2554,7 +2549,9 @@ Compiler::ParseRule Compiler::getRule(TokenType type) {
                 [this](bool canAssign) {
                     errorAt(m_parser->previous,
                             "Keyword 'function' was removed; use 'fn'.");
-                    functionLiteral(canAssign);
+                    skipInvalidLegacyConstruct();
+                    emitByte(OpCode::NIL);
+                    pushExprType(TypeInfo::makeAny());
                 },
                 nullptr, PREC_NONE};
 

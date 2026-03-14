@@ -1,5 +1,5 @@
-const counter = @import("examples:counter");
+const counter = @import("examples:counter")
 
-print(counter.PACKAGE_ID);
-print(counter.read(counter.create(10i64)));
-print(counter.add(counter.create(10i64), 5i64));
+print(counter.PACKAGE_ID)
+print(counter.read(counter.create(10i64)))
+print(counter.add(counter.create(10i64), 5i64))

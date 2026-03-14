@@ -1,4 +1,4 @@
 #!strict
-var mask u8 = 240u8;
-var other u16 = 255u16;
-mask &= other;
+var mask u8 = 240u8
+var other u16 = 255u16
+mask &= other

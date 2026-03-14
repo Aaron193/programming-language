@@ -1,14 +1,14 @@
-var sum i64 = 0;
+var sum i64 = 0
 
-var timeA f64 = clock();
+var timeA f64 = clock()
 
 for (var i i64 = 0; i < 100000; i++) {
-    sum += i;
+    sum += i
 }
 
-var timeB f64 = clock();
+var timeB f64 = clock()
 
-var timeTaken f64 = timeB - timeA;
+var timeTaken f64 = timeB - timeA
 
-print(timeTaken);
+print(timeTaken)
 print(sum)

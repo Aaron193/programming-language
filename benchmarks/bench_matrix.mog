@@ -1,36 +1,36 @@
-var n i32 = 30;
-var size i32 = n * n;
+var n i32 = 30
+var size i32 = n * n
 
-var a Array<i32> = [];
-var b Array<i32> = [];
-var c Array<i32> = [];
+var a Array<i32> = []
+var b Array<i32> = []
+var c Array<i32> = []
 
 for (var i i32 = 0; i < n; i++) {
   for (var j i32 = 0; j < n; j++) {
-    a.push(i + j);
-    b.push(i * j);
-    c.push(0);
+    a.push(i + j)
+    b.push(i * j)
+    c.push(0)
   }
 }
 
-var start f64 = clock();
+var start f64 = clock()
 
 for (var row i32 = 0; row < n; row++) {
   for (var col i32 = 0; col < n; col++) {
-    var sum i32 = 0;
+    var sum i32 = 0
     for (var k i32 = 0; k < n; k++) {
-      sum += a[row * n + k] * b[k * n + col];
+      sum += a[row * n + k] * b[k * n + col]
     }
-    c[row * n + col] = sum;
+    c[row * n + col] = sum
   }
 }
 
-var checksum i32 = 0;
+var checksum i32 = 0
 for (var idx i32 = 0; idx < size; idx++) {
-  checksum += c[idx];
+  checksum += c[idx]
 }
 
-var elapsed f64 = clock() - start;
+var elapsed f64 = clock() - start
 
-print(checksum);
-print(elapsed);
+print(checksum)
+print(elapsed)

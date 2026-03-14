@@ -1,20 +1,20 @@
-var d Dict<str, i32> = {};
+var d Dict<str, i32> = {}
 
-var start f64 = clock();
+var start f64 = clock()
 
 for (var i i32 = 0; i < 30000; i++) {
-  var key str = "key" + str(i);
-  d[key] = i;
+  var key str = "key" + str(i)
+  d[key] = i
 }
 
-var sum i32 = 0;
+var sum i32 = 0
 for (var i i32 = 0; i < 30000; i++) {
-  var key str = "key" + str(i);
-  sum += d[key];
+  var key str = "key" + str(i)
+  sum += d[key]
 }
 
-var elapsed f64 = clock() - start;
+var elapsed f64 = clock() - start
 
-print(sum);
-print(d.size());
-print(elapsed);
+print(sum)
+print(d.size())
+print(elapsed)

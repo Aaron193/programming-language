@@ -1,8 +1,8 @@
-var a bool = false;
-var b bool = false;
-a && (b = true);
-print(b);
-var c bool = true;
-var d bool = false;
-c || (d = true);
-print(d);
+var a bool = false
+var b bool = false
+a && (b = true)
+print(b)
+var c bool = true
+var d bool = false
+c || (d = true)
+print(d)

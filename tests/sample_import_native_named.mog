@@ -1,5 +1,5 @@
-const { addI64, greet, MEANING_OF_LIFE } = @import("examples:math");
+const { addI64, greet, MEANING_OF_LIFE } = @import("examples:math")
 
-print(addI64(1i64, 2i64));
-print(MEANING_OF_LIFE);
-print(greet("Turing"));
+print(addI64(1i64, 2i64))
+print(MEANING_OF_LIFE)
+print(greet("Turing"))

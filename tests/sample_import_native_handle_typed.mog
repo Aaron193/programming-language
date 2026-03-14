@@ -1,7 +1,7 @@
-const counter = @import("examples:counter");
+const counter = @import("examples:counter")
 
-const first handle<examples:counter:CounterHandle> = counter.create(10i64);
-const second handle<examples:counter:CounterHandle> = counter.create(20i64);
+const first handle<examples:counter:CounterHandle> = counter.create(10i64)
+const second handle<examples:counter:CounterHandle> = counter.create(20i64)
 
-print(counter.read(first));
-print(counter.add(second, 5i64));
+print(counter.read(first))
+print(counter.add(second, 5i64))

@@ -1,3 +1,3 @@
-const cyc = @import("./modules/cycle_a.mog");
+const cyc = @import("./modules/cycle_a.mog")
 
-print(cyc.A);
+print(cyc.A)

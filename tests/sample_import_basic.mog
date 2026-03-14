@@ -1,4 +1,4 @@
-const math = @import("./modules/math.mog");
+const math = @import("./modules/math.mog")
 
-print(math.PI);
-print(math.Add(1, 2));
+print(math.PI)
+print(math.Add(1, 2))

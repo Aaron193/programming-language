@@ -1,5 +1,5 @@
-var and bool = true;
-var or bool = false;
+var and bool = true
+var or bool = false
 
-print(and);
-print(or);
+print(and)
+print(or)

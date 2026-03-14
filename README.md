@@ -20,6 +20,12 @@ This project is a bytecode-compiled, stack-based interpreter implemented in C++.
 - Operator annotations: `@operator(\"+\")` lowers annotated method calls at compile time
 - Native packages: runtime-loadable C++ shared libraries imported through `@import(...)`
 
+Notes:
+- Semicolons are not part of normal statement syntax. They are only used as separators inside `for (...)` clauses.
+- Local declarations still require explicit types except for `@import(...)` bindings.
+- `type ... struct` is currently class-backed syntax, not a separate value-type runtime.
+- Supported operator annotations are currently limited to `+`, `-`, `*`, `/`, `==`, `!=`, `<`, `<=`, `>`, `>=`.
+
 ## Runtime / Engine Features
 
 - Bytecode compiler with Pratt parser
@@ -107,6 +113,7 @@ Run additional suites:
 ./tests/test_typechecker_errors.sh
 ./tests/test_logical_operator_syntax.sh
 ./tests/test_package_validation.sh
+./tests/test_syntax_breakage.sh
 ```
 
 ## Benchmarks
@@ -188,24 +195,24 @@ perf report
 Top-level exports:
 
 ```expr
-fn Add(a i32, b i32) i32 { return a + b; }
-const PI f64 = 3.14159;
+fn Add(a i32, b i32) i32 { return a + b }
+const PI f64 = 3.14159
 type Vector struct {}
 ```
 
 Namespace import:
 
 ```expr
-const math = @import("./math.mog");
-print(math.PI);
-print(math.Add(1, 2));
+const math = @import("./math.mog")
+print(math.PI)
+print(math.Add(1, 2))
 ```
 
 Named import and aliasing:
 
 ```expr
-const { Add, PI } = @import("./math.mog");
-const { Add as sum } = @import("./math.mog");
+const { Add, PI } = @import("./math.mog")
+const { Add as sum } = @import("./math.mog")
 ```
 
 Notes:
@@ -219,8 +226,8 @@ Notes:
 Source modules and native packages share the same import syntax:
 
 ```expr
-const nativeMath = @import("examples:math");
-const { addI64, greet } = @import("examples:math");
+const nativeMath = @import("examples:math")
+const { addI64, greet } = @import("examples:math")
 ```
 
 Namespaced package imports use `namespace:name` and resolve to nested package
@@ -247,10 +254,10 @@ package lives in `packages/examples/counter/`.
 Source files can declare native handles directly:
 
 ```expr
-const counter = @import("examples:counter");
+const counter = @import("examples:counter")
 
-const c handle<examples:counter:CounterHandle> = counter.create(10i64);
-print(counter.read(c));
+const c handle<examples:counter:CounterHandle> = counter.create(10i64)
+print(counter.read(c))
 ```
 
 Official runtime-maintained packages use the reserved `mog:*` namespace. The
@@ -260,14 +267,14 @@ configure time:
 Headless smoke usage for tests:
 
 ```expr
-const window = @import("mog:window");
+const window = @import("mog:window")
 
 const win handle<mog:window:WindowHandle> =
-    window.create("Demo", 800i64, 600i64);
-const evt handle<mog:window:EventHandle>? = window.pollEvent(win);
-window.clear(win);
-window.present(win);
-window.close(win);
+    window.create("Demo", 800i64, 600i64)
+const evt handle<mog:window:EventHandle>? = window.pollEvent(win)
+window.clear(win)
+window.present(win)
+window.close(win)
 ```
 
 For simple realtime graphics, `mog:window` also exposes:

@@ -1,25 +1,25 @@
 type Base struct {
   fn greet() str {
-    return "base";
+    return "base"
   }
 }
 
 type Derived struct < Base {
-  label str;
+  label str
 
   fn greet() str {
-    return super.greet() + "-" + this.label;
+    return super.greet() + "-" + this.label
   }
 }
 
-var d Derived = Derived();
-d.label = "derived";
-print(d.greet());
+var d Derived = Derived()
+d.label = "derived"
+print(d.greet())
 
-var extracted fn() str = d.greet;
-print(extracted());
+var extracted fn() str = d.greet
+print(extracted())
 
-var values Array<i32> = [1i32, 2i32];
-print(values.size());
-values.push(3i32);
-print(values.size());
+var values Array<i32> = [1i32, 2i32]
+print(values.size())
+values.push(3i32)
+print(values.size())

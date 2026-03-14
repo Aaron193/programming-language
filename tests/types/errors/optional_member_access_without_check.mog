@@ -1,8 +1,8 @@
 type Dog struct {
     str bark() {
-        return "woof";
+        return "woof"
     }
 }
 
-var d Dog? = Dog();
-print(d.bark());
+var d Dog? = Dog()
+print(d.bark())

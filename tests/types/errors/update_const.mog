@@ -1,2 +1,2 @@
-const count i32 = 1;
-++count;
+const count i32 = 1
+++count

@@ -1,5 +1,5 @@
 fn bad() void {
-    export const i32 x = 1;
+    export const i32 x = 1
 }
 
-bad();
+bad()

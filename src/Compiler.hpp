@@ -132,7 +132,11 @@ class Compiler {
     const Token& tokenAt(size_t offset);
     bool parseTypeLookahead(size_t& offset);
     bool looksLikeFunctionTypeDeclarationStart();
+    bool hasLineBreakBeforeCurrent() const;
     void synchronize();
+    bool isRecoveryBoundaryToken(TokenType type) const;
+    void rejectStraySemicolon();
+    void skipInvalidLegacyConstruct();
     void errorAtCurrent(const std::string& message);
     void errorAt(const Token& token, const std::string& message);
     void consume(TokenType type, const std::string& message);
@@ -203,13 +207,8 @@ class Compiler {
         std::string& outError);
     TypeRef tokenToType(const Token& token) const;
     void typeDeclaration(Token* declaredName = nullptr);
-    void classDeclaration();
     void classMemberDeclaration();
-    void typedClassMemberDeclaration();
-    void methodDeclaration();
     void functionDeclaration();
-    void importDeclaration();
-    void exportDeclaration();
     void emitExportName(const Token& nameToken);
     void statement();
     void block();

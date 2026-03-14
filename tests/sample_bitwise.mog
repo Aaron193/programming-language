@@ -1,33 +1,33 @@
-var value i32 = 6;
-print(value & 3);
-print(value | 3);
-print(value ^ 3);
-print(~value);
+var value i32 = 6
+print(value & 3)
+print(value | 3)
+print(value ^ 3)
+print(~value)
 
-print(1 | 6 & 3);
-print(12 >> 1 & 5);
-print(5 & 3 == 1);
+print(1 | 6 & 3)
+print(12 >> 1 & 5)
+print(5 & 3 == 1)
 
-value &= 3;
-print(value);
-value |= 8;
-print(value);
-value ^= 15;
-print(value);
+value &= 3
+print(value)
+value |= 8
+print(value)
+value ^= 15
+print(value)
 
 type Box struct {
-	bits i32;
+	bits i32
 }
 
-var box Box = Box();
-box.bits = 12;
-box.bits &= 10;
-print(box.bits);
+var box Box = Box()
+box.bits = 12
+box.bits &= 10
+print(box.bits)
 
-var nums Array<i32> = [7, 12];
-nums[1] ^= 10;
-print(nums[1]);
+var nums Array<i32> = [7, 12]
+nums[1] ^= 10
+print(nums[1])
 
-var left u8 = 12u8;
-var right u16 = 10u16;
-print(left & right);
+var left u8 = 12u8
+var right u16 = 10u16
+print(left & right)
