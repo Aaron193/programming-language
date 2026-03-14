@@ -1,0 +1,5 @@
+bool and = true;
+bool or = false;
+
+print(and);
+print(or);

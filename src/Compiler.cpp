@@ -2470,11 +2470,11 @@ Compiler::ParseRule Compiler::getRule(TokenType type) {
             return ParseRule{nullptr,
                              [this](bool canAssign) { binary(canAssign); },
                              PREC_EQUALITY};
-        case TokenType::AND:
+        case TokenType::LOGICAL_AND:
             return ParseRule{nullptr,
                              [this](bool canAssign) { andOperator(canAssign); },
                              PREC_AND};
-        case TokenType::OR:
+        case TokenType::LOGICAL_OR:
             return ParseRule{nullptr,
                              [this](bool canAssign) { orOperator(canAssign); },
                              PREC_OR};

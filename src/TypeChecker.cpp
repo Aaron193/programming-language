@@ -1217,12 +1217,12 @@ class CheckerImpl {
 
     ExprInfo parseOr() {
         ExprInfo expr = parseAnd();
-        while (match(TokenType::OR)) {
+        while (match(TokenType::LOGICAL_OR)) {
             ExprInfo rhs = parseAnd();
             if (!(expr.type->kind == TypeKind::BOOL || expr.type->isAny()) ||
                 !(rhs.type->kind == TypeKind::BOOL || rhs.type->isAny())) {
                 addError(m_previous.line(),
-                         "Type error: logical 'or' expects bool operands.");
+                         "Type error: logical '||' expects bool operands.");
             }
             expr = ExprInfo{TypeInfo::makeBool(), false, false, "",
                             m_previous.line()};
@@ -1232,12 +1232,12 @@ class CheckerImpl {
 
     ExprInfo parseAnd() {
         ExprInfo expr = parseEquality();
-        while (match(TokenType::AND)) {
+        while (match(TokenType::LOGICAL_AND)) {
             ExprInfo rhs = parseEquality();
             if (!(expr.type->kind == TypeKind::BOOL || expr.type->isAny()) ||
                 !(rhs.type->kind == TypeKind::BOOL || rhs.type->isAny())) {
                 addError(m_previous.line(),
-                         "Type error: logical 'and' expects bool operands.");
+                         "Type error: logical '&&' expects bool operands.");
             }
             expr = ExprInfo{TypeInfo::makeBool(), false, false, "",
                             m_previous.line()};

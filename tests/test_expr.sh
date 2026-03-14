@@ -37,7 +37,7 @@ for file in "${FILES[@]}"; do
     if [[ "$base_name" == sample_native_error_* ]]; then
         continue
     fi
-    if [[ "$base_name" == "sample_compile_multi_error.expr" || "$base_name" == "sample_runtime_stacktrace.expr" ]]; then
+    if [[ "$base_name" == "sample_compile_multi_error.expr" || "$base_name" == "sample_runtime_stacktrace.expr" || "$base_name" == "sample_legacy_logical_keywords.expr" ]]; then
         continue
     fi
     if [[ "$base_name" == "sample_import_cycle.expr" || "$base_name" == "sample_export_scoped_error.expr" || "$base_name" == "sample_import_native_missing.expr" || "$base_name" == "sample_import_native_type_mismatch.expr" || "$base_name" == "sample_import_native_invalid_id.expr" || "$base_name" == "sample_import_native_metadata_mismatch.expr" ]]; then

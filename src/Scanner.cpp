@@ -127,6 +127,12 @@ Token Scanner::nextToken() {
         case '!':
             return match('=') ? createToken(TokenType::BANG_EQUAL)
                               : createToken(TokenType::BANG);
+        case '&':
+            return match('&') ? createToken(TokenType::LOGICAL_AND)
+                              : createErrorToken("Unexpected Token.");
+        case '|':
+            return match('|') ? createToken(TokenType::LOGICAL_OR)
+                              : createErrorToken("Unexpected Token.");
         case '+':
             if (match('+')) return createToken(TokenType::PLUS_PLUS);
             return match('=') ? createToken(TokenType::PLUS_EQUAL)
@@ -230,7 +236,6 @@ bool Scanner::matchKeyword(const char* keyword, size_t length) {
 TokenType Scanner::getIdentifier() {
     switch (m_start[0]) {
         case 'a':
-            if (matchKeyword("and", 3)) return TokenType::AND;
             if (matchKeyword("as", 2)) return TokenType::AS_KW;
             break;
 
@@ -269,10 +274,6 @@ TokenType Scanner::getIdentifier() {
 
         case 'n':
             if (matchKeyword("null", 4)) return TokenType::TYPE_NULL_KW;
-            break;
-
-        case 'o':
-            if (matchKeyword("or", 2)) return TokenType::OR;
             break;
 
         case 'p':

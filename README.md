@@ -7,7 +7,7 @@ This project is a bytecode-compiled, stack-based interpreter implemented in C++.
 - Expressions: numbers, booleans, `null`, strings, grouping
 - Arithmetic: `+`, `-`, `*`, `/`
 - Comparison/equality: `>`, `>=`, `<`, `<=`, `==`, `!=`
-- Logical operators: `!`, `and`, `or` (short-circuiting)
+- Logical operators: `!`, `&&`, `||` (short-circuiting)
 - Bit shifts: `<<`, `>>`
 - Variables: explicit typed declarations (with required initializer), `const` immutable bindings, assignment, compound assignment (`+=`, `-=`, `*=`, `/=`, `<<=`, `>>=`), lexical scope
 - Update operators: `++`, `--`
@@ -103,6 +103,7 @@ Run additional suites:
 ./tests/test_import.sh
 ./tests/test_const.sh
 ./tests/test_typechecker_errors.sh
+./tests/test_logical_operator_syntax.sh
 ./tests/test_package_validation.sh
 ```
 

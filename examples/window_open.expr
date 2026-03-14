@@ -10,7 +10,7 @@ window.present(win);
 bool running = true;
 f64 start = clock();
 
-while (running and (clock() - start) < 5) {
+while (running && (clock() - start) < 5) {
     const handle<mog:window:EventHandle>? evt = window.pollEvent(win);
     if (evt != null) {
         if (window.eventKind(evt) == "quit") {

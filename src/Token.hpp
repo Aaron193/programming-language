@@ -37,6 +37,8 @@ enum TokenType {
     QUESTION,
     EQUAL,
     EQUAL_EQUAL,
+    LOGICAL_AND,
+    LOGICAL_OR,
 
     // identifier
     IDENTIFIER,
@@ -46,8 +48,6 @@ enum TokenType {
     // reserved
     PRINT,
     FUNCTION,
-    AND,
-    OR,
     CLASS,
     CONST,
     SUPER,

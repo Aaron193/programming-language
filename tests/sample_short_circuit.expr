@@ -1,8 +1,8 @@
 bool a = false;
 bool b = false;
-a and (b = true);
+a && (b = true);
 print(b);
 bool c = true;
 bool d = false;
-c or (d = true);
+c || (d = true);
 print(d);
