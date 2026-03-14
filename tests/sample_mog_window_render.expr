@@ -1,0 +1,15 @@
+import window from "mog:window";
+
+const handle<mog:window:WindowHandle> win =
+    window.create("Render Demo", 64i64, 64i64);
+
+window.clearRgb(win, 32i64, 64i64, 96i64);
+window.fillRect(win, 8i64, 8i64, 24i64, 24i64, 255i64, 0i64, 0i64);
+window.fillRect(win, -4i64, -4i64, 8i64, 8i64, 0i64, 255i64, 0i64);
+window.present(win);
+window.delay(1i64);
+
+print(window.KEY_SPACE > 0i64);
+print(window.KEY_ESCAPE > 0i64);
+
+window.close(win);

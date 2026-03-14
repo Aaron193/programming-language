@@ -23,7 +23,7 @@ while (running) {
             if (kind == "key_down") {
                 i64 keyCode = window.eventKeyCode(evt);
                 print(keyCode);
-                if (keyCode == 27i64) {
+                if (keyCode == window.KEY_ESCAPE) {
                     running = false;
                 }
             }

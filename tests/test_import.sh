@@ -217,6 +217,20 @@ if [[ -f "$WINDOW_PACKAGE_SO" || -f "$WINDOW_PACKAGE_DYLIB" ]]; then
         FAIL=$((FAIL + 1))
     fi
     echo
+
+    WINDOW_RENDER_FILE="$SCRIPT_DIR/sample_mog_window_render.expr"
+    echo "========================================"
+    echo "Running SDL render smoke test: $WINDOW_RENDER_FILE"
+    echo "----------------------------------------"
+
+    if SDL_VIDEODRIVER=dummy "$INTERPRETER" "$WINDOW_RENDER_FILE"; then
+        echo "[PASS] SDL render smoke test"
+        PASS=$((PASS + 1))
+    else
+        echo "[FAIL] SDL render smoke test"
+        FAIL=$((FAIL + 1))
+    fi
+    echo
 else
     echo "[SKIP] SDL2 not available; mog:window package not built"
     echo

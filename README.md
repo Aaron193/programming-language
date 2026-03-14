@@ -267,6 +267,17 @@ window.present(win);
 window.close(win);
 ```
 
+For simple realtime graphics, `mog:window` also exposes:
+
+- `clearRgb(win, r, g, b)`
+- `fillRect(win, x, y, width, height, r, g, b)`
+- `delay(ms)`
+- `KEY_SPACE`
+- `KEY_ESCAPE`
+
+See `examples/flappy_bird.expr` for a playable rectangle-rendered demo built
+entirely in the language on top of those primitives.
+
 Visible manual demos live under `examples/` and call `window.show(win)` after
 creation so the current hidden-by-default behavior remains stable for tests.
 

@@ -3,6 +3,7 @@
 #include <SDL.h>
 
 #include <cstdint>
+#include <limits>
 #include <new>
 #include <string>
 #include <string_view>
@@ -26,6 +27,14 @@ void setError(ExprPackageStringView* outError, const char* message) {
     }
 
     *outError = {message, std::char_traits<char>::length(message)};
+}
+
+bool setStaticError(ExprPackageStringView* outError, const char* message,
+                    size_t length) {
+    if (outError != nullptr) {
+        *outError = {message, length};
+    }
+    return false;
 }
 
 bool acquireSdl(ExprPackageStringView* outError) {
@@ -139,6 +148,104 @@ bool expectEventHandle(const ExprPackageValue& value, EventHandle*& outHandle,
     }
 
     outHandle = static_cast<EventHandle*>(handle.handle_data);
+    return true;
+}
+
+bool validateColorChannel(int64_t value, const char* name,
+                          ExprPackageStringView* outError) {
+    if (value < 0 || value > 255) {
+        static thread_local std::string message;
+        message = std::string(name) + " must be in range 0..255";
+        setError(outError, message.c_str());
+        return false;
+    }
+
+    return true;
+}
+
+bool validateDelayMs(int64_t value, ExprPackageStringView* outError) {
+    if (value < 0) {
+        return setStaticError(outError, "delay expects a non-negative duration",
+                              37);
+    }
+
+    if (value > static_cast<int64_t>(std::numeric_limits<uint32_t>::max())) {
+        return setStaticError(outError, "delay duration is too large", 27);
+    }
+
+    return true;
+}
+
+SDL_Surface* getWindowSurface(WindowHandle* windowHandle,
+                              ExprPackageStringView* outError) {
+    SDL_Surface* surface = SDL_GetWindowSurface(windowHandle->window);
+    if (surface == nullptr) {
+        setError(outError, SDL_GetError());
+    }
+    return surface;
+}
+
+bool clipRectToSurface(SDL_Surface* surface, int64_t x, int64_t y, int64_t width,
+                       int64_t height, SDL_Rect& outRect) {
+    if (surface == nullptr || width <= 0 || height <= 0) {
+        return false;
+    }
+
+    int64_t clippedX = x;
+    int64_t clippedY = y;
+    int64_t clippedWidth = width;
+    int64_t clippedHeight = height;
+
+    if (clippedX < 0) {
+        clippedWidth += clippedX;
+        clippedX = 0;
+    }
+    if (clippedY < 0) {
+        clippedHeight += clippedY;
+        clippedY = 0;
+    }
+
+    const int64_t surfaceWidth = static_cast<int64_t>(surface->w);
+    const int64_t surfaceHeight = static_cast<int64_t>(surface->h);
+    if (clippedX >= surfaceWidth || clippedY >= surfaceHeight ||
+        clippedWidth <= 0 || clippedHeight <= 0) {
+        return false;
+    }
+
+    if (clippedWidth > surfaceWidth - clippedX) {
+        clippedWidth = surfaceWidth - clippedX;
+    }
+    if (clippedHeight > surfaceHeight - clippedY) {
+        clippedHeight = surfaceHeight - clippedY;
+    }
+
+    if (clippedWidth <= 0 || clippedHeight <= 0) {
+        return false;
+    }
+
+    outRect.x = static_cast<int>(clippedX);
+    outRect.y = static_cast<int>(clippedY);
+    outRect.w = static_cast<int>(clippedWidth);
+    outRect.h = static_cast<int>(clippedHeight);
+    return true;
+}
+
+bool fillSurface(SDL_Surface* surface, const SDL_Rect* rect, int64_t r, int64_t g,
+                 int64_t b, ExprPackageStringView* outError) {
+    if (!validateColorChannel(r, "red", outError) ||
+        !validateColorChannel(g, "green", outError) ||
+        !validateColorChannel(b, "blue", outError)) {
+        return false;
+    }
+
+    if (SDL_FillRect(surface, rect,
+                     SDL_MapRGB(surface->format, static_cast<Uint8>(r),
+                                static_cast<Uint8>(g),
+                                static_cast<Uint8>(b))) != 0) {
+        setError(outError, SDL_GetError());
+        return false;
+    }
+
     return true;
 }
 
@@ -463,15 +570,95 @@ bool clearWindow(const ExprHostApi* hostApi, const ExprPackageValue* args,
         return false;
     }
 
-    SDL_Surface* surface = SDL_GetWindowSurface(windowHandle->window);
+    SDL_Surface* surface = getWindowSurface(windowHandle, outError);
     if (surface == nullptr) {
-        setError(outError, SDL_GetError());
         return false;
     }
 
-    if (SDL_FillRect(surface, nullptr,
-                     SDL_MapRGB(surface->format, 0, 0, 0)) != 0) {
-        setError(outError, SDL_GetError());
+    if (!fillSurface(surface, nullptr, 0, 0, 0, outError)) {
+        return false;
+    }
+
+    outResult->kind = EXPR_PACKAGE_VALUE_NULL;
+    return true;
+}
+
+bool clearWindowRgb(const ExprHostApi* hostApi, const ExprPackageValue* args,
+                    size_t argc, ExprPackageValue* outResult,
+                    ExprPackageStringView* outError) {
+    (void)hostApi;
+    if (argc != 4 || args == nullptr || outResult == nullptr) {
+        setError(outError, "expected exactly 4 arguments");
+        return false;
+    }
+
+    WindowHandle* windowHandle = nullptr;
+    if (!expectOpenWindowHandle(args[0], windowHandle, outError)) {
+        return false;
+    }
+
+    for (size_t index = 1; index < 4; ++index) {
+        if (args[index].kind != EXPR_PACKAGE_VALUE_I64) {
+            setError(outError, "clearRgb expects (WindowHandle, i64, i64, i64)");
+            return false;
+        }
+    }
+
+    SDL_Surface* surface = getWindowSurface(windowHandle, outError);
+    if (surface == nullptr) {
+        return false;
+    }
+
+    if (!fillSurface(surface, nullptr, args[1].as.i64_value, args[2].as.i64_value,
+                     args[3].as.i64_value, outError)) {
+        return false;
+    }
+
+    outResult->kind = EXPR_PACKAGE_VALUE_NULL;
+    return true;
+}
+
+bool fillRect(const ExprHostApi* hostApi, const ExprPackageValue* args, size_t argc,
+              ExprPackageValue* outResult,
+              ExprPackageStringView* outError) {
+    (void)hostApi;
+    if (argc != 8 || args == nullptr || outResult == nullptr) {
+        setError(outError, "expected exactly 8 arguments");
+        return false;
+    }
+
+    WindowHandle* windowHandle = nullptr;
+    if (!expectOpenWindowHandle(args[0], windowHandle, outError)) {
+        return false;
+    }
+
+    for (size_t index = 1; index < 8; ++index) {
+        if (args[index].kind != EXPR_PACKAGE_VALUE_I64) {
+            setError(outError,
+                     "fillRect expects (WindowHandle, i64, i64, i64, i64, i64, "
+                     "i64, i64)");
+            return false;
+        }
+    }
+
+    const int64_t x = args[1].as.i64_value;
+    const int64_t y = args[2].as.i64_value;
+    const int64_t width = args[3].as.i64_value;
+    const int64_t height = args[4].as.i64_value;
+
+    SDL_Surface* surface = getWindowSurface(windowHandle, outError);
+    if (surface == nullptr) {
+        return false;
+    }
+
+    SDL_Rect rect{};
+    if (!clipRectToSurface(surface, x, y, width, height, rect)) {
+        outResult->kind = EXPR_PACKAGE_VALUE_NULL;
+        return true;
+    }
+
+    if (!fillSurface(surface, &rect, args[5].as.i64_value, args[6].as.i64_value,
+                     args[7].as.i64_value, outError)) {
         return false;
     }
 
@@ -502,6 +689,30 @@ bool presentWindow(const ExprHostApi* hostApi, const ExprPackageValue* args,
     return true;
 }
 
+bool delayMs(const ExprHostApi* hostApi, const ExprPackageValue* args, size_t argc,
+             ExprPackageValue* outResult,
+             ExprPackageStringView* outError) {
+    (void)hostApi;
+    if (argc != 1 || args == nullptr || outResult == nullptr) {
+        setError(outError, "expected exactly 1 argument");
+        return false;
+    }
+
+    if (args[0].kind != EXPR_PACKAGE_VALUE_I64) {
+        setError(outError, "delay expects an i64 duration in milliseconds");
+        return false;
+    }
+
+    const int64_t durationMs = args[0].as.i64_value;
+    if (!validateDelayMs(durationMs, outError)) {
+        return false;
+    }
+
+    SDL_Delay(static_cast<uint32_t>(durationMs));
+    outResult->kind = EXPR_PACKAGE_VALUE_NULL;
+    return true;
+}
+
 constexpr ExprPackageFunctionExport kFunctions[] = {
     {"create", "fn(str, i64, i64) -> handle<mog:window:WindowHandle>", 3,
      createWindow},
@@ -519,14 +730,24 @@ constexpr ExprPackageFunctionExport kFunctions[] = {
     {"mouseX", "fn(handle<mog:window:WindowHandle>) -> i64", 1, mouseX},
     {"mouseY", "fn(handle<mog:window:WindowHandle>) -> i64", 1, mouseY},
     {"clear", "fn(handle<mog:window:WindowHandle>) -> void", 1, clearWindow},
+    {"clearRgb",
+     "fn(handle<mog:window:WindowHandle>, i64, i64, i64) -> void", 4,
+     clearWindowRgb},
+    {"fillRect",
+     "fn(handle<mog:window:WindowHandle>, i64, i64, i64, i64, i64, i64, i64) "
+     "-> void",
+     8, fillRect},
     {"present", "fn(handle<mog:window:WindowHandle>) -> void", 1,
      presentWindow},
+    {"delay", "fn(i64) -> void", 1, delayMs},
 };
 
 constexpr ExprPackageConstantExport kConstants[] = {
     {"PACKAGE_ID",
      "str",
      {EXPR_PACKAGE_VALUE_STR, {.string_value = {"mog:window", 10}}}},
+    {"KEY_ESCAPE", "i64", {EXPR_PACKAGE_VALUE_I64, {.i64_value = SDLK_ESCAPE}}},
+    {"KEY_SPACE", "i64", {EXPR_PACKAGE_VALUE_I64, {.i64_value = SDLK_SPACE}}},
 };
 
 constexpr ExprPackageRegistration kRegistration = {
