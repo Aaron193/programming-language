@@ -447,9 +447,7 @@ Value Compiler::makeStringValue(const std::string& text) {
         return Value();
     }
 
-    auto* stringObject = m_gc->allocate<StringObject>();
-    stringObject->value = text;
-    return Value(stringObject);
+    return Value(m_gc->internString(text));
 }
 
 uint8_t Compiler::makeConstant(Value value) {
@@ -706,6 +704,52 @@ TypeRef Compiler::lookupClassMethodType(const std::string& className,
     }
 
     return nullptr;
+}
+
+int Compiler::lookupClassFieldSlot(const std::string& className,
+                                   const std::string& fieldName) const {
+    std::vector<std::string> orderedFieldNames;
+    std::unordered_set<std::string> seenFields;
+    std::unordered_set<std::string> visited;
+    std::vector<std::string> lineage;
+    std::string current = className;
+
+    while (!current.empty() && visited.emplace(current).second) {
+        lineage.push_back(current);
+        auto superIt = m_superclassOf.find(current);
+        if (superIt == m_superclassOf.end()) {
+            break;
+        }
+        current = superIt->second;
+    }
+
+    for (auto it = lineage.rbegin(); it != lineage.rend(); ++it) {
+        auto classFields = m_classFieldTypes.find(*it);
+        if (classFields == m_classFieldTypes.end()) {
+            continue;
+        }
+
+        std::vector<std::string> ownFieldNames;
+        ownFieldNames.reserve(classFields->second.size());
+        for (const auto& [name, type] : classFields->second) {
+            (void)type;
+            if (seenFields.emplace(name).second) {
+                ownFieldNames.push_back(name);
+            }
+        }
+
+        std::sort(ownFieldNames.begin(), ownFieldNames.end());
+        orderedFieldNames.insert(orderedFieldNames.end(), ownFieldNames.begin(),
+                                 ownFieldNames.end());
+    }
+
+    for (size_t index = 0; index < orderedFieldNames.size(); ++index) {
+        if (orderedFieldNames[index] == fieldName) {
+            return static_cast<int>(index);
+        }
+    }
+
+    return -1;
 }
 
 void Compiler::emitCoerceToType(const TypeRef& sourceType,
@@ -3249,7 +3293,11 @@ void Compiler::dot(bool canAssign) {
     std::string propertyName(propertyToken.start(), propertyToken.length());
 
     TypeRef memberType = TypeInfo::makeAny();
+    int fieldSlot = -1;
+    bool knownField = false;
     if (objectType && objectType->kind == TypeKind::CLASS) {
+        fieldSlot = lookupClassFieldSlot(objectType->className, propertyName);
+        knownField = fieldSlot >= 0;
         memberType = lookupClassFieldType(objectType->className, propertyName);
 
         if (!memberType || memberType->isAny()) {
@@ -3271,7 +3319,12 @@ void Compiler::dot(bool canAssign) {
             advance();
             expression();
             TypeRef rhsType = popExprType();
-            emitBytes(OpCode::SET_PROPERTY, name);
+            if (knownField) {
+                emitBytes(OpCode::SET_FIELD_SLOT,
+                          static_cast<uint8_t>(fieldSlot));
+            } else {
+                emitBytes(OpCode::SET_PROPERTY, name);
+            }
             pushExprType((memberType && !memberType->isAny()) ? memberType
                                                               : rhsType);
             return;
@@ -3281,11 +3334,21 @@ void Compiler::dot(bool canAssign) {
             assignmentType == TokenType::MINUS_MINUS) {
             advance();
             emitByte(OpCode::DUP);
-            emitBytes(OpCode::GET_PROPERTY, name);
+            if (knownField) {
+                emitBytes(OpCode::GET_FIELD_SLOT,
+                          static_cast<uint8_t>(fieldSlot));
+            } else {
+                emitBytes(OpCode::GET_PROPERTY, name);
+            }
             emitConstant(Value(static_cast<int64_t>(1)));
             emitByte(assignmentType == TokenType::PLUS_PLUS ? OpCode::ADD
                                                             : OpCode::SUB);
-            emitBytes(OpCode::SET_PROPERTY, name);
+            if (knownField) {
+                emitBytes(OpCode::SET_FIELD_SLOT,
+                          static_cast<uint8_t>(fieldSlot));
+            } else {
+                emitBytes(OpCode::SET_PROPERTY, name);
+            }
             pushExprType(memberType);
             return;
         }
@@ -3301,11 +3364,21 @@ void Compiler::dot(bool canAssign) {
             assignmentType == TokenType::SHIFT_RIGHT_EQUAL) {
             advance();
             emitByte(OpCode::DUP);
-            emitBytes(OpCode::GET_PROPERTY, name);
+            if (knownField) {
+                emitBytes(OpCode::GET_FIELD_SLOT,
+                          static_cast<uint8_t>(fieldSlot));
+            } else {
+                emitBytes(OpCode::GET_PROPERTY, name);
+            }
             expression();
             TypeRef rhsType = popExprType();
             emitCompoundBinary(assignmentType, memberType, rhsType);
-            emitBytes(OpCode::SET_PROPERTY, name);
+            if (knownField) {
+                emitBytes(OpCode::SET_FIELD_SLOT,
+                          static_cast<uint8_t>(fieldSlot));
+            } else {
+                emitBytes(OpCode::SET_PROPERTY, name);
+            }
             pushExprType(memberType);
             return;
         }
@@ -3316,7 +3389,11 @@ void Compiler::dot(bool canAssign) {
         return;
     }
 
-    emitBytes(OpCode::GET_PROPERTY, name);
+    if (knownField) {
+        emitBytes(OpCode::GET_FIELD_SLOT, static_cast<uint8_t>(fieldSlot));
+    } else {
+        emitBytes(OpCode::GET_PROPERTY, name);
+    }
     pushExprType(memberType);
 }
 

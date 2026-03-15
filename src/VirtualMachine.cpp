@@ -272,16 +272,6 @@ static bool setRemoveValue(SetObject* set, const Value& element) {
     return true;
 }
 
-static std::vector<Value> sortedDictKeys(const DictObject* dict) {
-    std::vector<Value> orderedKeys;
-    orderedKeys.reserve(dict->map.size());
-    for (const auto& entry : dict->map) {
-        orderedKeys.push_back(entry.first);
-    }
-    std::sort(orderedKeys.begin(), orderedKeys.end(), valueSortLess);
-    return orderedKeys;
-}
-
 enum class BuiltinNativeKind : uint8_t {
     CLOCK,
     SQRT,
@@ -600,6 +590,60 @@ static void rebuildFieldLayout(ClassObject* klass) {
     }
 
     klass->fieldNames = std::move(orderedFieldNames);
+    klass->fieldTypesBySlot.assign(klass->fieldNames.size(), TypeInfo::makeAny());
+    for (size_t index = 0; index < klass->fieldNames.size(); ++index) {
+        auto fieldTypeIt = klass->fieldTypes.find(klass->fieldNames[index]);
+        if (fieldTypeIt != klass->fieldTypes.end()) {
+            klass->fieldTypesBySlot[index] = fieldTypeIt->second;
+        }
+    }
+}
+
+static bool callInlineCacheMatches(const CallInlineCache& cache,
+                                   const Value& callee) {
+    if (cache.target == nullptr) {
+        return false;
+    }
+
+    switch (cache.kind) {
+        case CallInlineCacheKind::CLOSURE:
+            return callee.isClosure() && callee.asClosure() == cache.target;
+        case CallInlineCacheKind::BOUND_METHOD:
+            return callee.isBoundMethod() &&
+                   callee.asBoundMethod() == cache.target;
+        case CallInlineCacheKind::NATIVE:
+            return callee.isNative() && callee.asNative() == cache.target;
+        case CallInlineCacheKind::NATIVE_BOUND:
+            return callee.isNativeBound() &&
+                   callee.asNativeBound() == cache.target;
+        case CallInlineCacheKind::CLASS:
+            return callee.isClass() && callee.asClass() == cache.target;
+        case CallInlineCacheKind::EMPTY:
+        default:
+            return false;
+    }
+}
+
+static void populateCallInlineCache(CallInlineCache& cache, const Value& callee) {
+    cache.kind = CallInlineCacheKind::EMPTY;
+    cache.target = nullptr;
+
+    if (callee.isClosure()) {
+        cache.kind = CallInlineCacheKind::CLOSURE;
+        cache.target = callee.asClosure();
+    } else if (callee.isBoundMethod()) {
+        cache.kind = CallInlineCacheKind::BOUND_METHOD;
+        cache.target = callee.asBoundMethod();
+    } else if (callee.isNative()) {
+        cache.kind = CallInlineCacheKind::NATIVE;
+        cache.target = callee.asNative();
+    } else if (callee.isNativeBound()) {
+        cache.kind = CallInlineCacheKind::NATIVE_BOUND;
+        cache.target = callee.asNativeBound();
+    } else if (callee.isClass()) {
+        cache.kind = CallInlineCacheKind::CLASS;
+        cache.target = callee.asClass();
+    }
 }
 
 static bool isInstanceOfClass(const InstanceObject* instance,
@@ -953,9 +997,7 @@ Status VirtualMachine::runtimeError(const std::string& message) {
 }
 
 Value VirtualMachine::makeStringValue(std::string text) {
-    auto* stringObject = gcAlloc<StringObject>();
-    stringObject->value = std::move(text);
-    return Value(stringObject);
+    return Value(m_gc.makeString(std::move(text)));
 }
 
 Status invokeBuiltinNative(VirtualMachine& vm, const NativeFunctionObject& native,
@@ -1490,6 +1532,7 @@ Status VirtualMachine::callNativeMethod(NativeMethodId id,
             auto [it, inserted] = dict->map.insert_or_assign(
                 std::move(key), std::move(storedValue));
             (void)inserted;
+            invalidateDictOrderCache(dict);
             result = it->second;
         } else if (id == NativeMethodId::DICT_HAS) {
             if (argumentCount != 1) {
@@ -1504,7 +1547,7 @@ Status VirtualMachine::callNativeMethod(NativeMethodId id,
             }
 
             auto keys = gcAlloc<ArrayObject>();
-            std::vector<Value> orderedKeys = sortedDictKeys(dict);
+            const auto& orderedKeys = orderedDictKeys(dict);
             keys->elements.reserve(orderedKeys.size());
 
             for (const auto& key : orderedKeys) {
@@ -1520,7 +1563,7 @@ Status VirtualMachine::callNativeMethod(NativeMethodId id,
             }
 
             auto values = gcAlloc<ArrayObject>();
-            std::vector<Value> orderedKeys = sortedDictKeys(dict);
+            const auto& orderedKeys = orderedDictKeys(dict);
             values->elements.reserve(orderedKeys.size());
 
             for (const auto& key : orderedKeys) {
@@ -1550,6 +1593,7 @@ Status VirtualMachine::callNativeMethod(NativeMethodId id,
 
             result = it->second;
             dict->map.erase(it);
+            invalidateDictOrderCache(dict);
         } else if (id == NativeMethodId::DICT_CLEAR) {
             if (argumentCount != 0) {
                 return runtimeError("Dict method 'clear' expects 0 arguments.");
@@ -1557,6 +1601,7 @@ Status VirtualMachine::callNativeMethod(NativeMethodId id,
 
             double removed = static_cast<double>(dict->map.size());
             dict->map.clear();
+            invalidateDictOrderCache(dict);
             result = Value(removed);
         } else if (id == NativeMethodId::DICT_IS_EMPTY) {
             if (argumentCount != 0) {
@@ -1974,6 +2019,8 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
         VM_OPCODE_ADDR(GET_PROPERTY),
         VM_OPCODE_ADDR(INVOKE),
         VM_OPCODE_ADDR(SET_PROPERTY),
+        VM_OPCODE_ADDR(GET_FIELD_SLOT),
+        VM_OPCODE_ADDR(SET_FIELD_SLOT),
         VM_OPCODE_ADDR(CALL),
         VM_OPCODE_ADDR(CLOSURE),
         VM_OPCODE_ADDR(CLOSE_UPVALUE),
@@ -2951,12 +2998,158 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
             DISPATCH();
         }
 
+        VM_CASE(GET_FIELD_SLOT) {
+            uint8_t slot = readByte();
+            Value receiver = m_stack.peek(0);
+            if (!receiver.isInstance()) {
+                return runtimeError("Only instances have fields.");
+            }
+
+            auto instance = receiver.asInstance();
+            if (slot >= instance->fieldSlots.size() ||
+                slot >= instance->initializedFieldSlots.size() ||
+                !instance->initializedFieldSlots[slot]) {
+                const std::string fieldName =
+                    (slot < instance->klass->fieldNames.size())
+                        ? instance->klass->fieldNames[slot]
+                        : "<unknown>";
+                return runtimeError("Undefined property '" + fieldName + "'.");
+            }
+
+            m_stack.pop();
+            m_stack.push(instance->fieldSlots[slot]);
+            DISPATCH();
+        }
+
+        VM_CASE(SET_FIELD_SLOT) {
+            uint8_t slot = readByte();
+            Value value = m_stack.peek(0);
+            Value receiver = m_stack.peek(1);
+            if (!receiver.isInstance()) {
+                return runtimeError("Only instances have fields.");
+            }
+
+            auto instance = receiver.asInstance();
+            if (slot >= instance->fieldSlots.size() ||
+                slot >= instance->initializedFieldSlots.size()) {
+                const std::string fieldName =
+                    (slot < instance->klass->fieldNames.size())
+                        ? instance->klass->fieldNames[slot]
+                        : "<unknown>";
+                return runtimeError("Undefined field '" + fieldName +
+                                    "' on class '" + instance->klass->name +
+                                    "'.");
+            }
+
+            TypeRef expectedType =
+                (slot < instance->klass->fieldTypesBySlot.size())
+                    ? instance->klass->fieldTypesBySlot[slot]
+                    : nullptr;
+            const std::string fieldName =
+                (slot < instance->klass->fieldNames.size())
+                    ? instance->klass->fieldNames[slot]
+                    : "<unknown>";
+            if (expectedType && !valueMatchesType(value, expectedType)) {
+                return runtimeError("Type error: field '" + fieldName +
+                                    "' on class '" + instance->klass->name +
+                                    "' expects '" + expectedType->toString() +
+                                    "', got '" + valueTypeName(value) + "'.");
+            }
+
+            instance->fieldSlots[slot] = value;
+            instance->initializedFieldSlots[slot] = 1;
+
+            m_stack.pop();
+            m_stack.pop();
+            m_stack.push(value);
+            DISPATCH();
+        }
+
         VM_CASE(CALL) {
+            size_t instructionOffset = currentInstructionOffset();
             uint8_t argumentCount = readByte();
             Value callee = m_stack.peek(argumentCount);
             size_t calleeIndex =
                 m_stack.size() - static_cast<size_t>(argumentCount) - 1;
-            Status status = callValue(callee, argumentCount, calleeIndex);
+            auto& cache =
+                currentFrame().chunk->callInlineCacheAt(instructionOffset);
+            Status status = Status::OK;
+            if (callInlineCacheMatches(cache, callee)) {
+                switch (cache.kind) {
+                    case CallInlineCacheKind::CLOSURE:
+                        status = callClosure(
+                            static_cast<ClosureObject*>(cache.target),
+                            argumentCount);
+                        break;
+                    case CallInlineCacheKind::BOUND_METHOD: {
+                        auto* bound =
+                            static_cast<BoundMethodObject*>(cache.target);
+                        status = callClosure(bound->method, argumentCount,
+                                             bound->receiver);
+                        break;
+                    }
+                    case CallInlineCacheKind::NATIVE: {
+                        auto* native =
+                            static_cast<NativeFunctionObject*>(cache.target);
+                        if (native->arity >= 0 &&
+                            native->arity != argumentCount) {
+                            status = runtimeError(
+                                "Native function '" + native->name +
+                                "' expected " +
+                                std::to_string(native->arity) +
+                                " arguments but got " +
+                                std::to_string(
+                                    static_cast<int>(argumentCount)) +
+                                ".");
+                        } else if (native->callback == nullptr) {
+                            status = runtimeError("Unknown native function '" +
+                                                  native->name + "'.");
+                        } else {
+                            status = native->callback(*this, *native,
+                                                      argumentCount,
+                                                      calleeIndex);
+                        }
+                        break;
+                    }
+                    case CallInlineCacheKind::NATIVE_BOUND: {
+                        auto* bound = static_cast<NativeBoundMethodObject*>(
+                            cache.target);
+                        status = callNativeMethod(bound->id, bound->name,
+                                                  bound->receiver,
+                                                  argumentCount, calleeIndex);
+                        break;
+                    }
+                    case CallInlineCacheKind::CLASS: {
+                        auto* klass = static_cast<ClassObject*>(cache.target);
+                        if (argumentCount != 0) {
+                            status = runtimeError(
+                                "Class '" + klass->name +
+                                "' expected 0 arguments but got " +
+                                std::to_string(
+                                    static_cast<int>(argumentCount)) +
+                                ".");
+                        } else {
+                            auto instance = gcAlloc<InstanceObject>();
+                            instance->klass = klass;
+                            instance->fieldSlots.resize(
+                                instance->klass->fieldNames.size());
+                            instance->initializedFieldSlots.assign(
+                                instance->klass->fieldNames.size(), 0);
+                            m_stack.setAt(calleeIndex, Value(instance));
+                        }
+                        break;
+                    }
+                    case CallInlineCacheKind::EMPTY:
+                    default:
+                        status = callValue(callee, argumentCount, calleeIndex);
+                        break;
+                }
+            } else {
+                status = callValue(callee, argumentCount, calleeIndex);
+                if (status == Status::OK) {
+                    populateCallInlineCache(cache, callee);
+                }
+            }
             if (status != Status::OK) {
                 return status;
             }
@@ -3102,6 +3295,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
                 dict->map.insert_or_assign(std::move(keyValue),
                                            std::move(value));
+                invalidateDictOrderCache(dict);
             }
 
             dict->keyType = keyType ? keyType : TypeInfo::makeAny();
@@ -3206,6 +3400,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 }
 
                 dict->map.insert_or_assign(std::move(indexValue), value);
+                invalidateDictOrderCache(dict);
                 m_stack.push(std::move(value));
                 DISPATCH();
             }
@@ -3238,7 +3433,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 iterator->kind = IteratorObject::DICT_ITER;
                 iterator->dict = iterable.asDict();
 
-                iterator->dictKeys = sortedDictKeys(iterator->dict);
+                iterator->dictKeys = orderedDictKeys(iterator->dict);
             } else if (iterable.isSet()) {
                 iterator->kind = IteratorObject::SET_ITER;
                 iterator->set = iterable.asSet();

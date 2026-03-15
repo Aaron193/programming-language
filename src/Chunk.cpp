@@ -81,6 +81,7 @@ void Chunk::write(uint8_t byte, int line) {
     m_bytes->push_back(byte);
     m_lines->push_back(line);
     m_propertyInlineCaches->emplace_back();
+    m_callInlineCaches->emplace_back();
 }
 
 int Chunk::addConstant(Value value) {
@@ -213,6 +214,12 @@ int Chunk::disassembleInstruction(int offset) {
             return invokeInstruction("INVOKE", offset, *m_bytes, *m_constants);
         case OpCode::SET_PROPERTY:
             return constantInstruction("SET_PROPERTY", offset);
+        case OpCode::GET_FIELD_SLOT:
+            return byteInstruction("GET_FIELD_SLOT", offset,
+                                   m_bytes->at(offset + 1));
+        case OpCode::SET_FIELD_SLOT:
+            return byteInstruction("SET_FIELD_SLOT", offset,
+                                   m_bytes->at(offset + 1));
         case OpCode::CALL:
             return byteInstruction("CALL", offset, m_bytes->at(offset + 1));
         case OpCode::CLOSURE:
@@ -314,6 +321,10 @@ void FunctionObject::trace(GC& gc) {
         gc.markObject(cache.klass);
         gc.markObject(cache.method);
     }
+
+    for (const auto& cache : chunk->callInlineCaches()) {
+        gc.markObject(cache.target);
+    }
 }
 
 void ClassObject::trace(GC& gc) {
@@ -387,6 +398,10 @@ void DictObject::trace(GC& gc) {
     for (const auto& [key, value] : map) {
         gc.markValue(key);
         gc.markValue(value);
+    }
+
+    for (const auto& key : orderedKeysCache) {
+        gc.markValue(key);
     }
 
     for (const auto& [name, method] : methodCache) {

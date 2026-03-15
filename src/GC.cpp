@@ -2,6 +2,8 @@
 
 #include "Chunk.hpp"
 
+#include <functional>
+
 void GC::markValue(const Value& value) {
     if (value.isString()) {
         markObject(value.asStringObject());
@@ -51,12 +53,36 @@ void GC::drainGrayStack() {
     }
 }
 
+StringObject* GC::makeString(std::string text) {
+    auto* stringObject = allocate<StringObject>();
+    stringObject->value = std::move(text);
+    stringObject->hashValue = std::hash<std::string>{}(stringObject->value);
+    stringObject->isInterned = false;
+    return stringObject;
+}
+
+StringObject* GC::internString(std::string text) {
+    auto existing = m_internedStrings.find(text);
+    if (existing != m_internedStrings.end()) {
+        return existing->second;
+    }
+
+    auto* stringObject = makeString(std::move(text));
+    stringObject->isInterned = true;
+    m_internedStrings.emplace(stringObject->value, stringObject);
+    return stringObject;
+}
+
 void GC::sweep() {
     GcObject** current = &m_objects;
     while (*current != nullptr) {
         GcObject* obj = *current;
         if (!obj->marked) {
             *current = obj->next;
+            if (auto* stringObject = dynamic_cast<StringObject*>(obj);
+                stringObject != nullptr && stringObject->isInterned) {
+                removeInternedString(stringObject);
+            }
             freeObject(obj);
         } else {
             obj->marked = false;
@@ -81,4 +107,15 @@ void GC::freeObject(GcObject* obj) {
         m_bytesAllocated = 0;
     }
     delete obj;
+}
+
+void GC::removeInternedString(const StringObject* obj) {
+    if (obj == nullptr || !obj->isInterned) {
+        return;
+    }
+
+    auto it = m_internedStrings.find(obj->value);
+    if (it != m_internedStrings.end() && it->second == obj) {
+        m_internedStrings.erase(it);
+    }
 }

@@ -4,6 +4,7 @@
 #include <cstring>
 #include <iostream>
 #include <memory>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -48,6 +49,20 @@ struct PropertyInlineCache {
     TypeRef fieldType;
 };
 
+enum class CallInlineCacheKind : uint8_t {
+    EMPTY,
+    CLOSURE,
+    BOUND_METHOD,
+    NATIVE,
+    NATIVE_BOUND,
+    CLASS,
+};
+
+struct CallInlineCache {
+    CallInlineCacheKind kind = CallInlineCacheKind::EMPTY;
+    GcObject* target = nullptr;
+};
+
 struct FunctionObject : GcObject {
     std::string name;
     std::vector<std::string> parameters;
@@ -64,6 +79,7 @@ struct ClassObject : GcObject {
     std::unordered_map<std::string, TypeRef> fieldTypes;
     std::unordered_map<std::string, TypeRef> methodTypes;
     std::vector<std::string> fieldNames;
+    std::vector<TypeRef> fieldTypesBySlot;
     std::unordered_map<std::string, size_t> fieldIndexByName;
 
     void trace(GC& gc) override;
@@ -121,6 +137,8 @@ struct NativeFunctionObject : GcObject {
 
 struct StringObject : GcObject {
     std::string value;
+    size_t hashValue = 0;
+    bool isInterned = false;
 
     void trace(GC& gc) override;
 };
@@ -199,6 +217,8 @@ enum OpCode {
     GET_PROPERTY,
     INVOKE,
     SET_PROPERTY,
+    GET_FIELD_SLOT,
+    SET_FIELD_SLOT,
     CALL,
     CLOSURE,
     CLOSE_UPVALUE,
@@ -483,7 +503,9 @@ struct ValueHash {
                 payloadHash = 0;
                 break;
             case Value::Kind::STRING:
-                payloadHash = std::hash<std::string>{}(value.asString());
+                payloadHash = value.asStringObject()->isInterned
+                                  ? value.asStringObject()->hashValue
+                                  : std::hash<std::string>{}(value.asString());
                 break;
             default:
                 payloadHash = std::hash<uintptr_t>{}(valuePointerBits(value));
@@ -514,6 +536,10 @@ struct ValueEqual {
             case Value::Kind::NIL:
                 return true;
             case Value::Kind::STRING:
+                if (lhs.asStringObject()->isInterned &&
+                    rhs.asStringObject()->isInterned) {
+                    return lhs.asStringObject() == rhs.asStringObject();
+                }
                 return lhs.asString() == rhs.asString();
             default:
                 return valuePointerBits(lhs) == valuePointerBits(rhs);
@@ -558,9 +584,38 @@ struct DictObject : GcObject {
     TypeRef valueType = TypeInfo::makeAny();
     std::unordered_map<Value, Value, ValueHash, ValueEqual> map;
     std::unordered_map<std::string, NativeBoundMethodObject*> methodCache;
+    mutable size_t mutationVersion = 0;
+    mutable size_t orderedKeysVersion = 0;
+    mutable std::vector<Value> orderedKeysCache;
 
     void trace(GC& gc) override;
 };
+
+inline void invalidateDictOrderCache(DictObject* dict) {
+    if (dict != nullptr) {
+        ++dict->mutationVersion;
+    }
+}
+
+inline const std::vector<Value>& orderedDictKeys(const DictObject* dict) {
+    static const std::vector<Value> empty;
+    if (dict == nullptr) {
+        return empty;
+    }
+
+    if (dict->orderedKeysVersion != dict->mutationVersion) {
+        dict->orderedKeysCache.clear();
+        dict->orderedKeysCache.reserve(dict->map.size());
+        for (const auto& entry : dict->map) {
+            dict->orderedKeysCache.push_back(entry.first);
+        }
+        std::sort(dict->orderedKeysCache.begin(), dict->orderedKeysCache.end(),
+                  valueSortLess);
+        dict->orderedKeysVersion = dict->mutationVersion;
+    }
+
+    return dict->orderedKeysCache;
+}
 
 struct SetObject : GcObject {
     TypeRef elementType = TypeInfo::makeAny();
@@ -617,6 +672,10 @@ inline bool operator==(const Value& lhs, const Value& rhs) {
         case Value::Kind::NIL:
             return true;
         case Value::Kind::STRING:
+            if (lhs.asStringObject()->isInterned &&
+                rhs.asStringObject()->isInterned) {
+                return lhs.asStringObject() == rhs.asStringObject();
+            }
             return lhs.asString() == rhs.asString();
         default:
             return valuePointerBits(lhs) == valuePointerBits(rhs);
@@ -695,12 +754,7 @@ inline void printValueInternal(std::ostream& stream, const Value& value,
         }
 
         active.insert(identity);
-        std::vector<Value> keys;
-        keys.reserve(dict->map.size());
-        for (const auto& entry : dict->map) {
-            keys.push_back(entry.first);
-        }
-        std::sort(keys.begin(), keys.end(), valueSortLess);
+        const auto& keys = orderedDictKeys(dict);
 
         stream << "{";
         for (size_t index = 0; index < keys.size(); ++index) {
@@ -781,6 +835,8 @@ class Chunk {
         std::make_unique<std::vector<int>>();
     std::unique_ptr<std::vector<PropertyInlineCache>> m_propertyInlineCaches =
         std::make_unique<std::vector<PropertyInlineCache>>();
+    std::unique_ptr<std::vector<CallInlineCache>> m_callInlineCaches =
+        std::make_unique<std::vector<CallInlineCache>>();
 
     void disassemble(std::string label);
     int simpleInstruction(const std::string& label, int offset);
@@ -806,6 +862,12 @@ class Chunk {
     }
     const std::vector<PropertyInlineCache>& propertyInlineCaches() const {
         return *m_propertyInlineCaches;
+    }
+    CallInlineCache& callInlineCacheAt(size_t index) {
+        return m_callInlineCaches->at(index);
+    }
+    const std::vector<CallInlineCache>& callInlineCaches() const {
+        return *m_callInlineCaches;
     }
 
     // inlined methods

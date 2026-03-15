@@ -191,6 +191,8 @@ class Compiler {
                                  const std::string& fieldName) const;
     TypeRef lookupClassMethodType(const std::string& className,
                                   const std::string& methodName) const;
+    int lookupClassFieldSlot(const std::string& className,
+                             const std::string& fieldName) const;
     void emitCoerceToType(const TypeRef& sourceType, const TypeRef& targetType);
     void emitCheckInstanceType(const TypeRef& targetType);
     uint8_t arithmeticOpcode(TokenType operatorType,
