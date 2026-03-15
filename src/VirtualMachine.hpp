@@ -88,6 +88,9 @@ class VirtualMachine {
     }
 
     Value makeStringValue(std::string text);
+    bool tryFuseBuiltinStringConcat(const NativeFunctionObject& native,
+                                    uint8_t argumentCount, size_t calleeIndex,
+                                    Status& outStatus);
     Status run(bool printReturnValue, Value& returnValue,
                size_t stopFrameCount = 0);
     Status runtimeError(const std::string& message);

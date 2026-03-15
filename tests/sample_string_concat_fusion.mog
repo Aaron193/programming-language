@@ -1,0 +1,18 @@
+var d Dict<str, i32> = {}
+
+for (var i i32 = 0; i < 5; i++) {
+  d["key" + str(i)] = i * 10
+}
+
+var total i32 = 0
+for (var i i32 = 0; i < 5; i++) {
+  total += d["key" + str(i)]
+}
+
+print(total)
+print(d.size())
+print("value:" + str(42))
+
+var plain str = str(42)
+print(plain + "!")
+print("x" + str("y"))

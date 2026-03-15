@@ -1,6 +1,8 @@
 #include "VirtualMachine.hpp"
 
 #include <algorithm>
+#include <array>
+#include <charconv>
 #include <chrono>
 #include <cctype>
 #include <cmath>
@@ -18,6 +20,32 @@
 
 #include "NativePackage.hpp"
 #include "StdLib.hpp"
+
+template <typename Integer>
+static std::string fastIntegerToString(Integer value) {
+    std::array<char, 32> buffer{};
+    auto [ptr, ec] =
+        std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
+    if (ec == std::errc()) {
+        return std::string(buffer.data(),
+                           static_cast<size_t>(ptr - buffer.data()));
+    }
+
+    return std::to_string(value);
+}
+
+template <typename Integer>
+static void appendFastInteger(std::string& out, Integer value) {
+    std::array<char, 32> buffer{};
+    auto [ptr, ec] =
+        std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
+    if (ec == std::errc()) {
+        out.append(buffer.data(), static_cast<size_t>(ptr - buffer.data()));
+        return;
+    }
+
+    out += std::to_string(value);
+}
 
 static bool isFalsey(const Value& value) {
     if (value.isNil()) return true;
@@ -148,8 +176,8 @@ static std::string_view stripStrictDirectiveLine(std::string_view source) {
 
 static std::string valueToString(const Value& value) {
     if (value.isString()) return value.asString();
-    if (value.isSignedInt()) return std::to_string(value.asSignedInt());
-    if (value.isUnsignedInt()) return std::to_string(value.asUnsignedInt());
+    if (value.isSignedInt()) return fastIntegerToString(value.asSignedInt());
+    if (value.isUnsignedInt()) return fastIntegerToString(value.asUnsignedInt());
     if (value.isBool()) return value.asBool() ? "true" : "false";
     if (value.isNil()) return "null";
 
@@ -1023,6 +1051,50 @@ Value VirtualMachine::makeStringValue(std::string text) {
     return Value(m_gc.makeString(std::move(text)));
 }
 
+bool VirtualMachine::tryFuseBuiltinStringConcat(
+    const NativeFunctionObject& native, uint8_t argumentCount, size_t calleeIndex,
+    Status& outStatus) {
+    outStatus = Status::OK;
+
+    if (native.userdata == nullptr || argumentCount != 1 || calleeIndex == 0) {
+        return false;
+    }
+
+    const auto kind = *static_cast<const BuiltinNativeKind*>(native.userdata);
+    if (kind != BuiltinNativeKind::STR && kind != BuiltinNativeKind::TO_STRING) {
+        return false;
+    }
+
+    CallFrame& frame = currentFrame();
+    if (frame.ip >= frame.chunk->getBytes() + frame.chunk->count()) {
+        return false;
+    }
+
+    if (static_cast<OpCode>(*frame.ip) != OpCode::ADD) {
+        return false;
+    }
+
+    const Value& lhs = m_stack.getAtUnchecked(calleeIndex - 1);
+    const Value& arg = m_stack.getAtUnchecked(calleeIndex + 1);
+    if (!lhs.isString() || (!arg.isSignedInt() && !arg.isUnsignedInt())) {
+        return false;
+    }
+
+    std::string result;
+    result.reserve(lhs.asString().size() + 24);
+    result += lhs.asString();
+    if (arg.isSignedInt()) {
+        appendFastInteger(result, arg.asSignedInt());
+    } else {
+        appendFastInteger(result, arg.asUnsignedInt());
+    }
+
+    m_stack.popN(m_stack.size() - (calleeIndex - 1));
+    m_stack.push(makeStringValue(std::move(result)));
+    ++frame.ip;
+    return true;
+}
+
 Status invokeBuiltinNative(VirtualMachine& vm, const NativeFunctionObject& native,
                            uint8_t argumentCount, size_t calleeIndex) {
     if (native.userdata == nullptr) {
@@ -1835,6 +1907,15 @@ Status VirtualMachine::callValue(Value callee, uint8_t argumentCount,
 
     if (callee.isNative()) {
         auto native = callee.asNative();
+        Status fusedStatus = Status::OK;
+        if (tryFuseBuiltinStringConcat(*native, argumentCount, calleeIndex,
+                                       fusedStatus)) {
+            return fusedStatus;
+        }
+        if (fusedStatus != Status::OK) {
+            return fusedStatus;
+        }
+
         if (native->arity >= 0 && native->arity != argumentCount) {
             return runtimeError("Native function '" + native->name +
                                 "' expected " +
@@ -3115,6 +3196,12 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                     case CallInlineCacheKind::NATIVE: {
                         auto* native =
                             static_cast<NativeFunctionObject*>(cache.target);
+                        bool fused = tryFuseBuiltinStringConcat(
+                            *native, argumentCount, calleeIndex, status);
+                        if (status != Status::OK || fused) {
+                            break;
+                        }
+
                         if (native->arity >= 0 &&
                             native->arity != argumentCount) {
                             status = runtimeError(
@@ -4061,12 +4148,13 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
         VM_CASE(INT_TO_STR) {
             Value value = m_stack.pop();
             if (value.isSignedInt()) {
-                m_stack.push(makeStringValue(std::to_string(value.asSignedInt())));
+                m_stack.push(
+                    makeStringValue(fastIntegerToString(value.asSignedInt())));
                 DISPATCH();
             }
             if (value.isUnsignedInt()) {
                 m_stack.push(
-                    makeStringValue(std::to_string(value.asUnsignedInt())));
+                    makeStringValue(fastIntegerToString(value.asUnsignedInt())));
                 DISPATCH();
             }
             if (value.isNumber()) {
