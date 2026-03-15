@@ -34,11 +34,20 @@ struct IteratorObject;
 struct ModuleObject;
 struct StringObject;
 struct NativeHandleObject;
+enum class NativeMethodId : uint8_t;
 
 enum class PropertyInlineCacheKind : uint8_t {
     EMPTY,
     FIELD,
     METHOD,
+    NATIVE_METHOD,
+};
+
+enum class NativeReceiverKind : uint8_t {
+    NONE,
+    ARRAY,
+    DICT,
+    SET,
 };
 
 struct PropertyInlineCache {
@@ -47,6 +56,8 @@ struct PropertyInlineCache {
     size_t slotIndex = 0;
     ClosureObject* method = nullptr;
     TypeRef fieldType;
+    NativeReceiverKind nativeReceiverKind = NativeReceiverKind::NONE;
+    NativeMethodId nativeMethodId{};
 };
 
 enum class CallInlineCacheKind : uint8_t {
@@ -503,9 +514,7 @@ struct ValueHash {
                 payloadHash = 0;
                 break;
             case Value::Kind::STRING:
-                payloadHash = value.asStringObject()->isInterned
-                                  ? value.asStringObject()->hashValue
-                                  : std::hash<std::string>{}(value.asString());
+                payloadHash = value.asStringObject()->hashValue;
                 break;
             default:
                 payloadHash = std::hash<uintptr_t>{}(valuePointerBits(value));

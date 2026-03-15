@@ -56,12 +56,20 @@ class Stack {
         return m_data[m_top - static_cast<int>(distance)];
     }
 
+    const T& peekUnchecked(size_t distance) const {
+        return m_data[m_top - static_cast<int>(distance)];
+    }
+
     T& peekRef(size_t distance) {
         static T empty{};
         if (m_top < 0 || distance > static_cast<size_t>(m_top)) {
             return empty;
         }
 
+        return m_data[m_top - static_cast<int>(distance)];
+    }
+
+    T& peekRefUnchecked(size_t distance) {
         return m_data[m_top - static_cast<int>(distance)];
     }
 
@@ -74,6 +82,8 @@ class Stack {
         return m_data[index];
     }
 
+    const T& getAtUnchecked(size_t index) const { return m_data[index]; }
+
     T& getAtRef(size_t index) {
         static T empty{};
         if (index > static_cast<size_t>(m_top)) {
@@ -83,6 +93,8 @@ class Stack {
         return m_data[index];
     }
 
+    T& getAtRefUnchecked(size_t index) { return m_data[index]; }
+
     const T& top() const {
         if (m_top < 0) {
             throw std::underflow_error("Stack underflow.");
@@ -91,6 +103,8 @@ class Stack {
         return m_data[m_top];
     }
 
+    const T& topUnchecked() const { return m_data[m_top]; }
+
     const T& second() const {
         if (m_top < 1) {
             throw std::underflow_error("Stack underflow.");
@@ -98,6 +112,8 @@ class Stack {
 
         return m_data[m_top - 1];
     }
+
+    const T& secondUnchecked() const { return m_data[m_top - 1]; }
 
     void setAt(size_t index, const T& value) {
         if (index <= static_cast<size_t>(m_top)) {
@@ -132,6 +148,10 @@ class Stack {
         m_data[m_top] = std::move(value);
     }
 
+    void replaceTopUnchecked(const T& value) { m_data[m_top] = value; }
+
+    void replaceTopUnchecked(T&& value) { m_data[m_top] = std::move(value); }
+
     void replaceTopPair(const T& value) {
         if (m_top < 1) {
             throw std::underflow_error("Stack underflow.");
@@ -144,6 +164,16 @@ class Stack {
         if (m_top < 1) {
             throw std::underflow_error("Stack underflow.");
         }
+        m_data[m_top - 1] = std::move(value);
+        --m_top;
+    }
+
+    void replaceTopPairUnchecked(const T& value) {
+        m_data[m_top - 1] = value;
+        --m_top;
+    }
+
+    void replaceTopPairUnchecked(T&& value) {
         m_data[m_top - 1] = std::move(value);
         --m_top;
     }

@@ -544,6 +544,29 @@ static NativeMethodId resolveNativeMethodId(const Value& receiver,
     return NativeMethodId::INVALID;
 }
 
+static NativeReceiverKind resolveNativeReceiverKind(const Value& receiver) {
+    if (receiver.isArray()) {
+        return NativeReceiverKind::ARRAY;
+    }
+    if (receiver.isDict()) {
+        return NativeReceiverKind::DICT;
+    }
+    if (receiver.isSet()) {
+        return NativeReceiverKind::SET;
+    }
+    return NativeReceiverKind::NONE;
+}
+
+static void resetPropertyInlineCache(PropertyInlineCache& cache) {
+    cache.klass = nullptr;
+    cache.kind = PropertyInlineCacheKind::EMPTY;
+    cache.slotIndex = 0;
+    cache.method = nullptr;
+    cache.fieldType.reset();
+    cache.nativeReceiverKind = NativeReceiverKind::NONE;
+    cache.nativeMethodId = NativeMethodId::INVALID;
+}
+
 static ClosureObject* findMethodClosure(ClassObject* klass,
                                         const std::string& name) {
     ClassObject* current = klass;
@@ -1010,10 +1033,11 @@ Status invokeBuiltinNative(VirtualMachine& vm, const NativeFunctionObject& nativ
         *static_cast<const BuiltinNativeKind*>(native.userdata);
     const size_t argBase = calleeIndex + 1;
     auto argAt = [&](uint8_t index) -> const Value& {
-        return vm.m_stack.getAt(argBase + static_cast<size_t>(index));
+        return vm.m_stack.getAtUnchecked(argBase + static_cast<size_t>(index));
     };
     auto argAtRef = [&](uint8_t index) -> Value& {
-        return vm.m_stack.getAtRef(argBase + static_cast<size_t>(index));
+        return vm.m_stack.getAtRefUnchecked(argBase +
+                                            static_cast<size_t>(index));
     };
 
     Value result;
@@ -1257,7 +1281,8 @@ Status invokePackageNative(VirtualMachine& vm, const NativeFunctionObject& nativ
     std::vector<ExprPackageValue> packageArgs(argumentCount);
     const size_t argBase = calleeIndex + 1;
     for (uint8_t index = 0; index < argumentCount; ++index) {
-        const Value& arg = vm.m_stack.getAt(argBase + static_cast<size_t>(index));
+        const Value& arg =
+            vm.m_stack.getAtUnchecked(argBase + static_cast<size_t>(index));
         if (arg.isNativeHandle()) {
             NativeHandleObject* handle = arg.asNativeHandle();
             if (handle == nullptr || handle->packageId != binding->packageId) {
@@ -1353,10 +1378,11 @@ Status VirtualMachine::callNativeMethod(NativeMethodId id,
                                         size_t calleeIndex) {
     const size_t argBase = calleeIndex + 1;
     auto argAt = [&](uint8_t index) -> const Value& {
-        return m_stack.getAt(argBase + static_cast<size_t>(index));
+        return m_stack.getAtUnchecked(argBase + static_cast<size_t>(index));
     };
     auto argAtRef = [&](uint8_t index) -> Value& {
-        return m_stack.getAtRef(argBase + static_cast<size_t>(index));
+        return m_stack.getAtRefUnchecked(argBase +
+                                         static_cast<size_t>(index));
     };
 
     Value result;
@@ -1856,7 +1882,8 @@ Status VirtualMachine::invokeProperty(size_t instructionOffset,
                                       uint8_t argumentCount) {
     size_t calleeIndex =
         m_stack.size() - static_cast<size_t>(argumentCount) - 1;
-    Value receiver = m_stack.peek(argumentCount);
+    Value receiver = m_stack.peekUnchecked(argumentCount);
+    auto& cache = currentFrame().chunk->propertyInlineCacheAt(instructionOffset);
 
     if (receiver.isModule()) {
         auto module = receiver.asModule();
@@ -1878,9 +1905,20 @@ Status VirtualMachine::invokeProperty(size_t instructionOffset,
         return callValue(it->second, argumentCount, calleeIndex);
     }
 
-    if (receiver.isArray() || receiver.isDict() || receiver.isSet()) {
-        return callNativeMethod(resolveNativeMethodId(receiver, name), name,
-                                receiver, argumentCount, calleeIndex);
+    NativeReceiverKind nativeReceiverKind = resolveNativeReceiverKind(receiver);
+    if (nativeReceiverKind != NativeReceiverKind::NONE) {
+        if (cache.kind == PropertyInlineCacheKind::NATIVE_METHOD &&
+            cache.nativeReceiverKind == nativeReceiverKind) {
+            return callNativeMethod(cache.nativeMethodId, name, receiver,
+                                    argumentCount, calleeIndex);
+        }
+
+        resetPropertyInlineCache(cache);
+        cache.kind = PropertyInlineCacheKind::NATIVE_METHOD;
+        cache.nativeReceiverKind = nativeReceiverKind;
+        cache.nativeMethodId = resolveNativeMethodId(receiver, name);
+        return callNativeMethod(cache.nativeMethodId, name, receiver,
+                                argumentCount, calleeIndex);
     }
 
     if (!receiver.isInstance()) {
@@ -1888,8 +1926,6 @@ Status VirtualMachine::invokeProperty(size_t instructionOffset,
     }
 
     auto instance = receiver.asInstance();
-    auto& cache =
-        currentFrame().chunk->propertyInlineCacheAt(instructionOffset);
     if (cache.klass == instance->klass) {
         if (cache.kind == PropertyInlineCacheKind::FIELD &&
             cache.slotIndex < instance->fieldSlots.size() &&
@@ -1907,11 +1943,10 @@ Status VirtualMachine::invokeProperty(size_t instructionOffset,
 
     auto fieldSlotIt = instance->klass->fieldIndexByName.find(name);
     if (fieldSlotIt != instance->klass->fieldIndexByName.end()) {
+        resetPropertyInlineCache(cache);
         cache.klass = instance->klass;
         cache.kind = PropertyInlineCacheKind::FIELD;
         cache.slotIndex = fieldSlotIt->second;
-        cache.method = nullptr;
-        cache.fieldType.reset();
 
         if (fieldSlotIt->second < instance->fieldSlots.size() &&
             fieldSlotIt->second < instance->initializedFieldSlots.size() &&
@@ -1923,25 +1958,20 @@ Status VirtualMachine::invokeProperty(size_t instructionOffset,
 
     auto method = findMethodClosure(instance->klass, name);
     if (!method) {
-        cache.klass = nullptr;
-        cache.kind = PropertyInlineCacheKind::EMPTY;
-        cache.slotIndex = 0;
-        cache.method = nullptr;
-        cache.fieldType.reset();
+        resetPropertyInlineCache(cache);
         return runtimeError("Undefined property '" + name + "'.");
     }
 
+    resetPropertyInlineCache(cache);
     cache.klass = instance->klass;
     cache.kind = PropertyInlineCacheKind::METHOD;
-    cache.slotIndex = 0;
     cache.method = method;
-    cache.fieldType.reset();
     return callClosure(method, argumentCount, instance);
 }
 
 Status VirtualMachine::invokeSuper(const std::string& name,
                                    uint8_t argumentCount) {
-    Value receiver = m_stack.peek(argumentCount);
+    Value receiver = m_stack.peekUnchecked(argumentCount);
     if (!receiver.isInstance() || !receiver.asInstance()->klass ||
         !receiver.asInstance()->klass->superclass) {
         return runtimeError("Invalid super lookup.");
@@ -2135,7 +2165,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
         }
 
         VM_CASE(NEGATE) {
-            const Value& value = m_stack.top();
+            const Value& value = m_stack.topUnchecked();
             if (!value.isAnyNumeric()) {
                 return runtimeError("Operand must be a number for unary '-'.");
             }
@@ -2149,38 +2179,40 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
             } else {
                 result = Value(-value.asNumber());
             }
-            m_stack.replaceTop(std::move(result));
+            m_stack.replaceTopUnchecked(std::move(result));
             DISPATCH();
         }
 
         VM_CASE(NOT) {
-            m_stack.replaceTop(Value(isFalsey(m_stack.top())));
+            m_stack.replaceTopUnchecked(Value(isFalsey(m_stack.topUnchecked())));
             DISPATCH();
         }
 
         VM_CASE(EQUAL_OP) {
-            m_stack.replaceTopPair(Value(m_stack.second() == m_stack.top()));
+            m_stack.replaceTopPairUnchecked(
+                Value(m_stack.secondUnchecked() == m_stack.topUnchecked()));
             DISPATCH();
         }
 
         VM_CASE(NOT_EQUAL_OP) {
-            m_stack.replaceTopPair(Value(m_stack.second() != m_stack.top()));
+            m_stack.replaceTopPairUnchecked(
+                Value(m_stack.secondUnchecked() != m_stack.topUnchecked()));
             DISPATCH();
         }
 
         VM_CASE(ADD) {
-            const Value& b = m_stack.top();
-            const Value& a = m_stack.second();
+            const Value& b = m_stack.topUnchecked();
+            const Value& a = m_stack.secondUnchecked();
 
             if (a.isSignedInt() && b.isSignedInt()) {
                 Value result(wrapSignedAdd(a.asSignedInt(), b.asSignedInt()));
-                m_stack.replaceTopPair(std::move(result));
+                m_stack.replaceTopPairUnchecked(std::move(result));
                 DISPATCH();
             }
 
             if (a.isUnsignedInt() && b.isUnsignedInt()) {
                 Value result(a.asUnsignedInt() + b.asUnsignedInt());
-                m_stack.replaceTopPair(std::move(result));
+                m_stack.replaceTopPairUnchecked(std::move(result));
                 DISPATCH();
             }
 
@@ -2190,13 +2222,13 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 valueToDouble(a, lhs);
                 valueToDouble(b, rhs);
                 Value result(lhs + rhs);
-                m_stack.replaceTopPair(std::move(result));
+                m_stack.replaceTopPairUnchecked(std::move(result));
                 DISPATCH();
             }
 
             if (a.isString() && b.isString()) {
                 std::string result = a.asString() + b.asString();
-                m_stack.replaceTopPair(makeStringValue(std::move(result)));
+                m_stack.replaceTopPairUnchecked(makeStringValue(std::move(result)));
                 DISPATCH();
             }
 
@@ -2205,21 +2237,21 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
         }
 
         VM_CASE(SUB) {
-            const Value& b = m_stack.top();
-            const Value& a = m_stack.second();
+            const Value& b = m_stack.topUnchecked();
+            const Value& a = m_stack.secondUnchecked();
             if (!isNumberPair(a, b)) {
                 return runtimeError("Operands must be numbers for '-'.");
             }
 
             if (a.isSignedInt() && b.isSignedInt()) {
                 Value result(wrapSignedSub(a.asSignedInt(), b.asSignedInt()));
-                m_stack.replaceTopPair(std::move(result));
+                m_stack.replaceTopPairUnchecked(std::move(result));
                 DISPATCH();
             }
 
             if (a.isUnsignedInt() && b.isUnsignedInt()) {
                 Value result(a.asUnsignedInt() - b.asUnsignedInt());
-                m_stack.replaceTopPair(std::move(result));
+                m_stack.replaceTopPairUnchecked(std::move(result));
                 DISPATCH();
             }
 
@@ -2228,26 +2260,26 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
             valueToDouble(a, lhs);
             valueToDouble(b, rhs);
             Value result(lhs - rhs);
-            m_stack.replaceTopPair(std::move(result));
+            m_stack.replaceTopPairUnchecked(std::move(result));
             DISPATCH();
         }
 
         VM_CASE(MULT) {
-            const Value& b = m_stack.top();
-            const Value& a = m_stack.second();
+            const Value& b = m_stack.topUnchecked();
+            const Value& a = m_stack.secondUnchecked();
             if (!isNumberPair(a, b)) {
                 return runtimeError("Operands must be numbers for '*'.");
             }
 
             if (a.isSignedInt() && b.isSignedInt()) {
                 Value result(wrapSignedMul(a.asSignedInt(), b.asSignedInt()));
-                m_stack.replaceTopPair(std::move(result));
+                m_stack.replaceTopPairUnchecked(std::move(result));
                 DISPATCH();
             }
 
             if (a.isUnsignedInt() && b.isUnsignedInt()) {
                 Value result(a.asUnsignedInt() * b.asUnsignedInt());
-                m_stack.replaceTopPair(std::move(result));
+                m_stack.replaceTopPairUnchecked(std::move(result));
                 DISPATCH();
             }
 
@@ -2256,13 +2288,13 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
             valueToDouble(a, lhs);
             valueToDouble(b, rhs);
             Value result(lhs * rhs);
-            m_stack.replaceTopPair(std::move(result));
+            m_stack.replaceTopPairUnchecked(std::move(result));
             DISPATCH();
         }
 
         VM_CASE(DIV) {
-            const Value& b = m_stack.top();
-            const Value& a = m_stack.second();
+            const Value& b = m_stack.topUnchecked();
+            const Value& a = m_stack.secondUnchecked();
             if (!isNumberPair(a, b)) {
                 return runtimeError("Operands must be numbers for '/'.");
             }
@@ -2272,7 +2304,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                     return runtimeError("Division by zero.");
                 }
                 Value result(a.asSignedInt() / b.asSignedInt());
-                m_stack.replaceTopPair(std::move(result));
+                m_stack.replaceTopPairUnchecked(std::move(result));
                 DISPATCH();
             }
 
@@ -2281,7 +2313,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                     return runtimeError("Division by zero.");
                 }
                 Value result(a.asUnsignedInt() / b.asUnsignedInt());
-                m_stack.replaceTopPair(std::move(result));
+                m_stack.replaceTopPairUnchecked(std::move(result));
                 DISPATCH();
             }
 
@@ -2290,107 +2322,107 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
             valueToDouble(a, lhs);
             valueToDouble(b, rhs);
             Value result(lhs / rhs);
-            m_stack.replaceTopPair(std::move(result));
+            m_stack.replaceTopPairUnchecked(std::move(result));
             DISPATCH();
         }
 
         VM_CASE(IADD) {
-            int64_t rhs = requireSignedInt(m_stack.top());
-            int64_t lhs = requireSignedInt(m_stack.second());
-            m_stack.replaceTopPair(Value(wrapSignedAdd(lhs, rhs)));
+            int64_t rhs = requireSignedInt(m_stack.topUnchecked());
+            int64_t lhs = requireSignedInt(m_stack.secondUnchecked());
+            m_stack.replaceTopPairUnchecked(Value(wrapSignedAdd(lhs, rhs)));
             DISPATCH();
         }
 
         VM_CASE(ISUB) {
-            int64_t rhs = requireSignedInt(m_stack.top());
-            int64_t lhs = requireSignedInt(m_stack.second());
-            m_stack.replaceTopPair(Value(wrapSignedSub(lhs, rhs)));
+            int64_t rhs = requireSignedInt(m_stack.topUnchecked());
+            int64_t lhs = requireSignedInt(m_stack.secondUnchecked());
+            m_stack.replaceTopPairUnchecked(Value(wrapSignedSub(lhs, rhs)));
             DISPATCH();
         }
 
         VM_CASE(IMULT) {
-            int64_t rhs = requireSignedInt(m_stack.top());
-            int64_t lhs = requireSignedInt(m_stack.second());
-            m_stack.replaceTopPair(Value(wrapSignedMul(lhs, rhs)));
+            int64_t rhs = requireSignedInt(m_stack.topUnchecked());
+            int64_t lhs = requireSignedInt(m_stack.secondUnchecked());
+            m_stack.replaceTopPairUnchecked(Value(wrapSignedMul(lhs, rhs)));
             DISPATCH();
         }
 
         VM_CASE(IDIV) {
-            int64_t rhs = requireSignedInt(m_stack.top());
-            int64_t lhs = requireSignedInt(m_stack.second());
+            int64_t rhs = requireSignedInt(m_stack.topUnchecked());
+            int64_t lhs = requireSignedInt(m_stack.secondUnchecked());
             if (rhs == 0) {
                 return runtimeError("Division by zero.");
             }
-            m_stack.replaceTopPair(Value(lhs / rhs));
+            m_stack.replaceTopPairUnchecked(Value(lhs / rhs));
             DISPATCH();
         }
 
         VM_CASE(IMOD) {
-            int64_t rhs = requireSignedInt(m_stack.top());
-            int64_t lhs = requireSignedInt(m_stack.second());
+            int64_t rhs = requireSignedInt(m_stack.topUnchecked());
+            int64_t lhs = requireSignedInt(m_stack.secondUnchecked());
             if (rhs == 0) {
                 return runtimeError("Division by zero.");
             }
-            m_stack.replaceTopPair(Value(lhs % rhs));
+            m_stack.replaceTopPairUnchecked(Value(lhs % rhs));
             DISPATCH();
         }
 
         VM_CASE(UADD) {
-            uint64_t rhs = requireUnsignedInt(m_stack.top());
-            uint64_t lhs = requireUnsignedInt(m_stack.second());
-            m_stack.replaceTopPair(Value(lhs + rhs));
+            uint64_t rhs = requireUnsignedInt(m_stack.topUnchecked());
+            uint64_t lhs = requireUnsignedInt(m_stack.secondUnchecked());
+            m_stack.replaceTopPairUnchecked(Value(lhs + rhs));
             DISPATCH();
         }
 
         VM_CASE(USUB) {
-            uint64_t rhs = requireUnsignedInt(m_stack.top());
-            uint64_t lhs = requireUnsignedInt(m_stack.second());
-            m_stack.replaceTopPair(Value(lhs - rhs));
+            uint64_t rhs = requireUnsignedInt(m_stack.topUnchecked());
+            uint64_t lhs = requireUnsignedInt(m_stack.secondUnchecked());
+            m_stack.replaceTopPairUnchecked(Value(lhs - rhs));
             DISPATCH();
         }
 
         VM_CASE(UMULT) {
-            uint64_t rhs = requireUnsignedInt(m_stack.top());
-            uint64_t lhs = requireUnsignedInt(m_stack.second());
-            m_stack.replaceTopPair(Value(lhs * rhs));
+            uint64_t rhs = requireUnsignedInt(m_stack.topUnchecked());
+            uint64_t lhs = requireUnsignedInt(m_stack.secondUnchecked());
+            m_stack.replaceTopPairUnchecked(Value(lhs * rhs));
             DISPATCH();
         }
 
         VM_CASE(UDIV) {
-            uint64_t rhs = requireUnsignedInt(m_stack.top());
-            uint64_t lhs = requireUnsignedInt(m_stack.second());
+            uint64_t rhs = requireUnsignedInt(m_stack.topUnchecked());
+            uint64_t lhs = requireUnsignedInt(m_stack.secondUnchecked());
             if (rhs == 0) {
                 return runtimeError("Division by zero.");
             }
-            m_stack.replaceTopPair(Value(lhs / rhs));
+            m_stack.replaceTopPairUnchecked(Value(lhs / rhs));
             DISPATCH();
         }
 
         VM_CASE(UMOD) {
-            uint64_t rhs = requireUnsignedInt(m_stack.top());
-            uint64_t lhs = requireUnsignedInt(m_stack.second());
+            uint64_t rhs = requireUnsignedInt(m_stack.topUnchecked());
+            uint64_t lhs = requireUnsignedInt(m_stack.secondUnchecked());
             if (rhs == 0) {
                 return runtimeError("Division by zero.");
             }
-            m_stack.replaceTopPair(Value(lhs % rhs));
+            m_stack.replaceTopPairUnchecked(Value(lhs % rhs));
             DISPATCH();
         }
 
         VM_CASE(GREATER_THAN) {
-            const Value& b = m_stack.top();
-            const Value& a = m_stack.second();
+            const Value& b = m_stack.topUnchecked();
+            const Value& a = m_stack.secondUnchecked();
             if (!isNumberPair(a, b)) {
                 return runtimeError("Operands must be numbers for '>'.");
             }
 
             if (a.isSignedInt() && b.isSignedInt()) {
-                m_stack.replaceTopPair(
+                m_stack.replaceTopPairUnchecked(
                     Value(a.asSignedInt() > b.asSignedInt()));
                 DISPATCH();
             }
 
             if (a.isUnsignedInt() && b.isUnsignedInt()) {
-                m_stack.replaceTopPair(
+                m_stack.replaceTopPairUnchecked(
                     Value(a.asUnsignedInt() > b.asUnsignedInt()));
                 DISPATCH();
             }
@@ -2399,25 +2431,25 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
             double rhs = 0.0;
             valueToDouble(a, lhs);
             valueToDouble(b, rhs);
-            m_stack.replaceTopPair(Value(lhs > rhs));
+            m_stack.replaceTopPairUnchecked(Value(lhs > rhs));
             DISPATCH();
         }
 
         VM_CASE(LESS_THAN) {
-            const Value& b = m_stack.top();
-            const Value& a = m_stack.second();
+            const Value& b = m_stack.topUnchecked();
+            const Value& a = m_stack.secondUnchecked();
             if (!isNumberPair(a, b)) {
                 return runtimeError("Operands must be numbers for '<'.");
             }
 
             if (a.isSignedInt() && b.isSignedInt()) {
-                m_stack.replaceTopPair(
+                m_stack.replaceTopPairUnchecked(
                     Value(a.asSignedInt() < b.asSignedInt()));
                 DISPATCH();
             }
 
             if (a.isUnsignedInt() && b.isUnsignedInt()) {
-                m_stack.replaceTopPair(
+                m_stack.replaceTopPairUnchecked(
                     Value(a.asUnsignedInt() < b.asUnsignedInt()));
                 DISPATCH();
             }
@@ -2426,25 +2458,25 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
             double rhs = 0.0;
             valueToDouble(a, lhs);
             valueToDouble(b, rhs);
-            m_stack.replaceTopPair(Value(lhs < rhs));
+            m_stack.replaceTopPairUnchecked(Value(lhs < rhs));
             DISPATCH();
         }
 
         VM_CASE(GREATER_EQUAL_THAN) {
-            const Value& b = m_stack.top();
-            const Value& a = m_stack.second();
+            const Value& b = m_stack.topUnchecked();
+            const Value& a = m_stack.secondUnchecked();
             if (!isNumberPair(a, b)) {
                 return runtimeError("Operands must be numbers for '>='.");
             }
 
             if (a.isSignedInt() && b.isSignedInt()) {
-                m_stack.replaceTopPair(
+                m_stack.replaceTopPairUnchecked(
                     Value(a.asSignedInt() >= b.asSignedInt()));
                 DISPATCH();
             }
 
             if (a.isUnsignedInt() && b.isUnsignedInt()) {
-                m_stack.replaceTopPair(
+                m_stack.replaceTopPairUnchecked(
                     Value(a.asUnsignedInt() >= b.asUnsignedInt()));
                 DISPATCH();
             }
@@ -2453,25 +2485,25 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
             double rhs = 0.0;
             valueToDouble(a, lhs);
             valueToDouble(b, rhs);
-            m_stack.replaceTopPair(Value(lhs >= rhs));
+            m_stack.replaceTopPairUnchecked(Value(lhs >= rhs));
             DISPATCH();
         }
 
         VM_CASE(LESS_EQUAL_THAN) {
-            const Value& b = m_stack.top();
-            const Value& a = m_stack.second();
+            const Value& b = m_stack.topUnchecked();
+            const Value& a = m_stack.secondUnchecked();
             if (!isNumberPair(a, b)) {
                 return runtimeError("Operands must be numbers for '<='.");
             }
 
             if (a.isSignedInt() && b.isSignedInt()) {
-                m_stack.replaceTopPair(
+                m_stack.replaceTopPairUnchecked(
                     Value(a.asSignedInt() <= b.asSignedInt()));
                 DISPATCH();
             }
 
             if (a.isUnsignedInt() && b.isUnsignedInt()) {
-                m_stack.replaceTopPair(
+                m_stack.replaceTopPairUnchecked(
                     Value(a.asUnsignedInt() <= b.asUnsignedInt()));
                 DISPATCH();
             }
@@ -2480,63 +2512,63 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
             double rhs = 0.0;
             valueToDouble(a, lhs);
             valueToDouble(b, rhs);
-            m_stack.replaceTopPair(Value(lhs <= rhs));
+            m_stack.replaceTopPairUnchecked(Value(lhs <= rhs));
             DISPATCH();
         }
 
         VM_CASE(IGREATER) {
-            int64_t rhs = requireSignedInt(m_stack.top());
-            int64_t lhs = requireSignedInt(m_stack.second());
-            m_stack.replaceTopPair(Value(lhs > rhs));
+            int64_t rhs = requireSignedInt(m_stack.topUnchecked());
+            int64_t lhs = requireSignedInt(m_stack.secondUnchecked());
+            m_stack.replaceTopPairUnchecked(Value(lhs > rhs));
             DISPATCH();
         }
 
         VM_CASE(ILESS) {
-            int64_t rhs = requireSignedInt(m_stack.top());
-            int64_t lhs = requireSignedInt(m_stack.second());
-            m_stack.replaceTopPair(Value(lhs < rhs));
+            int64_t rhs = requireSignedInt(m_stack.topUnchecked());
+            int64_t lhs = requireSignedInt(m_stack.secondUnchecked());
+            m_stack.replaceTopPairUnchecked(Value(lhs < rhs));
             DISPATCH();
         }
 
         VM_CASE(IGREATER_EQ) {
-            int64_t rhs = requireSignedInt(m_stack.top());
-            int64_t lhs = requireSignedInt(m_stack.second());
-            m_stack.replaceTopPair(Value(lhs >= rhs));
+            int64_t rhs = requireSignedInt(m_stack.topUnchecked());
+            int64_t lhs = requireSignedInt(m_stack.secondUnchecked());
+            m_stack.replaceTopPairUnchecked(Value(lhs >= rhs));
             DISPATCH();
         }
 
         VM_CASE(ILESS_EQ) {
-            int64_t rhs = requireSignedInt(m_stack.top());
-            int64_t lhs = requireSignedInt(m_stack.second());
-            m_stack.replaceTopPair(Value(lhs <= rhs));
+            int64_t rhs = requireSignedInt(m_stack.topUnchecked());
+            int64_t lhs = requireSignedInt(m_stack.secondUnchecked());
+            m_stack.replaceTopPairUnchecked(Value(lhs <= rhs));
             DISPATCH();
         }
 
         VM_CASE(UGREATER) {
-            uint64_t rhs = requireUnsignedInt(m_stack.top());
-            uint64_t lhs = requireUnsignedInt(m_stack.second());
-            m_stack.replaceTopPair(Value(lhs > rhs));
+            uint64_t rhs = requireUnsignedInt(m_stack.topUnchecked());
+            uint64_t lhs = requireUnsignedInt(m_stack.secondUnchecked());
+            m_stack.replaceTopPairUnchecked(Value(lhs > rhs));
             DISPATCH();
         }
 
         VM_CASE(ULESS) {
-            uint64_t rhs = requireUnsignedInt(m_stack.top());
-            uint64_t lhs = requireUnsignedInt(m_stack.second());
-            m_stack.replaceTopPair(Value(lhs < rhs));
+            uint64_t rhs = requireUnsignedInt(m_stack.topUnchecked());
+            uint64_t lhs = requireUnsignedInt(m_stack.secondUnchecked());
+            m_stack.replaceTopPairUnchecked(Value(lhs < rhs));
             DISPATCH();
         }
 
         VM_CASE(UGREATER_EQ) {
-            uint64_t rhs = requireUnsignedInt(m_stack.top());
-            uint64_t lhs = requireUnsignedInt(m_stack.second());
-            m_stack.replaceTopPair(Value(lhs >= rhs));
+            uint64_t rhs = requireUnsignedInt(m_stack.topUnchecked());
+            uint64_t lhs = requireUnsignedInt(m_stack.secondUnchecked());
+            m_stack.replaceTopPairUnchecked(Value(lhs >= rhs));
             DISPATCH();
         }
 
         VM_CASE(ULESS_EQ) {
-            uint64_t rhs = requireUnsignedInt(m_stack.top());
-            uint64_t lhs = requireUnsignedInt(m_stack.second());
-            m_stack.replaceTopPair(Value(lhs <= rhs));
+            uint64_t rhs = requireUnsignedInt(m_stack.topUnchecked());
+            uint64_t lhs = requireUnsignedInt(m_stack.secondUnchecked());
+            m_stack.replaceTopPairUnchecked(Value(lhs <= rhs));
             DISPATCH();
         }
 
@@ -2576,7 +2608,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 return runtimeError("Undefined variable '" + name + "'.");
             }
 
-            it->second = m_stack.peek(0);
+            it->second = m_stack.peekUnchecked(0);
             DISPATCH();
         }
 
@@ -2612,19 +2644,21 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 return runtimeError("Undefined variable '" + name + "'.");
             }
 
-            m_globalValues[slot] = m_stack.peek(0);
+            m_globalValues[slot] = m_stack.peekUnchecked(0);
             DISPATCH();
         }
 
         VM_CASE(GET_LOCAL) {
             uint8_t slot = readByte();
-            m_stack.push(m_stack.getAt(currentFrame().slotBase + slot));
+            m_stack.push(
+                m_stack.getAtUnchecked(currentFrame().slotBase + slot));
             DISPATCH();
         }
 
         VM_CASE(SET_LOCAL) {
             uint8_t slot = readByte();
-            m_stack.setAt(currentFrame().slotBase + slot, m_stack.peek(0));
+            m_stack.setAt(currentFrame().slotBase + slot,
+                          m_stack.peekUnchecked(0));
             DISPATCH();
         }
 
@@ -2634,7 +2668,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
             if (upvalue->isClosed) {
                 m_stack.push(upvalue->closed);
             } else {
-                m_stack.push(m_stack.getAt(upvalue->stackIndex));
+                m_stack.push(m_stack.getAtUnchecked(upvalue->stackIndex));
             }
             DISPATCH();
         }
@@ -2643,9 +2677,9 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
             uint8_t slot = readByte();
             auto upvalue = currentFrame().closure->upvalues[slot];
             if (upvalue->isClosed) {
-                upvalue->closed = m_stack.peek(0);
+                upvalue->closed = m_stack.peekUnchecked(0);
             } else {
-                m_stack.setAt(upvalue->stackIndex, m_stack.peek(0));
+                m_stack.setAt(upvalue->stackIndex, m_stack.peekUnchecked(0));
             }
             DISPATCH();
         }
@@ -2676,7 +2710,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
         VM_CASE(INHERIT) {
             Value superclassValue = m_stack.pop();
-            Value subclassValue = m_stack.peek(0);
+            Value subclassValue = m_stack.peekUnchecked(0);
 
             if (!superclassValue.isClass() || !subclassValue.isClass()) {
                 return runtimeError("Inheritance requires classes.");
@@ -2713,8 +2747,8 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
         VM_CASE(METHOD) {
             const std::string& name = readNameConstant();
-            Value method = m_stack.peek(0);
-            Value klass = m_stack.peek(1);
+            Value method = m_stack.peekUnchecked(0);
+            Value klass = m_stack.peekUnchecked(1);
 
             if (!klass.isClass() || !method.isClosure()) {
                 return runtimeError("Invalid method declaration.");
@@ -2768,7 +2802,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
         VM_CASE(GET_PROPERTY) {
             size_t instructionOffset = currentInstructionOffset();
             const std::string& name = readNameConstant();
-            Value receiver = m_stack.peek(0);
+            Value receiver = m_stack.peekUnchecked(0);
 
             if (receiver.isModule()) {
                 auto module = receiver.asModule();
@@ -2869,11 +2903,10 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
             auto fieldSlotIt = instance->klass->fieldIndexByName.find(name);
             if (fieldSlotIt != instance->klass->fieldIndexByName.end()) {
+                resetPropertyInlineCache(cache);
                 cache.klass = instance->klass;
                 cache.kind = PropertyInlineCacheKind::FIELD;
                 cache.slotIndex = fieldSlotIt->second;
-                cache.method = nullptr;
-                cache.fieldType.reset();
 
                 if (fieldSlotIt->second < instance->fieldSlots.size() &&
                     fieldSlotIt->second <
@@ -2887,19 +2920,14 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
             auto method = findMethodClosure(instance->klass, name);
             if (!method) {
-                cache.klass = nullptr;
-                cache.kind = PropertyInlineCacheKind::EMPTY;
-                cache.slotIndex = 0;
-                cache.method = nullptr;
-                cache.fieldType.reset();
+                resetPropertyInlineCache(cache);
                 return runtimeError("Undefined property '" + name + "'.");
             }
 
+            resetPropertyInlineCache(cache);
             cache.klass = instance->klass;
             cache.kind = PropertyInlineCacheKind::METHOD;
-            cache.slotIndex = 0;
             cache.method = method;
-            cache.fieldType.reset();
 
             auto bound = gcAlloc<BoundMethodObject>();
             bound->receiver = instance;
@@ -2925,8 +2953,8 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
         VM_CASE(SET_PROPERTY) {
             size_t instructionOffset = currentInstructionOffset();
             const std::string& name = readNameConstant();
-            Value value = m_stack.peek(0);
-            Value receiver = m_stack.peek(1);
+            Value value = m_stack.peekUnchecked(0);
+            Value receiver = m_stack.peekUnchecked(1);
             if (!receiver.isInstance()) {
                 return runtimeError("Only instances have fields.");
             }
@@ -2958,11 +2986,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
             auto fieldSlotIt = instance->klass->fieldIndexByName.find(name);
             if (fieldSlotIt == instance->klass->fieldIndexByName.end()) {
-                cache.klass = nullptr;
-                cache.kind = PropertyInlineCacheKind::EMPTY;
-                cache.slotIndex = 0;
-                cache.method = nullptr;
-                cache.fieldType.reset();
+                resetPropertyInlineCache(cache);
                 return runtimeError("Undefined field '" + name +
                                     "' on class '" + instance->klass->name +
                                     "'.");
@@ -2983,10 +3007,10 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                                     "', got '" + valueTypeName(value) + "'.");
             }
 
+            resetPropertyInlineCache(cache);
             cache.klass = instance->klass;
             cache.kind = PropertyInlineCacheKind::FIELD;
             cache.slotIndex = fieldSlotIt->second;
-            cache.method = nullptr;
             cache.fieldType = fieldTypeIt->second;
 
             instance->fieldSlots[fieldSlotIt->second] = value;
@@ -3000,7 +3024,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
         VM_CASE(GET_FIELD_SLOT) {
             uint8_t slot = readByte();
-            Value receiver = m_stack.peek(0);
+            Value receiver = m_stack.peekUnchecked(0);
             if (!receiver.isInstance()) {
                 return runtimeError("Only instances have fields.");
             }
@@ -3023,8 +3047,8 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
         VM_CASE(SET_FIELD_SLOT) {
             uint8_t slot = readByte();
-            Value value = m_stack.peek(0);
-            Value receiver = m_stack.peek(1);
+            Value value = m_stack.peekUnchecked(0);
+            Value receiver = m_stack.peekUnchecked(1);
             if (!receiver.isInstance()) {
                 return runtimeError("Only instances have fields.");
             }
@@ -3068,7 +3092,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
         VM_CASE(CALL) {
             size_t instructionOffset = currentInstructionOffset();
             uint8_t argumentCount = readByte();
-            Value callee = m_stack.peek(argumentCount);
+            Value callee = m_stack.peekUnchecked(argumentCount);
             size_t calleeIndex =
                 m_stack.size() - static_cast<size_t>(argumentCount) - 1;
             auto& cache =
@@ -3306,8 +3330,8 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
         }
 
         VM_CASE(GET_INDEX) {
-            const Value& indexValue = m_stack.top();
-            const Value& container = m_stack.second();
+            const Value& indexValue = m_stack.topUnchecked();
+            const Value& container = m_stack.secondUnchecked();
 
             if (container.isArray()) {
                 size_t index = 0;
@@ -3321,7 +3345,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                     return runtimeError("Array index out of bounds.");
                 }
 
-                m_stack.replaceTopPair(array->elements[index]);
+                m_stack.replaceTopPairUnchecked(array->elements[index]);
                 DISPATCH();
             }
 
@@ -3332,7 +3356,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                     return runtimeError("Dictionary key not found.");
                 }
 
-                m_stack.replaceTopPair(it->second);
+                m_stack.replaceTopPairUnchecked(it->second);
                 DISPATCH();
             }
 
@@ -3344,7 +3368,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                         set->elementType->toString() + "', got '" +
                         valueTypeName(indexValue) + "'.");
                 }
-                m_stack.replaceTopPair(
+                m_stack.replaceTopPairUnchecked(
                     Value(setContainsValue(set, indexValue)));
                 DISPATCH();
             }
@@ -3410,13 +3434,13 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
         }
 
         VM_CASE(DUP) {
-            m_stack.push(m_stack.peek(0));
+            m_stack.push(m_stack.peekUnchecked(0));
             DISPATCH();
         }
 
         VM_CASE(DUP2) {
-            Value second = m_stack.peek(1);
-            Value top = m_stack.peek(0);
+            Value second = m_stack.peekUnchecked(1);
+            Value top = m_stack.peekUnchecked(0);
             m_stack.push(second);
             m_stack.push(top);
             DISPATCH();
@@ -3477,7 +3501,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
         VM_CASE(ITER_HAS_NEXT_JUMP) {
             uint16_t offset = readShort();
-            const Value& iteratorValue = m_stack.top();
+            const Value& iteratorValue = m_stack.topUnchecked();
             if (!iteratorValue.isIterator()) {
                 return runtimeError("Internal error: iterator expected.");
             }
@@ -3549,7 +3573,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
         VM_CASE(ITER_NEXT_SET_LOCAL) {
             uint8_t slot = readByte();
-            const Value& iteratorValue = m_stack.top();
+            const Value& iteratorValue = m_stack.topUnchecked();
             if (!iteratorValue.isIterator()) {
                 return runtimeError("Internal error: iterator expected.");
             }
@@ -3763,7 +3787,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
         VM_CASE(EXPORT_NAME) {
             const std::string& name = readConstant().asString();
             if (m_currentModule != nullptr) {
-                Value value = m_stack.peek(0);
+                Value value = m_stack.peekUnchecked(0);
                 TypeRef declaredType = TypeInfo::makeAny();
                 for (size_t i = 0; i < m_globalNames.size(); ++i) {
                     if (m_globalNames[i] == name) {
@@ -3797,7 +3821,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
         VM_CASE(JUMP_IF_FALSE) {
             uint16_t offset = readShort();
-            Value condition = m_stack.peek(0);
+            Value condition = m_stack.peekUnchecked(0);
             if (isFalsey(condition)) {
                 currentFrame().ip += offset;
             }
@@ -3806,7 +3830,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
         VM_CASE(JUMP_IF_FALSE_POP) {
             uint16_t offset = readShort();
-            bool conditionFalsey = isFalsey(m_stack.top());
+            bool conditionFalsey = isFalsey(m_stack.topUnchecked());
             m_stack.pop();
             if (conditionFalsey) {
                 currentFrame().ip += offset;
@@ -4054,7 +4078,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
         VM_CASE(CHECK_INSTANCE_TYPE) {
             const std::string& expectedClass = readNameConstant();
-            Value value = m_stack.peek(0);
+            Value value = m_stack.peekUnchecked(0);
 
             if (!value.isInstance()) {
                 return runtimeError("Type error: expected instance of '" +

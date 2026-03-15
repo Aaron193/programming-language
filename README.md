@@ -201,6 +201,16 @@ The recommended profiling workflow is Valgrind Callgrind. It gives you
 function-level hotspots and callgraph information without adding manual timing
 logs to the interpreter.
 
+Before profiling, make sure the benchmark is stable enough to represent normal
+runtime work:
+
+```bash
+./benchmarks/compare_benchmarks.sh \
+  --filter 'benchmarks/bench_feature_mix.mog' \
+  --iterations 7 \
+  --warmup 1
+```
+
 Build an optimized binary with debug symbols and frame pointers:
 
 ```bash
@@ -228,13 +238,15 @@ callgrind_annotate --auto=yes build/callgrind/<profile>.out
 
 Recommended profiling targets:
 
+- `benchmarks/bench_feature_mix.mog` as the default general-runtime baseline
 - `benchmarks/bench_fibonacci.mog` for call overhead and dispatch-heavy recursion
 - `benchmarks/bench_sort.mog` and `benchmarks/bench_matrix.mog` for arithmetic and container traffic
-- `benchmarks/bench_feature_mix.mog` for a broader mixed workload
+- `benchmarks/bench_class_member_access.mog` when focusing on property/method dispatch
 
 Notes:
 
 - Callgrind is much slower than native execution. Prefer profiling one benchmark at a time.
+- The profiling script saves raw profiles under `build/callgrind/`.
 - Hotspots in `VirtualMachine::run(...)`, stack push/pop, and `Value` copies are good candidates for further investigation.
 - Linux `perf` is lower overhead, but it only works on machines where perf events are enabled. On such a machine, use:
 
