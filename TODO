@@ -1,0 +1,3 @@
+- add AST layer in compiler to allow for compile time optimizations and transformations (remove dead code, inline functions, constant expressions, etc.)
+- rework import system (@import('')) when it comes to standard library/packages vs user code vs external dependencies (need clear way to distinguish based off import statement)
+- compile time decorators using '@' ???
