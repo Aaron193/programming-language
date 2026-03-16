@@ -3508,8 +3508,9 @@ TypeRef Compiler::emitFunctionLiteral(const TypeRef& expectedType) {
         declaredReturnType = expectedType->returnType;
     }
 
-    CompiledFunction compiled =
-        compileFunction("<closure>", false, declaredReturnType, expectedType);
+    CompiledFunction compiled = compileFunction("<closure>", false,
+                                               declaredReturnType, expectedType,
+                                               true);
 
     emitBytes(OpCode::CLOSURE, makeConstant(Value(compiled.function)));
     for (const auto& upvalue : compiled.upvalues) {
@@ -3524,7 +3525,7 @@ TypeRef Compiler::emitFunctionLiteral(const TypeRef& expectedType) {
 
 Compiler::CompiledFunction Compiler::compileFunction(
     const std::string& name, bool isMethod, const TypeRef& declaredReturnType,
-    const TypeRef& expectedFunctionType) {
+    const TypeRef& expectedFunctionType, bool allowExpressionBody) {
     consume(TokenType::OPEN_PAREN, "Expected '(' after function name.");
 
     Chunk* enclosingChunk = m_chunk;
@@ -3541,6 +3542,8 @@ Compiler::CompiledFunction Compiler::compileFunction(
 
     std::vector<std::string> parameters;
     std::vector<TypeRef> parameterTypes;
+    bool omittedParameterTypeAnnotation = false;
+    Token firstOmittedParameterToken;
     const bool hasExpectedFunctionType =
         expectedFunctionType &&
         expectedFunctionType->kind == TypeKind::FUNCTION;
@@ -3569,6 +3572,10 @@ Compiler::CompiledFunction Compiler::compileFunction(
                             "Parameter '" + parameterName +
                                 "' must have a type annotation.");
                     parameterType = TypeInfo::makeAny();
+                }
+                if (!omittedParameterTypeAnnotation) {
+                    omittedParameterTypeAnnotation = true;
+                    firstOmittedParameterToken = parameterNameToken;
                 }
             } else {
                 parameterType = parseTypeExprType();
@@ -3613,23 +3620,6 @@ Compiler::CompiledFunction Compiler::compileFunction(
     const bool hasDeclaredReturnType =
         declaredReturnType && !declaredReturnType->isAny();
 
-    if (isTypedTypeAnnotationStart()) {
-        TypeRef parsedReturnType = parseTypeExprType();
-        if (!parsedReturnType) {
-            errorAtCurrent("Expected return type after parameter list.");
-        } else {
-            currentContext().returnType = parsedReturnType;
-        }
-    } else if (hasExpectedFunctionType && expectedFunctionType->returnType &&
-               !expectedFunctionType->returnType->isAny()) {
-        currentContext().returnType = expectedFunctionType->returnType;
-    } else if (!isInitializer && !hasDeclaredReturnType) {
-        errorAtCurrent("Function '" + name +
-                       "' must declare a return type.");
-    }
-
-    consume(TokenType::OPEN_CURLY, "Expected '{' before function body.");
-
     for (size_t index = 0; index < parameterTypes.size(); ++index) {
         const TypeRef& parameterType = parameterTypes[index];
         if (!parameterType || parameterType->kind != TypeKind::CLASS) {
@@ -3641,14 +3631,75 @@ Compiler::CompiledFunction Compiler::compileFunction(
         emitByte(OpCode::POP);
     }
 
-    while (m_parser->current.type() != TokenType::CLOSE_CURLY &&
-           m_parser->current.type() != TokenType::END_OF_FILE) {
-        declaration();
-    }
-    consume(TokenType::CLOSE_CURLY, "Expected '}' after function body.");
+    if (allowExpressionBody && m_parser->current.type() == TokenType::FAT_ARROW) {
+        if (hasLineBreakBeforeCurrent()) {
+            errorAtCurrent(lineLeadingContinuationMessage(m_parser->current.type()));
+        }
+        if (omittedParameterTypeAnnotation) {
+            errorAt(firstOmittedParameterToken,
+                    "Expression-bodied lambdas require explicit parameter types.");
+        }
 
-    emitByte(OpCode::NIL);
-    emitByte(OpCode::RETURN);
+        advance();
+        if (m_parser->current.type() == TokenType::OPEN_CURLY) {
+            errorAtCurrent(
+                "Expression-bodied lambdas do not support block bodies; use "
+                "'fn(...) { ... }'.");
+
+            advance();
+            while (m_parser->current.type() != TokenType::CLOSE_CURLY &&
+                   m_parser->current.type() != TokenType::END_OF_FILE) {
+                declaration();
+            }
+            consume(TokenType::CLOSE_CURLY,
+                    "Expected '}' after lambda block body.");
+
+            currentContext().returnType = TypeInfo::makeAny();
+            emitByte(OpCode::NIL);
+            emitByte(OpCode::RETURN);
+        } else {
+            expression();
+            recoverLineLeadingContinuation({TokenType::COMMA,
+                                            TokenType::CLOSE_PAREN,
+                                            TokenType::CLOSE_BRACKET,
+                                            TokenType::CLOSE_CURLY});
+            rejectUnexpectedTrailingToken({TokenType::COMMA,
+                                           TokenType::CLOSE_PAREN,
+                                           TokenType::CLOSE_BRACKET,
+                                           TokenType::CLOSE_CURLY});
+
+            TypeRef bodyType = popExprType();
+            currentContext().returnType =
+                bodyType ? bodyType : TypeInfo::makeAny();
+            emitByte(OpCode::RETURN);
+        }
+    } else {
+        if (isTypedTypeAnnotationStart()) {
+            TypeRef parsedReturnType = parseTypeExprType();
+            if (!parsedReturnType) {
+                errorAtCurrent("Expected return type after parameter list.");
+            } else {
+                currentContext().returnType = parsedReturnType;
+            }
+        } else if (hasExpectedFunctionType && expectedFunctionType->returnType &&
+                   !expectedFunctionType->returnType->isAny()) {
+            currentContext().returnType = expectedFunctionType->returnType;
+        } else if (!isInitializer && !hasDeclaredReturnType) {
+            errorAtCurrent("Function '" + name +
+                           "' must declare a return type.");
+        }
+
+        consume(TokenType::OPEN_CURLY, "Expected '{' before function body.");
+
+        while (m_parser->current.type() != TokenType::CLOSE_CURLY &&
+               m_parser->current.type() != TokenType::END_OF_FILE) {
+            declaration();
+        }
+        consume(TokenType::CLOSE_CURLY, "Expected '}' after function body.");
+
+        emitByte(OpCode::NIL);
+        emitByte(OpCode::RETURN);
+    }
 
     FunctionContext functionContext = std::move(currentContext());
     m_contexts.pop_back();

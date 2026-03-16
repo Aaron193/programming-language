@@ -82,6 +82,7 @@ run_expect_output "$NEWLINE_DIR/sample_newline_call_suffix.mog" "3" || failed=1
 run_expect_output "$NEWLINE_DIR/sample_newline_index_suffix.mog" "2" || failed=1
 run_expect_output "$NEWLINE_DIR/sample_newline_member_suffix.mog" "7" || failed=1
 run_expect_output "$NEWLINE_DIR/sample_newline_operator_rhs.mog" "3" || failed=1
+run_expect_output "$NEWLINE_DIR/sample_newline_lambda_body.mog" "42" || failed=1
 run_expect_output "$NEWLINE_DIR/sample_newline_prefix_statement.mog" $'2\n3' || failed=1
 run_expect_output "$NEWLINE_DIR/sample_newline_print_grouped_arg.mog" "3" || failed=1
 
@@ -90,7 +91,8 @@ for file in \
     "$NEWLINE_DIR/fail_newline_index_break.mog" \
     "$NEWLINE_DIR/fail_newline_member_break.mog" \
     "$NEWLINE_DIR/fail_newline_operator_break.mog" \
-    "$NEWLINE_DIR/fail_newline_cast_break.mog"
+    "$NEWLINE_DIR/fail_newline_cast_break.mog" \
+    "$NEWLINE_DIR/fail_newline_lambda_arrow_break.mog"
 do
     case "$(basename "$file")" in
         fail_newline_call_break.mog)
@@ -107,6 +109,9 @@ do
             ;;
         fail_newline_cast_break.mog)
             expected="Continuation token 'as' must stay on the previous line."
+            ;;
+        fail_newline_lambda_arrow_break.mog)
+            expected="Continuation token '=>' must stay on the previous line."
             ;;
     esac
 

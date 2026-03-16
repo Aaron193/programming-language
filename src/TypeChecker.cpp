@@ -2029,6 +2029,8 @@ class CheckerImpl {
 
         std::vector<std::pair<std::string, TypeRef>> params;
         std::vector<TypeRef> paramTypes;
+        bool omittedParameterTypeAnnotation = false;
+        Token firstOmittedParameterToken;
 
         if (!check(TokenType::CLOSE_PAREN)) {
             do {
@@ -2049,6 +2051,10 @@ class CheckerImpl {
                                  "Type error: parameter '" + paramName +
                                      "' must have a type annotation.");
                         paramType = TypeInfo::makeAny();
+                    }
+                    if (!omittedParameterTypeAnnotation) {
+                        omittedParameterTypeAnnotation = true;
+                        firstOmittedParameterToken = m_previous;
                     }
                 } else {
                     paramType = parseTypeExprType();
@@ -2081,6 +2087,71 @@ class CheckerImpl {
         }
 
         consume(TokenType::CLOSE_PAREN, "Expected ')' after parameters.");
+
+        if (check(TokenType::FAT_ARROW)) {
+            if (hasLineBreakBeforeCurrent()) {
+                addError(m_current.line(),
+                         lineLeadingContinuationMessage(m_current.type()));
+            }
+            if (omittedParameterTypeAnnotation) {
+                addError(firstOmittedParameterToken.line(),
+                         "Type error: expression-bodied lambdas require "
+                         "explicit parameter types.");
+            }
+
+            advance();
+            if (check(TokenType::OPEN_CURLY)) {
+                addError(m_current.line(),
+                         "Type error: expression-bodied lambdas do not support "
+                         "block bodies; use 'fn(...) { ... }'.");
+
+                advance();
+                m_functionContexts.push_back(FunctionCtx{TypeInfo::makeAny()});
+                beginScope();
+                for (const auto& param : params) {
+                    defineSymbol(param.first,
+                                 param.second ? param.second
+                                              : TypeInfo::makeAny());
+                }
+
+                while (!check(TokenType::CLOSE_CURLY) &&
+                       !check(TokenType::END_OF_FILE)) {
+                    declaration();
+                }
+
+                consume(TokenType::CLOSE_CURLY,
+                        "Expected '}' after lambda block body.");
+                endScope();
+                m_functionContexts.pop_back();
+
+                return ExprInfo{
+                    TypeInfo::makeFunction(paramTypes, TypeInfo::makeAny()),
+                    false, false, "", m_previous.line()};
+            }
+
+            m_functionContexts.push_back(FunctionCtx{TypeInfo::makeAny()});
+            beginScope();
+            for (const auto& param : params) {
+                defineSymbol(param.first,
+                             param.second ? param.second : TypeInfo::makeAny());
+            }
+
+            ExprInfo body = parseExpression();
+            recoverLineLeadingContinuation({TokenType::COMMA,
+                                            TokenType::CLOSE_PAREN,
+                                            TokenType::CLOSE_BRACKET,
+                                            TokenType::CLOSE_CURLY});
+            rejectUnexpectedTrailingToken({TokenType::COMMA,
+                                           TokenType::CLOSE_PAREN,
+                                           TokenType::CLOSE_BRACKET,
+                                           TokenType::CLOSE_CURLY});
+
+            endScope();
+            m_functionContexts.pop_back();
+
+            return ExprInfo{TypeInfo::makeFunction(paramTypes, body.type), false,
+                            false, "", body.line};
+        }
 
         TypeRef returnType = TypeInfo::makeAny();
         bool hasExplicitReturnType = false;

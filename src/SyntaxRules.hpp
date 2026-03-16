@@ -54,6 +54,7 @@ inline bool isLineContinuationToken(TokenType type) {
         case TokenType::SHIFT_LEFT_TOKEN:
         case TokenType::SHIFT_RIGHT_TOKEN:
         case TokenType::EQUAL:
+        case TokenType::FAT_ARROW:
         case TokenType::PLUS_EQUAL:
         case TokenType::MINUS_EQUAL:
         case TokenType::STAR_EQUAL:
@@ -115,6 +116,8 @@ inline std::string_view continuationTokenText(TokenType type) {
             return ">>";
         case TokenType::EQUAL:
             return "=";
+        case TokenType::FAT_ARROW:
+            return "=>";
         case TokenType::PLUS_EQUAL:
             return "+=";
         case TokenType::MINUS_EQUAL:

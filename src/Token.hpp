@@ -44,6 +44,7 @@ enum TokenType {
     DOT,
     QUESTION,
     EQUAL,
+    FAT_ARROW,
     EQUAL_EQUAL,
     LOGICAL_AND,
     LOGICAL_OR,

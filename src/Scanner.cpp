@@ -124,6 +124,7 @@ Token Scanner::nextToken() {
         case '@':
             return createToken(TokenType::AT);
         case '=':
+            if (match('>')) return createToken(TokenType::FAT_ARROW);
             return match('=') ? createToken(TokenType::EQUAL_EQUAL)
                               : createToken(TokenType::EQUAL);
         case '!':

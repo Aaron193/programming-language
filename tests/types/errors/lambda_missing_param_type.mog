@@ -1,0 +1,1 @@
+var addOne fn(i32) i32 = fn(x) => x + 1

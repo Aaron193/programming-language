@@ -12,7 +12,7 @@ This project is a bytecode-compiled, stack-based interpreter implemented in C++.
 - Variables: `var name Type = value`, `const name Type = value`, `const name = @import(...)`, assignment, compound assignment (`+=`, `-=`, `*=`, `/=`, `&=`, `|=`, `^=`, `<<=`, `>>=`), lexical scope
 - Update operators: `++`, `--`
 - Control flow: `if`/`else`, `while`, `for`, foreach (`for (var x Type : collection)`)
-- Functions: `fn name(param Type, ...) ReturnType { ... }`, function literals, recursion
+- Functions: `fn name(param Type, ...) ReturnType { ... }`, block function literals, expression-bodied lambdas, recursion
 - Closures: nested functions with captured/upvalue variables
 - Types: `type Name struct { ... }`, aliases via `type Alias ExistingType`, fields/methods, `this`
 - Inheritance: `type Child struct < Parent { ... }` with `super.method()` calls
@@ -33,6 +33,9 @@ Notes:
 Examples:
 
 ```expr
+var addOne fn(i32) i32 = fn(x i32) => x + 1
+print(addOne(41))
+
 print(add(
   1,
   2

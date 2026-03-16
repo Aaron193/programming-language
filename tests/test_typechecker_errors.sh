@@ -126,6 +126,18 @@ run_expect_compile_error \
     "cannot assign to const variable 'value'." || failed=1
 
 run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/lambda_missing_param_type.mog" \
+    "expression-bodied lambdas require explicit parameter types." || failed=1
+
+run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/lambda_return_type_mismatch.mog" \
+    "cannot assign 'function(i32) -> str' to variable 'bad' of type 'function(i32) -> i32'" || failed=1
+
+run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/lambda_block_body.mog" \
+    "expression-bodied lambdas do not support block bodies" || failed=1
+
+run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/assign_handle_foreign_type.mog" \
     "cannot assign 'handle<examples:counter:CounterHandle>' to variable 'bad' of type 'handle<examples:math:CounterHandle>'" || failed=1
 

@@ -1,0 +1,5 @@
+var addOne fn(i32) i32 =
+  fn(x i32)
+  => x + 1
+
+print(addOne(41))

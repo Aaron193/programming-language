@@ -259,7 +259,8 @@ class Compiler {
     CompiledFunction compileFunction(
         const std::string& name, bool isMethod = false,
         const TypeRef& declaredReturnType = TypeInfo::makeAny(),
-        const TypeRef& expectedFunctionType = nullptr);
+        const TypeRef& expectedFunctionType = nullptr,
+        bool allowExpressionBody = false);
 
    public:
     Compiler() = default;

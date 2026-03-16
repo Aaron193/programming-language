@@ -1,0 +1,13 @@
+fn applyTwice(f fn(i32) i32, value i32) i32 {
+  return f(f(value))
+}
+
+var addOne fn(i32) i32 = fn(x i32) => x + 1
+
+var makeAdder fn(i32, i32) fn(i32) i32 =
+  fn(x i32, y i32) => fn(a i32) => a + x + y
+
+print(addOne(41))
+print(makeAdder(10, 20)(3))
+print(applyTwice(fn(v i32) => v * 2, 3))
+print((fn(n i32) => n - 1)(9))
