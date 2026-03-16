@@ -32,34 +32,52 @@ Notes:
 
 Examples:
 
+Functions and lambdas:
+
 ```expr
+fn applyTwice(f fn(i32) i32, value i32) i32 {
+  return f(f(value))
+}
+
 var addOne fn(i32) i32 = fn(x i32) => x + 1
-print(addOne(41))
-
-print(add(
-  1,
-  2
-))
-
-print(box.
-get())
-
-print(1 +
-2)
+print(applyTwice(addOne, 40))
 ```
 
-These forms are rejected because the continuation token moved to the next line:
+Closures:
 
 ```expr
-print(value
-(1))
+fn makeAdder(x i32) fn(i32) i32 {
+  return fn(y i32) => x + y
+}
 
-print(value
-.field)
-
-print(1
-+ 2)
+var addTen fn(i32) i32 = makeAdder(10)
+print(addTen(32))
 ```
+
+Types and fields:
+
+```expr
+type Bag struct {
+  value i32
+  label str
+}
+
+var bag Bag = Bag()
+bag.value = 42
+bag.label = "snacks"
+print(bag.label)
+```
+
+Collections:
+
+```expr
+var scores Dict<str, i32> = {"alice": 7, "bob": 9}
+scores["alice"] = scores["alice"] + 1
+print(scores.get("alice"))
+print(scores.has("bob"))
+```
+
+Syntax note: continuation tokens such as `(`, `[`, `.`, `as`, assignment operators, and binary operators must stay on the same line as the expression they continue. For example, `print(1 +` on one line and `2)` on the next is valid, but moving `+` to the next line is rejected.
 
 ## Runtime / Engine Features
 
