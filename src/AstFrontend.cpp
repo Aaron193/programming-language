@@ -6,6 +6,57 @@
 #include "AstParser.hpp"
 #include "AstSymbolCollector.hpp"
 
+namespace {
+
+void appendParserErrors(const AstParser& parser,
+                        std::vector<TypeError>& outErrors) {
+    outErrors.clear();
+    for (const auto& error : parser.errors()) {
+        outErrors.push_back(TypeError{error.line, error.message});
+    }
+}
+
+void analyzeFrontendSemantics(const AstFrontendResult& frontend,
+                              std::vector<TypeError>& outErrors,
+                              AstSemanticModel* outModel) {
+    analyzeAstSemantics(frontend.module, frontend.classNames,
+                        frontend.typeAliases, frontend.functionSignatures,
+                        outErrors, outModel);
+}
+
+AstFrontendBuildStatus runSemanticPhases(AstFrontendResult& frontend,
+                                         std::vector<TypeError>& outErrors) {
+    if (frontend.mode == AstFrontendMode::StrictChecked) {
+        analyzeFrontendSemantics(frontend, outErrors, &frontend.semanticModel);
+        if (!outErrors.empty()) {
+            return AstFrontendBuildStatus::SemanticError;
+        }
+    } else {
+        std::vector<TypeError> ignoredErrors;
+        analyzeFrontendSemantics(frontend, ignoredErrors, &frontend.semanticModel);
+    }
+
+    // The optimizer may read this semantic model while rewriting, but the
+    // model becomes stale as soon as the AST mutates.
+    optimizeAst(frontend.module, frontend.semanticModel);
+
+    // The refreshed model below is the only semantic state lowering is allowed
+    // to consume. No frontend code should rely on pre-optimization metadata
+    // after the AST has been rewritten.
+    frontend.semanticModel = AstSemanticModel{};
+    outErrors.clear();
+    analyzeFrontendSemantics(frontend, outErrors, &frontend.semanticModel);
+
+    if (frontend.mode == AstFrontendMode::StrictChecked && !outErrors.empty()) {
+        return AstFrontendBuildStatus::SemanticError;
+    }
+
+    outErrors.clear();
+    return AstFrontendBuildStatus::Success;
+}
+
+}  // namespace
+
 AstFrontendBuildStatus buildAstFrontend(std::string_view source,
                                         AstFrontendMode mode,
                                         std::vector<TypeError>& outErrors,
@@ -13,10 +64,7 @@ AstFrontendBuildStatus buildAstFrontend(std::string_view source,
     AstModule module;
     AstParser parser(source);
     if (!parser.parseModule(module)) {
-        outErrors.clear();
-        for (const auto& error : parser.errors()) {
-            outErrors.push_back(TypeError{error.line, error.message});
-        }
+        appendParserErrors(parser, outErrors);
         return AstFrontendBuildStatus::ParseFailed;
     }
 
@@ -28,39 +76,5 @@ AstFrontendBuildStatus buildAstFrontend(std::string_view source,
     collectSymbolsFromAst(outFrontend.module, outFrontend.classNames,
                           outFrontend.functionSignatures,
                           &outFrontend.typeAliases);
-
-    if (mode == AstFrontendMode::StrictChecked) {
-        analyzeAstSemantics(outFrontend.module, outFrontend.classNames,
-                            outFrontend.typeAliases,
-                            outFrontend.functionSignatures, outErrors,
-                            &outFrontend.semanticModel);
-        if (!outErrors.empty()) {
-            return AstFrontendBuildStatus::SemanticError;
-        }
-
-        optimizeAst(outFrontend.module, outFrontend.semanticModel);
-        outFrontend.semanticModel = AstSemanticModel{};
-        outErrors.clear();
-        analyzeAstSemantics(outFrontend.module, outFrontend.classNames,
-                            outFrontend.typeAliases,
-                            outFrontend.functionSignatures, outErrors,
-                            &outFrontend.semanticModel);
-        return outErrors.empty() ? AstFrontendBuildStatus::Success
-                                 : AstFrontendBuildStatus::SemanticError;
-    }
-
-    std::vector<TypeError> ignoredErrors;
-    analyzeAstSemantics(outFrontend.module, outFrontend.classNames,
-                        outFrontend.typeAliases,
-                        outFrontend.functionSignatures, ignoredErrors,
-                        &outFrontend.semanticModel);
-    optimizeAst(outFrontend.module, outFrontend.semanticModel);
-    outFrontend.semanticModel = AstSemanticModel{};
-    ignoredErrors.clear();
-    analyzeAstSemantics(outFrontend.module, outFrontend.classNames,
-                        outFrontend.typeAliases,
-                        outFrontend.functionSignatures, ignoredErrors,
-                        &outFrontend.semanticModel);
-    outErrors.clear();
-    return AstFrontendBuildStatus::Success;
+    return runSemanticPhases(outFrontend, outErrors);
 }

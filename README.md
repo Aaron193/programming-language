@@ -137,6 +137,7 @@ Run expression samples:
 Run additional suites:
 
 ```bash
+./tests/test_ast_frontend.sh
 ./tests/test_native_errors.sh
 ./tests/test_compile_recovery.sh
 ./tests/test_runtime_stacktrace.sh

@@ -1,0 +1,5 @@
+#!strict
+const { Answer, Get } = @import("./modules/frontend_identity_module.mog")
+
+print(Get())
+print(Answer)

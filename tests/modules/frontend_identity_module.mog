@@ -1,0 +1,6 @@
+#!strict
+fn Get() i32 {
+    return 21i32 + 21i32
+}
+
+const Answer i32 = 40i32 + 2i32
