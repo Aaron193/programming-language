@@ -15,6 +15,9 @@ using AstNodeId = size_t;
 struct AstNodeInfo {
     AstNodeId id = 0;
     size_t line = 0;
+    SourceSpan span;
+
+    size_t column() const { return span.column(); }
 };
 
 enum class AstTypeKind {

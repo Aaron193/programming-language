@@ -35,6 +35,12 @@ run_expect_compile_error() {
         return 1
     fi
 
+    if ! grep -Eq "\\[error\\]\\[compile\\]\\[line [0-9]+:[0-9]+\\]" <<< "$output"; then
+        echo "[FAIL] Expected source line:column diagnostic prefix: $file"
+        echo "$output"
+        return 1
+    fi
+
     echo "[PASS] $file"
     return 0
 }

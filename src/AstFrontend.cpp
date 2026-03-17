@@ -12,7 +12,7 @@ void appendParserErrors(const AstParser& parser,
                         std::vector<TypeError>& outErrors) {
     outErrors.clear();
     for (const auto& error : parser.errors()) {
-        outErrors.push_back(TypeError{error.line, error.message});
+        outErrors.push_back(TypeError{error.span, error.message});
     }
 }
 
@@ -72,6 +72,16 @@ AstFrontendBuildStatus buildAstFrontend(std::string_view source,
     outFrontend.mode = mode;
     outFrontend.terminalLine =
         1 + static_cast<size_t>(std::count(source.begin(), source.end(), '\n'));
+    size_t terminalColumn = 1;
+    if (!source.empty() && source.back() != '\n') {
+        const size_t lastNewline = source.find_last_of('\n');
+        terminalColumn =
+            (lastNewline == std::string_view::npos)
+                ? source.size() + 1
+                : source.size() - lastNewline;
+    }
+    outFrontend.terminalPosition =
+        makeSourcePosition(source.size(), outFrontend.terminalLine, terminalColumn);
     outFrontend.module = std::move(module);
     collectSymbolsFromAst(outFrontend.module, outFrontend.classNames,
                           outFrontend.functionSignatures,

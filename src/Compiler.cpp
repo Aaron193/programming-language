@@ -53,24 +53,29 @@ bool validateNativePackageImport(const ImportTarget& importTarget,
     return true;
 }
 
+void printDiagnosticPrefix(const SourceSpan& span) {
+    std::cerr << "[error][compile][line " << span.line() << ":" << span.column()
+              << "] ";
+}
+
 bool reportAstFrontendFailure(AstFrontendBuildStatus status,
                               const std::vector<TypeError>& errors,
                               CompilerEmitterMode emitterMode) {
     if (status == AstFrontendBuildStatus::SemanticError) {
         for (const auto& error : errors) {
-            std::cerr << "[error][compile][line " << error.line << "] "
-                      << error.message << std::endl;
+            printDiagnosticPrefix(error.span);
+            std::cerr << error.message << std::endl;
         }
         return true;
     }
 
     if (status == AstFrontendBuildStatus::ParseFailed) {
         for (const auto& error : errors) {
-            std::cerr << "[error][compile][line " << error.line << "] "
-                      << error.message << std::endl;
+            printDiagnosticPrefix(error.span);
+            std::cerr << error.message << std::endl;
         }
-        std::cerr << "[error][compile][line 1] AST frontend failed to parse "
-                     "source";
+        printDiagnosticPrefix(makePointSpan(1, 1));
+        std::cerr << "AST frontend failed to parse source";
         if (emitterMode == CompilerEmitterMode::ForceAst) {
             std::cerr << " for forced AST emission";
         }
@@ -622,7 +627,7 @@ void Compiler::errorAt(const Token& token, const std::string& message) {
     m_panicMode = true;
     m_hadError = true;
 
-    std::cerr << "[error][compile][line " << token.line() << "]";
+    printDiagnosticPrefix(token.span());
     if (token.type() == TokenType::END_OF_FILE) {
         std::cerr << " at end";
     } else if (token.type() != TokenType::ERROR) {
@@ -640,6 +645,6 @@ void Compiler::errorAtLine(size_t line, const std::string& message) {
 
     m_panicMode = true;
     m_hadError = true;
-    std::cerr << "[error][compile][line " << line << "] " << message
-              << std::endl;
+    printDiagnosticPrefix(makePointSpan(line, 1));
+    std::cerr << message << std::endl;
 }

@@ -8,6 +8,7 @@
 
 #include "Ast.hpp"
 #include "AstSemanticAnalyzer.hpp"
+#include "SourceLocation.hpp"
 #include "TypeChecker.hpp"
 
 enum class AstFrontendMode {
@@ -29,6 +30,7 @@ struct AstFrontendResult {
     AstSemanticModel semanticModel;
     AstFrontendMode mode = AstFrontendMode::StrictChecked;
     size_t terminalLine = 1;
+    SourcePosition terminalPosition = makeSourcePosition(0, 1, 1);
 };
 
 AstFrontendBuildStatus buildAstFrontend(std::string_view source,

@@ -179,6 +179,23 @@ bool compileFileCanonical(const std::filesystem::path& path,
     return true;
 }
 
+bool compileSourceCanonical(std::string_view source, bool strictMode,
+                            CompilerEmitterMode emitterMode, GC& gc,
+                            Chunk& chunk, std::string& outDisassembly) {
+    Compiler compiler;
+    compiler.setGC(&gc);
+    compiler.setPackageSearchPaths(
+        {std::filesystem::current_path().append("build/packages").string()});
+    compiler.setEmitterMode(emitterMode);
+    compiler.setStrictMode(strictMode);
+    if (!compiler.compile(source, chunk, "<frontend-inline>")) {
+        return false;
+    }
+
+    outDisassembly = captureChunkDisassembly(chunk);
+    return true;
+}
+
 bool checkSemanticRefreshContract() {
     constexpr std::string_view kSource =
         "var value i32 = 41\n"
@@ -223,8 +240,12 @@ bool checkSemanticRefreshContract() {
     }
 
     if (!require(foldedLine == pipeline.preFoldedExprLine &&
-                     literal->token.line() == pipeline.preFoldedExprLine,
-                 "synthetic literal should keep the replaced expression line")) {
+                     literal->token.line() == pipeline.preFoldedExprLine &&
+                     literal->token.span().start.offset ==
+                         foldedExpr->node.span.start.offset &&
+                     literal->token.span().end.offset ==
+                         foldedExpr->node.span.end.offset,
+                 "synthetic literal should keep the replaced expression span")) {
         return false;
     }
 
@@ -262,6 +283,60 @@ bool checkSemanticRefreshContract() {
     return true;
 }
 
+bool checkParserDiagnosticSpans() {
+    constexpr std::string_view kSource =
+        "print(\n"
+        "  1\n"
+        "  + 2)\n";
+
+    AstParser parser(kSource);
+    AstModule module;
+    if (!require(!parser.parseModule(module),
+                 "indented trailing-comma source should fail to parse")) {
+        return false;
+    }
+
+    if (!require(!parser.errors().empty(),
+                 "parser should report an error for the indented trailing-comma sample")) {
+        return false;
+    }
+
+    const auto& error = parser.errors().front();
+    if (!require(error.line == 3 && error.column == 3,
+                 "parser diagnostic should point at the indented continuation token column")) {
+        return false;
+    }
+
+    std::cout << "[PASS] parser diagnostic spans\n";
+    return true;
+}
+
+bool checkSemanticDiagnosticSpans() {
+    constexpr std::string_view kSource = "    var age i32 = \"str\"\n";
+
+    AstFrontendResult frontend;
+    std::vector<TypeError> errors;
+    const AstFrontendBuildStatus status = buildAstFrontend(
+        kSource, AstFrontendMode::StrictChecked, errors, frontend);
+    if (!require(status == AstFrontendBuildStatus::SemanticError,
+                 "indented strict semantic sample should fail semantic analysis")) {
+        return false;
+    }
+
+    if (!require(errors.size() == 1,
+                 "semantic diagnostic span sample should report one error")) {
+        return false;
+    }
+
+    if (!require(errors.front().line == 1 && errors.front().column == 9,
+                 "semantic diagnostic should point at the variable identifier column")) {
+        return false;
+    }
+
+    std::cout << "[PASS] semantic diagnostic spans\n";
+    return true;
+}
+
 bool checkImportedModuleRegression(const std::filesystem::path& repoRoot) {
     const auto path = repoRoot / "tests/sample_import_frontend_identity.mog";
 
@@ -294,19 +369,47 @@ bool checkImportedModuleRegression(const std::filesystem::path& repoRoot) {
 
 bool checkNewlineOptimizationRegression(const std::filesystem::path& repoRoot) {
     const auto path = repoRoot / "tests/newline/sample_newline_operator_rhs.mog";
-
-    GC gc;
-    Chunk chunk;
-    std::string disassembly;
-    if (!require(compileFileCanonical(path, CompilerEmitterMode::ForceAst, gc,
-                                      chunk, disassembly),
-                 "newline-sensitive optimization sample should compile")) {
+    const std::string source = readFile(path);
+    if (!require(!source.empty(),
+                 "newline-sensitive optimization sample should be readable")) {
         return false;
     }
 
-    if (!require(disassembly.find("IADD") == std::string::npos &&
-                     disassembly.find("ADD") == std::string::npos,
-                 "newline-sensitive optimized sample should not emit addition opcodes")) {
+    GC autoGc;
+    Chunk autoChunk;
+    std::string autoDisassembly;
+    if (!require(compileFileCanonical(path, CompilerEmitterMode::Auto, autoGc,
+                                      autoChunk, autoDisassembly),
+                 "newline-sensitive optimization sample should compile in auto mode")) {
+        return false;
+    }
+
+    GC forcedGc;
+    Chunk forcedChunk;
+    std::string forcedDisassembly;
+    if (!require(compileFileCanonical(path, CompilerEmitterMode::ForceAst,
+                                      forcedGc, forcedChunk, forcedDisassembly),
+                 "newline-sensitive optimization sample should compile in forced AST mode")) {
+        return false;
+    }
+
+    if (!require(autoDisassembly == forcedDisassembly,
+                 "newline-sensitive sample should lower identically in auto and forced AST modes")) {
+        return false;
+    }
+
+    GC strictGc;
+    Chunk strictChunk;
+    std::string strictDisassembly;
+    if (!require(compileSourceCanonical(source, true, CompilerEmitterMode::ForceAst,
+                                        strictGc, strictChunk, strictDisassembly),
+                 "newline-sensitive optimization sample should compile in strict forced AST mode")) {
+        return false;
+    }
+
+    if (!require(strictDisassembly.find("IADD") == std::string::npos &&
+                     strictDisassembly.find("ADD") == std::string::npos,
+                 "strict newline-sensitive optimized sample should not emit addition opcodes")) {
         return false;
     }
 
@@ -320,6 +423,12 @@ int main() {
     const std::filesystem::path repoRoot = std::filesystem::current_path();
 
     if (!checkSemanticRefreshContract()) {
+        return 1;
+    }
+    if (!checkParserDiagnosticSpans()) {
+        return 1;
+    }
+    if (!checkSemanticDiagnosticSpans()) {
         return 1;
     }
     if (!checkImportedModuleRegression(repoRoot)) {

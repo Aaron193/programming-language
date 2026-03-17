@@ -22,7 +22,7 @@ bool TypeChecker::check(
     out.clear();
     if (!parser.parseModule(module)) {
         for (const auto& error : parser.errors()) {
-            out.push_back(TypeError{error.line, error.message});
+            out.push_back(TypeError{error.span, error.message});
         }
         if (outMetadata) {
             *outMetadata = TypeCheckerMetadata{};

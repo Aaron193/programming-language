@@ -104,8 +104,12 @@ class AstSemanticAnalyzerImpl {
         return std::string(token.start(), token.length());
     }
 
+    void addError(const SourceSpan& span, const std::string& message) {
+        m_errors.push_back(TypeError{span, message});
+    }
+
     void addError(size_t line, const std::string& message) {
-        m_errors.push_back(TypeError{line, message});
+        addError(makePointSpan(line, 1), message);
     }
 
     void recordNodeType(const AstNodeInfo& node, const TypeRef& type) {
@@ -343,7 +347,7 @@ class AstSemanticAnalyzerImpl {
         }
 
         if (core.empty()) {
-            addError(token.line(),
+            addError(token.span(),
                      "Type error: invalid numeric literal '" + literal + "'.");
             return TypeInfo::makeAny();
         }
@@ -359,7 +363,7 @@ class AstSemanticAnalyzerImpl {
         }
 
         if (floatLiteral && unsignedLiteral) {
-            addError(token.line(), "Type error: invalid numeric literal '" +
+            addError(token.span(), "Type error: invalid numeric literal '" +
                                        literal + "'.");
             return TypeInfo::makeAny();
         }
@@ -379,7 +383,7 @@ class AstSemanticAnalyzerImpl {
                 switch (inferredType->kind) {
                     case TypeKind::U8:
                         if (!checkRange(std::numeric_limits<uint8_t>::max())) {
-                            addError(token.line(),
+                            addError(token.span(),
                                      "Type error: integer literal '" + literal +
                                          "' is out of range for type '" +
                                          inferredType->toString() + "'.");
@@ -388,7 +392,7 @@ class AstSemanticAnalyzerImpl {
                         break;
                     case TypeKind::U16:
                         if (!checkRange(std::numeric_limits<uint16_t>::max())) {
-                            addError(token.line(),
+                            addError(token.span(),
                                      "Type error: integer literal '" + literal +
                                          "' is out of range for type '" +
                                          inferredType->toString() + "'.");
@@ -397,7 +401,7 @@ class AstSemanticAnalyzerImpl {
                         break;
                     case TypeKind::U32:
                         if (!checkRange(std::numeric_limits<uint32_t>::max())) {
-                            addError(token.line(),
+                            addError(token.span(),
                                      "Type error: integer literal '" + literal +
                                          "' is out of range for type '" +
                                          inferredType->toString() + "'.");
@@ -420,7 +424,7 @@ class AstSemanticAnalyzerImpl {
                 case TypeKind::I8:
                     if (!checkRange(std::numeric_limits<int8_t>::min(),
                                     std::numeric_limits<int8_t>::max())) {
-                        addError(token.line(),
+                        addError(token.span(),
                                  "Type error: integer literal '" + literal +
                                      "' is out of range for type '" +
                                      inferredType->toString() + "'.");
@@ -430,7 +434,7 @@ class AstSemanticAnalyzerImpl {
                 case TypeKind::I16:
                     if (!checkRange(std::numeric_limits<int16_t>::min(),
                                     std::numeric_limits<int16_t>::max())) {
-                        addError(token.line(),
+                        addError(token.span(),
                                  "Type error: integer literal '" + literal +
                                      "' is out of range for type '" +
                                      inferredType->toString() + "'.");
@@ -440,7 +444,7 @@ class AstSemanticAnalyzerImpl {
                 case TypeKind::I32:
                     if (!checkRange(std::numeric_limits<int32_t>::min(),
                                     std::numeric_limits<int32_t>::max())) {
-                        addError(token.line(),
+                        addError(token.span(),
                                  "Type error: integer literal '" + literal +
                                      "' is out of range for type '" +
                                      inferredType->toString() + "'.");
@@ -453,7 +457,7 @@ class AstSemanticAnalyzerImpl {
 
             return inferredType;
         } catch (...) {
-            addError(token.line(),
+            addError(token.span(),
                      "Type error: invalid numeric literal '" + literal + "'.");
             return TypeInfo::makeAny();
         }
@@ -531,7 +535,7 @@ class AstSemanticAnalyzerImpl {
                         return nullptr;
                     }
                     if (resolved->isVoid()) {
-                        addError(typeExpr.node.line,
+                        addError(typeExpr.node.span,
                                  "Type error: function type parameter cannot "
                                  "be 'void'.");
                         return nullptr;
@@ -553,7 +557,7 @@ class AstSemanticAnalyzerImpl {
                 }
                 if (TypeRef elementType = resolveTypeExpr(*typeExpr.elementType)) {
                     if (elementType->isVoid()) {
-                        addError(typeExpr.node.line,
+                        addError(typeExpr.node.span,
                                  "Type error: 'void' is not valid as an Array "
                                  "element type.");
                         return nullptr;
@@ -572,13 +576,13 @@ class AstSemanticAnalyzerImpl {
                         return nullptr;
                     }
                     if (keyType->isVoid()) {
-                        addError(typeExpr.node.line,
+                        addError(typeExpr.node.span,
                                  "Type error: 'void' is not valid as a Dict "
                                  "key type.");
                         return nullptr;
                     }
                     if (valueType->isVoid()) {
-                        addError(typeExpr.node.line,
+                        addError(typeExpr.node.span,
                                  "Type error: 'void' is not valid as a Dict "
                                  "value type.");
                         return nullptr;
@@ -591,7 +595,7 @@ class AstSemanticAnalyzerImpl {
                 }
                 if (TypeRef elementType = resolveTypeExpr(*typeExpr.elementType)) {
                     if (elementType->isVoid()) {
-                        addError(typeExpr.node.line,
+                        addError(typeExpr.node.span,
                                  "Type error: 'void' is not valid as a Set "
                                  "element type.");
                         return nullptr;
@@ -611,7 +615,7 @@ class AstSemanticAnalyzerImpl {
                 if (!isValidPackageIdPart(typeExpr.packageNamespace) ||
                     !isValidPackageIdPart(typeExpr.packageName) ||
                     !isValidHandleTypeName(typeExpr.nativeHandleTypeName)) {
-                    addError(typeExpr.node.line,
+                    addError(typeExpr.node.span,
                              "Type error: handle type must use "
                              "handle<namespace:name:Type> with lowercase "
                              "package IDs and an alphanumeric type name.");
@@ -891,7 +895,7 @@ class AstSemanticAnalyzerImpl {
                     !expectedParams[index]->isAny()) {
                     paramType = expectedParams[index];
                 } else {
-                    addError(param.name.line(),
+                    addError(param.name.span(),
                              "Type error: parameter '" + paramName +
                                  "' must have a type annotation.");
                     paramType = TypeInfo::makeAny();
@@ -904,14 +908,14 @@ class AstSemanticAnalyzerImpl {
             } else {
                 paramType = resolveTypeExpr(*param.type);
                 if (!paramType) {
-                    addError(param.type->node.line,
+                    addError(param.type->node.span,
                              "Type error: expected parameter type annotation.");
                     paramType = TypeInfo::makeAny();
                 }
             }
 
             if (paramType && paramType->isVoid()) {
-                addError(param.name.line(),
+                addError(param.name.span(),
                          "Type error: parameter '" + paramName +
                              "' cannot have type 'void'.");
             }
@@ -1740,7 +1744,7 @@ class AstSemanticAnalyzerImpl {
 
         if (omittedType) {
             if (!stmt.initializer || !isImportExpr(*stmt.initializer)) {
-                addError(stmt.name.line(),
+                addError(stmt.name.span(),
                          "Type error: variables require an explicit type unless "
                          "initialized from '@import(...)'.");
             }
@@ -1752,7 +1756,7 @@ class AstSemanticAnalyzerImpl {
                 declaredType = TypeInfo::makeAny();
             }
             if (declaredType->isVoid()) {
-                addError(stmtNode.line,
+                addError(stmtNode.span,
                          "Type error: variables cannot have type 'void'.");
             }
         }
@@ -1770,7 +1774,7 @@ class AstSemanticAnalyzerImpl {
                                    : ExprInfo{};
 
         if (!omittedType && !isAssignableType(initializer.type, declaredType)) {
-            addError(stmt.name.line(), "Type error: cannot assign '" +
+            addError(stmt.name.span(), "Type error: cannot assign '" +
                                            initializer.type->toString() +
                                            "' to variable '" + name +
                                            "' of type '" +

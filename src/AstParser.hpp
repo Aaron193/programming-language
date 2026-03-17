@@ -14,7 +14,21 @@ class AstParser {
    public:
     struct ParseError {
         size_t line = 0;
+        size_t column = 1;
+        SourceSpan span = makePointSpan(1, 1);
         std::string message;
+
+        ParseError() = default;
+        ParseError(size_t lineValue, std::string messageValue)
+            : line(lineValue == 0 ? 1 : lineValue),
+              column(1),
+              span(makePointSpan(lineValue == 0 ? 1 : lineValue, 1)),
+              message(std::move(messageValue)) {}
+        ParseError(SourceSpan spanValue, std::string messageValue)
+            : line(spanValue.line()),
+              column(spanValue.column()),
+              span(std::move(spanValue)),
+              message(std::move(messageValue)) {}
     };
 
     explicit AstParser(std::string_view source);
@@ -32,6 +46,7 @@ class AstParser {
     std::vector<ParseError> m_errors;
 
     AstNodeInfo makeNodeInfo(const Token& token);
+    AstNodeInfo makeNodeInfo(const SourceSpan& span);
 
     void advance();
     const Token& peekToken(size_t offset = 1);
@@ -44,6 +59,7 @@ class AstParser {
     std::string tokenText(const Token& token) const;
     void error();
     void errorAtLine(size_t line, const std::string& message);
+    void errorAtSpan(const SourceSpan& span, const std::string& message);
     void rejectStraySemicolon();
     bool isRecoveryBoundaryToken(TokenType type) const;
     bool recoverLineLeadingContinuation(

@@ -7,7 +7,17 @@ Scanner::Scanner(std::string_view source)
       m_start(source.data()),
       m_current(source.data()) {}
 
-char Scanner::advance() { return *m_current++; }
+char Scanner::advance() {
+    const char current = *m_current++;
+    ++m_offset;
+    if (current == '\n') {
+        ++m_line;
+        m_column = 1;
+    } else {
+        ++m_column;
+    }
+    return current;
+}
 char Scanner::peek() { return *m_current; }
 char Scanner::peekNext() {
     if (isEOF()) return '\0';
@@ -22,7 +32,6 @@ void Scanner::skipWhitespace() {
         if (c == ' ' || c == '\t' || c == '\v' || c == '\f' || c == '\r') {
             advance();
         } else if (c == '\n') {
-            m_line++;
             advance();
         } else if (c == '/' && peekNext() == '/') {
             while (peek() != '\n' && !isEOF()) {
@@ -49,6 +58,9 @@ bool Scanner::isAlpha(char c) {
 Token Scanner::nextToken() {
     skipWhitespace();
     m_start = m_current;
+    m_tokenStartLine = m_line;
+    m_tokenStartColumn = m_column;
+    m_tokenStartOffset = m_offset;
 
     if (isEOF()) {
         return createToken(TokenType::END_OF_FILE);
@@ -212,10 +224,6 @@ Token Scanner::nextToken() {
 
         case '"': {
             while (peek() != '"' && !isEOF()) {
-                if (peek() == '\n') {
-                    m_line++;
-                }
-
                 advance();
             }
 

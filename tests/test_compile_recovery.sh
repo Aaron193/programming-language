@@ -22,8 +22,14 @@ if [[ $STATUS -eq 0 ]]; then
     exit 1
 fi
 
-if ! grep -q "\[error\]\[compile\]\[line 1\] AST frontend failed to parse source\." <<< "$OUTPUT"; then
+if ! grep -q "\[error\]\[compile\]\[line 1:1\] AST frontend failed to parse source\." <<< "$OUTPUT"; then
     echo "[FAIL] Expected direct AST frontend parse failure."
+    echo "$OUTPUT"
+    exit 1
+fi
+
+if ! grep -q "\[error\]\[compile\]\[line 2:1\] Expected expression\." <<< "$OUTPUT"; then
+    echo "[FAIL] Expected source-accurate parser diagnostic."
     echo "$OUTPUT"
     exit 1
 fi

@@ -72,7 +72,19 @@ bool isEqualityOperator(TokenType type) {
 AstParser::AstParser(std::string_view source) : m_scanner(source) { advance(); }
 
 AstNodeInfo AstParser::makeNodeInfo(const Token& token) {
-    return AstNodeInfo{m_nextNodeId++, token.line()};
+    AstNodeInfo node;
+    node.id = m_nextNodeId++;
+    node.line = token.line();
+    node.span = token.span();
+    return node;
+}
+
+AstNodeInfo AstParser::makeNodeInfo(const SourceSpan& span) {
+    AstNodeInfo node;
+    node.id = m_nextNodeId++;
+    node.line = span.line();
+    node.span = span;
+    return node;
 }
 
 bool AstParser::parseModule(AstModule& outModule) {
@@ -160,8 +172,12 @@ std::string AstParser::tokenText(const Token& token) const {
 void AstParser::error() { m_hadError = true; }
 
 void AstParser::errorAtLine(size_t line, const std::string& message) {
+    errorAtSpan(makePointSpan(line == 0 ? 1 : line, 1), message);
+}
+
+void AstParser::errorAtSpan(const SourceSpan& span, const std::string& message) {
     m_hadError = true;
-    m_errors.push_back(ParseError{line == 0 ? 1 : line, message});
+    m_errors.push_back(ParseError{span, message});
 }
 
 void AstParser::rejectStraySemicolon() {
@@ -199,7 +215,7 @@ bool AstParser::recoverLineLeadingContinuation(
         return false;
     }
 
-    errorAtLine(m_current.line(),
+    errorAtSpan(m_current.span(),
                 "Continuation token '" +
                     std::string(continuationTokenText(m_current.type())) +
                     "' must stay on the previous line.");
@@ -490,6 +506,9 @@ std::unique_ptr<AstTypeExpr> AstParser::parseTypeExpr() {
             return nullptr;
         }
 
+        functionType->node = makeNodeInfo(
+            combineSourceSpans(typeToken.span(), functionType->returnType->node.span));
+
         typeExpr = std::move(functionType);
     } else if (isTypeToken(m_current.type()) &&
                m_current.type() != TokenType::TYPE_FN) {
@@ -529,7 +548,8 @@ std::unique_ptr<AstTypeExpr> AstParser::parseTypeExpr() {
             }
 
             auto handleType = std::make_unique<AstTypeExpr>();
-            handleType->node = makeNodeInfo(nameToken);
+            handleType->node = makeNodeInfo(
+                combineSourceSpans(nameToken.span(), m_previous.span()));
             handleType->kind = AstTypeKind::NATIVE_HANDLE;
             handleType->token = nameToken;
             handleType->packageNamespace = tokenText(namespaceToken);
@@ -548,7 +568,8 @@ std::unique_ptr<AstTypeExpr> AstParser::parseTypeExpr() {
                 }
 
                 auto collectionType = std::make_unique<AstTypeExpr>();
-                collectionType->node = makeNodeInfo(nameToken);
+                collectionType->node = makeNodeInfo(
+                    combineSourceSpans(nameToken.span(), m_previous.span()));
                 collectionType->kind =
                     name == "Array" ? AstTypeKind::ARRAY : AstTypeKind::SET;
                 collectionType->token = nameToken;
@@ -566,7 +587,8 @@ std::unique_ptr<AstTypeExpr> AstParser::parseTypeExpr() {
                 }
 
                 auto dictType = std::make_unique<AstTypeExpr>();
-                dictType->node = makeNodeInfo(nameToken);
+                dictType->node = makeNodeInfo(
+                    combineSourceSpans(nameToken.span(), m_previous.span()));
                 dictType->kind = AstTypeKind::DICT;
                 dictType->token = nameToken;
                 dictType->keyType = std::move(keyType);
@@ -587,7 +609,8 @@ std::unique_ptr<AstTypeExpr> AstParser::parseTypeExpr() {
 
     while (match(TokenType::QUESTION)) {
         auto optionalType = std::make_unique<AstTypeExpr>();
-        optionalType->node = makeNodeInfo(startToken);
+        optionalType->node =
+            makeNodeInfo(combineSourceSpans(typeExpr->node.span, m_previous.span()));
         optionalType->kind = AstTypeKind::OPTIONAL;
         optionalType->token = typeExpr->token;
         optionalType->innerType = std::move(typeExpr);
@@ -619,6 +642,8 @@ std::vector<AstParameter> AstParser::parseParameters() {
                 if (!param.type) {
                     return {};
                 }
+                param.node = makeNodeInfo(
+                    combineSourceSpans(param.name.span(), param.type->node.span));
             }
             params.push_back(std::move(param));
         } while (match(TokenType::COMMA));
@@ -691,7 +716,8 @@ bool AstParser::parseTypeDeclaration(AstItem& outItem) {
         }
 
         AstTypeAliasDecl aliasDecl;
-        aliasDecl.node = makeNodeInfo(nameToken);
+        aliasDecl.node =
+            makeNodeInfo(combineSourceSpans(nameToken.span(), aliasedType->node.span));
         aliasDecl.name = nameToken;
         aliasDecl.aliasedType = std::move(aliasedType);
         rejectStraySemicolon();
@@ -732,6 +758,8 @@ bool AstParser::parseTypeDeclaration(AstItem& outItem) {
         return false;
     }
 
+    classDecl.node =
+        makeNodeInfo(combineSourceSpans(nameToken.span(), m_previous.span()));
     outItem.value = std::move(classDecl);
     return !m_hadError;
 }
@@ -763,6 +791,8 @@ bool AstParser::parseFunctionDeclaration(AstItem& outItem) {
         return false;
     }
 
+    functionDecl.node = makeNodeInfo(
+        combineSourceSpans(functionDecl.name.span(), functionDecl.body->node.span));
     outItem.value = std::move(functionDecl);
     return !m_hadError;
 }
@@ -776,6 +806,8 @@ bool AstParser::parseClassMember(AstClassDecl& outClassDecl) {
             return false;
         }
 
+        methodDecl.node = makeNodeInfo(
+            combineSourceSpans(methodDecl.name.span(), methodDecl.body->node.span));
         outClassDecl.methods.push_back(std::move(methodDecl));
         return !m_hadError;
     };
@@ -889,6 +921,8 @@ bool AstParser::parseClassMember(AstClassDecl& outClassDecl) {
     if (!fieldDecl.type) {
         return false;
     }
+    fieldDecl.node =
+        makeNodeInfo(combineSourceSpans(fieldDecl.name.span(), fieldDecl.type->node.span));
     rejectStraySemicolon();
     outClassDecl.fields.push_back(std::move(fieldDecl));
     return !m_hadError;
@@ -947,7 +981,7 @@ AstStmtPtr AstParser::parseBlockStatement() {
     }
 
     auto stmt = std::make_unique<AstStmt>();
-    stmt->node = makeNodeInfo(openToken);
+    stmt->node = makeNodeInfo(combineSourceSpans(openToken.span(), m_previous.span()));
     stmt->value = std::move(blockStmt);
     return stmt;
 }
@@ -969,7 +1003,8 @@ AstStmtPtr AstParser::parsePrintStatement(const Token& printToken) {
     rejectStraySemicolon();
 
     auto stmt = std::make_unique<AstStmt>();
-    stmt->node = makeNodeInfo(printToken);
+    stmt->node =
+        makeNodeInfo(combineSourceSpans(printToken.span(), printStmt.expression->node.span));
     stmt->value = std::move(printStmt);
     return stmt;
 }
@@ -1000,7 +1035,10 @@ AstStmtPtr AstParser::parseIfStatement(const Token& ifToken) {
     }
 
     auto stmt = std::make_unique<AstStmt>();
-    stmt->node = makeNodeInfo(ifToken);
+    const SourceSpan endSpan = ifStmt.elseBranch
+                                   ? ifStmt.elseBranch->node.span
+                                   : ifStmt.thenBranch->node.span;
+    stmt->node = makeNodeInfo(combineSourceSpans(ifToken.span(), endSpan));
     stmt->value = std::move(ifStmt);
     return stmt;
 }
@@ -1025,7 +1063,8 @@ AstStmtPtr AstParser::parseWhileStatement(const Token& whileToken) {
     }
 
     auto stmt = std::make_unique<AstStmt>();
-    stmt->node = makeNodeInfo(whileToken);
+    stmt->node =
+        makeNodeInfo(combineSourceSpans(whileToken.span(), whileStmt.body->node.span));
     stmt->value = std::move(whileStmt);
     return stmt;
 }
@@ -1092,6 +1131,8 @@ AstStmtPtr AstParser::parseForStatement(const Token& forToken) {
             if (!consume(TokenType::SEMI_COLON)) {
                 return nullptr;
             }
+            varDecl->node = makeNodeInfo(
+                combineSourceSpans(mutabilityToken.span(), varDecl->initializer->node.span));
             forStmt.initializer = std::move(varDecl);
         }
         (void)mutabilityToken;
@@ -1109,7 +1150,8 @@ AstStmtPtr AstParser::parseForStatement(const Token& forToken) {
 
     if (forEachStmt.has_value()) {
         auto stmt = std::make_unique<AstStmt>();
-        stmt->node = makeNodeInfo(forToken);
+        stmt->node =
+            makeNodeInfo(combineSourceSpans(forToken.span(), forEachStmt->body->node.span));
         stmt->value = std::move(*forEachStmt);
         return stmt;
     }
@@ -1142,7 +1184,7 @@ AstStmtPtr AstParser::parseForStatement(const Token& forToken) {
     }
 
     auto stmt = std::make_unique<AstStmt>();
-    stmt->node = makeNodeInfo(forToken);
+    stmt->node = makeNodeInfo(combineSourceSpans(forToken.span(), forStmt.body->node.span));
     stmt->value = std::move(forStmt);
     return stmt;
 }
@@ -1164,7 +1206,10 @@ AstStmtPtr AstParser::parseReturnStatement(const Token& returnToken) {
     }
 
     auto stmt = std::make_unique<AstStmt>();
-    stmt->node = makeNodeInfo(returnToken);
+    stmt->node = makeNodeInfo(returnStmt.value
+                                  ? combineSourceSpans(returnToken.span(),
+                                                       returnStmt.value->node.span)
+                                  : returnToken.span());
     stmt->value = std::move(returnStmt);
     return stmt;
 }
@@ -1244,7 +1289,8 @@ AstStmtPtr AstParser::parseVariableDeclarationStatement(bool allowForClause) {
         }
 
         auto stmt = std::make_unique<AstStmt>();
-        stmt->node = makeNodeInfo(mutabilityToken);
+        stmt->node = makeNodeInfo(combineSourceSpans(
+            mutabilityToken.span(), destructuredDecl.initializer->node.span));
         stmt->value = std::move(destructuredDecl);
         return stmt;
     }
@@ -1291,7 +1337,8 @@ AstStmtPtr AstParser::parseVariableDeclarationStatement(bool allowForClause) {
     }
 
     auto stmt = std::make_unique<AstStmt>();
-    stmt->node = makeNodeInfo(mutabilityToken);
+    stmt->node =
+        makeNodeInfo(combineSourceSpans(mutabilityToken.span(), varDecl->initializer->node.span));
     stmt->value = std::move(*varDecl);
     return stmt;
 }
@@ -1327,7 +1374,7 @@ AstExprPtr AstParser::parseAssignment() {
 
     if (op.type() == TokenType::PLUS_PLUS || op.type() == TokenType::MINUS_MINUS) {
         auto expr = std::make_unique<AstExpr>();
-        expr->node = makeNodeInfo(op);
+        expr->node = makeNodeInfo(combineSourceSpans(lhs->node.span, op.span()));
         expr->value =
             AstUpdateExpr{op, std::move(lhs), false};
         return expr;
@@ -1339,7 +1386,7 @@ AstExprPtr AstParser::parseAssignment() {
     }
 
     auto expr = std::make_unique<AstExpr>();
-    expr->node = makeNodeInfo(op);
+    expr->node = makeNodeInfo(combineSourceSpans(lhs->node.span, rhs->node.span));
     expr->value = AstAssignmentExpr{std::move(lhs), op, std::move(rhs)};
     return expr;
 }
@@ -1353,7 +1400,7 @@ AstExprPtr AstParser::parseOr() {
             return nullptr;
         }
         auto binary = std::make_unique<AstExpr>();
-        binary->node = makeNodeInfo(op);
+        binary->node = makeNodeInfo(combineSourceSpans(expr->node.span, rhs->node.span));
         binary->value = AstBinaryExpr{std::move(expr), op, std::move(rhs)};
         expr = std::move(binary);
     }
@@ -1369,7 +1416,7 @@ AstExprPtr AstParser::parseAnd() {
             return nullptr;
         }
         auto binary = std::make_unique<AstExpr>();
-        binary->node = makeNodeInfo(op);
+        binary->node = makeNodeInfo(combineSourceSpans(expr->node.span, rhs->node.span));
         binary->value = AstBinaryExpr{std::move(expr), op, std::move(rhs)};
         expr = std::move(binary);
     }
@@ -1387,7 +1434,7 @@ AstExprPtr AstParser::parseEquality() {
             return nullptr;
         }
         auto binary = std::make_unique<AstExpr>();
-        binary->node = makeNodeInfo(op);
+        binary->node = makeNodeInfo(combineSourceSpans(expr->node.span, rhs->node.span));
         binary->value = AstBinaryExpr{std::move(expr), op, std::move(rhs)};
         expr = std::move(binary);
     }
@@ -1405,7 +1452,7 @@ AstExprPtr AstParser::parseComparison() {
             return nullptr;
         }
         auto binary = std::make_unique<AstExpr>();
-        binary->node = makeNodeInfo(op);
+        binary->node = makeNodeInfo(combineSourceSpans(expr->node.span, rhs->node.span));
         binary->value = AstBinaryExpr{std::move(expr), op, std::move(rhs)};
         expr = std::move(binary);
     }
@@ -1421,7 +1468,7 @@ AstExprPtr AstParser::parseBitwiseOr() {
             return nullptr;
         }
         auto binary = std::make_unique<AstExpr>();
-        binary->node = makeNodeInfo(op);
+        binary->node = makeNodeInfo(combineSourceSpans(expr->node.span, rhs->node.span));
         binary->value = AstBinaryExpr{std::move(expr), op, std::move(rhs)};
         expr = std::move(binary);
     }
@@ -1437,7 +1484,7 @@ AstExprPtr AstParser::parseBitwiseXor() {
             return nullptr;
         }
         auto binary = std::make_unique<AstExpr>();
-        binary->node = makeNodeInfo(op);
+        binary->node = makeNodeInfo(combineSourceSpans(expr->node.span, rhs->node.span));
         binary->value = AstBinaryExpr{std::move(expr), op, std::move(rhs)};
         expr = std::move(binary);
     }
@@ -1453,7 +1500,7 @@ AstExprPtr AstParser::parseBitwiseAnd() {
             return nullptr;
         }
         auto binary = std::make_unique<AstExpr>();
-        binary->node = makeNodeInfo(op);
+        binary->node = makeNodeInfo(combineSourceSpans(expr->node.span, rhs->node.span));
         binary->value = AstBinaryExpr{std::move(expr), op, std::move(rhs)};
         expr = std::move(binary);
     }
@@ -1472,7 +1519,7 @@ AstExprPtr AstParser::parseShift() {
             return nullptr;
         }
         auto binary = std::make_unique<AstExpr>();
-        binary->node = makeNodeInfo(op);
+        binary->node = makeNodeInfo(combineSourceSpans(expr->node.span, rhs->node.span));
         binary->value = AstBinaryExpr{std::move(expr), op, std::move(rhs)};
         expr = std::move(binary);
     }
@@ -1490,7 +1537,7 @@ AstExprPtr AstParser::parseTerm() {
             return nullptr;
         }
         auto binary = std::make_unique<AstExpr>();
-        binary->node = makeNodeInfo(op);
+        binary->node = makeNodeInfo(combineSourceSpans(expr->node.span, rhs->node.span));
         binary->value = AstBinaryExpr{std::move(expr), op, std::move(rhs)};
         expr = std::move(binary);
     }
@@ -1508,7 +1555,7 @@ AstExprPtr AstParser::parseFactor() {
             return nullptr;
         }
         auto binary = std::make_unique<AstExpr>();
-        binary->node = makeNodeInfo(op);
+        binary->node = makeNodeInfo(combineSourceSpans(expr->node.span, rhs->node.span));
         binary->value = AstBinaryExpr{std::move(expr), op, std::move(rhs)};
         expr = std::move(binary);
     }
@@ -1524,7 +1571,7 @@ AstExprPtr AstParser::parseUnary() {
             return nullptr;
         }
         auto expr = std::make_unique<AstExpr>();
-        expr->node = makeNodeInfo(op);
+        expr->node = makeNodeInfo(combineSourceSpans(op.span(), operand->node.span));
         expr->value = AstUnaryExpr{op, std::move(operand)};
         return expr;
     }
@@ -1536,7 +1583,7 @@ AstExprPtr AstParser::parseUnary() {
             return nullptr;
         }
         auto expr = std::make_unique<AstExpr>();
-        expr->node = makeNodeInfo(op);
+        expr->node = makeNodeInfo(combineSourceSpans(op.span(), operand->node.span));
         expr->value = AstUpdateExpr{op, std::move(operand), true};
         return expr;
     }
@@ -1554,7 +1601,8 @@ AstExprPtr AstParser::parseCast() {
         }
 
         auto castExpr = std::make_unique<AstExpr>();
-        castExpr->node = makeNodeInfo(asToken);
+        castExpr->node =
+            makeNodeInfo(combineSourceSpans(expr->node.span, targetType->node.span));
         castExpr->value = AstCastExpr{std::move(expr), std::move(targetType)};
         expr = std::move(castExpr);
     }
@@ -1586,7 +1634,8 @@ AstExprPtr AstParser::parseCall() {
             }
 
             auto call = std::make_unique<AstExpr>();
-            call->node = makeNodeInfo(openParen);
+            call->node = makeNodeInfo(
+                combineSourceSpans(callExpr.callee->node.span, m_previous.span()));
             call->value = std::move(callExpr);
             expr = std::move(call);
             continue;
@@ -1602,7 +1651,8 @@ AstExprPtr AstParser::parseCall() {
             advance();
 
             auto member = std::make_unique<AstExpr>();
-            member->node = makeNodeInfo(dotToken);
+            member->node =
+                makeNodeInfo(combineSourceSpans(expr->node.span, memberToken.span()));
             member->value = AstMemberExpr{std::move(expr), memberToken};
             expr = std::move(member);
             continue;
@@ -1619,7 +1669,8 @@ AstExprPtr AstParser::parseCall() {
             }
 
             auto indexed = std::make_unique<AstExpr>();
-            indexed->node = makeNodeInfo(openBracket);
+            indexed->node = makeNodeInfo(
+                combineSourceSpans(expr->node.span, m_previous.span()));
             indexed->value = AstIndexExpr{std::move(expr), std::move(index)};
             expr = std::move(indexed);
             continue;
@@ -1646,7 +1697,7 @@ AstExprPtr AstParser::parseFunctionLiteralExpr() {
     if (check(TokenType::FAT_ARROW)) {
         value.usesFatArrow = true;
         if (hasLineBreakBeforeCurrent()) {
-            errorAtLine(m_current.line(),
+            errorAtSpan(m_current.span(),
                         "Continuation token '" +
                             std::string(continuationTokenText(m_current.type())) +
                             "' must stay on the previous line.");
@@ -1657,6 +1708,8 @@ AstExprPtr AstParser::parseFunctionLiteralExpr() {
             if (!value.blockBody) {
                 return nullptr;
             }
+            functionExpr->node =
+                makeNodeInfo(combineSourceSpans(fnToken.span(), value.blockBody->node.span));
             functionExpr->value = std::move(value);
             return functionExpr;
         }
@@ -1670,6 +1723,8 @@ AstExprPtr AstParser::parseFunctionLiteralExpr() {
         rejectUnexpectedTrailingToken({TokenType::COMMA, TokenType::CLOSE_PAREN,
                                        TokenType::CLOSE_BRACKET,
                                        TokenType::CLOSE_CURLY});
+        functionExpr->node = makeNodeInfo(
+            combineSourceSpans(fnToken.span(), value.expressionBody->node.span));
         functionExpr->value = std::move(value);
         return functionExpr;
     }
@@ -1686,6 +1741,8 @@ AstExprPtr AstParser::parseFunctionLiteralExpr() {
         return nullptr;
     }
 
+    functionExpr->node =
+        makeNodeInfo(combineSourceSpans(fnToken.span(), value.blockBody->node.span));
     functionExpr->value = std::move(value);
     return functionExpr;
 }
@@ -1714,7 +1771,7 @@ AstExprPtr AstParser::parseImportExpression(const Token& atToken) {
     }
 
     auto expr = std::make_unique<AstExpr>();
-    expr->node = makeNodeInfo(atToken);
+    expr->node = makeNodeInfo(combineSourceSpans(atToken.span(), m_previous.span()));
     expr->value = AstImportExpr{pathToken};
     return expr;
 }
@@ -1739,7 +1796,7 @@ AstExprPtr AstParser::parsePrimary() {
             return nullptr;
         }
         auto expr = std::make_unique<AstExpr>();
-        expr->node = makeNodeInfo(openToken);
+        expr->node = makeNodeInfo(combineSourceSpans(openToken.span(), m_previous.span()));
         expr->value = AstGroupingExpr{std::move(inner)};
         return expr;
     }
@@ -1782,7 +1839,7 @@ AstExprPtr AstParser::parsePrimary() {
             return nullptr;
         }
         auto expr = std::make_unique<AstExpr>();
-        expr->node = makeNodeInfo(openToken);
+        expr->node = makeNodeInfo(combineSourceSpans(openToken.span(), m_previous.span()));
         expr->value = std::move(arrayLiteral);
         return expr;
     }
@@ -1808,7 +1865,7 @@ AstExprPtr AstParser::parsePrimary() {
             return nullptr;
         }
         auto expr = std::make_unique<AstExpr>();
-        expr->node = makeNodeInfo(openToken);
+        expr->node = makeNodeInfo(combineSourceSpans(openToken.span(), m_previous.span()));
         expr->value = std::move(dictLiteral);
         return expr;
     }
@@ -1823,7 +1880,7 @@ AstExprPtr AstParser::parsePrimary() {
         return expr;
     }
 
-    errorAtLine(m_current.line(), "Expected expression.");
+    errorAtSpan(m_current.span(), "Expected expression.");
     if (!check(TokenType::END_OF_FILE)) {
         advance();
     }

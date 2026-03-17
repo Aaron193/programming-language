@@ -29,6 +29,11 @@ class Scanner {
     const char* m_current;
     // line number
     size_t m_line = 1;
+    size_t m_column = 1;
+    size_t m_offset = 0;
+    size_t m_tokenStartLine = 1;
+    size_t m_tokenStartColumn = 1;
+    size_t m_tokenStartOffset = 0;
 
     Token nextToken();
     char advance();

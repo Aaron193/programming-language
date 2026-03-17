@@ -209,11 +209,11 @@ AstExpr ConstantEvaluator::makeLiteralExpr(const AstExpr& original,
             literal.token = Token::synthetic(value.boolValue ? TokenType::TRUE
                                                              : TokenType::FALSE,
                                              value.boolValue ? "true" : "false",
-                                             original.node.line);
+                                             original.node.span);
             break;
         case ConstantValue::Kind::Null:
             literal.token =
-                Token::synthetic(TokenType::_NULL, "null", original.node.line);
+                Token::synthetic(TokenType::_NULL, "null", original.node.span);
             break;
         case ConstantValue::Kind::SignedInteger: {
             TypeRef type = typeOf(original.node.id);
@@ -223,7 +223,7 @@ AstExpr ConstantEvaluator::makeLiteralExpr(const AstExpr& original,
             }
             literal.token =
                 Token::synthetic(TokenType::NUMBER, std::move(text),
-                                 original.node.line);
+                                 original.node.span);
             break;
         }
         case ConstantValue::Kind::UnsignedInteger: {
@@ -234,7 +234,7 @@ AstExpr ConstantEvaluator::makeLiteralExpr(const AstExpr& original,
             }
             literal.token =
                 Token::synthetic(TokenType::NUMBER, std::move(text),
-                                 original.node.line);
+                                 original.node.span);
             break;
         }
         case ConstantValue::Kind::Float: {
@@ -245,11 +245,9 @@ AstExpr ConstantEvaluator::makeLiteralExpr(const AstExpr& original,
             } else {
                 text += "f64";
             }
-            // Optimizer-created literals stay anchored to the replaced
-            // expression line until the frontend grows full source spans.
             literal.token =
                 Token::synthetic(TokenType::NUMBER, std::move(text),
-                                 original.node.line);
+                                 original.node.span);
             break;
         }
     }
