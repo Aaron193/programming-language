@@ -222,7 +222,7 @@ class ConstantEvaluator {
                     Token::synthetic(TokenType::_NULL, "null", original.node.line);
                 break;
             case ConstantValue::Kind::SignedInteger: {
-                TypeRef type = nodeType(original.node.id);
+                TypeRef type = typeOf(original.node.id);
                 std::string text = std::to_string(value.signedValue);
                 if (type && type->isInteger()) {
                     text += integerSuffix(type->kind);
@@ -233,7 +233,7 @@ class ConstantEvaluator {
                 break;
             }
             case ConstantValue::Kind::UnsignedInteger: {
-                TypeRef type = nodeType(original.node.id);
+                TypeRef type = typeOf(original.node.id);
                 std::string text = std::to_string(value.unsignedValue);
                 if (type && type->isInteger()) {
                     text += integerSuffix(type->kind);
@@ -244,7 +244,7 @@ class ConstantEvaluator {
                 break;
             }
             case ConstantValue::Kind::Float: {
-                TypeRef type = nodeType(original.node.id);
+                TypeRef type = typeOf(original.node.id);
                 std::string text = formatFloatCore(value.floatValue);
                 if (type && type->kind == TypeKind::F32) {
                     text += "f32";
@@ -262,16 +262,26 @@ class ConstantEvaluator {
         return expr;
     }
 
-   private:
-    const AstSemanticModel& m_semanticModel;
+    bool evaluateConditionBool(const AstExpr& expr, bool& outValue) const {
+        ConstantValue constant;
+        if (!evaluate(expr, constant) ||
+            constant.kind != ConstantValue::Kind::Boolean) {
+            return false;
+        }
+        outValue = constant.boolValue;
+        return true;
+    }
 
-    TypeRef nodeType(AstNodeId id) const {
+    TypeRef typeOf(AstNodeId id) const {
         auto it = m_semanticModel.nodeTypes.find(id);
         if (it == m_semanticModel.nodeTypes.end()) {
             return nullptr;
         }
         return it->second;
     }
+
+   private:
+    const AstSemanticModel& m_semanticModel;
 
     bool constantToDouble(const ConstantValue& value, double& outValue) const {
         switch (value.kind) {
@@ -332,7 +342,7 @@ class ConstantEvaluator {
                 out.kind = ConstantValue::Kind::Null;
                 return true;
             case TokenType::NUMBER: {
-                TypeRef literalType = nodeType(expr.node.id);
+                TypeRef literalType = typeOf(expr.node.id);
                 if (!literalType || !literalType->isNumeric()) {
                     return false;
                 }
@@ -412,8 +422,8 @@ class ConstantEvaluator {
                                const ConstantValue& left,
                                const ConstantValue& right,
                                ConstantValue& out) const {
-        TypeRef leftType = nodeType(binary.left->node.id);
-        TypeRef rightType = nodeType(binary.right->node.id);
+        TypeRef leftType = typeOf(binary.left->node.id);
+        TypeRef rightType = typeOf(binary.right->node.id);
         TypeRef promoted = numericPromotion(leftType, rightType);
         if (!promoted) {
             return false;
@@ -637,7 +647,7 @@ class ConstantEvaluator {
                 return false;
         }
 
-        TypeRef resultType = nodeType(expr.node.id);
+        TypeRef resultType = typeOf(expr.node.id);
         const bool signedResult =
             resultType ? resultType->isSigned()
                        : (left.kind == ConstantValue::Kind::SignedInteger &&
@@ -775,30 +785,41 @@ class ConstantEvaluator {
 void optimizeExpr(AstExpr& expr, const ConstantEvaluator& evaluator);
 void optimizeStmt(AstStmt& stmt, const ConstantEvaluator& evaluator);
 void optimizeItem(AstItem& item, const ConstantEvaluator& evaluator);
-bool stmtAlwaysReturns(const AstStmt& stmt);
-bool itemAlwaysReturns(const AstItem& item);
+bool isDefinitelyTerminal(const AstStmt& stmt);
+bool isDefinitelyTerminal(const AstItem& item);
 
-bool blockAlwaysReturns(const AstBlockStmt& block) {
+bool tryEvaluateConstant(const AstExpr& expr, const ConstantEvaluator& evaluator,
+                         ConstantValue& out) {
+    return evaluator.evaluate(expr, out);
+}
+
+bool tryEvaluateConditionBool(const AstExpr& expr,
+                              const ConstantEvaluator& evaluator,
+                              bool& outValue) {
+    return evaluator.evaluateConditionBool(expr, outValue);
+}
+
+bool blockIsDefinitelyTerminal(const AstBlockStmt& block) {
     for (auto it = block.items.rbegin(); it != block.items.rend(); ++it) {
         if (*it) {
-            return itemAlwaysReturns(**it);
+            return isDefinitelyTerminal(**it);
         }
     }
     return false;
 }
 
-bool stmtAlwaysReturns(const AstStmt& stmt) {
+bool isDefinitelyTerminal(const AstStmt& stmt) {
     return std::visit(
         [&](const auto& value) -> bool {
             using T = std::decay_t<decltype(value)>;
             if constexpr (std::is_same_v<T, AstReturnStmt>) {
                 return true;
             } else if constexpr (std::is_same_v<T, AstBlockStmt>) {
-                return blockAlwaysReturns(value);
+                return blockIsDefinitelyTerminal(value);
             } else if constexpr (std::is_same_v<T, AstIfStmt>) {
                 return value.thenBranch && value.elseBranch &&
-                       stmtAlwaysReturns(*value.thenBranch) &&
-                       stmtAlwaysReturns(*value.elseBranch);
+                       isDefinitelyTerminal(*value.thenBranch) &&
+                       isDefinitelyTerminal(*value.elseBranch);
             } else {
                 return false;
             }
@@ -806,17 +827,58 @@ bool stmtAlwaysReturns(const AstStmt& stmt) {
         stmt.value);
 }
 
-bool itemAlwaysReturns(const AstItem& item) {
+bool isDefinitelyTerminal(const AstItem& item) {
     return std::visit(
         [&](const auto& value) -> bool {
             using T = std::decay_t<decltype(value)>;
             if constexpr (std::is_same_v<T, AstStmtPtr>) {
-                return value && stmtAlwaysReturns(*value);
+                return value && isDefinitelyTerminal(*value);
             } else {
                 return false;
             }
         },
         item.value);
+}
+
+bool isDefinitelyPure(const AstExpr& expr) {
+    return std::visit(
+        [&](const auto& value) -> bool {
+            using T = std::decay_t<decltype(value)>;
+            if constexpr (std::is_same_v<T, AstLiteralExpr> ||
+                          std::is_same_v<T, AstIdentifierExpr> ||
+                          std::is_same_v<T, AstThisExpr> ||
+                          std::is_same_v<T, AstSuperExpr>) {
+                return true;
+            } else if constexpr (std::is_same_v<T, AstGroupingExpr>) {
+                return value.expression && isDefinitelyPure(*value.expression);
+            } else if constexpr (std::is_same_v<T, AstUnaryExpr>) {
+                return value.operand && isDefinitelyPure(*value.operand);
+            } else if constexpr (std::is_same_v<T, AstBinaryExpr>) {
+                return value.left && value.right &&
+                       isDefinitelyPure(*value.left) &&
+                       isDefinitelyPure(*value.right);
+            } else if constexpr (std::is_same_v<T, AstCastExpr>) {
+                return value.expression && isDefinitelyPure(*value.expression);
+            } else {
+                return false;
+            }
+        },
+        expr.value);
+}
+
+AstStmtPtr makeStmtPtr(AstStmt&& stmt) {
+    return std::make_unique<AstStmt>(std::move(stmt));
+}
+
+AstItemPtr makeItemPtr(AstStmtPtr stmt) {
+    auto item = std::make_unique<AstItem>();
+    item->value = std::move(stmt);
+    return item;
+}
+
+bool isEmptyBlockStmt(const AstStmt& stmt) {
+    const auto* block = std::get_if<AstBlockStmt>(&stmt.value);
+    return block && block->items.empty();
 }
 
 void replaceStmtWith(AstStmt& target, AstStmtPtr replacement) {
@@ -825,6 +887,277 @@ void replaceStmtWith(AstStmt& target, AstStmtPtr replacement) {
         return;
     }
     target.value = std::move(replacement->value);
+}
+
+void replaceExprWith(AstExpr& target, AstExprPtr replacement) {
+    if (!replacement) {
+        return;
+    }
+    replacement->node = target.node;
+    target = std::move(*replacement);
+}
+
+bool sameKnownType(const ConstantEvaluator& evaluator, AstNodeId lhs,
+                   AstNodeId rhs) {
+    TypeRef leftType = evaluator.typeOf(lhs);
+    TypeRef rightType = evaluator.typeOf(rhs);
+    return leftType && rightType && leftType == rightType;
+}
+
+bool canReuseOperandAsResult(const AstExpr& expr, const AstExpr& operand,
+                             const ConstantEvaluator& evaluator) {
+    return sameKnownType(evaluator, expr.node.id, operand.node.id);
+}
+
+bool isZeroConstant(const ConstantValue& value) {
+    switch (value.kind) {
+        case ConstantValue::Kind::SignedInteger:
+            return value.signedValue == 0;
+        case ConstantValue::Kind::UnsignedInteger:
+            return value.unsignedValue == 0;
+        case ConstantValue::Kind::Float:
+            return value.floatValue == 0.0;
+        default:
+            return false;
+    }
+}
+
+bool isOneConstant(const ConstantValue& value) {
+    switch (value.kind) {
+        case ConstantValue::Kind::SignedInteger:
+            return value.signedValue == 1;
+        case ConstantValue::Kind::UnsignedInteger:
+            return value.unsignedValue == 1;
+        case ConstantValue::Kind::Float:
+            return value.floatValue == 1.0;
+        default:
+            return false;
+    }
+}
+
+bool replaceWithOperandIfTypeMatches(AstExpr& expr, AstExprPtr& operand,
+                                     const ConstantEvaluator& evaluator) {
+    if (!operand || !canReuseOperandAsResult(expr, *operand, evaluator)) {
+        return false;
+    }
+    replaceExprWith(expr, std::move(operand));
+    return true;
+}
+
+bool simplifyIdentityBinary(AstExpr& expr, AstBinaryExpr& binary,
+                            const ConstantEvaluator& evaluator) {
+    if (!binary.left || !binary.right) {
+        return false;
+    }
+
+    TypeRef exprType = evaluator.typeOf(expr.node.id);
+    if (!exprType) {
+        return false;
+    }
+
+    ConstantValue leftConstant;
+    ConstantValue rightConstant;
+    const bool hasLeftConstant =
+        tryEvaluateConstant(*binary.left, evaluator, leftConstant);
+    const bool hasRightConstant =
+        tryEvaluateConstant(*binary.right, evaluator, rightConstant);
+
+    switch (binary.op.type()) {
+        case TokenType::PLUS:
+            if (!exprType->isNumeric()) {
+                return false;
+            }
+            if (hasRightConstant && isZeroConstant(rightConstant)) {
+                return replaceWithOperandIfTypeMatches(expr, binary.left,
+                                                       evaluator);
+            }
+            if (hasLeftConstant && isZeroConstant(leftConstant)) {
+                return replaceWithOperandIfTypeMatches(expr, binary.right,
+                                                       evaluator);
+            }
+            return false;
+        case TokenType::MINUS:
+            return exprType->isNumeric() && hasRightConstant &&
+                   isZeroConstant(rightConstant) &&
+                   replaceWithOperandIfTypeMatches(expr, binary.left, evaluator);
+        case TokenType::STAR:
+            if (!exprType->isNumeric()) {
+                return false;
+            }
+            if (hasRightConstant && isOneConstant(rightConstant)) {
+                return replaceWithOperandIfTypeMatches(expr, binary.left,
+                                                       evaluator);
+            }
+            if (hasLeftConstant && isOneConstant(leftConstant)) {
+                return replaceWithOperandIfTypeMatches(expr, binary.right,
+                                                       evaluator);
+            }
+            return false;
+        case TokenType::SLASH:
+            return exprType->isNumeric() && hasRightConstant &&
+                   isOneConstant(rightConstant) &&
+                   replaceWithOperandIfTypeMatches(expr, binary.left, evaluator);
+        case TokenType::PIPE:
+        case TokenType::CARET:
+            if (!exprType->isInteger()) {
+                return false;
+            }
+            if (hasRightConstant && isZeroConstant(rightConstant)) {
+                return replaceWithOperandIfTypeMatches(expr, binary.left,
+                                                       evaluator);
+            }
+            if (hasLeftConstant && isZeroConstant(leftConstant)) {
+                return replaceWithOperandIfTypeMatches(expr, binary.right,
+                                                       evaluator);
+            }
+            return false;
+        case TokenType::SHIFT_LEFT_TOKEN:
+        case TokenType::SHIFT_RIGHT_TOKEN:
+            return exprType->isInteger() && hasRightConstant &&
+                   isZeroConstant(rightConstant) &&
+                   replaceWithOperandIfTypeMatches(expr, binary.left, evaluator);
+        default:
+            return false;
+    }
+}
+
+bool simplifyLogicalBinary(AstExpr& expr, AstBinaryExpr& binary,
+                           const ConstantEvaluator& evaluator) {
+    if (!binary.left || !binary.right ||
+        !sameKnownType(evaluator, expr.node.id, binary.right->node.id)) {
+        return false;
+    }
+
+    bool leftValue = false;
+    if (!tryEvaluateConditionBool(*binary.left, evaluator, leftValue)) {
+        return false;
+    }
+
+    switch (binary.op.type()) {
+        case TokenType::LOGICAL_AND:
+            if (leftValue) {
+                return replaceWithOperandIfTypeMatches(expr, binary.right,
+                                                       evaluator);
+            }
+            if (!isDefinitelyPure(*binary.right)) {
+                return false;
+            }
+            expr = evaluator.makeLiteralExpr(
+                expr, ConstantValue{ConstantValue::Kind::Boolean, 0, 0, 0.0,
+                                    false});
+            return true;
+        case TokenType::LOGICAL_OR:
+            if (!leftValue) {
+                return replaceWithOperandIfTypeMatches(expr, binary.right,
+                                                       evaluator);
+            }
+            if (!isDefinitelyPure(*binary.right)) {
+                return false;
+            }
+            expr = evaluator.makeLiteralExpr(
+                expr, ConstantValue{ConstantValue::Kind::Boolean, 0, 0, 0.0,
+                                    true});
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool simplifyBinaryExpr(AstExpr& expr, const ConstantEvaluator& evaluator) {
+    auto* binary = std::get_if<AstBinaryExpr>(&expr.value);
+    if (!binary) {
+        return false;
+    }
+
+    if (simplifyLogicalBinary(expr, *binary, evaluator)) {
+        return true;
+    }
+
+    binary = std::get_if<AstBinaryExpr>(&expr.value);
+    return binary && simplifyIdentityBinary(expr, *binary, evaluator);
+}
+
+void pruneUnreachableBlockItems(AstBlockStmt& block) {
+    size_t reachableCount = block.items.size();
+    for (size_t index = 0; index < block.items.size(); ++index) {
+        if (block.items[index] && isDefinitelyTerminal(*block.items[index])) {
+            reachableCount = index + 1;
+            break;
+        }
+    }
+
+    if (reachableCount < block.items.size()) {
+        block.items.erase(block.items.begin() +
+                              static_cast<ptrdiff_t>(reachableCount),
+                          block.items.end());
+    }
+}
+
+void removeNoOpBlockItems(AstBlockStmt& block) {
+    std::vector<AstItemPtr> kept;
+    kept.reserve(block.items.size());
+    for (auto& item : block.items) {
+        if (!item) {
+            continue;
+        }
+
+        bool keepItem = true;
+        std::visit(
+            [&](const auto& value) {
+                using T = std::decay_t<decltype(value)>;
+                if constexpr (std::is_same_v<T, AstStmtPtr>) {
+                    keepItem = value && !isEmptyBlockStmt(*value);
+                }
+            },
+            item->value);
+
+        if (keepItem) {
+            kept.push_back(std::move(item));
+        }
+    }
+
+    block.items = std::move(kept);
+}
+
+AstStmtPtr takeForInitializerStmt(AstForStmt& loop) {
+    if (auto* initDecl =
+            std::get_if<std::unique_ptr<AstVarDeclStmt>>(&loop.initializer)) {
+        if (!*initDecl) {
+            return nullptr;
+        }
+
+        AstStmt stmt;
+        stmt.node = (*initDecl)->node;
+        stmt.value = std::move(**initDecl);
+        *initDecl = nullptr;
+        loop.initializer = std::monostate{};
+        return makeStmtPtr(std::move(stmt));
+    }
+
+    auto* initExpr = std::get_if<AstExprPtr>(&loop.initializer);
+    if (!initExpr || !*initExpr) {
+        return nullptr;
+    }
+
+    AstStmt stmt;
+    stmt.node = (*initExpr)->node;
+    AstExprStmt exprStmt;
+    exprStmt.expression = std::move(*initExpr);
+    stmt.value = std::move(exprStmt);
+    loop.initializer = std::monostate{};
+    return makeStmtPtr(std::move(stmt));
+}
+
+AstStmtPtr makeForFalseReplacement(AstForStmt& loop, const AstStmt& original) {
+    AstBlockStmt block;
+    if (AstStmtPtr initializer = takeForInitializerStmt(loop)) {
+        block.items.push_back(makeItemPtr(std::move(initializer)));
+    }
+
+    AstStmt stmt;
+    stmt.node = original.node;
+    stmt.value = std::move(block);
+    return makeStmtPtr(std::move(stmt));
 }
 
 void optimizeExpr(AstExpr& expr, const ConstantEvaluator& evaluator) {
@@ -903,8 +1236,10 @@ void optimizeExpr(AstExpr& expr, const ConstantEvaluator& evaluator) {
         },
         expr.value);
 
+    simplifyBinaryExpr(expr, evaluator);
+
     ConstantValue constant;
-    if (evaluator.evaluate(expr, constant)) {
+    if (tryEvaluateConstant(expr, evaluator, constant)) {
         expr = evaluator.makeLiteralExpr(expr, constant);
     }
 }
@@ -920,19 +1255,9 @@ void optimizeStmt(AstStmt& stmt, const ConstantEvaluator& evaluator) {
                     }
                 }
 
-                size_t reachableCount = value.items.size();
-                for (size_t index = 0; index < value.items.size(); ++index) {
-                    if (value.items[index] &&
-                        itemAlwaysReturns(*value.items[index])) {
-                        reachableCount = index + 1;
-                        break;
-                    }
-                }
-                if (reachableCount < value.items.size()) {
-                    value.items.erase(value.items.begin() +
-                                          static_cast<ptrdiff_t>(reachableCount),
-                                      value.items.end());
-                }
+                removeNoOpBlockItems(value);
+                pruneUnreachableBlockItems(value);
+                removeNoOpBlockItems(value);
             } else if constexpr (std::is_same_v<T, AstExprStmt>) {
                 if (value.expression) {
                     optimizeExpr(*value.expression, evaluator);
@@ -956,13 +1281,14 @@ void optimizeStmt(AstStmt& stmt, const ConstantEvaluator& evaluator) {
                     optimizeStmt(*value.elseBranch, evaluator);
                 }
 
-                ConstantValue condition;
-                if (!value.condition || !evaluator.evaluate(*value.condition, condition) ||
-                    condition.kind != ConstantValue::Kind::Boolean) {
+                bool condition = false;
+                if (!value.condition ||
+                    !tryEvaluateConditionBool(*value.condition, evaluator,
+                                              condition)) {
                     return;
                 }
 
-                if (condition.boolValue) {
+                if (condition) {
                     replaceStmtWith(stmt, std::move(value.thenBranch));
                 } else if (value.elseBranch) {
                     replaceStmtWith(stmt, std::move(value.elseBranch));
@@ -977,10 +1303,11 @@ void optimizeStmt(AstStmt& stmt, const ConstantEvaluator& evaluator) {
                     optimizeStmt(*value.body, evaluator);
                 }
 
-                ConstantValue condition;
-                if (value.condition && evaluator.evaluate(*value.condition, condition) &&
-                    condition.kind == ConstantValue::Kind::Boolean &&
-                    !condition.boolValue) {
+                bool condition = false;
+                if (value.condition &&
+                    tryEvaluateConditionBool(*value.condition, evaluator,
+                                             condition) &&
+                    !condition) {
                     stmt.value = AstBlockStmt{};
                 }
             } else if constexpr (std::is_same_v<T, AstVarDeclStmt>) {
@@ -993,11 +1320,13 @@ void optimizeStmt(AstStmt& stmt, const ConstantEvaluator& evaluator) {
                 }
             } else if constexpr (std::is_same_v<T, AstForStmt>) {
                 if (auto* initDecl =
-                        std::get_if<std::unique_ptr<AstVarDeclStmt>>(&value.initializer)) {
+                        std::get_if<std::unique_ptr<AstVarDeclStmt>>(
+                            &value.initializer)) {
                     if (*initDecl && (*initDecl)->initializer) {
                         optimizeExpr(*(*initDecl)->initializer, evaluator);
                     }
-                } else if (auto* initExpr = std::get_if<AstExprPtr>(&value.initializer)) {
+                } else if (auto* initExpr =
+                               std::get_if<AstExprPtr>(&value.initializer)) {
                     if (*initExpr) {
                         optimizeExpr(**initExpr, evaluator);
                     }
@@ -1010,6 +1339,14 @@ void optimizeStmt(AstStmt& stmt, const ConstantEvaluator& evaluator) {
                 }
                 if (value.body) {
                     optimizeStmt(*value.body, evaluator);
+                }
+
+                bool condition = false;
+                if (value.condition &&
+                    tryEvaluateConditionBool(*value.condition, evaluator,
+                                             condition) &&
+                    !condition) {
+                    replaceStmtWith(stmt, makeForFalseReplacement(value, stmt));
                 }
             } else if constexpr (std::is_same_v<T, AstForEachStmt>) {
                 if (value.iterable) {

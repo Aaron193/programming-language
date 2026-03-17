@@ -1,0 +1,11 @@
+#!strict
+fn init() i32 {
+    print("init")
+    return 7
+}
+
+for (var i i32 = init(); false; i += 1) {
+    print("body")
+}
+
+print("done")

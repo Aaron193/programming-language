@@ -1,0 +1,6 @@
+#!strict
+var yes bool = true
+var no bool = false
+
+print(false && yes)
+print(true || no)

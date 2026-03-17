@@ -1,0 +1,9 @@
+#!strict
+var maybe bool = false
+
+if (maybe) {
+    print(9223372036854775807i64 + 1i64)
+    print(7i32 / 0i32)
+}
+
+print("ok")
