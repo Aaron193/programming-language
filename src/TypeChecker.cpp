@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "AstSymbolCollector.hpp"
 #include "NativePackage.hpp"
 #include "Scanner.hpp"
 #include "SyntaxRules.hpp"
@@ -3060,6 +3061,11 @@ bool TypeChecker::collectSymbols(
     std::string_view source, std::unordered_set<std::string>& outClassNames,
     std::unordered_map<std::string, TypeRef>& outFunctionSignatures,
     std::unordered_map<std::string, TypeRef>* outTypeAliases) {
+    if (collectSymbolsFromAst(source, outClassNames, outFunctionSignatures,
+                              outTypeAliases)) {
+        return true;
+    }
+
     outClassNames.clear();
     if (outTypeAliases != nullptr) {
         outTypeAliases->clear();
