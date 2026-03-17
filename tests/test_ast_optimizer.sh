@@ -102,6 +102,50 @@ if grep -q "JUMP_IF_FALSE_POP" <<< "$while_disassembly" || grep -q "LOOP" <<< "$
     exit 1
 fi
 
+run_and_capture "$SCRIPT_DIR/sample_ast_opt_typed_numeric_fold.mog" \
+    typed_output typed_status typed_disassembly typed_disassembly_status
+
+if [[ $typed_status -ne 0 || $typed_disassembly_status -ne 0 ]]; then
+    echo "[FAIL] typed-fold sample failed"
+    echo "$typed_output"
+    echo "$typed_disassembly"
+    exit 1
+fi
+
+if [[ "$typed_output" != $'3\n3.5\ntrue\ntrue' ]]; then
+    echo "[FAIL] typed-fold sample produced unexpected output"
+    echo "$typed_output"
+    exit 1
+fi
+
+if grep -Eq "UADD|ADD|IGREATER_EQ|UGREATER_EQ|GREATER_EQUAL_THAN|NOT" <<< "$typed_disassembly"; then
+    echo "[FAIL] typed-fold sample still emits typed arithmetic or comparison opcodes"
+    echo "$typed_disassembly"
+    exit 1
+fi
+
+run_and_capture "$SCRIPT_DIR/sample_ast_opt_comparison_branch_fold.mog" \
+    cmp_branch_output cmp_branch_status cmp_branch_disassembly cmp_branch_disassembly_status
+
+if [[ $cmp_branch_status -ne 0 || $cmp_branch_disassembly_status -ne 0 ]]; then
+    echo "[FAIL] comparison-branch sample failed"
+    echo "$cmp_branch_output"
+    echo "$cmp_branch_disassembly"
+    exit 1
+fi
+
+if [[ "$cmp_branch_output" != $'then\nok' ]]; then
+    echo "[FAIL] comparison-branch sample produced unexpected output"
+    echo "$cmp_branch_output"
+    exit 1
+fi
+
+if grep -q "JUMP_IF_FALSE_POP" <<< "$cmp_branch_disassembly" || grep -q "JUMP " <<< "$cmp_branch_disassembly"; then
+    echo "[FAIL] comparison-branch sample still emits branch jumps"
+    echo "$cmp_branch_disassembly"
+    exit 1
+fi
+
 run_and_capture "$SCRIPT_DIR/sample_ast_opt_no_side_effect_fold.mog" \
     side_effect_output side_effect_status side_effect_disassembly side_effect_disassembly_status
 

@@ -1,8 +1,10 @@
 #include "AstOptimizer.hpp"
 
-#include <cctype>
+#include <cmath>
 #include <cstdint>
+#include <iomanip>
 #include <limits>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <variant>
@@ -11,15 +13,21 @@
 
 namespace {
 
+constexpr uint64_t kMaxExactIntegerInDouble = 9007199254740992ULL;
+
 struct ConstantValue {
     enum class Kind {
-        Integer,
+        SignedInteger,
+        UnsignedInteger,
+        Float,
         Boolean,
         Null,
     };
 
     Kind kind = Kind::Null;
-    int64_t integerValue = 0;
+    int64_t signedValue = 0;
+    uint64_t unsignedValue = 0;
+    double floatValue = 0.0;
     bool boolValue = false;
 };
 
@@ -35,24 +43,46 @@ bool mulOverflow(int64_t lhs, int64_t rhs, int64_t& out) {
     return __builtin_mul_overflow(lhs, rhs, &out);
 }
 
-bool isUnsuffixedIntegerLiteral(const Token& token, int64_t& outValue) {
+bool addOverflow(uint64_t lhs, uint64_t rhs, uint64_t& out) {
+    return __builtin_add_overflow(lhs, rhs, &out);
+}
+
+bool subOverflow(uint64_t lhs, uint64_t rhs, uint64_t& out) {
+    return __builtin_sub_overflow(lhs, rhs, &out);
+}
+
+bool mulOverflow(uint64_t lhs, uint64_t rhs, uint64_t& out) {
+    return __builtin_mul_overflow(lhs, rhs, &out);
+}
+
+std::string stripNumericSuffix(std::string text) {
+    auto strip = [&](std::string_view suffix) -> bool {
+        if (text.size() < suffix.size()) {
+            return false;
+        }
+        if (text.compare(text.size() - suffix.size(), suffix.size(),
+                         suffix.data()) != 0) {
+            return false;
+        }
+        text.resize(text.size() - suffix.size());
+        return true;
+    };
+
+    strip("usize") || strip("i16") || strip("i32") || strip("i64") ||
+        strip("u16") || strip("u32") || strip("u64") || strip("f32") ||
+        strip("f64") || strip("i8") || strip("u8") || strip("u");
+    return text;
+}
+
+bool parseSignedIntegerLiteral(const Token& token, int64_t& outValue) {
     if (token.type() != TokenType::NUMBER) {
         return false;
     }
 
-    std::string text(token.start(), token.length());
-    if (text.empty()) {
-        return false;
-    }
-
-    for (char ch : text) {
-        if (!std::isdigit(static_cast<unsigned char>(ch))) {
-            return false;
-        }
-    }
-
     try {
         size_t parsed = 0;
+        std::string text = stripNumericSuffix(
+            std::string(token.start(), token.length()));
         long long value = std::stoll(text, &parsed, 10);
         if (parsed != text.size()) {
             return false;
@@ -64,235 +94,580 @@ bool isUnsuffixedIntegerLiteral(const Token& token, int64_t& outValue) {
     }
 }
 
-bool evaluateConstant(const AstExpr& expr, ConstantValue& out);
-
-bool evaluateLiteral(const AstLiteralExpr& literal, ConstantValue& out) {
-    switch (literal.token.type()) {
-        case TokenType::TRUE:
-            out.kind = ConstantValue::Kind::Boolean;
-            out.boolValue = true;
-            return true;
-        case TokenType::FALSE:
-            out.kind = ConstantValue::Kind::Boolean;
-            out.boolValue = false;
-            return true;
-        case TokenType::_NULL:
-        case TokenType::TYPE_NULL_KW:
-            out.kind = ConstantValue::Kind::Null;
-            return true;
-        case TokenType::NUMBER:
-            out.kind = ConstantValue::Kind::Integer;
-            return isUnsuffixedIntegerLiteral(literal.token, out.integerValue);
-        default:
-            return false;
-    }
-}
-
-bool evaluateUnary(const AstUnaryExpr& expr, ConstantValue& out) {
-    ConstantValue operand;
-    if (!evaluateConstant(*expr.operand, operand)) {
+bool parseUnsignedIntegerLiteral(const Token& token, uint64_t& outValue) {
+    if (token.type() != TokenType::NUMBER) {
         return false;
     }
 
-    switch (expr.op.type()) {
-        case TokenType::BANG:
-            if (operand.kind != ConstantValue::Kind::Boolean) {
-                return false;
-            }
-            out.kind = ConstantValue::Kind::Boolean;
-            out.boolValue = !operand.boolValue;
-            return true;
-        case TokenType::MINUS:
-            if (operand.kind != ConstantValue::Kind::Integer) {
-                return false;
-            }
-            if (operand.integerValue == std::numeric_limits<int64_t>::min()) {
-                return false;
-            }
-            out.kind = ConstantValue::Kind::Integer;
-            out.integerValue = -operand.integerValue;
-            return true;
-        case TokenType::TILDE:
-            if (operand.kind != ConstantValue::Kind::Integer) {
-                return false;
-            }
-            out.kind = ConstantValue::Kind::Integer;
-            out.integerValue = ~operand.integerValue;
-            return true;
-        default:
+    try {
+        size_t parsed = 0;
+        std::string text = stripNumericSuffix(
+            std::string(token.start(), token.length()));
+        unsigned long long value = std::stoull(text, &parsed, 10);
+        if (parsed != text.size()) {
             return false;
+        }
+        outValue = static_cast<uint64_t>(value);
+        return true;
+    } catch (...) {
+        return false;
     }
 }
 
-bool evaluateBinary(const AstBinaryExpr& expr, ConstantValue& out) {
-    ConstantValue left;
-    ConstantValue right;
-    if (!evaluateConstant(*expr.left, left) || !evaluateConstant(*expr.right, right)) {
+bool parseFloatLiteral(const Token& token, double& outValue) {
+    if (token.type() != TokenType::NUMBER) {
         return false;
     }
 
-    switch (expr.op.type()) {
-        case TokenType::PLUS:
-        case TokenType::MINUS:
-        case TokenType::STAR:
-        case TokenType::SLASH:
-        case TokenType::GREATER:
-        case TokenType::GREATER_EQUAL:
-        case TokenType::LESS:
-        case TokenType::LESS_EQUAL:
-        case TokenType::EQUAL_EQUAL:
-        case TokenType::BANG_EQUAL:
-        case TokenType::LOGICAL_AND:
-        case TokenType::LOGICAL_OR:
-            break;
-        default:
+    try {
+        size_t parsed = 0;
+        std::string text = stripNumericSuffix(
+            std::string(token.start(), token.length()));
+        double value = std::stod(text, &parsed);
+        if (parsed != text.size() || !std::isfinite(value)) {
             return false;
+        }
+        outValue = value;
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+std::string integerSuffix(TypeKind kind) {
+    switch (kind) {
+        case TypeKind::I8:
+            return "i8";
+        case TypeKind::I16:
+            return "i16";
+        case TypeKind::I32:
+            return "i32";
+        case TypeKind::I64:
+            return "i64";
+        case TypeKind::U8:
+            return "u8";
+        case TypeKind::U16:
+            return "u16";
+        case TypeKind::U32:
+            return "u32";
+        case TypeKind::U64:
+            return "u64";
+        case TypeKind::USIZE:
+            return "usize";
+        default:
+            return "";
+    }
+}
+
+std::string formatFloatCore(double value) {
+    if (value == 0.0) {
+        value = 0.0;
     }
 
-    if (left.kind == ConstantValue::Kind::Integer &&
-        right.kind == ConstantValue::Kind::Integer) {
-        int64_t numericResult = 0;
-        switch (expr.op.type()) {
-            case TokenType::PLUS:
-                if (addOverflow(left.integerValue, right.integerValue,
-                                numericResult)) {
+    std::ostringstream out;
+    out << std::fixed << std::setprecision(15) << value;
+    std::string text = out.str();
+    while (!text.empty() && text.back() == '0') {
+        text.pop_back();
+    }
+    if (!text.empty() && text.back() == '.') {
+        text.push_back('0');
+    }
+    if (text.empty()) {
+        return "0.0";
+    }
+    return text;
+}
+
+class ConstantEvaluator {
+   public:
+    explicit ConstantEvaluator(const AstSemanticModel& semanticModel)
+        : m_semanticModel(semanticModel) {}
+
+    bool evaluate(const AstExpr& expr, ConstantValue& out) const {
+        return std::visit(
+            [&](const auto& value) -> bool {
+                using T = std::decay_t<decltype(value)>;
+                if constexpr (std::is_same_v<T, AstLiteralExpr>) {
+                    return evaluateLiteral(expr, value, out);
+                } else if constexpr (std::is_same_v<T, AstGroupingExpr>) {
+                    return value.expression && evaluate(*value.expression, out);
+                } else if constexpr (std::is_same_v<T, AstUnaryExpr>) {
+                    return evaluateUnary(expr, value, out);
+                } else if constexpr (std::is_same_v<T, AstBinaryExpr>) {
+                    return evaluateBinary(value, out);
+                } else {
                     return false;
                 }
-                out.kind = ConstantValue::Kind::Integer;
-                out.integerValue = numericResult;
+            },
+            expr.value);
+    }
+
+    AstExpr makeLiteralExpr(const AstExpr& original,
+                            const ConstantValue& value) const {
+        AstExpr expr;
+        expr.node = original.node;
+
+        AstLiteralExpr literal;
+        switch (value.kind) {
+            case ConstantValue::Kind::Boolean:
+                literal.token = Token::synthetic(value.boolValue ? TokenType::TRUE
+                                                                 : TokenType::FALSE,
+                                                 value.boolValue ? "true"
+                                                                 : "false",
+                                                 original.node.line);
+                break;
+            case ConstantValue::Kind::Null:
+                literal.token =
+                    Token::synthetic(TokenType::_NULL, "null", original.node.line);
+                break;
+            case ConstantValue::Kind::SignedInteger: {
+                TypeRef type = nodeType(original.node.id);
+                std::string text = std::to_string(value.signedValue);
+                if (type && type->isInteger()) {
+                    text += integerSuffix(type->kind);
+                }
+                literal.token =
+                    Token::synthetic(TokenType::NUMBER, std::move(text),
+                                     original.node.line);
+                break;
+            }
+            case ConstantValue::Kind::UnsignedInteger: {
+                TypeRef type = nodeType(original.node.id);
+                std::string text = std::to_string(value.unsignedValue);
+                if (type && type->isInteger()) {
+                    text += integerSuffix(type->kind);
+                }
+                literal.token =
+                    Token::synthetic(TokenType::NUMBER, std::move(text),
+                                     original.node.line);
+                break;
+            }
+            case ConstantValue::Kind::Float: {
+                TypeRef type = nodeType(original.node.id);
+                std::string text = formatFloatCore(value.floatValue);
+                if (type && type->kind == TypeKind::F32) {
+                    text += "f32";
+                } else {
+                    text += "f64";
+                }
+                literal.token =
+                    Token::synthetic(TokenType::NUMBER, std::move(text),
+                                     original.node.line);
+                break;
+            }
+        }
+
+        expr.value = std::move(literal);
+        return expr;
+    }
+
+   private:
+    const AstSemanticModel& m_semanticModel;
+
+    TypeRef nodeType(AstNodeId id) const {
+        auto it = m_semanticModel.nodeTypes.find(id);
+        if (it == m_semanticModel.nodeTypes.end()) {
+            return nullptr;
+        }
+        return it->second;
+    }
+
+    bool constantToDouble(const ConstantValue& value, double& outValue) const {
+        switch (value.kind) {
+            case ConstantValue::Kind::Float:
+                outValue = value.floatValue;
+                return std::isfinite(outValue);
+            case ConstantValue::Kind::SignedInteger:
+                if (value.signedValue < 0 &&
+                    static_cast<uint64_t>(-(value.signedValue + 1)) + 1 >
+                        kMaxExactIntegerInDouble) {
+                    return false;
+                }
+                if (value.signedValue >= 0 &&
+                    static_cast<uint64_t>(value.signedValue) >
+                        kMaxExactIntegerInDouble) {
+                    return false;
+                }
+                outValue = static_cast<double>(value.signedValue);
+                return true;
+            case ConstantValue::Kind::UnsignedInteger:
+                if (value.unsignedValue > kMaxExactIntegerInDouble) {
+                    return false;
+                }
+                outValue = static_cast<double>(value.unsignedValue);
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    bool evaluateLiteral(const AstExpr& expr, const AstLiteralExpr& literal,
+                         ConstantValue& out) const {
+        switch (literal.token.type()) {
+            case TokenType::TRUE:
+                out.kind = ConstantValue::Kind::Boolean;
+                out.boolValue = true;
+                return true;
+            case TokenType::FALSE:
+                out.kind = ConstantValue::Kind::Boolean;
+                out.boolValue = false;
+                return true;
+            case TokenType::_NULL:
+            case TokenType::TYPE_NULL_KW:
+                out.kind = ConstantValue::Kind::Null;
+                return true;
+            case TokenType::NUMBER: {
+                TypeRef literalType = nodeType(expr.node.id);
+                if (!literalType || !literalType->isNumeric()) {
+                    return false;
+                }
+
+                if (literalType->isFloat()) {
+                    out.kind = ConstantValue::Kind::Float;
+                    return parseFloatLiteral(literal.token, out.floatValue);
+                }
+
+                if (literalType->isUnsigned()) {
+                    out.kind = ConstantValue::Kind::UnsignedInteger;
+                    return parseUnsignedIntegerLiteral(literal.token,
+                                                       out.unsignedValue);
+                }
+
+                if (literalType->isInteger()) {
+                    out.kind = ConstantValue::Kind::SignedInteger;
+                    return parseSignedIntegerLiteral(literal.token,
+                                                     out.signedValue);
+                }
+                return false;
+            }
+            default:
+                return false;
+        }
+    }
+
+    bool evaluateUnary(const AstExpr& expr, const AstUnaryExpr& unary,
+                       ConstantValue& out) const {
+        ConstantValue operand;
+        if (!unary.operand || !evaluate(*unary.operand, operand)) {
+            return false;
+        }
+
+        switch (unary.op.type()) {
+            case TokenType::BANG:
+                if (operand.kind != ConstantValue::Kind::Boolean) {
+                    return false;
+                }
+                out.kind = ConstantValue::Kind::Boolean;
+                out.boolValue = !operand.boolValue;
                 return true;
             case TokenType::MINUS:
-                if (subOverflow(left.integerValue, right.integerValue,
-                                numericResult)) {
-                    return false;
+                if (operand.kind == ConstantValue::Kind::SignedInteger) {
+                    if (operand.signedValue ==
+                        std::numeric_limits<int64_t>::min()) {
+                        return false;
+                    }
+                    out.kind = ConstantValue::Kind::SignedInteger;
+                    out.signedValue = -operand.signedValue;
+                    return true;
                 }
-                out.kind = ConstantValue::Kind::Integer;
-                out.integerValue = numericResult;
-                return true;
-            case TokenType::STAR:
-                if (mulOverflow(left.integerValue, right.integerValue,
-                                numericResult)) {
-                    return false;
+                if (operand.kind == ConstantValue::Kind::Float) {
+                    out.kind = ConstantValue::Kind::Float;
+                    out.floatValue = -operand.floatValue;
+                    return std::isfinite(out.floatValue);
                 }
-                out.kind = ConstantValue::Kind::Integer;
-                out.integerValue = numericResult;
-                return true;
-            case TokenType::SLASH:
-                if (right.integerValue == 0 ||
-                    (left.integerValue == std::numeric_limits<int64_t>::min() &&
-                     right.integerValue == -1)) {
-                    return false;
+                return false;
+            case TokenType::TILDE:
+                if (operand.kind == ConstantValue::Kind::SignedInteger) {
+                    out.kind = ConstantValue::Kind::SignedInteger;
+                    out.signedValue = ~operand.signedValue;
+                    return true;
                 }
-                out.kind = ConstantValue::Kind::Integer;
-                out.integerValue = left.integerValue / right.integerValue;
-                return true;
-            case TokenType::GREATER:
-                out.kind = ConstantValue::Kind::Boolean;
-                out.boolValue = left.integerValue > right.integerValue;
-                return true;
-            case TokenType::GREATER_EQUAL:
-                out.kind = ConstantValue::Kind::Boolean;
-                out.boolValue = left.integerValue >= right.integerValue;
-                return true;
-            case TokenType::LESS:
-                out.kind = ConstantValue::Kind::Boolean;
-                out.boolValue = left.integerValue < right.integerValue;
-                return true;
-            case TokenType::LESS_EQUAL:
-                out.kind = ConstantValue::Kind::Boolean;
-                out.boolValue = left.integerValue <= right.integerValue;
-                return true;
-            case TokenType::EQUAL_EQUAL:
-                out.kind = ConstantValue::Kind::Boolean;
-                out.boolValue = left.integerValue == right.integerValue;
-                return true;
-            case TokenType::BANG_EQUAL:
-                out.kind = ConstantValue::Kind::Boolean;
-                out.boolValue = left.integerValue != right.integerValue;
-                return true;
+                if (operand.kind == ConstantValue::Kind::UnsignedInteger) {
+                    out.kind = ConstantValue::Kind::UnsignedInteger;
+                    out.unsignedValue = ~operand.unsignedValue;
+                    return true;
+                }
+                return false;
             default:
                 return false;
         }
     }
 
-    if (left.kind == ConstantValue::Kind::Boolean &&
-        right.kind == ConstantValue::Kind::Boolean) {
-        out.kind = ConstantValue::Kind::Boolean;
-        switch (expr.op.type()) {
-            case TokenType::EQUAL_EQUAL:
-                out.boolValue = left.boolValue == right.boolValue;
-                return true;
-            case TokenType::BANG_EQUAL:
-                out.boolValue = left.boolValue != right.boolValue;
-                return true;
-            case TokenType::LOGICAL_AND:
-                out.boolValue = left.boolValue && right.boolValue;
-                return true;
-            case TokenType::LOGICAL_OR:
-                out.boolValue = left.boolValue || right.boolValue;
-                return true;
-            default:
-                return false;
+    bool evaluateNumericBinary(const AstBinaryExpr& binary,
+                               const ConstantValue& left,
+                               const ConstantValue& right,
+                               ConstantValue& out) const {
+        TypeRef leftType = nodeType(binary.left->node.id);
+        TypeRef rightType = nodeType(binary.right->node.id);
+        TypeRef promoted = numericPromotion(leftType, rightType);
+        if (!promoted) {
+            return false;
         }
-    }
 
-    if (left.kind == ConstantValue::Kind::Null &&
-        right.kind == ConstantValue::Kind::Null) {
-        out.kind = ConstantValue::Kind::Boolean;
-        out.boolValue = (expr.op.type() == TokenType::EQUAL_EQUAL);
-        return expr.op.type() == TokenType::EQUAL_EQUAL ||
-               expr.op.type() == TokenType::BANG_EQUAL;
-    }
-
-    return false;
-}
-
-bool evaluateConstant(const AstExpr& expr, ConstantValue& out) {
-    return std::visit(
-        [&](const auto& value) -> bool {
-            using T = std::decay_t<decltype(value)>;
-            if constexpr (std::is_same_v<T, AstLiteralExpr>) {
-                return evaluateLiteral(value, out);
-            } else if constexpr (std::is_same_v<T, AstGroupingExpr>) {
-                return value.expression && evaluateConstant(*value.expression, out);
-            } else if constexpr (std::is_same_v<T, AstUnaryExpr>) {
-                return evaluateUnary(value, out);
-            } else if constexpr (std::is_same_v<T, AstBinaryExpr>) {
-                return evaluateBinary(value, out);
-            } else {
+        if (promoted->isFloat()) {
+            double lhs = 0.0;
+            double rhs = 0.0;
+            if (!constantToDouble(left, lhs) || !constantToDouble(right, rhs)) {
                 return false;
             }
-        },
-        expr.value);
-}
 
-AstExpr makeLiteralExpr(const AstNodeInfo& node, const ConstantValue& value) {
-    AstExpr expr;
-    expr.node = node;
-    AstLiteralExpr literal;
-    switch (value.kind) {
-        case ConstantValue::Kind::Boolean:
-            literal.token = Token::synthetic(value.boolValue ? TokenType::TRUE
-                                                             : TokenType::FALSE,
-                                             value.boolValue ? "true" : "false",
-                                             node.line);
-            break;
-        case ConstantValue::Kind::Integer:
-            literal.token = Token::synthetic(TokenType::NUMBER,
-                                             std::to_string(value.integerValue),
-                                             node.line);
-            break;
-        case ConstantValue::Kind::Null:
-            literal.token = Token::synthetic(TokenType::_NULL, "null", node.line);
-            break;
+            switch (binary.op.type()) {
+                case TokenType::PLUS:
+                    out.kind = ConstantValue::Kind::Float;
+                    out.floatValue = lhs + rhs;
+                    return std::isfinite(out.floatValue);
+                case TokenType::MINUS:
+                    out.kind = ConstantValue::Kind::Float;
+                    out.floatValue = lhs - rhs;
+                    return std::isfinite(out.floatValue);
+                case TokenType::STAR:
+                    out.kind = ConstantValue::Kind::Float;
+                    out.floatValue = lhs * rhs;
+                    return std::isfinite(out.floatValue);
+                case TokenType::SLASH:
+                    if (rhs == 0.0) {
+                        return false;
+                    }
+                    out.kind = ConstantValue::Kind::Float;
+                    out.floatValue = lhs / rhs;
+                    return std::isfinite(out.floatValue);
+                case TokenType::GREATER:
+                    out.kind = ConstantValue::Kind::Boolean;
+                    out.boolValue = lhs > rhs;
+                    return true;
+                case TokenType::GREATER_EQUAL:
+                    out.kind = ConstantValue::Kind::Boolean;
+                    out.boolValue = lhs >= rhs;
+                    return true;
+                case TokenType::LESS:
+                    out.kind = ConstantValue::Kind::Boolean;
+                    out.boolValue = lhs < rhs;
+                    return true;
+                case TokenType::LESS_EQUAL:
+                    out.kind = ConstantValue::Kind::Boolean;
+                    out.boolValue = lhs <= rhs;
+                    return true;
+                case TokenType::EQUAL_EQUAL:
+                    out.kind = ConstantValue::Kind::Boolean;
+                    out.boolValue = lhs == rhs;
+                    return true;
+                case TokenType::BANG_EQUAL:
+                    out.kind = ConstantValue::Kind::Boolean;
+                    out.boolValue = lhs != rhs;
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        if (promoted->isSigned() &&
+            left.kind == ConstantValue::Kind::SignedInteger &&
+            right.kind == ConstantValue::Kind::SignedInteger) {
+            int64_t numericResult = 0;
+            switch (binary.op.type()) {
+                case TokenType::PLUS:
+                    if (addOverflow(left.signedValue, right.signedValue,
+                                    numericResult)) {
+                        return false;
+                    }
+                    out.kind = ConstantValue::Kind::SignedInteger;
+                    out.signedValue = numericResult;
+                    return true;
+                case TokenType::MINUS:
+                    if (subOverflow(left.signedValue, right.signedValue,
+                                    numericResult)) {
+                        return false;
+                    }
+                    out.kind = ConstantValue::Kind::SignedInteger;
+                    out.signedValue = numericResult;
+                    return true;
+                case TokenType::STAR:
+                    if (mulOverflow(left.signedValue, right.signedValue,
+                                    numericResult)) {
+                        return false;
+                    }
+                    out.kind = ConstantValue::Kind::SignedInteger;
+                    out.signedValue = numericResult;
+                    return true;
+                case TokenType::SLASH:
+                    if (right.signedValue == 0 ||
+                        (left.signedValue ==
+                             std::numeric_limits<int64_t>::min() &&
+                         right.signedValue == -1)) {
+                        return false;
+                    }
+                    out.kind = ConstantValue::Kind::SignedInteger;
+                    out.signedValue = left.signedValue / right.signedValue;
+                    return true;
+                case TokenType::GREATER:
+                    out.kind = ConstantValue::Kind::Boolean;
+                    out.boolValue = left.signedValue > right.signedValue;
+                    return true;
+                case TokenType::GREATER_EQUAL:
+                    out.kind = ConstantValue::Kind::Boolean;
+                    out.boolValue = left.signedValue >= right.signedValue;
+                    return true;
+                case TokenType::LESS:
+                    out.kind = ConstantValue::Kind::Boolean;
+                    out.boolValue = left.signedValue < right.signedValue;
+                    return true;
+                case TokenType::LESS_EQUAL:
+                    out.kind = ConstantValue::Kind::Boolean;
+                    out.boolValue = left.signedValue <= right.signedValue;
+                    return true;
+                case TokenType::EQUAL_EQUAL:
+                    out.kind = ConstantValue::Kind::Boolean;
+                    out.boolValue = left.signedValue == right.signedValue;
+                    return true;
+                case TokenType::BANG_EQUAL:
+                    out.kind = ConstantValue::Kind::Boolean;
+                    out.boolValue = left.signedValue != right.signedValue;
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        if (promoted->isUnsigned() &&
+            left.kind == ConstantValue::Kind::UnsignedInteger &&
+            right.kind == ConstantValue::Kind::UnsignedInteger) {
+            uint64_t numericResult = 0;
+            switch (binary.op.type()) {
+                case TokenType::PLUS:
+                    if (addOverflow(left.unsignedValue, right.unsignedValue,
+                                    numericResult)) {
+                        return false;
+                    }
+                    out.kind = ConstantValue::Kind::UnsignedInteger;
+                    out.unsignedValue = numericResult;
+                    return true;
+                case TokenType::MINUS:
+                    if (subOverflow(left.unsignedValue, right.unsignedValue,
+                                    numericResult)) {
+                        return false;
+                    }
+                    out.kind = ConstantValue::Kind::UnsignedInteger;
+                    out.unsignedValue = numericResult;
+                    return true;
+                case TokenType::STAR:
+                    if (mulOverflow(left.unsignedValue, right.unsignedValue,
+                                    numericResult)) {
+                        return false;
+                    }
+                    out.kind = ConstantValue::Kind::UnsignedInteger;
+                    out.unsignedValue = numericResult;
+                    return true;
+                case TokenType::SLASH:
+                    if (right.unsignedValue == 0) {
+                        return false;
+                    }
+                    out.kind = ConstantValue::Kind::UnsignedInteger;
+                    out.unsignedValue = left.unsignedValue / right.unsignedValue;
+                    return true;
+                case TokenType::GREATER:
+                    out.kind = ConstantValue::Kind::Boolean;
+                    out.boolValue = left.unsignedValue > right.unsignedValue;
+                    return true;
+                case TokenType::GREATER_EQUAL:
+                    out.kind = ConstantValue::Kind::Boolean;
+                    out.boolValue = left.unsignedValue >= right.unsignedValue;
+                    return true;
+                case TokenType::LESS:
+                    out.kind = ConstantValue::Kind::Boolean;
+                    out.boolValue = left.unsignedValue < right.unsignedValue;
+                    return true;
+                case TokenType::LESS_EQUAL:
+                    out.kind = ConstantValue::Kind::Boolean;
+                    out.boolValue = left.unsignedValue <= right.unsignedValue;
+                    return true;
+                case TokenType::EQUAL_EQUAL:
+                    out.kind = ConstantValue::Kind::Boolean;
+                    out.boolValue = left.unsignedValue == right.unsignedValue;
+                    return true;
+                case TokenType::BANG_EQUAL:
+                    out.kind = ConstantValue::Kind::Boolean;
+                    out.boolValue = left.unsignedValue != right.unsignedValue;
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        return false;
     }
-    expr.value = std::move(literal);
-    return expr;
-}
 
-void optimizeExpr(AstExpr& expr);
-void optimizeStmt(AstStmt& stmt);
-void optimizeItem(AstItem& item);
+    bool evaluateBinary(const AstBinaryExpr& binary, ConstantValue& out) const {
+        ConstantValue left;
+        ConstantValue right;
+        if (!binary.left || !binary.right || !evaluate(*binary.left, left) ||
+            !evaluate(*binary.right, right)) {
+            return false;
+        }
+
+        switch (binary.op.type()) {
+            case TokenType::PLUS:
+            case TokenType::MINUS:
+            case TokenType::STAR:
+            case TokenType::SLASH:
+            case TokenType::GREATER:
+            case TokenType::GREATER_EQUAL:
+            case TokenType::LESS:
+            case TokenType::LESS_EQUAL:
+            case TokenType::EQUAL_EQUAL:
+            case TokenType::BANG_EQUAL:
+            case TokenType::LOGICAL_AND:
+            case TokenType::LOGICAL_OR:
+                break;
+            default:
+                return false;
+        }
+
+        if ((left.kind == ConstantValue::Kind::SignedInteger ||
+             left.kind == ConstantValue::Kind::UnsignedInteger ||
+             left.kind == ConstantValue::Kind::Float) &&
+            (right.kind == ConstantValue::Kind::SignedInteger ||
+             right.kind == ConstantValue::Kind::UnsignedInteger ||
+             right.kind == ConstantValue::Kind::Float)) {
+            return evaluateNumericBinary(binary, left, right, out);
+        }
+
+        if (left.kind == ConstantValue::Kind::Boolean &&
+            right.kind == ConstantValue::Kind::Boolean) {
+            out.kind = ConstantValue::Kind::Boolean;
+            switch (binary.op.type()) {
+                case TokenType::EQUAL_EQUAL:
+                    out.boolValue = left.boolValue == right.boolValue;
+                    return true;
+                case TokenType::BANG_EQUAL:
+                    out.boolValue = left.boolValue != right.boolValue;
+                    return true;
+                case TokenType::LOGICAL_AND:
+                    out.boolValue = left.boolValue && right.boolValue;
+                    return true;
+                case TokenType::LOGICAL_OR:
+                    out.boolValue = left.boolValue || right.boolValue;
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        if (left.kind == ConstantValue::Kind::Null &&
+            right.kind == ConstantValue::Kind::Null) {
+            out.kind = ConstantValue::Kind::Boolean;
+            out.boolValue = (binary.op.type() == TokenType::EQUAL_EQUAL);
+            return binary.op.type() == TokenType::EQUAL_EQUAL ||
+                   binary.op.type() == TokenType::BANG_EQUAL;
+        }
+
+        return false;
+    }
+};
+
+void optimizeExpr(AstExpr& expr, const ConstantEvaluator& evaluator);
+void optimizeStmt(AstStmt& stmt, const ConstantEvaluator& evaluator);
+void optimizeItem(AstItem& item, const ConstantEvaluator& evaluator);
 
 void replaceStmtWith(AstStmt& target, AstStmtPtr replacement) {
     if (!replacement) {
@@ -302,76 +677,76 @@ void replaceStmtWith(AstStmt& target, AstStmtPtr replacement) {
     target.value = std::move(replacement->value);
 }
 
-void optimizeExpr(AstExpr& expr) {
+void optimizeExpr(AstExpr& expr, const ConstantEvaluator& evaluator) {
     std::visit(
         [&](auto& value) {
             using T = std::decay_t<decltype(value)>;
             if constexpr (std::is_same_v<T, AstGroupingExpr>) {
                 if (value.expression) {
-                    optimizeExpr(*value.expression);
+                    optimizeExpr(*value.expression, evaluator);
                 }
             } else if constexpr (std::is_same_v<T, AstUnaryExpr>) {
                 if (value.operand) {
-                    optimizeExpr(*value.operand);
+                    optimizeExpr(*value.operand, evaluator);
                 }
             } else if constexpr (std::is_same_v<T, AstBinaryExpr>) {
                 if (value.left) {
-                    optimizeExpr(*value.left);
+                    optimizeExpr(*value.left, evaluator);
                 }
                 if (value.right) {
-                    optimizeExpr(*value.right);
+                    optimizeExpr(*value.right, evaluator);
                 }
             } else if constexpr (std::is_same_v<T, AstAssignmentExpr>) {
                 if (value.target) {
-                    optimizeExpr(*value.target);
+                    optimizeExpr(*value.target, evaluator);
                 }
                 if (value.value) {
-                    optimizeExpr(*value.value);
+                    optimizeExpr(*value.value, evaluator);
                 }
             } else if constexpr (std::is_same_v<T, AstCallExpr>) {
                 if (value.callee) {
-                    optimizeExpr(*value.callee);
+                    optimizeExpr(*value.callee, evaluator);
                 }
                 for (auto& argument : value.arguments) {
                     if (argument) {
-                        optimizeExpr(*argument);
+                        optimizeExpr(*argument, evaluator);
                     }
                 }
             } else if constexpr (std::is_same_v<T, AstMemberExpr>) {
                 if (value.object) {
-                    optimizeExpr(*value.object);
+                    optimizeExpr(*value.object, evaluator);
                 }
             } else if constexpr (std::is_same_v<T, AstIndexExpr>) {
                 if (value.object) {
-                    optimizeExpr(*value.object);
+                    optimizeExpr(*value.object, evaluator);
                 }
                 if (value.index) {
-                    optimizeExpr(*value.index);
+                    optimizeExpr(*value.index, evaluator);
                 }
             } else if constexpr (std::is_same_v<T, AstCastExpr>) {
                 if (value.expression) {
-                    optimizeExpr(*value.expression);
+                    optimizeExpr(*value.expression, evaluator);
                 }
             } else if constexpr (std::is_same_v<T, AstFunctionExpr>) {
                 if (value.blockBody) {
-                    optimizeStmt(*value.blockBody);
+                    optimizeStmt(*value.blockBody, evaluator);
                 }
                 if (value.expressionBody) {
-                    optimizeExpr(*value.expressionBody);
+                    optimizeExpr(*value.expressionBody, evaluator);
                 }
             } else if constexpr (std::is_same_v<T, AstArrayLiteralExpr>) {
                 for (auto& element : value.elements) {
                     if (element) {
-                        optimizeExpr(*element);
+                        optimizeExpr(*element, evaluator);
                     }
                 }
             } else if constexpr (std::is_same_v<T, AstDictLiteralExpr>) {
                 for (auto& entry : value.entries) {
                     if (entry.key) {
-                        optimizeExpr(*entry.key);
+                        optimizeExpr(*entry.key, evaluator);
                     }
                     if (entry.value) {
-                        optimizeExpr(*entry.value);
+                        optimizeExpr(*entry.value, evaluator);
                     }
                 }
             }
@@ -379,46 +754,46 @@ void optimizeExpr(AstExpr& expr) {
         expr.value);
 
     ConstantValue constant;
-    if (evaluateConstant(expr, constant)) {
-        expr = makeLiteralExpr(expr.node, constant);
+    if (evaluator.evaluate(expr, constant)) {
+        expr = evaluator.makeLiteralExpr(expr, constant);
     }
 }
 
-void optimizeStmt(AstStmt& stmt) {
+void optimizeStmt(AstStmt& stmt, const ConstantEvaluator& evaluator) {
     std::visit(
         [&](auto& value) {
             using T = std::decay_t<decltype(value)>;
             if constexpr (std::is_same_v<T, AstBlockStmt>) {
                 for (auto& item : value.items) {
                     if (item) {
-                        optimizeItem(*item);
+                        optimizeItem(*item, evaluator);
                     }
                 }
             } else if constexpr (std::is_same_v<T, AstExprStmt>) {
                 if (value.expression) {
-                    optimizeExpr(*value.expression);
+                    optimizeExpr(*value.expression, evaluator);
                 }
             } else if constexpr (std::is_same_v<T, AstPrintStmt>) {
                 if (value.expression) {
-                    optimizeExpr(*value.expression);
+                    optimizeExpr(*value.expression, evaluator);
                 }
             } else if constexpr (std::is_same_v<T, AstReturnStmt>) {
                 if (value.value) {
-                    optimizeExpr(*value.value);
+                    optimizeExpr(*value.value, evaluator);
                 }
             } else if constexpr (std::is_same_v<T, AstIfStmt>) {
                 if (value.condition) {
-                    optimizeExpr(*value.condition);
+                    optimizeExpr(*value.condition, evaluator);
                 }
                 if (value.thenBranch) {
-                    optimizeStmt(*value.thenBranch);
+                    optimizeStmt(*value.thenBranch, evaluator);
                 }
                 if (value.elseBranch) {
-                    optimizeStmt(*value.elseBranch);
+                    optimizeStmt(*value.elseBranch, evaluator);
                 }
 
                 ConstantValue condition;
-                if (!value.condition || !evaluateConstant(*value.condition, condition) ||
+                if (!value.condition || !evaluator.evaluate(*value.condition, condition) ||
                     condition.kind != ConstantValue::Kind::Boolean) {
                     return;
                 }
@@ -432,75 +807,75 @@ void optimizeStmt(AstStmt& stmt) {
                 }
             } else if constexpr (std::is_same_v<T, AstWhileStmt>) {
                 if (value.condition) {
-                    optimizeExpr(*value.condition);
+                    optimizeExpr(*value.condition, evaluator);
                 }
                 if (value.body) {
-                    optimizeStmt(*value.body);
+                    optimizeStmt(*value.body, evaluator);
                 }
 
                 ConstantValue condition;
-                if (value.condition && evaluateConstant(*value.condition, condition) &&
+                if (value.condition && evaluator.evaluate(*value.condition, condition) &&
                     condition.kind == ConstantValue::Kind::Boolean &&
                     !condition.boolValue) {
                     stmt.value = AstBlockStmt{};
                 }
             } else if constexpr (std::is_same_v<T, AstVarDeclStmt>) {
                 if (value.initializer) {
-                    optimizeExpr(*value.initializer);
+                    optimizeExpr(*value.initializer, evaluator);
                 }
             } else if constexpr (std::is_same_v<T, AstDestructuredImportStmt>) {
                 if (value.initializer) {
-                    optimizeExpr(*value.initializer);
+                    optimizeExpr(*value.initializer, evaluator);
                 }
             } else if constexpr (std::is_same_v<T, AstForStmt>) {
                 if (auto* initDecl =
                         std::get_if<std::unique_ptr<AstVarDeclStmt>>(&value.initializer)) {
                     if (*initDecl && (*initDecl)->initializer) {
-                        optimizeExpr(*(*initDecl)->initializer);
+                        optimizeExpr(*(*initDecl)->initializer, evaluator);
                     }
                 } else if (auto* initExpr = std::get_if<AstExprPtr>(&value.initializer)) {
                     if (*initExpr) {
-                        optimizeExpr(**initExpr);
+                        optimizeExpr(**initExpr, evaluator);
                     }
                 }
                 if (value.condition) {
-                    optimizeExpr(*value.condition);
+                    optimizeExpr(*value.condition, evaluator);
                 }
                 if (value.increment) {
-                    optimizeExpr(*value.increment);
+                    optimizeExpr(*value.increment, evaluator);
                 }
                 if (value.body) {
-                    optimizeStmt(*value.body);
+                    optimizeStmt(*value.body, evaluator);
                 }
             } else if constexpr (std::is_same_v<T, AstForEachStmt>) {
                 if (value.iterable) {
-                    optimizeExpr(*value.iterable);
+                    optimizeExpr(*value.iterable, evaluator);
                 }
                 if (value.body) {
-                    optimizeStmt(*value.body);
+                    optimizeStmt(*value.body, evaluator);
                 }
             }
         },
         stmt.value);
 }
 
-void optimizeItem(AstItem& item) {
+void optimizeItem(AstItem& item, const ConstantEvaluator& evaluator) {
     std::visit(
         [&](auto& value) {
             using T = std::decay_t<decltype(value)>;
             if constexpr (std::is_same_v<T, AstFunctionDecl>) {
                 if (value.body) {
-                    optimizeStmt(*value.body);
+                    optimizeStmt(*value.body, evaluator);
                 }
             } else if constexpr (std::is_same_v<T, AstClassDecl>) {
                 for (auto& method : value.methods) {
                     if (method.body) {
-                        optimizeStmt(*method.body);
+                        optimizeStmt(*method.body, evaluator);
                     }
                 }
             } else if constexpr (std::is_same_v<T, AstStmtPtr>) {
                 if (value) {
-                    optimizeStmt(*value);
+                    optimizeStmt(*value, evaluator);
                 }
             }
         },
@@ -510,10 +885,10 @@ void optimizeItem(AstItem& item) {
 }  // namespace
 
 void optimizeAst(AstModule& module, const AstSemanticModel& semanticModel) {
-    (void)semanticModel;
+    ConstantEvaluator evaluator(semanticModel);
     for (auto& item : module.items) {
         if (item) {
-            optimizeItem(*item);
+            optimizeItem(*item, evaluator);
         }
     }
 }

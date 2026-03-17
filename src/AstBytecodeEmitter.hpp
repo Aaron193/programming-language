@@ -175,7 +175,7 @@ class AstBytecodeEmitter {
         }
 
         emitReturn(lastModuleLine());
-        return !m_compiler.m_parser->hadError;
+        return !m_compiler.m_hadError;
     }
 
    private:

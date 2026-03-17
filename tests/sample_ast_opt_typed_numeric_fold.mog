@@ -1,0 +1,5 @@
+#!strict
+print(1u8 + 2u8)
+print(1.25f64 + 2.25f64)
+print(!false)
+print(5i64 >= 5i64)

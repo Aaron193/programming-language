@@ -1,0 +1,12 @@
+#!strict
+if (1u8 + 2u8 == 3u8) {
+    print("then")
+} else {
+    print("else")
+}
+
+if (1.5f64 < 1.0f64) {
+    print("bad")
+} else {
+    print("ok")
+}
