@@ -43,6 +43,7 @@ struct AstTypeExpr {
 };
 
 struct AstParameter {
+    AstNodeInfo node;
     Token name;
     std::unique_ptr<AstTypeExpr> type;
 };
@@ -183,6 +184,7 @@ struct AstWhileStmt {
 };
 
 struct AstVarDeclStmt {
+    AstNodeInfo node;
     bool isConst = false;
     Token name;
     std::unique_ptr<AstTypeExpr> declaredType;
@@ -191,6 +193,7 @@ struct AstVarDeclStmt {
 };
 
 struct AstImportBinding {
+    AstNodeInfo node;
     Token exportedName;
     std::optional<Token> localName;
 };

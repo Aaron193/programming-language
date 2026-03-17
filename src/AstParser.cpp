@@ -603,6 +603,7 @@ std::vector<AstParameter> AstParser::parseParameters() {
             }
 
             AstParameter param;
+            param.node = makeNodeInfo(m_current);
             param.name = m_current;
             advance();
             if (isTypedTypeAnnotationStart()) {
@@ -1025,6 +1026,7 @@ AstStmtPtr AstParser::parseForStatement(const Token& forToken) {
                 return nullptr;
             }
             auto varDecl = std::make_unique<AstVarDeclStmt>();
+            varDecl->node = makeNodeInfo(mutabilityToken);
             varDecl->isConst = isConst;
             varDecl->name = nameToken;
             varDecl->declaredType = std::move(declaredType);
@@ -1153,6 +1155,7 @@ AstStmtPtr AstParser::parseVariableDeclarationStatement(bool allowForClause) {
                 }
 
                 AstImportBinding binding;
+                binding.node = makeNodeInfo(m_current);
                 binding.exportedName = m_current;
                 advance();
                 if (match(TokenType::AS_KW)) {
@@ -1198,6 +1201,7 @@ AstStmtPtr AstParser::parseVariableDeclarationStatement(bool allowForClause) {
     }
 
     auto varDecl = std::make_unique<AstVarDeclStmt>();
+    varDecl->node = makeNodeInfo(mutabilityToken);
     varDecl->isConst = isConst;
     varDecl->name = m_current;
     advance();

@@ -11,6 +11,8 @@
 #include <utility>
 #include <vector>
 
+#include "AstParser.hpp"
+#include "AstSemanticAnalyzer.hpp"
 #include "AstSymbolCollector.hpp"
 #include "NativePackage.hpp"
 #include "Scanner.hpp"
@@ -3467,6 +3469,18 @@ bool TypeChecker::check(
     const std::unordered_map<std::string, TypeRef>& typeAliases,
     const std::unordered_map<std::string, TypeRef>& functionSignatures,
     std::vector<TypeError>& out, TypeCheckerMetadata* outMetadata) {
+    AstModule module;
+    AstParser parser(source);
+    if (parser.parseModule(module)) {
+        AstSemanticModel semanticModel;
+        analyzeAstSemantics(module, classNames, typeAliases,
+                            functionSignatures, out, &semanticModel);
+        if (outMetadata) {
+            *outMetadata = semanticModel.metadata;
+        }
+        return out.empty();
+    }
+
     CheckerImpl checker(source, classNames, typeAliases, functionSignatures,
                         out);
     checker.run();
