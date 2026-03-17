@@ -161,16 +161,25 @@ bool collectSymbolsFromAst(
         outTypeAliases->clear();
     }
 
-    for (const AstDeclaration& declaration : module.declarations) {
-        if (const auto* classDecl = std::get_if<AstClassDecl>(&declaration)) {
+    for (const auto& item : module.items) {
+        if (item == nullptr) {
+            continue;
+        }
+
+        const auto* classDecl = std::get_if<AstClassDecl>(&item->value);
+        if (classDecl != nullptr) {
             outClassNames.emplace(std::string(classDecl->name.start(),
                                               classDecl->name.length()));
         }
     }
 
     if (outTypeAliases != nullptr) {
-        for (const AstDeclaration& declaration : module.declarations) {
-            const auto* aliasDecl = std::get_if<AstTypeAliasDecl>(&declaration);
+        for (const auto& item : module.items) {
+            if (item == nullptr) {
+                continue;
+            }
+
+            const auto* aliasDecl = std::get_if<AstTypeAliasDecl>(&item->value);
             if (aliasDecl == nullptr || !aliasDecl->aliasedType) {
                 continue;
             }
@@ -189,8 +198,12 @@ bool collectSymbolsFromAst(
     const auto& aliases =
         outTypeAliases != nullptr ? *outTypeAliases : emptyAliases;
 
-    for (const AstDeclaration& declaration : module.declarations) {
-        const auto* functionDecl = std::get_if<AstFunctionDecl>(&declaration);
+    for (const auto& item : module.items) {
+        if (item == nullptr) {
+            continue;
+        }
+
+        const auto* functionDecl = std::get_if<AstFunctionDecl>(&item->value);
         if (functionDecl == nullptr) {
             continue;
         }

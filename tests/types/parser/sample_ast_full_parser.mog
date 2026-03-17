@@ -1,0 +1,37 @@
+const { Add as Plus, PI } = @import("./modules/math.mog")
+
+type Counter struct {
+    value i32
+
+    fn bump(step i32) i32 {
+        if (step > 0) {
+            this.value += step
+        } else {
+            this.value++
+        }
+
+        return this.value
+    }
+}
+
+fn runner(seed i32) i32 {
+    var total i32 = seed
+    var next fn(i32) i32 = fn(delta i32) => total + delta
+    var pairs Dict<str, i32> = {"a": 1, "b": 2}
+
+    for (var i i32 = 0; i < 3; i++) {
+        total += i
+    }
+
+    for (var value i32 : [1, 2, 3]) {
+        total += value
+    }
+
+    while (total < 20) {
+        total++
+    }
+
+    return next(total) + pairs["a"] + PI as i32
+}
+
+print(runner(Plus(1, 2)))

@@ -2,6 +2,7 @@
 
 #include <utility>
 
+#include "NativePackage.hpp"
 #include "SyntaxRules.hpp"
 
 namespace {
@@ -30,40 +31,59 @@ bool isTypeToken(TokenType type) {
     }
 }
 
+bool isAssignmentOperator(TokenType type) {
+    switch (type) {
+        case TokenType::EQUAL:
+        case TokenType::PLUS_EQUAL:
+        case TokenType::MINUS_EQUAL:
+        case TokenType::STAR_EQUAL:
+        case TokenType::SLASH_EQUAL:
+        case TokenType::AMPERSAND_EQUAL:
+        case TokenType::CARET_EQUAL:
+        case TokenType::PIPE_EQUAL:
+        case TokenType::SHIFT_LEFT_EQUAL:
+        case TokenType::SHIFT_RIGHT_EQUAL:
+        case TokenType::PLUS_PLUS:
+        case TokenType::MINUS_MINUS:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool isComparisonOperator(TokenType type) {
+    switch (type) {
+        case TokenType::GREATER:
+        case TokenType::GREATER_EQUAL:
+        case TokenType::LESS:
+        case TokenType::LESS_EQUAL:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool isEqualityOperator(TokenType type) {
+    return type == TokenType::EQUAL_EQUAL || type == TokenType::BANG_EQUAL;
+}
+
 }  // namespace
 
 AstParser::AstParser(std::string_view source) : m_scanner(source) { advance(); }
 
+AstNodeInfo AstParser::makeNodeInfo(const Token& token) {
+    return AstNodeInfo{m_nextNodeId++, token.line()};
+}
+
 bool AstParser::parseModule(AstModule& outModule) {
-    outModule.declarations.clear();
+    outModule.items.clear();
 
     while (!check(TokenType::END_OF_FILE)) {
-        if (match(TokenType::SEMI_COLON)) {
-            continue;
+        AstItemPtr item = parseItem();
+        if (!item) {
+            return false;
         }
-
-        if (match(TokenType::TYPE)) {
-            if (!parseTopLevelTypeDeclaration(outModule)) {
-                return false;
-            }
-            continue;
-        }
-
-        if (check(TokenType::TYPE_FN) &&
-            peekToken().type() == TokenType::IDENTIFIER) {
-            advance();
-            if (!parseTopLevelFunctionDeclaration(outModule)) {
-                return false;
-            }
-            continue;
-        }
-
-        if (check(TokenType::CONST) || check(TokenType::VAR)) {
-            skipVariableDeclaration();
-            continue;
-        }
-
-        skipStatement();
+        outModule.items.push_back(std::move(item));
     }
 
     return !m_hadError;
@@ -78,6 +98,7 @@ void AstParser::advance() {
         } else {
             m_current = m_scanner.nextToken();
         }
+
         if (m_current.type() != TokenType::ERROR) {
             break;
         }
@@ -88,6 +109,10 @@ void AstParser::advance() {
 const Token& AstParser::peekToken(size_t offset) { return tokenAt(offset); }
 
 const Token& AstParser::tokenAt(size_t offset) {
+    if (offset == 0) {
+        return m_current;
+    }
+
     while (m_bufferedTokens.size() < offset) {
         m_bufferedTokens.push_back(m_scanner.nextToken());
     }
@@ -104,9 +129,20 @@ bool AstParser::match(TokenType type) {
     return true;
 }
 
+bool AstParser::matchSameLine(TokenType type) {
+    if (!check(type) || hasLineBreakBeforeCurrent()) {
+        return false;
+    }
+    advance();
+    return true;
+}
+
 bool AstParser::consume(TokenType type) {
     if (!check(type)) {
         error();
+        if (!check(TokenType::END_OF_FILE)) {
+            advance();
+        }
         return false;
     }
     advance();
@@ -123,8 +159,293 @@ std::string AstParser::tokenText(const Token& token) const {
 
 void AstParser::error() { m_hadError = true; }
 
+void AstParser::rejectStraySemicolon() {
+    if (!check(TokenType::SEMI_COLON)) {
+        return;
+    }
+
+    error();
+    advance();
+}
+
+bool AstParser::isRecoveryBoundaryToken(TokenType type) const {
+    switch (type) {
+        case TokenType::TYPE:
+        case TokenType::VAR:
+        case TokenType::CONST:
+        case TokenType::TYPE_FN:
+        case TokenType::FOR:
+        case TokenType::IF:
+        case TokenType::WHILE:
+        case TokenType::PRINT:
+        case TokenType::_RETURN:
+        case TokenType::CLOSE_CURLY:
+        case TokenType::END_OF_FILE:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool AstParser::recoverLineLeadingContinuation(
+    std::initializer_list<TokenType> terminators) {
+    if (!hasLineBreakBeforeCurrent() ||
+        !isLineContinuationToken(m_current.type())) {
+        return false;
+    }
+
+    error();
+
+    int parenDepth = 0;
+    int bracketDepth = 0;
+    int braceDepth = 0;
+
+    while (!check(TokenType::END_OF_FILE)) {
+        if (parenDepth == 0 && bracketDepth == 0 && braceDepth == 0) {
+            for (TokenType terminator : terminators) {
+                if (check(terminator)) {
+                    return true;
+                }
+            }
+
+            if (check(TokenType::SEMI_COLON) || check(TokenType::CLOSE_CURLY) ||
+                isRecoveryBoundaryToken(m_current.type())) {
+                return true;
+            }
+        }
+
+        switch (m_current.type()) {
+            case TokenType::OPEN_PAREN:
+                ++parenDepth;
+                break;
+            case TokenType::CLOSE_PAREN:
+                if (parenDepth > 0) {
+                    --parenDepth;
+                }
+                break;
+            case TokenType::OPEN_BRACKET:
+                ++bracketDepth;
+                break;
+            case TokenType::CLOSE_BRACKET:
+                if (bracketDepth > 0) {
+                    --bracketDepth;
+                }
+                break;
+            case TokenType::OPEN_CURLY:
+                ++braceDepth;
+                break;
+            case TokenType::CLOSE_CURLY:
+                if (braceDepth > 0) {
+                    --braceDepth;
+                }
+                break;
+            default:
+                break;
+        }
+
+        advance();
+    }
+
+    return true;
+}
+
+bool AstParser::rejectUnexpectedTrailingToken(
+    std::initializer_list<TokenType> allowedTerminators) {
+    if (check(TokenType::END_OF_FILE) || hasLineBreakBeforeCurrent() ||
+        check(TokenType::SEMI_COLON)) {
+        return false;
+    }
+
+    for (TokenType terminator : allowedTerminators) {
+        if (check(terminator)) {
+            return false;
+        }
+    }
+
+    error();
+
+    while (!check(TokenType::END_OF_FILE) && !hasLineBreakBeforeCurrent()) {
+        bool reachedTerminator = false;
+        for (TokenType terminator : allowedTerminators) {
+            if (check(terminator)) {
+                reachedTerminator = true;
+                break;
+            }
+        }
+
+        if (reachedTerminator || check(TokenType::SEMI_COLON) ||
+            check(TokenType::CLOSE_CURLY) ||
+            isRecoveryBoundaryToken(m_current.type())) {
+            break;
+        }
+
+        advance();
+    }
+
+    return true;
+}
+
+bool AstParser::parseTypeLookahead(size_t& offset) {
+    auto consumeOptionalSuffix = [&]() {
+        while (tokenAt(offset).type() == TokenType::QUESTION) {
+            ++offset;
+        }
+    };
+
+    const Token& current = tokenAt(offset);
+    if (current.type() == TokenType::TYPE_FN) {
+        ++offset;
+        if (tokenAt(offset).type() != TokenType::OPEN_PAREN) {
+            return false;
+        }
+
+        ++offset;
+        if (tokenAt(offset).type() != TokenType::CLOSE_PAREN) {
+            while (true) {
+                if (!parseTypeLookahead(offset)) {
+                    return false;
+                }
+                if (tokenAt(offset).type() == TokenType::COMMA) {
+                    ++offset;
+                    continue;
+                }
+                if (tokenAt(offset).type() != TokenType::CLOSE_PAREN) {
+                    return false;
+                }
+                break;
+            }
+        }
+
+        ++offset;
+        if (!parseTypeLookahead(offset)) {
+            return false;
+        }
+
+        consumeOptionalSuffix();
+        return true;
+    }
+
+    if (isTypeToken(current.type())) {
+        ++offset;
+        consumeOptionalSuffix();
+        return true;
+    }
+
+    if (current.type() != TokenType::IDENTIFIER) {
+        return false;
+    }
+
+    std::string_view name(current.start(), current.length());
+    ++offset;
+
+    if (isHandleTypeNameText(name)) {
+        if (tokenAt(offset).type() != TokenType::LESS) {
+            return false;
+        }
+        ++offset;
+
+        if (tokenAt(offset).type() != TokenType::IDENTIFIER) {
+            return false;
+        }
+        std::string_view packageNamespace(tokenAt(offset).start(),
+                                          tokenAt(offset).length());
+        ++offset;
+        if (tokenAt(offset).type() != TokenType::COLON ||
+            !isValidPackageIdPart(packageNamespace)) {
+            return false;
+        }
+        ++offset;
+
+        if (tokenAt(offset).type() != TokenType::IDENTIFIER) {
+            return false;
+        }
+        std::string_view packageName(tokenAt(offset).start(),
+                                     tokenAt(offset).length());
+        ++offset;
+        if (tokenAt(offset).type() != TokenType::COLON ||
+            !isValidPackageIdPart(packageName)) {
+            return false;
+        }
+        ++offset;
+
+        if (tokenAt(offset).type() != TokenType::IDENTIFIER) {
+            return false;
+        }
+        std::string_view typeName(tokenAt(offset).start(),
+                                  tokenAt(offset).length());
+        ++offset;
+        if (tokenAt(offset).type() != TokenType::GREATER ||
+            !isValidHandleTypeName(typeName)) {
+            return false;
+        }
+        ++offset;
+        consumeOptionalSuffix();
+        return true;
+    }
+
+    if (isCollectionTypeNameText(name) && tokenAt(offset).type() == TokenType::LESS) {
+        ++offset;
+        if (name == "Array" || name == "Set") {
+            if (!parseTypeLookahead(offset) ||
+                tokenAt(offset).type() != TokenType::GREATER) {
+                return false;
+            }
+            ++offset;
+            consumeOptionalSuffix();
+            return true;
+        }
+
+        if (!parseTypeLookahead(offset) ||
+            tokenAt(offset).type() != TokenType::COMMA) {
+            return false;
+        }
+        ++offset;
+        if (!parseTypeLookahead(offset) ||
+            tokenAt(offset).type() != TokenType::GREATER) {
+            return false;
+        }
+        ++offset;
+        consumeOptionalSuffix();
+        return true;
+    }
+
+    consumeOptionalSuffix();
+    return true;
+}
+
+bool AstParser::isTypedTypeAnnotationStart() {
+    if (check(TokenType::TYPE_FN)) {
+        return peekToken().type() == TokenType::OPEN_PAREN;
+    }
+
+    if (isTypeToken(m_current.type())) {
+        return true;
+    }
+
+    if (!check(TokenType::IDENTIFIER)) {
+        return false;
+    }
+
+    const Token& lookahead = peekToken();
+    if (isHandleTypeNameText(tokenText(m_current))) {
+        return lookahead.type() == TokenType::LESS;
+    }
+
+    if (isCollectionTypeNameText(tokenText(m_current))) {
+        return lookahead.type() == TokenType::LESS;
+    }
+
+    size_t offset = 0;
+    if (!parseTypeLookahead(offset)) {
+        return false;
+    }
+
+    return true;
+}
+
 std::unique_ptr<AstTypeExpr> AstParser::parseTypeExpr() {
     std::unique_ptr<AstTypeExpr> typeExpr;
+    Token startToken = m_current;
 
     if (check(TokenType::TYPE_FN)) {
         Token typeToken = m_current;
@@ -134,6 +455,7 @@ std::unique_ptr<AstTypeExpr> AstParser::parseTypeExpr() {
         }
 
         auto functionType = std::make_unique<AstTypeExpr>();
+        functionType->node = makeNodeInfo(typeToken);
         functionType->kind = AstTypeKind::FUNCTION;
         functionType->token = typeToken;
 
@@ -164,6 +486,7 @@ std::unique_ptr<AstTypeExpr> AstParser::parseTypeExpr() {
     } else if (isTypeToken(m_current.type()) &&
                m_current.type() != TokenType::TYPE_FN) {
         auto namedType = std::make_unique<AstTypeExpr>();
+        namedType->node = makeNodeInfo(m_current);
         namedType->kind = AstTypeKind::NAMED;
         namedType->token = m_current;
         advance();
@@ -198,6 +521,7 @@ std::unique_ptr<AstTypeExpr> AstParser::parseTypeExpr() {
             }
 
             auto handleType = std::make_unique<AstTypeExpr>();
+            handleType->node = makeNodeInfo(nameToken);
             handleType->kind = AstTypeKind::NATIVE_HANDLE;
             handleType->token = nameToken;
             handleType->packageNamespace = tokenText(namespaceToken);
@@ -216,8 +540,9 @@ std::unique_ptr<AstTypeExpr> AstParser::parseTypeExpr() {
                 }
 
                 auto collectionType = std::make_unique<AstTypeExpr>();
-                collectionType->kind = name == "Array" ? AstTypeKind::ARRAY
-                                                        : AstTypeKind::SET;
+                collectionType->node = makeNodeInfo(nameToken);
+                collectionType->kind =
+                    name == "Array" ? AstTypeKind::ARRAY : AstTypeKind::SET;
                 collectionType->token = nameToken;
                 collectionType->elementType = std::move(elementType);
                 typeExpr = std::move(collectionType);
@@ -226,12 +551,14 @@ std::unique_ptr<AstTypeExpr> AstParser::parseTypeExpr() {
                 if (!keyType || !consume(TokenType::COMMA)) {
                     return nullptr;
                 }
+
                 auto valueType = parseTypeExpr();
                 if (!valueType || !consume(TokenType::GREATER)) {
                     return nullptr;
                 }
 
                 auto dictType = std::make_unique<AstTypeExpr>();
+                dictType->node = makeNodeInfo(nameToken);
                 dictType->kind = AstTypeKind::DICT;
                 dictType->token = nameToken;
                 dictType->keyType = std::move(keyType);
@@ -240,6 +567,7 @@ std::unique_ptr<AstTypeExpr> AstParser::parseTypeExpr() {
             }
         } else {
             auto namedType = std::make_unique<AstTypeExpr>();
+            namedType->node = makeNodeInfo(nameToken);
             namedType->kind = AstTypeKind::NAMED;
             namedType->token = nameToken;
             typeExpr = std::move(namedType);
@@ -251,6 +579,7 @@ std::unique_ptr<AstTypeExpr> AstParser::parseTypeExpr() {
 
     while (match(TokenType::QUESTION)) {
         auto optionalType = std::make_unique<AstTypeExpr>();
+        optionalType->node = makeNodeInfo(startToken);
         optionalType->kind = AstTypeKind::OPTIONAL;
         optionalType->token = typeExpr->token;
         optionalType->innerType = std::move(typeExpr);
@@ -267,7 +596,7 @@ std::vector<AstParameter> AstParser::parseParameters() {
     }
 
     if (!check(TokenType::CLOSE_PAREN)) {
-        while (true) {
+        do {
             if (!check(TokenType::IDENTIFIER)) {
                 error();
                 return {};
@@ -276,16 +605,14 @@ std::vector<AstParameter> AstParser::parseParameters() {
             AstParameter param;
             param.name = m_current;
             advance();
-            param.type = parseTypeExpr();
-            if (!param.type) {
-                return {};
+            if (isTypedTypeAnnotationStart()) {
+                param.type = parseTypeExpr();
+                if (!param.type) {
+                    return {};
+                }
             }
             params.push_back(std::move(param));
-
-            if (!match(TokenType::COMMA)) {
-                break;
-            }
-        }
+        } while (match(TokenType::COMMA));
     }
 
     if (!consume(TokenType::CLOSE_PAREN)) {
@@ -295,7 +622,50 @@ std::vector<AstParameter> AstParser::parseParameters() {
     return params;
 }
 
-bool AstParser::parseTopLevelTypeDeclaration(AstModule& outModule) {
+AstItemPtr AstParser::parseItem() {
+    if (check(TokenType::SEMI_COLON)) {
+        rejectStraySemicolon();
+        if (m_hadError) {
+            return nullptr;
+        }
+    }
+
+    auto item = std::make_unique<AstItem>();
+
+    if (match(TokenType::TYPE)) {
+        item->node = makeNodeInfo(m_previous);
+        if (!parseTypeDeclaration(*item)) {
+            return nullptr;
+        }
+        return item;
+    }
+
+    if (check(TokenType::TYPE_FN) && peekToken().type() == TokenType::IDENTIFIER) {
+        advance();
+        item->node = makeNodeInfo(m_previous);
+        if (!parseFunctionDeclaration(*item)) {
+            return nullptr;
+        }
+        return item;
+    }
+
+    AstStmtPtr stmt;
+    if (check(TokenType::CONST) || check(TokenType::VAR)) {
+        stmt = parseVariableDeclarationStatement();
+    } else {
+        stmt = parseStatement();
+    }
+
+    if (!stmt) {
+        return nullptr;
+    }
+
+    item->node = stmt->node;
+    item->value = std::move(stmt);
+    return item;
+}
+
+bool AstParser::parseTypeDeclaration(AstItem& outItem) {
     if (!check(TokenType::IDENTIFIER)) {
         error();
         return false;
@@ -310,16 +680,20 @@ bool AstParser::parseTopLevelTypeDeclaration(AstModule& outModule) {
         if (!aliasedType) {
             return false;
         }
-        outModule.declarations.push_back(
-            AstTypeAliasDecl{nameToken, std::move(aliasedType)});
-        match(TokenType::SEMI_COLON);
+
+        AstTypeAliasDecl aliasDecl;
+        aliasDecl.node = makeNodeInfo(nameToken);
+        aliasDecl.name = nameToken;
+        aliasDecl.aliasedType = std::move(aliasedType);
+        rejectStraySemicolon();
+        outItem.value = std::move(aliasDecl);
         return !m_hadError;
     }
 
-    if (match(TokenType::STRUCT)) {
-    }
+    match(TokenType::STRUCT);
 
     AstClassDecl classDecl;
+    classDecl.node = makeNodeInfo(nameToken);
     classDecl.name = nameToken;
 
     if (match(TokenType::LESS)) {
@@ -336,7 +710,8 @@ bool AstParser::parseTopLevelTypeDeclaration(AstModule& outModule) {
     }
 
     while (!check(TokenType::CLOSE_CURLY) && !check(TokenType::END_OF_FILE)) {
-        if (match(TokenType::SEMI_COLON)) {
+        if (check(TokenType::SEMI_COLON)) {
+            rejectStraySemicolon();
             continue;
         }
         if (!parseClassMember(classDecl)) {
@@ -348,17 +723,18 @@ bool AstParser::parseTopLevelTypeDeclaration(AstModule& outModule) {
         return false;
     }
 
-    outModule.declarations.push_back(std::move(classDecl));
+    outItem.value = std::move(classDecl);
     return !m_hadError;
 }
 
-bool AstParser::parseTopLevelFunctionDeclaration(AstModule& outModule) {
+bool AstParser::parseFunctionDeclaration(AstItem& outItem) {
     if (!check(TokenType::IDENTIFIER)) {
         error();
         return false;
     }
 
     AstFunctionDecl functionDecl;
+    functionDecl.node = makeNodeInfo(m_current);
     functionDecl.name = m_current;
     advance();
     functionDecl.params = parseParameters();
@@ -366,20 +742,19 @@ bool AstParser::parseTopLevelFunctionDeclaration(AstModule& outModule) {
         return false;
     }
 
-    if (!check(TokenType::OPEN_CURLY) && !check(TokenType::END_OF_FILE)) {
+    if (isTypedTypeAnnotationStart()) {
         functionDecl.returnType = parseTypeExpr();
         if (!functionDecl.returnType) {
             return false;
         }
     }
 
-    if (!check(TokenType::OPEN_CURLY)) {
-        error();
+    functionDecl.body = parseBlockStatement();
+    if (!functionDecl.body) {
         return false;
     }
-    skipBlock();
 
-    outModule.declarations.push_back(std::move(functionDecl));
+    outItem.value = std::move(functionDecl);
     return !m_hadError;
 }
 
@@ -417,6 +792,7 @@ bool AstParser::parseClassMember(AstClassDecl& outClassDecl) {
         }
 
         AstMethodDecl methodDecl;
+        methodDecl.node = makeNodeInfo(m_current);
         methodDecl.name = m_current;
         methodDecl.annotatedOperators = std::move(annotatedOperators);
         advance();
@@ -425,21 +801,24 @@ bool AstParser::parseClassMember(AstClassDecl& outClassDecl) {
             return false;
         }
 
-        if (!check(TokenType::OPEN_CURLY) && !check(TokenType::END_OF_FILE)) {
+        if (isTypedTypeAnnotationStart()) {
             methodDecl.returnType = parseTypeExpr();
             if (!methodDecl.returnType) {
                 return false;
             }
         }
 
-        if (!check(TokenType::OPEN_CURLY)) {
-            error();
+        methodDecl.body = parseBlockStatement();
+        if (!methodDecl.body) {
             return false;
         }
-        skipBlock();
 
         outClassDecl.methods.push_back(std::move(methodDecl));
         return !m_hadError;
+    }
+
+    if (!annotatedOperators.empty()) {
+        error();
     }
 
     if (!check(TokenType::IDENTIFIER)) {
@@ -448,224 +827,926 @@ bool AstParser::parseClassMember(AstClassDecl& outClassDecl) {
     }
 
     AstFieldDecl fieldDecl;
+    fieldDecl.node = makeNodeInfo(m_current);
     fieldDecl.name = m_current;
     advance();
     fieldDecl.type = parseTypeExpr();
     if (!fieldDecl.type) {
         return false;
     }
-    match(TokenType::SEMI_COLON);
+    rejectStraySemicolon();
     outClassDecl.fields.push_back(std::move(fieldDecl));
     return !m_hadError;
 }
 
-void AstParser::skipBlock() {
-    if (!match(TokenType::OPEN_CURLY)) {
-        error();
-        return;
+AstStmtPtr AstParser::parseStatement() {
+    if (check(TokenType::SEMI_COLON)) {
+        rejectStraySemicolon();
+        return nullptr;
     }
 
-    int depth = 1;
-    while (depth > 0 && !check(TokenType::END_OF_FILE)) {
-        TokenType type = m_current.type();
-        advance();
-        if (type == TokenType::OPEN_CURLY) {
-            depth++;
-        } else if (type == TokenType::CLOSE_CURLY) {
-            depth--;
-        }
-    }
-
-    if (depth != 0) {
-        error();
-    }
-}
-
-void AstParser::skipParenthesized() {
-    if (!match(TokenType::OPEN_PAREN)) {
-        error();
-        return;
-    }
-
-    int depth = 1;
-    while (depth > 0 && !check(TokenType::END_OF_FILE)) {
-        TokenType type = m_current.type();
-        advance();
-        if (type == TokenType::OPEN_PAREN) {
-            depth++;
-        } else if (type == TokenType::CLOSE_PAREN) {
-            depth--;
-        } else if (type == TokenType::OPEN_CURLY) {
-            int blockDepth = 1;
-            while (blockDepth > 0 && !check(TokenType::END_OF_FILE)) {
-                TokenType nestedType = m_current.type();
-                advance();
-                if (nestedType == TokenType::OPEN_CURLY) {
-                    blockDepth++;
-                } else if (nestedType == TokenType::CLOSE_CURLY) {
-                    blockDepth--;
-                }
-            }
-        }
-    }
-
-    if (depth != 0) {
-        error();
-    }
-}
-
-void AstParser::skipStatement() {
     if (match(TokenType::PRINT)) {
-        if (check(TokenType::OPEN_PAREN)) {
-            skipParenthesized();
-        } else {
-            skipExpression();
-        }
-        match(TokenType::SEMI_COLON);
-        return;
+        return parsePrintStatement(m_previous);
     }
 
     if (match(TokenType::IF)) {
-        if (check(TokenType::OPEN_PAREN)) {
-            skipParenthesized();
-        }
-        skipStatement();
-        if (match(TokenType::ELSE)) {
-            skipStatement();
-        }
-        return;
+        return parseIfStatement(m_previous);
     }
 
     if (match(TokenType::WHILE)) {
-        if (check(TokenType::OPEN_PAREN)) {
-            skipParenthesized();
-        }
-        skipStatement();
-        return;
+        return parseWhileStatement(m_previous);
     }
 
     if (match(TokenType::FOR)) {
-        if (check(TokenType::OPEN_PAREN)) {
-            skipParenthesized();
-        }
-        skipStatement();
-        return;
+        return parseForStatement(m_previous);
     }
 
     if (match(TokenType::_RETURN)) {
-        if (check(TokenType::SEMI_COLON) || check(TokenType::CLOSE_CURLY) ||
-            check(TokenType::END_OF_FILE)) {
-            match(TokenType::SEMI_COLON);
-            return;
-        }
-        skipExpression();
-        match(TokenType::SEMI_COLON);
-        return;
+        return parseReturnStatement(m_previous);
     }
 
     if (check(TokenType::OPEN_CURLY)) {
-        skipBlock();
-        return;
+        return parseBlockStatement();
     }
 
-    skipExpression();
-    match(TokenType::SEMI_COLON);
+    return parseExpressionStatement();
 }
 
-void AstParser::skipExpression(TokenType primaryTerminator) {
-    int parenDepth = 0;
-    int bracketDepth = 0;
-    int braceDepth = 0;
-    bool consumedAny = false;
+AstStmtPtr AstParser::parseBlockStatement() {
+    Token openToken = m_current;
+    if (!consume(TokenType::OPEN_CURLY)) {
+        return nullptr;
+    }
 
-    while (!check(TokenType::END_OF_FILE)) {
-        if (consumedAny && parenDepth == 0 && bracketDepth == 0 &&
-            braceDepth == 0) {
-            if (check(primaryTerminator) || check(TokenType::SEMI_COLON) ||
-                check(TokenType::CLOSE_CURLY)) {
-                return;
-            }
-            if (hasLineBreakBeforeCurrent() &&
-                !isLineContinuationToken(m_current.type())) {
-                return;
-            }
+    AstBlockStmt blockStmt;
+    while (!check(TokenType::CLOSE_CURLY) && !check(TokenType::END_OF_FILE)) {
+        AstItemPtr item = parseItem();
+        if (!item) {
+            return nullptr;
+        }
+        blockStmt.items.push_back(std::move(item));
+    }
+
+    if (!consume(TokenType::CLOSE_CURLY)) {
+        return nullptr;
+    }
+
+    auto stmt = std::make_unique<AstStmt>();
+    stmt->node = makeNodeInfo(openToken);
+    stmt->value = std::move(blockStmt);
+    return stmt;
+}
+
+AstStmtPtr AstParser::parsePrintStatement(const Token& printToken) {
+    if (!consume(TokenType::OPEN_PAREN)) {
+        return nullptr;
+    }
+
+    AstPrintStmt printStmt;
+    printStmt.expression = parseExpression();
+    if (!printStmt.expression) {
+        return nullptr;
+    }
+    recoverLineLeadingContinuation({TokenType::CLOSE_PAREN});
+    if (!consume(TokenType::CLOSE_PAREN)) {
+        return nullptr;
+    }
+    rejectStraySemicolon();
+
+    auto stmt = std::make_unique<AstStmt>();
+    stmt->node = makeNodeInfo(printToken);
+    stmt->value = std::move(printStmt);
+    return stmt;
+}
+
+AstStmtPtr AstParser::parseIfStatement(const Token& ifToken) {
+    if (!consume(TokenType::OPEN_PAREN)) {
+        return nullptr;
+    }
+
+    AstIfStmt ifStmt;
+    ifStmt.condition = parseExpression();
+    if (!ifStmt.condition) {
+        return nullptr;
+    }
+    recoverLineLeadingContinuation({TokenType::CLOSE_PAREN});
+    if (!consume(TokenType::CLOSE_PAREN)) {
+        return nullptr;
+    }
+    ifStmt.thenBranch = parseStatement();
+    if (!ifStmt.thenBranch) {
+        return nullptr;
+    }
+    if (match(TokenType::ELSE)) {
+        ifStmt.elseBranch = parseStatement();
+        if (!ifStmt.elseBranch) {
+            return nullptr;
+        }
+    }
+
+    auto stmt = std::make_unique<AstStmt>();
+    stmt->node = makeNodeInfo(ifToken);
+    stmt->value = std::move(ifStmt);
+    return stmt;
+}
+
+AstStmtPtr AstParser::parseWhileStatement(const Token& whileToken) {
+    if (!consume(TokenType::OPEN_PAREN)) {
+        return nullptr;
+    }
+
+    AstWhileStmt whileStmt;
+    whileStmt.condition = parseExpression();
+    if (!whileStmt.condition) {
+        return nullptr;
+    }
+    recoverLineLeadingContinuation({TokenType::CLOSE_PAREN});
+    if (!consume(TokenType::CLOSE_PAREN)) {
+        return nullptr;
+    }
+    whileStmt.body = parseStatement();
+    if (!whileStmt.body) {
+        return nullptr;
+    }
+
+    auto stmt = std::make_unique<AstStmt>();
+    stmt->node = makeNodeInfo(whileToken);
+    stmt->value = std::move(whileStmt);
+    return stmt;
+}
+
+AstStmtPtr AstParser::parseForStatement(const Token& forToken) {
+    if (!consume(TokenType::OPEN_PAREN)) {
+        return nullptr;
+    }
+
+    AstForStmt forStmt;
+    std::optional<AstForEachStmt> forEachStmt;
+
+    if (match(TokenType::SEMI_COLON)) {
+    } else if (check(TokenType::CONST) || check(TokenType::VAR)) {
+        Token mutabilityToken = m_current;
+        bool isConst = match(TokenType::CONST);
+        if (!isConst) {
+            consume(TokenType::VAR);
+        }
+        if (!check(TokenType::IDENTIFIER)) {
+            error();
+            return nullptr;
         }
 
-        TokenType type = m_current.type();
+        Token nameToken = m_current;
         advance();
-        consumedAny = true;
-
-        switch (type) {
-            case TokenType::OPEN_PAREN:
-                parenDepth++;
-                break;
-            case TokenType::CLOSE_PAREN:
-                if (parenDepth == 0) {
-                    return;
-                }
-                parenDepth--;
-                break;
-            case TokenType::OPEN_BRACKET:
-                bracketDepth++;
-                break;
-            case TokenType::CLOSE_BRACKET:
-                if (bracketDepth == 0) {
-                    return;
-                }
-                bracketDepth--;
-                break;
-            case TokenType::OPEN_CURLY:
-                braceDepth++;
-                break;
-            case TokenType::CLOSE_CURLY:
-                if (braceDepth == 0) {
-                    return;
-                }
-                braceDepth--;
-                break;
-            default:
-                break;
+        std::unique_ptr<AstTypeExpr> declaredType = parseTypeExpr();
+        if (!declaredType) {
+            return nullptr;
         }
+
+        if (match(TokenType::COLON)) {
+            AstForEachStmt foreach;
+            foreach.isConst = isConst;
+            foreach.name = nameToken;
+            foreach.declaredType = std::move(declaredType);
+            foreach.iterable = parseExpression();
+            if (!foreach.iterable) {
+                return nullptr;
+            }
+            recoverLineLeadingContinuation({TokenType::CLOSE_PAREN});
+            if (!consume(TokenType::CLOSE_PAREN)) {
+                return nullptr;
+            }
+            foreach.body = parseStatement();
+            if (!foreach.body) {
+                return nullptr;
+            }
+            forEachStmt = std::move(foreach);
+        } else {
+            if (!consume(TokenType::EQUAL)) {
+                return nullptr;
+            }
+            auto varDecl = std::make_unique<AstVarDeclStmt>();
+            varDecl->isConst = isConst;
+            varDecl->name = nameToken;
+            varDecl->declaredType = std::move(declaredType);
+            varDecl->initializer = parseExpression();
+            if (!varDecl->initializer) {
+                return nullptr;
+            }
+            recoverLineLeadingContinuation({TokenType::SEMI_COLON});
+            if (!consume(TokenType::SEMI_COLON)) {
+                return nullptr;
+            }
+            forStmt.initializer = std::move(varDecl);
+        }
+        (void)mutabilityToken;
+    } else {
+        AstExprPtr initializer = parseExpression();
+        if (!initializer) {
+            return nullptr;
+        }
+        recoverLineLeadingContinuation({TokenType::SEMI_COLON});
+        if (!consume(TokenType::SEMI_COLON)) {
+            return nullptr;
+        }
+        forStmt.initializer = std::move(initializer);
     }
+
+    if (forEachStmt.has_value()) {
+        auto stmt = std::make_unique<AstStmt>();
+        stmt->node = makeNodeInfo(forToken);
+        stmt->value = std::move(*forEachStmt);
+        return stmt;
+    }
+
+    if (!check(TokenType::SEMI_COLON)) {
+        forStmt.condition = parseExpression();
+        if (!forStmt.condition) {
+            return nullptr;
+        }
+        recoverLineLeadingContinuation({TokenType::SEMI_COLON});
+    }
+    if (!consume(TokenType::SEMI_COLON)) {
+        return nullptr;
+    }
+
+    if (!check(TokenType::CLOSE_PAREN)) {
+        forStmt.increment = parseExpression();
+        if (!forStmt.increment) {
+            return nullptr;
+        }
+        recoverLineLeadingContinuation({TokenType::CLOSE_PAREN});
+    }
+    if (!consume(TokenType::CLOSE_PAREN)) {
+        return nullptr;
+    }
+
+    forStmt.body = parseStatement();
+    if (!forStmt.body) {
+        return nullptr;
+    }
+
+    auto stmt = std::make_unique<AstStmt>();
+    stmt->node = makeNodeInfo(forToken);
+    stmt->value = std::move(forStmt);
+    return stmt;
 }
 
-void AstParser::skipVariableDeclaration() {
-    advance();
+AstStmtPtr AstParser::parseReturnStatement(const Token& returnToken) {
+    AstReturnStmt returnStmt;
+
+    if (check(TokenType::SEMI_COLON) || check(TokenType::CLOSE_CURLY) ||
+        check(TokenType::END_OF_FILE)) {
+        rejectStraySemicolon();
+    } else {
+        returnStmt.value = parseExpression();
+        if (!returnStmt.value) {
+            return nullptr;
+        }
+        recoverLineLeadingContinuation();
+        rejectUnexpectedTrailingToken();
+        rejectStraySemicolon();
+    }
+
+    auto stmt = std::make_unique<AstStmt>();
+    stmt->node = makeNodeInfo(returnToken);
+    stmt->value = std::move(returnStmt);
+    return stmt;
+}
+
+AstStmtPtr AstParser::parseExpressionStatement() {
+    AstExprStmt exprStmt;
+    exprStmt.expression = parseExpression();
+    if (!exprStmt.expression) {
+        return nullptr;
+    }
+    recoverLineLeadingContinuation();
+    rejectUnexpectedTrailingToken();
+    rejectStraySemicolon();
+
+    auto stmt = std::make_unique<AstStmt>();
+    stmt->node = exprStmt.expression->node;
+    stmt->value = std::move(exprStmt);
+    return stmt;
+}
+
+AstStmtPtr AstParser::parseVariableDeclarationStatement(bool allowForClause) {
+    if (!check(TokenType::CONST) && !check(TokenType::VAR)) {
+        error();
+        return nullptr;
+    }
+
+    Token mutabilityToken = m_current;
+    bool isConst = match(TokenType::CONST);
+    if (!isConst) {
+        consume(TokenType::VAR);
+    }
 
     if (match(TokenType::OPEN_CURLY)) {
-        int depth = 1;
-        while (depth > 0 && !check(TokenType::END_OF_FILE)) {
-            TokenType type = m_current.type();
-            advance();
-            if (type == TokenType::OPEN_CURLY) {
-                depth++;
-            } else if (type == TokenType::CLOSE_CURLY) {
-                depth--;
-            }
+        AstDestructuredImportStmt destructuredDecl;
+        destructuredDecl.isConst = isConst;
+
+        if (!check(TokenType::CLOSE_CURLY)) {
+            do {
+                if (!check(TokenType::IDENTIFIER)) {
+                    error();
+                    return nullptr;
+                }
+
+                AstImportBinding binding;
+                binding.exportedName = m_current;
+                advance();
+                if (match(TokenType::AS_KW)) {
+                    if (!check(TokenType::IDENTIFIER)) {
+                        error();
+                        return nullptr;
+                    }
+                    binding.localName = m_current;
+                    advance();
+                }
+                destructuredDecl.bindings.push_back(std::move(binding));
+            } while (match(TokenType::COMMA));
         }
-        if (match(TokenType::EQUAL)) {
-            skipExpression();
+
+        if (!consume(TokenType::CLOSE_CURLY) || !consume(TokenType::EQUAL)) {
+            return nullptr;
         }
-        match(TokenType::SEMI_COLON);
-        return;
+
+        if (!check(TokenType::AT)) {
+            error();
+            return nullptr;
+        }
+        Token atToken = m_current;
+        advance();
+        destructuredDecl.initializer = parseImportExpression(atToken);
+        if (!destructuredDecl.initializer) {
+            return nullptr;
+        }
+
+        if (!allowForClause) {
+            rejectStraySemicolon();
+        }
+
+        auto stmt = std::make_unique<AstStmt>();
+        stmt->node = makeNodeInfo(mutabilityToken);
+        stmt->value = std::move(destructuredDecl);
+        return stmt;
     }
 
     if (!check(TokenType::IDENTIFIER)) {
         error();
-        return;
+        return nullptr;
     }
+
+    auto varDecl = std::make_unique<AstVarDeclStmt>();
+    varDecl->isConst = isConst;
+    varDecl->name = m_current;
     advance();
 
-    if (!check(TokenType::EQUAL)) {
-        auto ignoredType = parseTypeExpr();
-        if (!ignoredType) {
-            return;
+    if (check(TokenType::EQUAL)) {
+        varDecl->omittedType = true;
+    } else {
+        varDecl->declaredType = parseTypeExpr();
+        if (!varDecl->declaredType) {
+            return nullptr;
         }
     }
 
     if (!consume(TokenType::EQUAL)) {
-        return;
+        return nullptr;
     }
-    skipExpression();
-    match(TokenType::SEMI_COLON);
+
+    if (check(TokenType::AT)) {
+        Token atToken = m_current;
+        advance();
+        varDecl->initializer = parseImportExpression(atToken);
+    } else {
+        varDecl->initializer = parseExpression();
+    }
+    if (!varDecl->initializer) {
+        return nullptr;
+    }
+
+    if (!allowForClause) {
+        recoverLineLeadingContinuation();
+        rejectUnexpectedTrailingToken();
+        rejectStraySemicolon();
+    }
+
+    auto stmt = std::make_unique<AstStmt>();
+    stmt->node = makeNodeInfo(mutabilityToken);
+    stmt->value = std::move(*varDecl);
+    return stmt;
+}
+
+AstExprPtr AstParser::parseExpression() { return parseAssignment(); }
+
+AstExprPtr AstParser::parseAssignment() {
+    AstExprPtr lhs = parseOr();
+    if (!lhs) {
+        return nullptr;
+    }
+
+    if (hasLineBreakBeforeCurrent() || !isAssignmentOperator(m_current.type())) {
+        return lhs;
+    }
+
+    Token op = m_current;
+    advance();
+
+    if (op.type() == TokenType::PLUS_PLUS || op.type() == TokenType::MINUS_MINUS) {
+        auto expr = std::make_unique<AstExpr>();
+        expr->node = makeNodeInfo(op);
+        expr->value =
+            AstUpdateExpr{op, std::move(lhs), false};
+        return expr;
+    }
+
+    AstExprPtr rhs = parseAssignment();
+    if (!rhs) {
+        return nullptr;
+    }
+
+    auto expr = std::make_unique<AstExpr>();
+    expr->node = makeNodeInfo(op);
+    expr->value = AstAssignmentExpr{std::move(lhs), op, std::move(rhs)};
+    return expr;
+}
+
+AstExprPtr AstParser::parseOr() {
+    AstExprPtr expr = parseAnd();
+    while (expr && matchSameLine(TokenType::LOGICAL_OR)) {
+        Token op = m_previous;
+        AstExprPtr rhs = parseAnd();
+        if (!rhs) {
+            return nullptr;
+        }
+        auto binary = std::make_unique<AstExpr>();
+        binary->node = makeNodeInfo(op);
+        binary->value = AstBinaryExpr{std::move(expr), op, std::move(rhs)};
+        expr = std::move(binary);
+    }
+    return expr;
+}
+
+AstExprPtr AstParser::parseAnd() {
+    AstExprPtr expr = parseEquality();
+    while (expr && matchSameLine(TokenType::LOGICAL_AND)) {
+        Token op = m_previous;
+        AstExprPtr rhs = parseEquality();
+        if (!rhs) {
+            return nullptr;
+        }
+        auto binary = std::make_unique<AstExpr>();
+        binary->node = makeNodeInfo(op);
+        binary->value = AstBinaryExpr{std::move(expr), op, std::move(rhs)};
+        expr = std::move(binary);
+    }
+    return expr;
+}
+
+AstExprPtr AstParser::parseEquality() {
+    AstExprPtr expr = parseComparison();
+    while (expr && !hasLineBreakBeforeCurrent() &&
+           isEqualityOperator(m_current.type())) {
+        Token op = m_current;
+        advance();
+        AstExprPtr rhs = parseComparison();
+        if (!rhs) {
+            return nullptr;
+        }
+        auto binary = std::make_unique<AstExpr>();
+        binary->node = makeNodeInfo(op);
+        binary->value = AstBinaryExpr{std::move(expr), op, std::move(rhs)};
+        expr = std::move(binary);
+    }
+    return expr;
+}
+
+AstExprPtr AstParser::parseComparison() {
+    AstExprPtr expr = parseBitwiseOr();
+    while (expr && !hasLineBreakBeforeCurrent() &&
+           isComparisonOperator(m_current.type())) {
+        Token op = m_current;
+        advance();
+        AstExprPtr rhs = parseBitwiseOr();
+        if (!rhs) {
+            return nullptr;
+        }
+        auto binary = std::make_unique<AstExpr>();
+        binary->node = makeNodeInfo(op);
+        binary->value = AstBinaryExpr{std::move(expr), op, std::move(rhs)};
+        expr = std::move(binary);
+    }
+    return expr;
+}
+
+AstExprPtr AstParser::parseBitwiseOr() {
+    AstExprPtr expr = parseBitwiseXor();
+    while (expr && matchSameLine(TokenType::PIPE)) {
+        Token op = m_previous;
+        AstExprPtr rhs = parseBitwiseXor();
+        if (!rhs) {
+            return nullptr;
+        }
+        auto binary = std::make_unique<AstExpr>();
+        binary->node = makeNodeInfo(op);
+        binary->value = AstBinaryExpr{std::move(expr), op, std::move(rhs)};
+        expr = std::move(binary);
+    }
+    return expr;
+}
+
+AstExprPtr AstParser::parseBitwiseXor() {
+    AstExprPtr expr = parseBitwiseAnd();
+    while (expr && matchSameLine(TokenType::CARET)) {
+        Token op = m_previous;
+        AstExprPtr rhs = parseBitwiseAnd();
+        if (!rhs) {
+            return nullptr;
+        }
+        auto binary = std::make_unique<AstExpr>();
+        binary->node = makeNodeInfo(op);
+        binary->value = AstBinaryExpr{std::move(expr), op, std::move(rhs)};
+        expr = std::move(binary);
+    }
+    return expr;
+}
+
+AstExprPtr AstParser::parseBitwiseAnd() {
+    AstExprPtr expr = parseShift();
+    while (expr && matchSameLine(TokenType::AMPERSAND)) {
+        Token op = m_previous;
+        AstExprPtr rhs = parseShift();
+        if (!rhs) {
+            return nullptr;
+        }
+        auto binary = std::make_unique<AstExpr>();
+        binary->node = makeNodeInfo(op);
+        binary->value = AstBinaryExpr{std::move(expr), op, std::move(rhs)};
+        expr = std::move(binary);
+    }
+    return expr;
+}
+
+AstExprPtr AstParser::parseShift() {
+    AstExprPtr expr = parseTerm();
+    while (expr && !hasLineBreakBeforeCurrent() &&
+           (check(TokenType::SHIFT_LEFT_TOKEN) ||
+            check(TokenType::SHIFT_RIGHT_TOKEN))) {
+        Token op = m_current;
+        advance();
+        AstExprPtr rhs = parseTerm();
+        if (!rhs) {
+            return nullptr;
+        }
+        auto binary = std::make_unique<AstExpr>();
+        binary->node = makeNodeInfo(op);
+        binary->value = AstBinaryExpr{std::move(expr), op, std::move(rhs)};
+        expr = std::move(binary);
+    }
+    return expr;
+}
+
+AstExprPtr AstParser::parseTerm() {
+    AstExprPtr expr = parseFactor();
+    while (expr && !hasLineBreakBeforeCurrent() &&
+           (check(TokenType::PLUS) || check(TokenType::MINUS))) {
+        Token op = m_current;
+        advance();
+        AstExprPtr rhs = parseFactor();
+        if (!rhs) {
+            return nullptr;
+        }
+        auto binary = std::make_unique<AstExpr>();
+        binary->node = makeNodeInfo(op);
+        binary->value = AstBinaryExpr{std::move(expr), op, std::move(rhs)};
+        expr = std::move(binary);
+    }
+    return expr;
+}
+
+AstExprPtr AstParser::parseFactor() {
+    AstExprPtr expr = parseUnary();
+    while (expr && !hasLineBreakBeforeCurrent() &&
+           (check(TokenType::STAR) || check(TokenType::SLASH))) {
+        Token op = m_current;
+        advance();
+        AstExprPtr rhs = parseUnary();
+        if (!rhs) {
+            return nullptr;
+        }
+        auto binary = std::make_unique<AstExpr>();
+        binary->node = makeNodeInfo(op);
+        binary->value = AstBinaryExpr{std::move(expr), op, std::move(rhs)};
+        expr = std::move(binary);
+    }
+    return expr;
+}
+
+AstExprPtr AstParser::parseUnary() {
+    if (match(TokenType::BANG) || match(TokenType::MINUS) ||
+        match(TokenType::TILDE)) {
+        Token op = m_previous;
+        AstExprPtr operand = parseUnary();
+        if (!operand) {
+            return nullptr;
+        }
+        auto expr = std::make_unique<AstExpr>();
+        expr->node = makeNodeInfo(op);
+        expr->value = AstUnaryExpr{op, std::move(operand)};
+        return expr;
+    }
+
+    if (match(TokenType::PLUS_PLUS) || match(TokenType::MINUS_MINUS)) {
+        Token op = m_previous;
+        AstExprPtr operand = parseUnary();
+        if (!operand) {
+            return nullptr;
+        }
+        auto expr = std::make_unique<AstExpr>();
+        expr->node = makeNodeInfo(op);
+        expr->value = AstUpdateExpr{op, std::move(operand), true};
+        return expr;
+    }
+
+    return parseCast();
+}
+
+AstExprPtr AstParser::parseCast() {
+    AstExprPtr expr = parseCall();
+    while (expr && matchSameLine(TokenType::AS_KW)) {
+        Token asToken = m_previous;
+        std::unique_ptr<AstTypeExpr> targetType = parseTypeExpr();
+        if (!targetType) {
+            return nullptr;
+        }
+
+        auto castExpr = std::make_unique<AstExpr>();
+        castExpr->node = makeNodeInfo(asToken);
+        castExpr->value = AstCastExpr{std::move(expr), std::move(targetType)};
+        expr = std::move(castExpr);
+    }
+    return expr;
+}
+
+AstExprPtr AstParser::parseCall() {
+    AstExprPtr expr = parsePrimary();
+    if (!expr) {
+        return nullptr;
+    }
+
+    while (true) {
+        if (matchSameLine(TokenType::OPEN_PAREN)) {
+            Token openParen = m_previous;
+            AstCallExpr callExpr;
+            callExpr.callee = std::move(expr);
+            if (!check(TokenType::CLOSE_PAREN)) {
+                do {
+                    AstExprPtr arg = parseExpression();
+                    if (!arg) {
+                        return nullptr;
+                    }
+                    callExpr.arguments.push_back(std::move(arg));
+                } while (match(TokenType::COMMA));
+            }
+            if (!consume(TokenType::CLOSE_PAREN)) {
+                return nullptr;
+            }
+
+            auto call = std::make_unique<AstExpr>();
+            call->node = makeNodeInfo(openParen);
+            call->value = std::move(callExpr);
+            expr = std::move(call);
+            continue;
+        }
+
+        if (matchSameLine(TokenType::DOT)) {
+            Token dotToken = m_previous;
+            if (!check(TokenType::IDENTIFIER)) {
+                error();
+                return nullptr;
+            }
+            Token memberToken = m_current;
+            advance();
+
+            auto member = std::make_unique<AstExpr>();
+            member->node = makeNodeInfo(dotToken);
+            member->value = AstMemberExpr{std::move(expr), memberToken};
+            expr = std::move(member);
+            continue;
+        }
+
+        if (matchSameLine(TokenType::OPEN_BRACKET)) {
+            Token openBracket = m_previous;
+            AstExprPtr index = parseExpression();
+            if (!index) {
+                return nullptr;
+            }
+            if (!consume(TokenType::CLOSE_BRACKET)) {
+                return nullptr;
+            }
+
+            auto indexed = std::make_unique<AstExpr>();
+            indexed->node = makeNodeInfo(openBracket);
+            indexed->value = AstIndexExpr{std::move(expr), std::move(index)};
+            expr = std::move(indexed);
+            continue;
+        }
+
+        break;
+    }
+
+    return expr;
+}
+
+AstExprPtr AstParser::parseFunctionLiteralExpr() {
+    Token fnToken = m_previous;
+
+    auto functionExpr = std::make_unique<AstExpr>();
+    functionExpr->node = makeNodeInfo(fnToken);
+
+    AstFunctionExpr value;
+    value.params = parseParameters();
+    if (m_hadError) {
+        return nullptr;
+    }
+
+    if (check(TokenType::FAT_ARROW)) {
+        if (hasLineBreakBeforeCurrent()) {
+            error();
+            return nullptr;
+        }
+        advance();
+        if (check(TokenType::OPEN_CURLY)) {
+            error();
+            return nullptr;
+        }
+        value.expressionBody = parseExpression();
+        if (!value.expressionBody) {
+            return nullptr;
+        }
+        recoverLineLeadingContinuation({TokenType::COMMA, TokenType::CLOSE_PAREN,
+                                        TokenType::CLOSE_BRACKET,
+                                        TokenType::CLOSE_CURLY});
+        rejectUnexpectedTrailingToken({TokenType::COMMA, TokenType::CLOSE_PAREN,
+                                       TokenType::CLOSE_BRACKET,
+                                       TokenType::CLOSE_CURLY});
+        functionExpr->value = std::move(value);
+        return functionExpr;
+    }
+
+    if (isTypedTypeAnnotationStart()) {
+        value.returnType = parseTypeExpr();
+        if (!value.returnType) {
+            return nullptr;
+        }
+    }
+
+    value.blockBody = parseBlockStatement();
+    if (!value.blockBody) {
+        return nullptr;
+    }
+
+    functionExpr->value = std::move(value);
+    return functionExpr;
+}
+
+AstExprPtr AstParser::parseImportExpression(const Token& atToken) {
+    if (!check(TokenType::IDENTIFIER)) {
+        error();
+        return nullptr;
+    }
+
+    std::string directiveName = tokenText(m_current);
+    advance();
+    if (directiveName != "import") {
+        error();
+        return nullptr;
+    }
+
+    if (!consume(TokenType::OPEN_PAREN) || !check(TokenType::STRING)) {
+        return nullptr;
+    }
+
+    Token pathToken = m_current;
+    advance();
+    if (!consume(TokenType::CLOSE_PAREN)) {
+        return nullptr;
+    }
+
+    auto expr = std::make_unique<AstExpr>();
+    expr->node = makeNodeInfo(atToken);
+    expr->value = AstImportExpr{pathToken};
+    return expr;
+}
+
+AstExprPtr AstParser::parsePrimary() {
+    if (match(TokenType::NUMBER) || match(TokenType::STRING) ||
+        match(TokenType::TRUE) || match(TokenType::FALSE) ||
+        match(TokenType::_NULL) || match(TokenType::TYPE_NULL_KW)) {
+        auto expr = std::make_unique<AstExpr>();
+        expr->node = makeNodeInfo(m_previous);
+        expr->value = AstLiteralExpr{m_previous};
+        return expr;
+    }
+
+    if (match(TokenType::OPEN_PAREN)) {
+        Token openToken = m_previous;
+        AstExprPtr inner = parseExpression();
+        if (!inner) {
+            return nullptr;
+        }
+        if (!consume(TokenType::CLOSE_PAREN)) {
+            return nullptr;
+        }
+        auto expr = std::make_unique<AstExpr>();
+        expr->node = makeNodeInfo(openToken);
+        expr->value = AstGroupingExpr{std::move(inner)};
+        return expr;
+    }
+
+    if (match(TokenType::TYPE_FN)) {
+        return parseFunctionLiteralExpr();
+    }
+
+    if (match(TokenType::AT)) {
+        return parseImportExpression(m_previous);
+    }
+
+    if (match(TokenType::THIS)) {
+        auto expr = std::make_unique<AstExpr>();
+        expr->node = makeNodeInfo(m_previous);
+        expr->value = AstThisExpr{m_previous};
+        return expr;
+    }
+
+    if (match(TokenType::SUPER)) {
+        auto expr = std::make_unique<AstExpr>();
+        expr->node = makeNodeInfo(m_previous);
+        expr->value = AstSuperExpr{m_previous};
+        return expr;
+    }
+
+    if (match(TokenType::OPEN_BRACKET)) {
+        Token openToken = m_previous;
+        AstArrayLiteralExpr arrayLiteral;
+        if (!check(TokenType::CLOSE_BRACKET)) {
+            do {
+                AstExprPtr element = parseExpression();
+                if (!element) {
+                    return nullptr;
+                }
+                arrayLiteral.elements.push_back(std::move(element));
+            } while (match(TokenType::COMMA));
+        }
+        if (!consume(TokenType::CLOSE_BRACKET)) {
+            return nullptr;
+        }
+        auto expr = std::make_unique<AstExpr>();
+        expr->node = makeNodeInfo(openToken);
+        expr->value = std::move(arrayLiteral);
+        return expr;
+    }
+
+    if (match(TokenType::OPEN_CURLY)) {
+        Token openToken = m_previous;
+        AstDictLiteralExpr dictLiteral;
+        if (!check(TokenType::CLOSE_CURLY)) {
+            do {
+                AstDictEntry entry;
+                entry.key = parseExpression();
+                if (!entry.key || !consume(TokenType::COLON)) {
+                    return nullptr;
+                }
+                entry.value = parseExpression();
+                if (!entry.value) {
+                    return nullptr;
+                }
+                dictLiteral.entries.push_back(std::move(entry));
+            } while (match(TokenType::COMMA));
+        }
+        if (!consume(TokenType::CLOSE_CURLY)) {
+            return nullptr;
+        }
+        auto expr = std::make_unique<AstExpr>();
+        expr->node = makeNodeInfo(openToken);
+        expr->value = std::move(dictLiteral);
+        return expr;
+    }
+
+    if (check(TokenType::IDENTIFIER) || check(TokenType::TYPE) ||
+        isTypeToken(m_current.type())) {
+        Token nameToken = m_current;
+        advance();
+        auto expr = std::make_unique<AstExpr>();
+        expr->node = makeNodeInfo(nameToken);
+        expr->value = AstIdentifierExpr{nameToken};
+        return expr;
+    }
+
+    error();
+    if (!check(TokenType::END_OF_FILE)) {
+        advance();
+    }
+    return nullptr;
 }

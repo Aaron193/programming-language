@@ -38,6 +38,17 @@ file(GLOB_RECURSE SOURCES
 add_executable(interpreter ${SOURCES})
 target_include_directories(interpreter PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
+set(AST_PARSER_SMOKE_SOURCES ${SOURCES})
+list(REMOVE_ITEM AST_PARSER_SMOKE_SOURCES
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp")
+add_executable(ast_parser_smoke
+    tests/ast_parser_smoke.cpp
+    ${AST_PARSER_SMOKE_SOURCES}
+)
+target_include_directories(ast_parser_smoke
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+
 add_library(examples_math_package MODULE
     packages/examples/math/package.cpp
 )
