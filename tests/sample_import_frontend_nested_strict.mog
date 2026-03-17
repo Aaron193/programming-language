@@ -1,0 +1,5 @@
+#!strict
+const { Value, GetValue } = @import("./modules/frontend_nested_a.mog")
+
+print(GetValue())
+print(Value)

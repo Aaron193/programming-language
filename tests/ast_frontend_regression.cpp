@@ -196,6 +196,52 @@ bool compileSourceCanonical(std::string_view source, bool strictMode,
     return true;
 }
 
+bool checkCanonicalLoweringStable(const std::filesystem::path& path,
+                                  const std::string& description) {
+    GC autoGc;
+    Chunk autoChunk;
+    std::string autoDisassembly;
+    if (!require(compileFileCanonical(path, CompilerEmitterMode::Auto, autoGc,
+                                      autoChunk, autoDisassembly),
+                 description + " should compile in auto mode")) {
+        return false;
+    }
+
+    GC forcedGc;
+    Chunk forcedChunk;
+    std::string forcedDisassembly;
+    if (!require(compileFileCanonical(path, CompilerEmitterMode::ForceAst,
+                                      forcedGc, forcedChunk, forcedDisassembly),
+                 description + " should compile in forced AST mode")) {
+        return false;
+    }
+
+    return require(autoDisassembly == forcedDisassembly,
+                   description +
+                       " should lower identically in auto and forced AST modes");
+}
+
+bool checkStrictForcedAstHasNoAdd(const std::filesystem::path& path,
+                                  const std::string& description) {
+    const std::string source = readFile(path);
+    if (!require(!source.empty(), description + " should be readable")) {
+        return false;
+    }
+
+    GC strictGc;
+    Chunk strictChunk;
+    std::string strictDisassembly;
+    if (!require(compileSourceCanonical(source, true, CompilerEmitterMode::ForceAst,
+                                        strictGc, strictChunk, strictDisassembly),
+                 description + " should compile in strict forced AST mode")) {
+        return false;
+    }
+
+    return require(strictDisassembly.find("IADD") == std::string::npos &&
+                       strictDisassembly.find("ADD") == std::string::npos,
+                   description + " should not emit addition opcodes");
+}
+
 bool checkSemanticRefreshContract() {
     constexpr std::string_view kSource =
         "var value i32 = 41\n"
@@ -337,29 +383,79 @@ bool checkSemanticDiagnosticSpans() {
     return true;
 }
 
+bool checkCallableDiagnosticSpans() {
+    {
+        constexpr std::string_view kSource =
+            "var bad fn(i32) i32 = fn(x i32, y i32) i32 {\n"
+            "  return x + y\n"
+            "}\n";
+
+        AstFrontendResult frontend;
+        std::vector<TypeError> errors;
+        const AstFrontendBuildStatus status = buildAstFrontend(
+            kSource, AstFrontendMode::StrictChecked, errors, frontend);
+        if (!require(status == AstFrontendBuildStatus::SemanticError,
+                     "closure mismatch sample should fail semantic analysis") ||
+            !require(!errors.empty(),
+                     "closure mismatch sample should report semantic errors") ||
+            !require(errors.front().line == 1 && errors.front().column == 23,
+                     "closure mismatch diagnostic should point at the closure literal")) {
+            return false;
+        }
+    }
+
+    {
+        constexpr std::string_view kSource =
+            "var addOne fn(i32) i32 = fn(x) => x + 1\n";
+
+        AstFrontendResult frontend;
+        std::vector<TypeError> errors;
+        const AstFrontendBuildStatus status = buildAstFrontend(
+            kSource, AstFrontendMode::StrictChecked, errors, frontend);
+        if (!require(status == AstFrontendBuildStatus::SemanticError,
+                     "lambda parameter sample should fail semantic analysis") ||
+            !require(errors.size() == 1,
+                     "lambda parameter sample should report one error") ||
+            !require(errors.front().line == 1 && errors.front().column == 29,
+                     "lambda parameter diagnostic should point at the omitted parameter")) {
+            return false;
+        }
+    }
+
+    {
+        constexpr std::string_view kSource =
+            "var bad fn(i32) i32 = fn(x i32) => {\n"
+            "  return x + 1\n"
+            "}\n";
+
+        AstFrontendResult frontend;
+        std::vector<TypeError> errors;
+        const AstFrontendBuildStatus status = buildAstFrontend(
+            kSource, AstFrontendMode::StrictChecked, errors, frontend);
+        if (!require(status == AstFrontendBuildStatus::SemanticError,
+                     "lambda block-body sample should fail semantic analysis") ||
+            !require(errors.size() == 1,
+                     "lambda block-body sample should report one error") ||
+            !require(errors.front().line == 1 && errors.front().column == 35,
+                     "lambda block-body diagnostic should point at the block body")) {
+            return false;
+        }
+    }
+
+    std::cout << "[PASS] callable diagnostic spans\n";
+    return true;
+}
+
 bool checkImportedModuleRegression(const std::filesystem::path& repoRoot) {
-    const auto path = repoRoot / "tests/sample_import_frontend_identity.mog";
-
-    GC autoGc;
-    Chunk autoChunk;
-    std::string autoDisassembly;
-    if (!require(compileFileCanonical(path, CompilerEmitterMode::Auto, autoGc,
-                                      autoChunk, autoDisassembly),
-                 "optimized importer sample should compile in auto mode")) {
+    if (!checkCanonicalLoweringStable(
+            repoRoot / "tests/sample_import_frontend_identity.mog",
+            "optimized importer sample")) {
         return false;
     }
 
-    GC forcedGc;
-    Chunk forcedChunk;
-    std::string forcedDisassembly;
-    if (!require(compileFileCanonical(path, CompilerEmitterMode::ForceAst,
-                                      forcedGc, forcedChunk, forcedDisassembly),
-                 "optimized importer sample should compile in forced AST mode")) {
-        return false;
-    }
-
-    if (!require(autoDisassembly == forcedDisassembly,
-                 "optimized importer sample should have stable lowering in auto and forced AST modes")) {
+    if (!checkCanonicalLoweringStable(
+            repoRoot / "tests/sample_import_frontend_nested_strict.mog",
+            "nested strict importer sample")) {
         return false;
     }
 
@@ -368,48 +464,45 @@ bool checkImportedModuleRegression(const std::filesystem::path& repoRoot) {
 }
 
 bool checkNewlineOptimizationRegression(const std::filesystem::path& repoRoot) {
-    const auto path = repoRoot / "tests/newline/sample_newline_operator_rhs.mog";
-    const std::string source = readFile(path);
-    if (!require(!source.empty(),
-                 "newline-sensitive optimization sample should be readable")) {
+    if (!checkCanonicalLoweringStable(
+            repoRoot / "tests/newline/sample_newline_call_suffix.mog",
+            "newline call-suffix sample")) {
         return false;
     }
 
-    GC autoGc;
-    Chunk autoChunk;
-    std::string autoDisassembly;
-    if (!require(compileFileCanonical(path, CompilerEmitterMode::Auto, autoGc,
-                                      autoChunk, autoDisassembly),
-                 "newline-sensitive optimization sample should compile in auto mode")) {
+    if (!checkCanonicalLoweringStable(
+            repoRoot / "tests/newline/sample_newline_member_suffix.mog",
+            "newline member-suffix sample")) {
         return false;
     }
 
-    GC forcedGc;
-    Chunk forcedChunk;
-    std::string forcedDisassembly;
-    if (!require(compileFileCanonical(path, CompilerEmitterMode::ForceAst,
-                                      forcedGc, forcedChunk, forcedDisassembly),
-                 "newline-sensitive optimization sample should compile in forced AST mode")) {
+    if (!checkCanonicalLoweringStable(
+            repoRoot / "tests/newline/sample_newline_index_suffix.mog",
+            "newline index-suffix sample")) {
         return false;
     }
 
-    if (!require(autoDisassembly == forcedDisassembly,
-                 "newline-sensitive sample should lower identically in auto and forced AST modes")) {
+    if (!checkCanonicalLoweringStable(
+            repoRoot / "tests/newline/sample_newline_operator_rhs.mog",
+            "newline operator sample")) {
         return false;
     }
 
-    GC strictGc;
-    Chunk strictChunk;
-    std::string strictDisassembly;
-    if (!require(compileSourceCanonical(source, true, CompilerEmitterMode::ForceAst,
-                                        strictGc, strictChunk, strictDisassembly),
-                 "newline-sensitive optimization sample should compile in strict forced AST mode")) {
+    if (!checkCanonicalLoweringStable(
+            repoRoot / "tests/newline/sample_newline_call_suffix_folded_arg.mog",
+            "newline folded call sample")) {
         return false;
     }
 
-    if (!require(strictDisassembly.find("IADD") == std::string::npos &&
-                     strictDisassembly.find("ADD") == std::string::npos,
-                 "strict newline-sensitive optimized sample should not emit addition opcodes")) {
+    if (!checkStrictForcedAstHasNoAdd(
+            repoRoot / "tests/newline/sample_newline_operator_rhs.mog",
+            "strict newline operator sample")) {
+        return false;
+    }
+
+    if (!checkStrictForcedAstHasNoAdd(
+            repoRoot / "tests/newline/sample_newline_call_suffix_folded_arg.mog",
+            "strict newline folded call sample")) {
         return false;
     }
 
@@ -429,6 +522,9 @@ int main() {
         return 1;
     }
     if (!checkSemanticDiagnosticSpans()) {
+        return 1;
+    }
+    if (!checkCallableDiagnosticSpans()) {
         return 1;
     }
     if (!checkImportedModuleRegression(repoRoot)) {

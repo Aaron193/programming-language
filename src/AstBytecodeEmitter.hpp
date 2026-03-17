@@ -233,6 +233,18 @@ class AstBytecodeEmitter {
         return safeLine(m_frontend.terminalLine);
     }
 
+    void errorAtSpan(const SourceSpan& span, const std::string& message) {
+        m_compiler.errorAtSpan(span, message);
+    }
+
+    void errorAtNode(const AstNodeInfo& node, const std::string& message) {
+        errorAtSpan(node.span, message);
+    }
+
+    void errorAtToken(const Token& token, const std::string& message) {
+        errorAtSpan(token.span(), message);
+    }
+
     void errorAtLine(size_t line, const std::string& message) {
         m_compiler.errorAtLine(safeLine(line), message);
     }
@@ -437,13 +449,14 @@ class AstBytecodeEmitter {
 
     ImportTarget parseImportTarget(const Token& pathToken, size_t line) {
         if (m_compiler.m_sourcePath.empty()) {
-            errorAtLine(line, "@import(...) is not allowed in interactive mode.");
+            errorAtToken(pathToken,
+                         "@import(...) is not allowed in interactive mode.");
             return ImportTarget{};
         }
 
         std::string pathText(pathToken.start(), pathToken.length());
         if (pathText.length() < 2) {
-            errorAtLine(line, "Invalid import path.");
+            errorAtToken(pathToken, "Invalid import path.");
             return ImportTarget{};
         }
 
@@ -453,7 +466,7 @@ class AstBytecodeEmitter {
         if (!resolveImportTarget(m_compiler.m_sourcePath, rawPath,
                                  m_compiler.m_packageSearchPaths, importTarget,
                                  resolveError)) {
-            errorAtLine(line, resolveError);
+            errorAtToken(pathToken, resolveError);
             return ImportTarget{};
         }
 
@@ -465,7 +478,7 @@ class AstBytecodeEmitter {
                                              false, nullptr) ||
                 !ast_bytecode_emitter_detail::validateNativePackageImport(
                     importTarget, packageDescriptor, packageError)) {
-                errorAtLine(line, packageError);
+                errorAtToken(pathToken, packageError);
                 return ImportTarget{};
             }
         }
@@ -561,7 +574,7 @@ class AstBytecodeEmitter {
         m_compiler.m_chunk = enclosingChunk;
 
         if (m_compiler.m_gc == nullptr) {
-            errorAtLine(functionNode.line,
+            errorAtNode(functionNode,
                         "Internal compiler error: GC allocator unavailable.");
             return Compiler::CompiledFunction{nullptr, {},
                                               std::move(parameterTypes),
@@ -628,7 +641,7 @@ class AstBytecodeEmitter {
     void emitClassDecl(const AstClassDecl& classDecl) {
         size_t line = classDecl.node.line;
         if (m_compiler.currentContext().scopeDepth != 0) {
-            errorAtLine(line,
+            errorAtNode(classDecl.node,
                         "Type declarations are only allowed at the top level.");
             return;
         }
@@ -724,7 +737,13 @@ class AstBytecodeEmitter {
                                 size_t line) {
         if (!stmt.initializer ||
             !std::holds_alternative<AstImportExpr>(stmt.initializer->value)) {
-            errorAtLine(line, "Expected '@import(...)' in destructured import.");
+            if (stmt.initializer) {
+                errorAtNode(stmt.initializer->node,
+                            "Expected '@import(...)' in destructured import.");
+            } else {
+                errorAtLine(line,
+                            "Expected '@import(...)' in destructured import.");
+            }
             return;
         }
 
@@ -739,7 +758,7 @@ class AstBytecodeEmitter {
         std::string moduleTypeError;
         if (!m_compiler.resolveImportExportTypes(importTarget, moduleExportTypes,
                                                  moduleTypeError)) {
-            errorAtLine(line, moduleTypeError);
+            errorAtToken(importExpr.path, moduleTypeError);
             return;
         }
 
@@ -823,7 +842,7 @@ class AstBytecodeEmitter {
                     emitByte(OpCode::PRINT_OP, stmt.node.line);
                 } else if constexpr (std::is_same_v<T, AstReturnStmt>) {
                     if (!m_compiler.currentContext().inFunction) {
-                        errorAtLine(stmt.node.line,
+                        errorAtNode(stmt.node,
                                     "Cannot return from top-level code.");
                         return;
                     }
@@ -950,7 +969,7 @@ class AstBytecodeEmitter {
         const std::string targetName(target.name.start(), target.name.length());
 
         if (resolved.isConst) {
-            errorAtLine(line,
+            errorAtToken(target.name,
                         "Cannot assign to const variable '" + targetName + "'.");
             if (valueExpr) {
                 emitExpr(*valueExpr);
@@ -1162,7 +1181,7 @@ class AstBytecodeEmitter {
                                 ast_bytecode_emitter_detail::parseNumericLiteralInfo(
                                     literal);
                             if (!literalInfo.valid) {
-                                errorAtLine(expr.node.line,
+                                errorAtToken(value.token,
                                             "Invalid numeric literal '" +
                                                 literal + "'.");
                                 emitByte(OpCode::NIL, expr.node.line);
@@ -1234,7 +1253,7 @@ class AstBytecodeEmitter {
                                               value.operand.get(),
                                               expr.node.line);
                     } else {
-                        errorAtLine(expr.node.line, "Invalid assignment target.");
+                        errorAtNode(expr.node, "Invalid assignment target.");
                         emitByte(OpCode::NIL, expr.node.line);
                         m_compiler.pushExprType(TypeInfo::makeAny());
                     }
@@ -1408,7 +1427,7 @@ class AstBytecodeEmitter {
                         emitAssignmentToIndex(*index, value.op, value.value.get(),
                                               expr.node.line);
                     } else {
-                        errorAtLine(expr.node.line, "Invalid assignment target.");
+                        errorAtNode(expr.node, "Invalid assignment target.");
                         emitByte(OpCode::NIL, expr.node.line);
                         m_compiler.pushExprType(TypeInfo::makeAny());
                     }
@@ -1516,7 +1535,7 @@ class AstBytecodeEmitter {
                     emitByte(OpCode::GET_THIS, expr.node.line);
                     m_compiler.pushExprType(nodeType(expr.node));
                 } else if constexpr (std::is_same_v<T, AstSuperExpr>) {
-                    errorAtLine(expr.node.line,
+                    errorAtNode(expr.node,
                                 "Expected member access after 'super'.");
                     emitByte(OpCode::NIL, expr.node.line);
                     m_compiler.pushExprType(TypeInfo::makeAny());
@@ -1526,7 +1545,7 @@ class AstBytecodeEmitter {
                         emitExpr(*element);
                         m_compiler.popExprType();
                         if (count == UINT8_MAX) {
-                            errorAtLine(expr.node.line,
+                            errorAtNode(expr.node,
                                         "Array literal cannot have more than "
                                         "255 elements.");
                             break;
@@ -1543,7 +1562,7 @@ class AstBytecodeEmitter {
                         emitExpr(*entry.value);
                         m_compiler.popExprType();
                         if (pairCount == UINT8_MAX) {
-                            errorAtLine(expr.node.line,
+                            errorAtNode(expr.node,
                                         "Dictionary literal cannot have more "
                                         "than 255 pairs.");
                             break;

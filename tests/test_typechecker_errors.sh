@@ -14,6 +14,7 @@ fi
 run_expect_compile_error() {
     local file="$1"
     local expected="$2"
+    local expected_location="${3:-}"
 
     set +e
     local output
@@ -37,6 +38,14 @@ run_expect_compile_error() {
 
     if ! grep -Eq "\\[error\\]\\[compile\\]\\[line [0-9]+:[0-9]+\\]" <<< "$output"; then
         echo "[FAIL] Expected source line:column diagnostic prefix: $file"
+        echo "$output"
+        return 1
+    fi
+
+    if [[ -n "$expected_location" ]] && ! grep -Fq "[error][compile][line $expected_location]" <<< "$output"; then
+        echo "[FAIL] Expected exact diagnostic location not found: $file"
+        echo "Expected location: $expected_location"
+        echo "Actual output:"
         echo "$output"
         return 1
     fi
@@ -89,7 +98,8 @@ run_expect_compile_error \
 
 run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/function_closure_param_count_mismatch.mog" \
-    "closure parameter count mismatch: expected 1, got 2." || failed=1
+    "closure parameter count mismatch: expected 1, got 2." \
+    "1:23" || failed=1
 
 run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/assign_to_const.mog" \
@@ -133,7 +143,8 @@ run_expect_compile_error \
 
 run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/lambda_missing_param_type.mog" \
-    "expression-bodied lambdas require explicit parameter types." || failed=1
+    "expression-bodied lambdas require explicit parameter types." \
+    "1:29" || failed=1
 
 run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/lambda_return_type_mismatch.mog" \
@@ -141,7 +152,8 @@ run_expect_compile_error \
 
 run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/lambda_block_body.mog" \
-    "expression-bodied lambdas do not support block bodies" || failed=1
+    "expression-bodied lambdas do not support block bodies" \
+    "1:35" || failed=1
 
 run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/assign_handle_foreign_type.mog" \

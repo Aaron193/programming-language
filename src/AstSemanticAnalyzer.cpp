@@ -84,7 +84,7 @@ class AstSemanticAnalyzerImpl {
         std::vector<TypeRef> paramTypes;
         TypeRef returnType = TypeInfo::makeAny();
         bool omittedParameterTypeAnnotation = false;
-        size_t firstOmittedParameterLine = 0;
+        SourceSpan firstOmittedParameterSpan = makePointSpan(1, 1);
     };
 
     const std::unordered_set<std::string>& m_classNames;
@@ -106,6 +106,14 @@ class AstSemanticAnalyzerImpl {
 
     void addError(const SourceSpan& span, const std::string& message) {
         m_errors.push_back(TypeError{span, message});
+    }
+
+    void addError(const AstNodeInfo& node, const std::string& message) {
+        addError(node.span, message);
+    }
+
+    void addError(const Token& token, const std::string& message) {
+        addError(token.span(), message);
     }
 
     void addError(size_t line, const std::string& message) {
@@ -688,7 +696,8 @@ class AstSemanticAnalyzerImpl {
     }
 
     TypeRef lookupOperatorResultType(const TypeRef& receiverType, TokenType op,
-                                     const TypeRef& rhs, size_t line) {
+                                     const TypeRef& rhs,
+                                     const SourceSpan& span) {
         if (!receiverType || receiverType->kind != TypeKind::CLASS) {
             return nullptr;
         }
@@ -706,13 +715,13 @@ class AstSemanticAnalyzerImpl {
         TypeRef methodType =
             lookupClassMethodType(receiverType->className, opIt->second);
         if (!methodType || methodType->kind != TypeKind::FUNCTION) {
-            addError(line, "Type error: operator method '" + opIt->second +
+            addError(span, "Type error: operator method '" + opIt->second +
                                "' is not callable.");
             return TypeInfo::makeAny();
         }
 
         if (methodType->paramTypes.size() != 1) {
-            addError(line, "Type error: operator method '" + opIt->second +
+            addError(span, "Type error: operator method '" + opIt->second +
                                "' must take exactly one argument.");
             return methodType->returnType ? methodType->returnType
                                           : TypeInfo::makeAny();
@@ -722,7 +731,7 @@ class AstSemanticAnalyzerImpl {
                                ? methodType->paramTypes[0]
                                : TypeInfo::makeAny();
         if (!isAssignableType(rhs, expected)) {
-            addError(line, "Type error: operator '" + opIt->second +
+            addError(span, "Type error: operator '" + opIt->second +
                                "' expects '" + expected->toString() +
                                "', got '" + rhs->toString() + "'.");
         }
@@ -732,7 +741,8 @@ class AstSemanticAnalyzerImpl {
     }
 
     TypeRef collectionMemberType(const TypeRef& receiverType,
-                                 const std::string& memberName, size_t line) {
+                                 const std::string& memberName,
+                                 const SourceSpan& span) {
         if (!receiverType) {
             return TypeInfo::makeAny();
         }
@@ -770,7 +780,7 @@ class AstSemanticAnalyzerImpl {
                 return TypeInfo::makeFunction({}, element);
             }
 
-            addError(line,
+            addError(span,
                      "Type error: array has no member '" + memberName + "'.");
             return TypeInfo::makeAny();
         }
@@ -811,7 +821,7 @@ class AstSemanticAnalyzerImpl {
                 return TypeInfo::makeFunction({key, value}, value);
             }
 
-            addError(line,
+            addError(span,
                      "Type error: dict has no member '" + memberName + "'.");
             return TypeInfo::makeAny();
         }
@@ -848,7 +858,7 @@ class AstSemanticAnalyzerImpl {
                 return TypeInfo::makeFunction({setType}, setType);
             }
 
-            addError(line,
+            addError(span,
                      "Type error: set has no member '" + memberName + "'.");
             return TypeInfo::makeAny();
         }
@@ -856,16 +866,16 @@ class AstSemanticAnalyzerImpl {
         return TypeInfo::makeAny();
     }
 
-    TypeRef requireTypeExpr(const AstTypeExpr* typeExpr, size_t line,
+    TypeRef requireTypeExpr(const AstTypeExpr* typeExpr, const SourceSpan& span,
                             const std::string& message) {
         if (!typeExpr) {
-            addError(line, message);
+            addError(span, message);
             return nullptr;
         }
 
         TypeRef resolved = resolveTypeExpr(*typeExpr);
         if (!resolved) {
-            addError(line, message);
+            addError(span, message);
         }
         return resolved;
     }
@@ -874,7 +884,7 @@ class AstSemanticAnalyzerImpl {
         const std::string& functionName, const std::vector<AstParameter>& params,
         const AstTypeExpr* returnTypeExpr, const TypeRef& expectedSignature,
         bool isMethod, bool isClosure, bool requireDeclaredReturnType,
-        size_t fallbackLine) {
+        const SourceSpan& fallbackSpan) {
         ResolvedCallableSignature out;
         const bool hasExpectedFunctionType =
             expectedSignature && expectedSignature->kind == TypeKind::FUNCTION;
@@ -903,7 +913,7 @@ class AstSemanticAnalyzerImpl {
 
                 if (!out.omittedParameterTypeAnnotation) {
                     out.omittedParameterTypeAnnotation = true;
-                    out.firstOmittedParameterLine = param.name.line();
+                    out.firstOmittedParameterSpan = param.name.span();
                 }
             } else {
                 paramType = resolveTypeExpr(*param.type);
@@ -929,7 +939,7 @@ class AstSemanticAnalyzerImpl {
 
         if (isClosure && hasExpectedFunctionType &&
             out.paramTypes.size() != expectedParams.size()) {
-            addError(fallbackLine,
+            addError(fallbackSpan,
                      "Type error: closure parameter count mismatch: expected " +
                          std::to_string(expectedParams.size()) + ", got " +
                          std::to_string(out.paramTypes.size()) + ".");
@@ -943,7 +953,7 @@ class AstSemanticAnalyzerImpl {
                 hasExplicitReturnType = true;
                 TypeRef parsedReturnType = resolveTypeExpr(*returnTypeExpr);
                 if (!parsedReturnType) {
-                    addError(fallbackLine,
+                    addError(returnTypeExpr->node,
                              "Type error: expected return type after parameter "
                              "list.");
                 } else {
@@ -961,7 +971,7 @@ class AstSemanticAnalyzerImpl {
 
             if (!hasExplicitReturnType && !hasSignatureReturnType &&
                 !isInitializer) {
-                addError(fallbackLine,
+                addError(fallbackSpan,
                          "Type error: function '" + functionName +
                              "' must declare a return type.");
             }
@@ -990,11 +1000,11 @@ class AstSemanticAnalyzerImpl {
                 const std::string superclassName =
                     tokenText(*classDecl->superclass);
                 if (superclassName == className) {
-                    addError(classDecl->superclass->line(),
+                    addError(*classDecl->superclass,
                              "Type error: a type cannot inherit from itself.");
                 }
                 if (m_classNames.find(superclassName) == m_classNames.end()) {
-                    addError(classDecl->superclass->line(),
+                    addError(*classDecl->superclass,
                              "Type error: unknown superclass '" +
                                  superclassName + "'.");
                 }
@@ -1003,13 +1013,13 @@ class AstSemanticAnalyzerImpl {
 
             for (const auto& field : classDecl->fields) {
                 TypeRef fieldType = requireTypeExpr(
-                    field.type.get(), field.node.line,
+                    field.type.get(), field.name.span(),
                     "Type error: expected field type after member name.");
                 if (!fieldType) {
                     continue;
                 }
                 if (fieldType->isVoid()) {
-                    addError(field.name.line(),
+                    addError(field.name,
                              "Type error: struct field '" +
                                  tokenText(field.name) +
                                  "' cannot have type 'void'.");
@@ -1024,8 +1034,7 @@ class AstSemanticAnalyzerImpl {
                     TypeInfo::makeFunction({}, TypeInfo::makeAny());
                 ResolvedCallableSignature signature = resolveCallableSignature(
                     tokenText(method.name), method.params, method.returnType.get(),
-                    placeholder, true, false, true,
-                    method.body ? method.body->node.line : method.node.line);
+                    placeholder, true, false, true, method.name.span());
                 TypeRef methodType =
                     TypeInfo::makeFunction(signature.paramTypes, signature.returnType);
                 m_metadata.classMethodSignatures[className][tokenText(method.name)] =
@@ -1097,7 +1106,7 @@ class AstSemanticAnalyzerImpl {
                     if (value.op.type() == TokenType::BANG) {
                         if (!(operand.type->kind == TypeKind::BOOL ||
                               operand.type->isAny())) {
-                            addError(value.op.line(),
+                            addError(value.op,
                                      "Type error: unary '!' expects a bool "
                                      "operand.");
                         }
@@ -1105,7 +1114,7 @@ class AstSemanticAnalyzerImpl {
                                           value.op.line()};
                     } else if (value.op.type() == TokenType::MINUS) {
                         if (!(operand.type->isNumeric() || operand.type->isAny())) {
-                            addError(value.op.line(),
+                            addError(value.op,
                                      "Type error: unary '-' expects a numeric "
                                      "operand.");
                         }
@@ -1113,7 +1122,7 @@ class AstSemanticAnalyzerImpl {
                                           value.op.line()};
                     } else {
                         if (!(operand.type->isInteger() || operand.type->isAny())) {
-                            addError(value.op.line(),
+                            addError(value.op,
                                      "Type error: unary '~' expects an integer "
                                      "operand.");
                         }
@@ -1124,13 +1133,13 @@ class AstSemanticAnalyzerImpl {
                     ExprInfo operand = analyzeExpr(*value.operand);
                     if (value.isPrefix) {
                         if (operand.isConstSymbol && !operand.name.empty()) {
-                            addError(value.op.line(),
+                            addError(value.op,
                                      "Type error: cannot assign to const "
                                      "variable '" +
                                          operand.name + "'.");
                         }
                         if (!(operand.type->isNumeric() || operand.type->isAny())) {
-                            addError(value.op.line(),
+                            addError(value.op,
                                      "Type error: update operator expects a "
                                      "numeric operand.");
                         }
@@ -1142,7 +1151,7 @@ class AstSemanticAnalyzerImpl {
                                               "", value.op.line()};
                         } else {
                             if (operand.isConstSymbol && !operand.name.empty()) {
-                                addError(value.op.line(),
+                                addError(value.op,
                                          "Type error: cannot assign to const "
                                          "variable '" +
                                              operand.name + "'.");
@@ -1158,7 +1167,7 @@ class AstSemanticAnalyzerImpl {
                                     targetType = resolveSymbol(operand.name);
                                 }
                                 if (!targetType) {
-                                    addError(value.op.line(),
+                                    addError(value.op,
                                              "Type error: unknown assignment "
                                              "target '" +
                                                  operand.name + "'.");
@@ -1171,7 +1180,7 @@ class AstSemanticAnalyzerImpl {
                                                       value.op.line()};
                                 } else {
                                     if (!targetType->isNumeric()) {
-                                        addError(value.op.line(),
+                                        addError(value.op,
                                                  "Type error: update operator "
                                                  "expects numeric operand.");
                                     }
@@ -1186,6 +1195,7 @@ class AstSemanticAnalyzerImpl {
                     ExprInfo lhs = analyzeExpr(*value.left);
                     ExprInfo rhs = analyzeExpr(*value.right);
                     const TokenType op = value.op.type();
+                    const SourceSpan opSpan = value.op.span();
                     const size_t line = value.op.line();
 
                     if (op == TokenType::LOGICAL_OR ||
@@ -1195,7 +1205,7 @@ class AstSemanticAnalyzerImpl {
                             !(rhs.type->kind == TypeKind::BOOL ||
                               rhs.type->isAny())) {
                             addError(
-                                line,
+                                opSpan,
                                 std::string("Type error: logical '") +
                                     (op == TokenType::LOGICAL_OR ? "||" : "&&") +
                                     "' expects bool operands.");
@@ -1205,13 +1215,13 @@ class AstSemanticAnalyzerImpl {
                     } else if (isEqualityOperator(op)) {
                         if (TypeRef overloaded =
                                 lookupOperatorResultType(lhs.type, op, rhs.type,
-                                                         line)) {
+                                                         opSpan)) {
                             result = ExprInfo{overloaded, false, false, "", line};
                         } else {
                             if (!(isAssignableType(lhs.type, rhs.type) ||
                                   isAssignableType(rhs.type, lhs.type))) {
                                 addError(
-                                    line,
+                                    opSpan,
                                     "Type error: incompatible operands for "
                                     "equality operator.");
                             }
@@ -1222,13 +1232,13 @@ class AstSemanticAnalyzerImpl {
                     } else if (isComparisonOperator(op)) {
                         if (TypeRef overloaded =
                                 lookupOperatorResultType(lhs.type, op, rhs.type,
-                                                         line)) {
+                                                         opSpan)) {
                             result = ExprInfo{overloaded, false, false, "", line};
                         } else {
                             bool lhsOk = lhs.type->isAny() || lhs.type->isNumeric();
                             bool rhsOk = rhs.type->isAny() || rhs.type->isNumeric();
                             if (!lhsOk || !rhsOk) {
-                                addError(line,
+                                addError(opSpan,
                                          "Type error: comparison operators "
                                          "require numeric operands.");
                             }
@@ -1246,7 +1256,7 @@ class AstSemanticAnalyzerImpl {
                             TypeRef resultType =
                                 bitwiseIntegerResultType(lhs.type, rhs.type);
                             if (!resultType) {
-                                addError(line,
+                                addError(opSpan,
                                          "Type error: bitwise operators "
                                          "require integer operands.");
                                 result = ExprInfo{TypeInfo::makeAny(), false,
@@ -1258,10 +1268,10 @@ class AstSemanticAnalyzerImpl {
                         }
                     } else if (op == TokenType::SHIFT_LEFT_TOKEN ||
                                op == TokenType::SHIFT_RIGHT_TOKEN) {
-                        bool lhsOk = lhs.type->isInteger() || lhs.type->isAny();
+                       bool lhsOk = lhs.type->isInteger() || lhs.type->isAny();
                         bool rhsOk = rhs.type->isInteger() || rhs.type->isAny();
                         if (!lhsOk || !rhsOk) {
-                            addError(line,
+                            addError(opSpan,
                                      "Type error: shift operators require "
                                      "integer operands.");
                         }
@@ -1269,7 +1279,7 @@ class AstSemanticAnalyzerImpl {
                     } else {
                         if (TypeRef overloaded =
                                 lookupOperatorResultType(lhs.type, op, rhs.type,
-                                                         line)) {
+                                                         opSpan)) {
                             result = ExprInfo{overloaded, false, false, "", line};
                         } else if (op == TokenType::PLUS &&
                                    lhs.type->kind == TypeKind::STR &&
@@ -1284,7 +1294,7 @@ class AstSemanticAnalyzerImpl {
                             bool lhsOk = lhs.type->isNumeric();
                             bool rhsOk = rhs.type->isNumeric();
                             if (!lhsOk || !rhsOk) {
-                                addError(line,
+                                addError(opSpan,
                                          "Type error: arithmetic operator "
                                          "requires numeric operands.");
                                 result = ExprInfo{TypeInfo::makeAny(), false,
@@ -1303,13 +1313,14 @@ class AstSemanticAnalyzerImpl {
                     ExprInfo lhs = analyzeExpr(*value.target);
                     ExprInfo rhs = analyzeExpr(*value.value);
                     const TokenType assignmentType = value.op.type();
+                    const SourceSpan opSpan = value.op.span();
                     const size_t line = value.op.line();
 
                     if (!lhs.isAssignable) {
                         result = ExprInfo{TypeInfo::makeAny(), false, false, "",
                                           line};
                     } else if (lhs.isConstSymbol && !lhs.name.empty()) {
-                        addError(line,
+                        addError(opSpan,
                                  "Type error: cannot assign to const variable '" +
                                      lhs.name + "'.");
                         result = ExprInfo{lhs.type ? lhs.type
@@ -1322,14 +1333,14 @@ class AstSemanticAnalyzerImpl {
                             targetType = resolveSymbol(lhs.name);
                         }
                         if (!targetType) {
-                            addError(line,
+                            addError(opSpan,
                                      "Type error: unknown assignment target '" +
                                          lhs.name + "'.");
                             result = ExprInfo{TypeInfo::makeAny(), false, false,
                                               lhs.name, line};
                         } else if (assignmentType == TokenType::EQUAL) {
                             if (!isAssignableType(rhs.type, targetType)) {
-                                addError(line,
+                                addError(opSpan,
                                          "Type error: cannot assign '" +
                                              rhs.type->toString() +
                                              "' to variable '" + lhs.name +
@@ -1345,7 +1356,7 @@ class AstSemanticAnalyzerImpl {
                                        assignmentType)) {
                             if (!(targetType->isNumeric() &&
                                   rhs.type->isNumeric())) {
-                                addError(line,
+                                addError(opSpan,
                                          "Type error: compound assignment "
                                          "requires numeric operands.");
                                 result = ExprInfo{TypeInfo::makeAny(), false,
@@ -1355,7 +1366,7 @@ class AstSemanticAnalyzerImpl {
                                     numericPromotion(targetType, rhs.type);
                                 if (!promoted ||
                                     !isAssignableType(promoted, targetType)) {
-                                    addError(line,
+                                    addError(opSpan,
                                              "Type error: result of compound "
                                              "assignment is not assignable to '" +
                                                  targetType->toString() + "'.");
@@ -1368,7 +1379,7 @@ class AstSemanticAnalyzerImpl {
                                        TokenType::SHIFT_RIGHT_EQUAL) {
                             if (!(targetType->isInteger() &&
                                   rhs.type->isInteger())) {
-                                addError(line,
+                                addError(opSpan,
                                          "Type error: shift operators require "
                                          "integer operands.");
                                 result = ExprInfo{TypeInfo::makeAny(), false,
@@ -1380,7 +1391,7 @@ class AstSemanticAnalyzerImpl {
                         } else if (isBitwiseCompoundAssignment(assignmentType)) {
                             if (!(targetType->isInteger() &&
                                   rhs.type->isInteger())) {
-                                addError(line,
+                                addError(opSpan,
                                          "Type error: bitwise operators require "
                                          "integer operands.");
                                 result = ExprInfo{TypeInfo::makeAny(), false,
@@ -1390,7 +1401,7 @@ class AstSemanticAnalyzerImpl {
                                     bitwiseIntegerResultType(targetType, rhs.type);
                                 if (!resultType ||
                                     !isAssignableType(resultType, targetType)) {
-                                    addError(line,
+                                    addError(opSpan,
                                              "Type error: result of compound "
                                              "assignment is not assignable to '" +
                                                  targetType->toString() + "'.");
@@ -1412,7 +1423,7 @@ class AstSemanticAnalyzerImpl {
                     }
 
                     if (callee.type && callee.type->isOptional()) {
-                        addError(expr.node.line,
+                        addError(value.callee->node,
                                  "Type error: cannot call optional value of "
                                  "type '" +
                                      callee.type->toString() +
@@ -1426,7 +1437,7 @@ class AstSemanticAnalyzerImpl {
                         result = ExprInfo{TypeInfo::makeAny(), false, false, "",
                                           expr.node.line};
                     } else if (callee.type->kind != TypeKind::FUNCTION) {
-                        addError(expr.node.line,
+                        addError(value.callee->node,
                                  "Type error: attempted to call a non-function "
                                  "value.");
                         result = ExprInfo{TypeInfo::makeAny(), false, false, "",
@@ -1434,7 +1445,7 @@ class AstSemanticAnalyzerImpl {
                     } else {
                         const auto& params = callee.type->paramTypes;
                         if (!params.empty() && params.size() != args.size()) {
-                            addError(expr.node.line,
+                            addError(expr.node,
                                      "Type error: function expects " +
                                          std::to_string(params.size()) +
                                          " arguments, got " +
@@ -1446,8 +1457,7 @@ class AstSemanticAnalyzerImpl {
                             TypeRef expected =
                                 params[index] ? params[index] : TypeInfo::makeAny();
                             if (!isAssignableType(args[index].type, expected)) {
-                                addError(args[index].line ? args[index].line
-                                                          : expr.node.line,
+                                addError(value.arguments[index]->node,
                                          "Type error: function argument " +
                                              std::to_string(index + 1) +
                                              " expects '" +
@@ -1464,7 +1474,7 @@ class AstSemanticAnalyzerImpl {
                 } else if constexpr (std::is_same_v<T, AstMemberExpr>) {
                     ExprInfo receiver = analyzeExpr(*value.object);
                     if (receiver.type && receiver.type->isOptional()) {
-                        addError(expr.node.line,
+                        addError(value.object->node,
                                  "Type error: cannot access members on optional "
                                  "value of type '" +
                                      receiver.type->toString() +
@@ -1488,7 +1498,7 @@ class AstSemanticAnalyzerImpl {
                                 result = ExprInfo{methodType, false, false, "",
                                                   value.member.line()};
                             } else {
-                                addError(value.member.line(),
+                                addError(value.member,
                                          "Type error: class '" +
                                              receiver.type->className +
                                              "' has no member '" + memberName +
@@ -1503,7 +1513,7 @@ class AstSemanticAnalyzerImpl {
                                 receiver.type->kind == TypeKind::DICT ||
                                 receiver.type->kind == TypeKind::SET)) {
                         TypeRef memberType = collectionMemberType(
-                            receiver.type, memberName, value.member.line());
+                            receiver.type, memberName, value.member.span());
                         result = ExprInfo{memberType ? memberType
                                                      : TypeInfo::makeAny(),
                                           false, false, "",
@@ -1521,7 +1531,7 @@ class AstSemanticAnalyzerImpl {
                                           expr.node.line};
                     } else if (collection.type->kind == TypeKind::ARRAY) {
                         if (!(index.type->isInteger() || index.type->isAny())) {
-                            addError(index.line ? index.line : expr.node.line,
+                            addError(value.index->node,
                                      "Type error: array index must be an "
                                      "integer.");
                         }
@@ -1535,7 +1545,7 @@ class AstSemanticAnalyzerImpl {
                                               ? collection.type->keyType
                                               : TypeInfo::makeAny();
                         if (!isAssignableType(index.type, keyType)) {
-                            addError(index.line ? index.line : expr.node.line,
+                            addError(value.index->node,
                                      "Type error: dict key expects '" +
                                          keyType->toString() + "', got '" +
                                          index.type->toString() + "'.");
@@ -1550,7 +1560,7 @@ class AstSemanticAnalyzerImpl {
                                                   ? collection.type->elementType
                                                   : TypeInfo::makeAny();
                         if (!isAssignableType(index.type, elementType)) {
-                            addError(index.line ? index.line : expr.node.line,
+                            addError(value.index->node,
                                      "Type error: set lookup expects '" +
                                          elementType->toString() + "', got '" +
                                          index.type->toString() + "'.");
@@ -1558,7 +1568,7 @@ class AstSemanticAnalyzerImpl {
                         result = ExprInfo{TypeInfo::makeBool(), false, false, "",
                                           expr.node.line};
                     } else {
-                        addError(expr.node.line,
+                        addError(expr.node,
                                  "Type error: indexing is only valid on Array, "
                                  "Dict, or Set.");
                         result = ExprInfo{TypeInfo::makeAny(), false, false, "",
@@ -1567,14 +1577,14 @@ class AstSemanticAnalyzerImpl {
                 } else if constexpr (std::is_same_v<T, AstCastExpr>) {
                     ExprInfo inner = analyzeExpr(*value.expression);
                     TypeRef target = requireTypeExpr(
-                        value.targetType.get(), expr.node.line,
+                        value.targetType.get(), expr.node.span,
                         "Type error: expected type after 'as'.");
                     if (!target) {
                         result = ExprInfo{TypeInfo::makeAny(), false, false, "",
                                           expr.node.line};
                     } else {
                         if (!isValidExplicitCast(inner.type, target)) {
-                            addError(expr.node.line,
+                            addError(expr.node,
                                      "Type error: cannot cast '" +
                                          inner.type->toString() + "' to '" +
                                          target->toString() + "'.");
@@ -1586,7 +1596,7 @@ class AstSemanticAnalyzerImpl {
                     ResolvedCallableSignature signature = resolveCallableSignature(
                         "<closure>", value.params, value.returnType.get(),
                         expectedFunctionLiteralType, false, true,
-                        !value.expressionBody, expr.node.line);
+                        !value.expressionBody, expr.node.span);
 
                     beginScope();
                     m_functionContexts.push_back(FunctionCtx{signature.returnType});
@@ -1597,9 +1607,8 @@ class AstSemanticAnalyzerImpl {
                     }
 
                     if (value.expressionBody) {
-                        if (signature.omittedParameterTypeAnnotation &&
-                            signature.firstOmittedParameterLine != 0) {
-                            addError(signature.firstOmittedParameterLine,
+                        if (signature.omittedParameterTypeAnnotation) {
+                            addError(signature.firstOmittedParameterSpan,
                                      "Type error: expression-bodied lambdas "
                                      "require explicit parameter types.");
                         }
@@ -1612,7 +1621,7 @@ class AstSemanticAnalyzerImpl {
                             false, false, "", body.line};
                     } else {
                         if (value.usesFatArrow && value.blockBody) {
-                            addError(value.blockBody->node.line,
+                            addError(value.blockBody->node,
                                      "Type error: expression-bodied lambdas do "
                                      "not support block bodies; use "
                                      "'fn(...) { ... }'.");
@@ -1671,7 +1680,7 @@ class AstSemanticAnalyzerImpl {
                             !item.type->isAny() &&
                             !isAssignableType(item.type, elementType) &&
                             !isAssignableType(elementType, item.type)) {
-                            addError(item.line ? item.line : expr.node.line,
+                            addError(element->node,
                                      "Type error: array literal elements must "
                                      "have a consistent type.");
                         }
@@ -1750,7 +1759,7 @@ class AstSemanticAnalyzerImpl {
             }
         } else {
             declaredType = requireTypeExpr(
-                stmt.declaredType.get(), stmtNode.line,
+                stmt.declaredType.get(), stmt.name.span(),
                 "Type error: expected type after variable name.");
             if (!declaredType) {
                 declaredType = TypeInfo::makeAny();
@@ -1809,17 +1818,18 @@ class AstSemanticAnalyzerImpl {
         recordNodeConstness(stmtNode.node, true);
     }
 
-    void analyzeReturnStmt(const AstReturnStmt& stmt, size_t line) {
+    void analyzeReturnStmt(const AstNodeInfo& stmtNode, const AstReturnStmt& stmt) {
         if (m_functionContexts.empty()) {
-            addError(line, "Type error: cannot return from top-level code.");
+            addError(stmtNode, "Type error: cannot return from top-level code.");
         }
 
         if (!stmt.value) {
             if (!m_functionContexts.empty()) {
                 TypeRef expected = m_functionContexts.back().returnType;
                 if (expected && !expected->isVoid()) {
-                    addError(line, "Type error: function expects return type '" +
-                                       expected->toString() + "'.");
+                    addError(stmtNode,
+                             "Type error: function expects return type '" +
+                                 expected->toString() + "'.");
                 }
             }
             return;
@@ -1829,10 +1839,11 @@ class AstSemanticAnalyzerImpl {
         if (!m_functionContexts.empty()) {
             TypeRef expected = m_functionContexts.back().returnType;
             if (expected && !isAssignableType(value.type, expected)) {
-                addError(line, "Type error: cannot return '" +
-                                   value.type->toString() +
-                                   "' from function returning '" +
-                                   expected->toString() + "'.");
+                addError(stmt.value->node,
+                         "Type error: cannot return '" +
+                             value.type->toString() +
+                             "' from function returning '" +
+                             expected->toString() + "'.");
             }
         }
     }
@@ -1855,12 +1866,12 @@ class AstSemanticAnalyzerImpl {
                 } else if constexpr (std::is_same_v<T, AstPrintStmt>) {
                     analyzeExpr(*value.expression);
                 } else if constexpr (std::is_same_v<T, AstReturnStmt>) {
-                    analyzeReturnStmt(value, stmt.node.line);
+                    analyzeReturnStmt(stmt.node, value);
                 } else if constexpr (std::is_same_v<T, AstIfStmt>) {
                     ExprInfo cond = analyzeExpr(*value.condition);
                     if (!(cond.type->kind == TypeKind::BOOL ||
                           cond.type->isAny())) {
-                        addError(cond.line ? cond.line : stmt.node.line,
+                        addError(value.condition->node,
                                  "Type error: if condition must be bool.");
                     }
                     analyzeStmt(*value.thenBranch);
@@ -1871,7 +1882,7 @@ class AstSemanticAnalyzerImpl {
                     ExprInfo cond = analyzeExpr(*value.condition);
                     if (!(cond.type->kind == TypeKind::BOOL ||
                           cond.type->isAny())) {
-                        addError(cond.line ? cond.line : stmt.node.line,
+                        addError(value.condition->node,
                                  "Type error: while condition must be bool.");
                     }
                     analyzeStmt(*value.body);
@@ -1899,7 +1910,7 @@ class AstSemanticAnalyzerImpl {
                         ExprInfo cond = analyzeExpr(*value.condition);
                         if (!(cond.type->kind == TypeKind::BOOL ||
                               cond.type->isAny())) {
-                            addError(cond.line ? cond.line : stmt.node.line,
+                            addError(value.condition->node,
                                      "Type error: for condition must be bool.");
                         }
                     }
@@ -1913,13 +1924,13 @@ class AstSemanticAnalyzerImpl {
                 } else if constexpr (std::is_same_v<T, AstForEachStmt>) {
                     beginScope();
                     TypeRef declaredType = requireTypeExpr(
-                        value.declaredType.get(), stmt.node.line,
+                        value.declaredType.get(), value.name.span(),
                         "Type error: expected type after loop variable name.");
                     if (!declaredType) {
                         declaredType = TypeInfo::makeAny();
                     }
                     if (declaredType->isVoid()) {
-                        addError(stmt.node.line,
+                        addError(value.name,
                                  "Type error: variables cannot have type "
                                  "'void'.");
                     }
@@ -1941,13 +1952,13 @@ class AstSemanticAnalyzerImpl {
                                                ? iterable.type->elementType
                                                : TypeInfo::makeAny();
                     } else if (!(iterable.type && iterable.type->isAny())) {
-                        addError(iterable.line ? iterable.line : stmt.node.line,
+                        addError(value.iterable->node,
                                  "Type error: foreach expects Array<T>, Dict<K, "
                                  "V>, or Set<T>.");
                     }
 
                     if (!isAssignableType(inferredLoopType, declaredType)) {
-                        addError(value.name.line(),
+                        addError(value.name,
                                  "Type error: cannot assign '" +
                                      inferredLoopType->toString() +
                                      "' to variable '" + tokenText(value.name) +
@@ -1993,9 +2004,7 @@ class AstSemanticAnalyzerImpl {
 
         ResolvedCallableSignature signature = resolveCallableSignature(
             functionName, functionDecl.params, functionDecl.returnType.get(),
-            functionType, false, false, true,
-            functionDecl.body ? functionDecl.body->node.line
-                              : functionDecl.node.line);
+            functionType, false, false, true, functionDecl.name.span());
 
         beginScope();
         m_functionContexts.push_back(FunctionCtx{signature.returnType});
@@ -2060,7 +2069,7 @@ class AstSemanticAnalyzerImpl {
 
     void analyzeTypeAliasDecl(const AstTypeAliasDecl& aliasDecl) {
         TypeRef aliasedType = requireTypeExpr(
-            aliasDecl.aliasedType.get(), aliasDecl.node.line,
+            aliasDecl.aliasedType.get(), aliasDecl.name.span(),
             "Type error: expected aliased type or 'struct'.");
         if (aliasedType) {
             m_typeAliases[tokenText(aliasDecl.name)] = aliasedType;

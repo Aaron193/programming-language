@@ -638,6 +638,17 @@ void Compiler::errorAt(const Token& token, const std::string& message) {
     std::cerr << " " << message << std::endl;
 }
 
+void Compiler::errorAtSpan(const SourceSpan& span, const std::string& message) {
+    if (m_panicMode) {
+        return;
+    }
+
+    m_panicMode = true;
+    m_hadError = true;
+    printDiagnosticPrefix(span);
+    std::cerr << message << std::endl;
+}
+
 void Compiler::errorAtLine(size_t line, const std::string& message) {
     if (m_panicMode) {
         return;

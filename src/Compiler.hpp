@@ -116,6 +116,7 @@ class Compiler {
     void markInitialized();
     bool identifiersEqual(const Token& lhs, const Token& rhs) const;
     void errorAt(const Token& token, const std::string& message);
+    void errorAtSpan(const SourceSpan& span, const std::string& message);
     void errorAtLine(size_t line, const std::string& message);
 
     bool resolveImportExportTypes(

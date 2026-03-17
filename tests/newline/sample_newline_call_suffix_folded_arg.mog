@@ -1,0 +1,7 @@
+fn id(value i32) i32 {
+  return value
+}
+
+print(id(
+  40i32 + 2i32
+))
