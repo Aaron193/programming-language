@@ -2122,6 +2122,7 @@ class AstSemanticAnalyzerImpl {
         }
 
         if (m_model) {
+            m_model->classOperatorMethods = m_classOperatorMethods;
             m_model->metadata = m_metadata;
         }
     }

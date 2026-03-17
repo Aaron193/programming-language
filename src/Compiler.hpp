@@ -45,6 +45,8 @@ enum Precedence {
 
 class Compiler {
    private:
+    friend class AstBytecodeEmitter;
+
     using ParseFn = std::function<void(bool)>;
 
     struct Local {
@@ -143,11 +145,14 @@ class Compiler {
         std::initializer_list<TokenType> allowedTerminators = {});
     void errorAtCurrent(const std::string& message);
     void errorAt(const Token& token, const std::string& message);
+    void errorAtLine(size_t line, const std::string& message);
     void consume(TokenType type, const std::string& message);
 
     Chunk* currentChunk() { return m_chunk; }
     void emitByte(uint8_t byte);
     void emitBytes(uint8_t byte1, uint8_t byte2);
+    void emitByte(uint8_t byte, size_t line);
+    void emitBytes(uint8_t byte1, uint8_t byte2, size_t line);
     void emitReturn();
     Value makeStringValue(const std::string& text);
     uint8_t makeConstant(Value value);

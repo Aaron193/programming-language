@@ -146,15 +146,9 @@ TypeRef resolveTypeExpr(const AstTypeExpr& typeExpr,
 }  // namespace
 
 bool collectSymbolsFromAst(
-    std::string_view source, std::unordered_set<std::string>& outClassNames,
+    const AstModule& module, std::unordered_set<std::string>& outClassNames,
     std::unordered_map<std::string, TypeRef>& outFunctionSignatures,
     std::unordered_map<std::string, TypeRef>* outTypeAliases) {
-    AstModule module;
-    AstParser parser(source);
-    if (!parser.parseModule(module)) {
-        return false;
-    }
-
     outClassNames.clear();
     outFunctionSignatures.clear();
     if (outTypeAliases != nullptr) {
@@ -231,4 +225,18 @@ bool collectSymbolsFromAst(
     }
 
     return true;
+}
+
+bool collectSymbolsFromAst(
+    std::string_view source, std::unordered_set<std::string>& outClassNames,
+    std::unordered_map<std::string, TypeRef>& outFunctionSignatures,
+    std::unordered_map<std::string, TypeRef>* outTypeAliases) {
+    AstModule module;
+    AstParser parser(source);
+    if (!parser.parseModule(module)) {
+        return false;
+    }
+
+    return collectSymbolsFromAst(module, outClassNames, outFunctionSignatures,
+                                 outTypeAliases);
 }
