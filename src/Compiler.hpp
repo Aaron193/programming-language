@@ -43,6 +43,12 @@ enum Precedence {
     PREC_PRIMARY,
 };
 
+enum class CompilerEmitterMode {
+    Auto,
+    ForceAst,
+    ForceLegacy,
+};
+
 class Compiler {
    private:
     friend class AstBytecodeEmitter;
@@ -127,6 +133,7 @@ class Compiler {
     std::vector<std::string> m_packageSearchPaths;
     std::string m_sourcePath;
     bool m_strictMode = false;
+    CompilerEmitterMode m_emitterMode = CompilerEmitterMode::Auto;
     std::deque<Token> m_bufferedTokens;
 
     void advance();
@@ -274,6 +281,7 @@ class Compiler {
     void setGC(GC* gc) { m_gc = gc; }
     void setSourcePath(const std::string& path) { m_sourcePath = path; }
     void setStrictMode(bool strictMode) { m_strictMode = strictMode; }
+    void setEmitterMode(CompilerEmitterMode mode) { m_emitterMode = mode; }
     void setPackageSearchPaths(std::vector<std::string> packageSearchPaths) {
         m_packageSearchPaths = std::move(packageSearchPaths);
     }
