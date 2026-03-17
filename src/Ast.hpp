@@ -116,6 +116,7 @@ struct AstFunctionExpr {
     std::unique_ptr<AstTypeExpr> returnType;
     AstStmtPtr blockBody;
     AstExprPtr expressionBody;
+    bool usesFatArrow = false;
 };
 
 struct AstImportExpr {

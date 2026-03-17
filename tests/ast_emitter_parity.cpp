@@ -130,13 +130,17 @@ std::vector<std::filesystem::path> defaultCorpus(
         repoRoot / "tests/sample_closure_capture.mog",
         repoRoot / "tests/sample_closure_mutation.mog",
         repoRoot / "tests/sample_class.mog",
+        repoRoot / "tests/sample_inherit_super.mog",
         repoRoot / "tests/sample_invoke_fusion.mog",
         repoRoot / "tests/sample_for_each.mog",
         repoRoot / "tests/sample_import_basic.mog",
         repoRoot / "tests/sample_import_named.mog",
+        repoRoot / "tests/sample_import_alias.mog",
         repoRoot / "tests/sample_import_class.mog",
         repoRoot / "tests/sample_import_nested.mog",
+        repoRoot / "tests/newline/sample_newline_call_suffix.mog",
         repoRoot / "tests/sample_runtime_stacktrace.mog",
+        repoRoot / "tests/sample_collection_print.mog",
         repoRoot / "tests/sample_strict_loop_optimizations.mog",
     };
 }

@@ -22,12 +22,23 @@ if [[ $STATUS -eq 0 ]]; then
     exit 1
 fi
 
-ERROR_COUNT=$(grep -c "\[error\]\[compile\]" <<< "$OUTPUT")
-if [[ $ERROR_COUNT -lt 2 ]]; then
-    echo "[FAIL] Expected at least 2 compile errors, got $ERROR_COUNT"
+if ! grep -q "\[error\]\[compile\]\[line 1\] AST frontend failed to parse source\." <<< "$OUTPUT"; then
+    echo "[FAIL] Expected direct AST frontend parse failure."
     echo "$OUTPUT"
     exit 1
 fi
 
-echo "[PASS] compile recovery reported multiple errors ($ERROR_COUNT)."
+if grep -q "at 'print' Expected expression\." <<< "$OUTPUT"; then
+    echo "[FAIL] Legacy parser diagnostics appeared; normal compilation still fell back."
+    echo "$OUTPUT"
+    exit 1
+fi
+
+if grep -q "at end Expected expression\." <<< "$OUTPUT"; then
+    echo "[FAIL] Legacy parser diagnostics appeared; normal compilation still fell back."
+    echo "$OUTPUT"
+    exit 1
+fi
+
+echo "[PASS] AST frontend compile failure surfaced without legacy fallback."
 exit 0

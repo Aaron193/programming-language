@@ -12,6 +12,10 @@ AstFrontendBuildStatus buildAstFrontend(std::string_view source,
     AstModule module;
     AstParser parser(source);
     if (!parser.parseModule(module)) {
+        outErrors.clear();
+        for (const auto& error : parser.errors()) {
+            outErrors.push_back(TypeError{error.line, error.message});
+        }
         return AstFrontendBuildStatus::ParseFailed;
     }
 

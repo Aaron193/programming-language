@@ -1617,6 +1617,12 @@ class AstSemanticAnalyzerImpl {
                             TypeInfo::makeFunction(signature.paramTypes, body.type),
                             false, false, "", body.line};
                     } else {
+                        if (value.usesFatArrow && value.blockBody) {
+                            addError(value.blockBody->node.line,
+                                     "Type error: expression-bodied lambdas do "
+                                     "not support block bodies; use "
+                                     "'fn(...) { ... }'.");
+                        }
                         if (value.blockBody) {
                             analyzeFunctionBody(*value.blockBody);
                         }

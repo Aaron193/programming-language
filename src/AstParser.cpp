@@ -159,6 +159,11 @@ std::string AstParser::tokenText(const Token& token) const {
 
 void AstParser::error() { m_hadError = true; }
 
+void AstParser::errorAtLine(size_t line, const std::string& message) {
+    m_hadError = true;
+    m_errors.push_back(ParseError{line == 0 ? 1 : line, message});
+}
+
 void AstParser::rejectStraySemicolon() {
     if (!check(TokenType::SEMI_COLON)) {
         return;
@@ -194,7 +199,10 @@ bool AstParser::recoverLineLeadingContinuation(
         return false;
     }
 
-    error();
+    errorAtLine(m_current.line(),
+                "Continuation token '" +
+                    std::string(continuationTokenText(m_current.type())) +
+                    "' must stay on the previous line.");
 
     int parenDepth = 0;
     int bracketDepth = 0;
@@ -252,7 +260,7 @@ bool AstParser::recoverLineLeadingContinuation(
 bool AstParser::rejectUnexpectedTrailingToken(
     std::initializer_list<TokenType> allowedTerminators) {
     if (check(TokenType::END_OF_FILE) || hasLineBreakBeforeCurrent() ||
-        check(TokenType::SEMI_COLON)) {
+        check(TokenType::SEMI_COLON) || check(TokenType::CLOSE_CURLY)) {
         return false;
     }
 
@@ -762,6 +770,16 @@ bool AstParser::parseFunctionDeclaration(AstItem& outItem) {
 bool AstParser::parseClassMember(AstClassDecl& outClassDecl) {
     std::vector<int> annotatedOperators;
 
+    auto finishMethod = [&](AstMethodDecl methodDecl) {
+        methodDecl.body = parseBlockStatement();
+        if (!methodDecl.body) {
+            return false;
+        }
+
+        outClassDecl.methods.push_back(std::move(methodDecl));
+        return !m_hadError;
+    };
+
     while (match(TokenType::AT)) {
         if (!check(TokenType::IDENTIFIER)) {
             error();
@@ -809,13 +827,49 @@ bool AstParser::parseClassMember(AstClassDecl& outClassDecl) {
             }
         }
 
-        methodDecl.body = parseBlockStatement();
-        if (!methodDecl.body) {
+        return finishMethod(std::move(methodDecl));
+    }
+
+    if (check(TokenType::IDENTIFIER) && peekToken().type() == TokenType::OPEN_PAREN) {
+        AstMethodDecl methodDecl;
+        methodDecl.node = makeNodeInfo(m_current);
+        methodDecl.name = m_current;
+        methodDecl.annotatedOperators = std::move(annotatedOperators);
+        advance();
+        methodDecl.params = parseParameters();
+        if (m_hadError) {
             return false;
         }
 
-        outClassDecl.methods.push_back(std::move(methodDecl));
-        return !m_hadError;
+        return finishMethod(std::move(methodDecl));
+    }
+
+    size_t returnTypeOffset = 0;
+    if (isTypedTypeAnnotationStart() &&
+        (returnTypeOffset = 0, parseTypeLookahead(returnTypeOffset)) &&
+        tokenAt(returnTypeOffset).type() == TokenType::IDENTIFIER &&
+        tokenAt(returnTypeOffset + 1).type() == TokenType::OPEN_PAREN) {
+        std::unique_ptr<AstTypeExpr> returnType = parseTypeExpr();
+        if (!returnType) {
+            return false;
+        }
+
+        if (check(TokenType::IDENTIFIER) && peekToken().type() == TokenType::OPEN_PAREN) {
+            AstMethodDecl methodDecl;
+            methodDecl.node = makeNodeInfo(m_current);
+            methodDecl.name = m_current;
+            methodDecl.returnType = std::move(returnType);
+            methodDecl.annotatedOperators = std::move(annotatedOperators);
+            advance();
+            methodDecl.params = parseParameters();
+            if (m_hadError) {
+                return false;
+            }
+
+            return finishMethod(std::move(methodDecl));
+        }
+
+        return false;
     }
 
     if (!annotatedOperators.empty()) {
@@ -1250,7 +1304,21 @@ AstExprPtr AstParser::parseAssignment() {
         return nullptr;
     }
 
-    if (hasLineBreakBeforeCurrent() || !isAssignmentOperator(m_current.type())) {
+    if (!isAssignmentOperator(m_current.type())) {
+        return lhs;
+    }
+
+    const bool lhsAssignable =
+        std::holds_alternative<AstIdentifierExpr>(lhs->value) ||
+        std::holds_alternative<AstMemberExpr>(lhs->value) ||
+        std::holds_alternative<AstIndexExpr>(lhs->value);
+    if (hasLineBreakBeforeCurrent() &&
+        (m_current.type() != TokenType::PLUS_PLUS &&
+         m_current.type() != TokenType::MINUS_MINUS)) {
+        return lhs;
+    }
+
+    if (hasLineBreakBeforeCurrent() && !lhsAssignable) {
         return lhs;
     }
 
@@ -1576,14 +1644,21 @@ AstExprPtr AstParser::parseFunctionLiteralExpr() {
     }
 
     if (check(TokenType::FAT_ARROW)) {
+        value.usesFatArrow = true;
         if (hasLineBreakBeforeCurrent()) {
-            error();
-            return nullptr;
+            errorAtLine(m_current.line(),
+                        "Continuation token '" +
+                            std::string(continuationTokenText(m_current.type())) +
+                            "' must stay on the previous line.");
         }
         advance();
         if (check(TokenType::OPEN_CURLY)) {
-            error();
-            return nullptr;
+            value.blockBody = parseBlockStatement();
+            if (!value.blockBody) {
+                return nullptr;
+            }
+            functionExpr->value = std::move(value);
+            return functionExpr;
         }
         value.expressionBody = parseExpression();
         if (!value.expressionBody) {
@@ -1748,7 +1823,7 @@ AstExprPtr AstParser::parsePrimary() {
         return expr;
     }
 
-    error();
+    errorAtLine(m_current.line(), "Expected expression.");
     if (!check(TokenType::END_OF_FILE)) {
         advance();
     }

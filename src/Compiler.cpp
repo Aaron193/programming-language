@@ -186,6 +186,34 @@ bool validateNativePackageImport(const ImportTarget& importTarget,
 
     return true;
 }
+
+bool reportAstFrontendFailure(AstFrontendBuildStatus status,
+                              const std::vector<TypeError>& errors,
+                              CompilerEmitterMode emitterMode) {
+    if (status == AstFrontendBuildStatus::SemanticError) {
+        for (const auto& error : errors) {
+            std::cerr << "[error][compile][line " << error.line << "] "
+                      << error.message << std::endl;
+        }
+        return true;
+    }
+
+    if (status == AstFrontendBuildStatus::ParseFailed) {
+        for (const auto& error : errors) {
+            std::cerr << "[error][compile][line " << error.line << "] "
+                      << error.message << std::endl;
+        }
+        std::cerr << "[error][compile][line 1] AST frontend failed to parse "
+                     "source";
+        if (emitterMode == CompilerEmitterMode::ForceAst) {
+            std::cerr << " for forced AST emission";
+        }
+        std::cerr << "." << std::endl;
+        return true;
+    }
+
+    return false;
+}
 }  // namespace
 
 bool Compiler::compile(std::string_view source, Chunk& chunk,
@@ -204,7 +232,6 @@ bool Compiler::compile(std::string_view source, Chunk& chunk,
     registerStandardLibraryTypeSignatures(m_functionSignatures);
 
     AstFrontendResult astFrontend;
-    bool useAstEmitter = false;
     if (m_emitterMode != CompilerEmitterMode::ForceLegacy) {
         std::vector<TypeError> astErrors;
         AstFrontendMode frontendMode = m_strictMode
@@ -213,40 +240,28 @@ bool Compiler::compile(std::string_view source, Chunk& chunk,
         AstFrontendBuildStatus astStatus =
             buildAstFrontend(source, frontendMode, astErrors, astFrontend);
 
-        if (astStatus == AstFrontendBuildStatus::Success) {
-            useAstEmitter = true;
-            m_classNames = astFrontend.classNames;
-            m_typeAliases = astFrontend.typeAliases;
-            m_functionSignatures = astFrontend.functionSignatures;
-            m_classFieldTypes = astFrontend.semanticModel.metadata.classFieldTypes;
-            m_classMethodSignatures =
-                astFrontend.semanticModel.metadata.classMethodSignatures;
-            m_classOperatorMethods =
-                astFrontend.semanticModel.classOperatorMethods;
-            m_superclassOf = astFrontend.semanticModel.metadata.superclassOf;
-            m_checkerTopLevelSymbolTypes =
-                astFrontend.semanticModel.metadata.topLevelSymbolTypes;
-            m_checkerDeclarationTypes =
-                astFrontend.semanticModel.metadata.declarationTypes;
-            if (!m_strictMode) {
-                m_checkerTopLevelSymbolTypes.clear();
-                m_checkerDeclarationTypes.clear();
-            }
-        } else if (astStatus == AstFrontendBuildStatus::SemanticError) {
-            for (const auto& error : astErrors) {
-                std::cerr << "[error][compile][line " << error.line << "] "
-                          << error.message << std::endl;
-            }
-            return false;
-        } else if (m_emitterMode == CompilerEmitterMode::ForceAst) {
-            std::cerr << "[error][compile][line 1] AST frontend failed to parse "
-                         "source for forced AST emission."
-                      << std::endl;
+        if (astStatus != AstFrontendBuildStatus::Success) {
+            reportAstFrontendFailure(astStatus, astErrors, m_emitterMode);
             return false;
         }
-    }
 
-    if (useAstEmitter) {
+        m_classNames = astFrontend.classNames;
+        m_typeAliases = astFrontend.typeAliases;
+        m_functionSignatures = astFrontend.functionSignatures;
+        m_classFieldTypes = astFrontend.semanticModel.metadata.classFieldTypes;
+        m_classMethodSignatures =
+            astFrontend.semanticModel.metadata.classMethodSignatures;
+        m_classOperatorMethods = astFrontend.semanticModel.classOperatorMethods;
+        m_superclassOf = astFrontend.semanticModel.metadata.superclassOf;
+        m_checkerTopLevelSymbolTypes =
+            astFrontend.semanticModel.metadata.topLevelSymbolTypes;
+        m_checkerDeclarationTypes =
+            astFrontend.semanticModel.metadata.declarationTypes;
+        if (!m_strictMode) {
+            m_checkerTopLevelSymbolTypes.clear();
+            m_checkerDeclarationTypes.clear();
+        }
+
         m_scanner.reset();
         m_parser = std::make_unique<Parser>();
         m_currentClass = nullptr;

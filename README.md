@@ -67,7 +67,7 @@ print(1
 - VM call frame stack (non-recursive interpreter loop)
 - Runtime error reporting with source line numbers
 - Runtime call stack traces
-- Compile error recovery with panic-mode synchronization
+- Compile error reporting with source line numbers
 - Optional diagnostics flags (`--trace`, `--show-return`, `--disassemble`)
 - Interactive REPL when no source file is provided
 

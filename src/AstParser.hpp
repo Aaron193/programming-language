@@ -3,16 +3,24 @@
 #include <deque>
 #include <initializer_list>
 #include <memory>
+#include <string>
 #include <string_view>
+#include <vector>
 
 #include "Ast.hpp"
 #include "Scanner.hpp"
 
 class AstParser {
    public:
+    struct ParseError {
+        size_t line = 0;
+        std::string message;
+    };
+
     explicit AstParser(std::string_view source);
 
     bool parseModule(AstModule& outModule);
+    const std::vector<ParseError>& errors() const { return m_errors; }
 
    private:
     Scanner m_scanner;
@@ -21,6 +29,7 @@ class AstParser {
     std::deque<Token> m_bufferedTokens;
     bool m_hadError = false;
     AstNodeId m_nextNodeId = 1;
+    std::vector<ParseError> m_errors;
 
     AstNodeInfo makeNodeInfo(const Token& token);
 
@@ -34,6 +43,7 @@ class AstParser {
     bool hasLineBreakBeforeCurrent() const;
     std::string tokenText(const Token& token) const;
     void error();
+    void errorAtLine(size_t line, const std::string& message);
     void rejectStraySemicolon();
     bool isRecoveryBoundaryToken(TokenType type) const;
     bool recoverLineLeadingContinuation(
