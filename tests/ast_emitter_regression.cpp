@@ -176,36 +176,51 @@ int main(int argc, char** argv) {
             return 1;
         }
 
-        GC astGc;
-        Chunk astChunk;
-        std::string astCanonical;
-        if (!compileWithMode(canonicalPath, CompilerEmitterMode::ForceAst, astGc,
-                             packagePaths, astChunk, astCanonical)) {
+        GC firstGc;
+        Chunk firstChunk;
+        std::string firstCanonical;
+        if (!compileWithMode(canonicalPath, CompilerEmitterMode::Auto, firstGc,
+                             packagePaths, firstChunk, firstCanonical)) {
             std::cerr << "AST compile failed for " << canonicalPath << '\n';
             return 1;
         }
 
-        GC legacyGc;
-        Chunk legacyChunk;
-        std::string legacyCanonical;
-        if (!compileWithMode(canonicalPath, CompilerEmitterMode::ForceLegacy,
-                             legacyGc, packagePaths, legacyChunk,
-                             legacyCanonical)) {
-            std::cerr << "Legacy compile failed for " << canonicalPath << '\n';
+        GC secondGc;
+        Chunk secondChunk;
+        std::string secondCanonical;
+        if (!compileWithMode(canonicalPath, CompilerEmitterMode::Auto,
+                             secondGc, packagePaths, secondChunk,
+                             secondCanonical)) {
+            std::cerr << "Repeated AST compile failed for " << canonicalPath
+                      << '\n';
             return 1;
         }
 
-        if (astCanonical != legacyCanonical) {
-            std::cerr << "Emitter parity mismatch: " << canonicalPath << "\n\n";
-            std::cerr << "--- AST ---\n" << astCanonical;
-            std::cerr << "--- Legacy ---\n" << legacyCanonical;
+        GC forcedAstGc;
+        Chunk forcedAstChunk;
+        std::string forcedAstCanonical;
+        if (!compileWithMode(canonicalPath, CompilerEmitterMode::ForceAst,
+                             forcedAstGc, packagePaths, forcedAstChunk,
+                             forcedAstCanonical)) {
+            std::cerr << "Forced AST compile failed for " << canonicalPath
+                      << '\n';
+            return 1;
+        }
+
+        if (firstCanonical != secondCanonical ||
+            firstCanonical != forcedAstCanonical) {
+            std::cerr << "AST emitter regression mismatch: " << canonicalPath
+                      << "\n\n";
+            std::cerr << "--- AUTO (1) ---\n" << firstCanonical;
+            std::cerr << "--- AUTO (2) ---\n" << secondCanonical;
+            std::cerr << "--- FORCE_AST ---\n" << forcedAstCanonical;
             return 1;
         }
 
         ++passed;
     }
 
-    std::cout << "[PASS] AST/legacy emitter parity corpus matched for "
-              << passed << " file(s)." << std::endl;
+    std::cout << "[PASS] AST emitter regression corpus matched for " << passed
+              << " file(s)." << std::endl;
     return 0;
 }

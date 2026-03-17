@@ -1,0 +1,6 @@
+#!strict
+while (false) {
+    print("loop")
+}
+
+print("done")

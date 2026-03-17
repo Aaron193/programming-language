@@ -12,9 +12,8 @@
 #include "AstBytecodeEmitter.hpp"
 #include "AstFrontend.hpp"
 #include "ModuleResolver.hpp"
-#include "SyntaxRules.hpp"
 #include "StdLib.hpp"
-#include "TypeChecker.hpp"
+#include "SyntaxRules.hpp"
 
 namespace {
 bool isBitwiseAssignmentOperator(TokenType type) {
@@ -227,104 +226,31 @@ bool Compiler::compile(std::string_view source, Chunk& chunk,
     m_classMethodSignatures.clear();
     m_classOperatorMethods.clear();
     m_superclassOf.clear();
-    m_checkerTopLevelSymbolTypes.clear();
-    m_checkerDeclarationTypes.clear();
     registerStandardLibraryTypeSignatures(m_functionSignatures);
 
     AstFrontendResult astFrontend;
-    if (m_emitterMode != CompilerEmitterMode::ForceLegacy) {
-        std::vector<TypeError> astErrors;
-        AstFrontendMode frontendMode = m_strictMode
-                                           ? AstFrontendMode::StrictChecked
-                                           : AstFrontendMode::LoweringOnly;
-        AstFrontendBuildStatus astStatus =
-            buildAstFrontend(source, frontendMode, astErrors, astFrontend);
+    std::vector<TypeError> astErrors;
+    AstFrontendMode frontendMode = m_strictMode
+                                       ? AstFrontendMode::StrictChecked
+                                       : AstFrontendMode::LoweringOnly;
+    AstFrontendBuildStatus astStatus =
+        buildAstFrontend(source, frontendMode, astErrors, astFrontend);
 
-        if (astStatus != AstFrontendBuildStatus::Success) {
-            reportAstFrontendFailure(astStatus, astErrors, m_emitterMode);
-            return false;
-        }
-
-        m_classNames = astFrontend.classNames;
-        m_typeAliases = astFrontend.typeAliases;
-        m_functionSignatures = astFrontend.functionSignatures;
-        m_classFieldTypes = astFrontend.semanticModel.metadata.classFieldTypes;
-        m_classMethodSignatures =
-            astFrontend.semanticModel.metadata.classMethodSignatures;
-        m_classOperatorMethods = astFrontend.semanticModel.classOperatorMethods;
-        m_superclassOf = astFrontend.semanticModel.metadata.superclassOf;
-        m_checkerTopLevelSymbolTypes =
-            astFrontend.semanticModel.metadata.topLevelSymbolTypes;
-        m_checkerDeclarationTypes =
-            astFrontend.semanticModel.metadata.declarationTypes;
-        if (!m_strictMode) {
-            m_checkerTopLevelSymbolTypes.clear();
-            m_checkerDeclarationTypes.clear();
-        }
-
-        m_scanner.reset();
-        m_parser = std::make_unique<Parser>();
-        m_currentClass = nullptr;
-        m_contexts.clear();
-        m_globalSlots.clear();
-        m_globalTypes.clear();
-        m_globalConstness.clear();
-        m_exprTypeStack.clear();
-        m_globalNames.clear();
-        m_exportedNames.clear();
-        m_bufferedTokens.clear();
-        m_contexts.push_back(
-            FunctionContext{{}, {}, 0, false, false, TypeInfo::makeAny()});
-
-        AstBytecodeEmitter emitter(*this, astFrontend);
-        return emitter.emitModule();
-    }
-
-    TypeChecker typeChecker;
-    if (!typeChecker.collectSymbols(source, m_classNames,
-                                    m_functionSignatures, &m_typeAliases)) {
+    if (astStatus != AstFrontendBuildStatus::Success) {
+        reportAstFrontendFailure(astStatus, astErrors, m_emitterMode);
         return false;
     }
 
-    std::vector<TypeError> typeErrors;
-    TypeCheckerMetadata typeMetadata;
-    if (m_strictMode &&
-        !typeChecker.check(source, m_classNames, m_typeAliases,
-                           m_functionSignatures,
-                           typeErrors, &typeMetadata)) {
-        for (const auto& error : typeErrors) {
-            std::cerr << "[error][compile][line " << error.line << "] "
-                      << error.message << std::endl;
-        }
-        return false;
-    }
+    m_classNames = astFrontend.classNames;
+    m_typeAliases = astFrontend.typeAliases;
+    m_functionSignatures = astFrontend.functionSignatures;
+    m_classFieldTypes = astFrontend.semanticModel.metadata.classFieldTypes;
+    m_classMethodSignatures =
+        astFrontend.semanticModel.metadata.classMethodSignatures;
+    m_classOperatorMethods = astFrontend.semanticModel.classOperatorMethods;
+    m_superclassOf = astFrontend.semanticModel.metadata.superclassOf;
 
-    if (m_strictMode) {
-        for (const auto& classEntry : typeMetadata.classFieldTypes) {
-            auto& fieldMap = m_classFieldTypes[classEntry.first];
-            for (const auto& fieldEntry : classEntry.second) {
-                if (fieldMap.find(fieldEntry.first) == fieldMap.end()) {
-                    fieldMap[fieldEntry.first] = fieldEntry.second;
-                }
-            }
-        }
-
-        for (const auto& classEntry : typeMetadata.classMethodSignatures) {
-            auto& methodMap = m_classMethodSignatures[classEntry.first];
-            for (const auto& methodEntry : classEntry.second) {
-                if (methodMap.find(methodEntry.first) == methodMap.end()) {
-                    methodMap[methodEntry.first] = methodEntry.second;
-                }
-            }
-        }
-
-        m_superclassOf = std::move(typeMetadata.superclassOf);
-        m_checkerTopLevelSymbolTypes =
-            std::move(typeMetadata.topLevelSymbolTypes);
-        m_checkerDeclarationTypes = std::move(typeMetadata.declarationTypes);
-    }
-
-    m_scanner = std::make_unique<Scanner>(source);
+    m_scanner.reset();
     m_parser = std::make_unique<Parser>();
     m_currentClass = nullptr;
     m_contexts.clear();
@@ -338,16 +264,8 @@ bool Compiler::compile(std::string_view source, Chunk& chunk,
     m_contexts.push_back(
         FunctionContext{{}, {}, 0, false, false, TypeInfo::makeAny()});
 
-    advance();
-
-    while (m_parser->current.type() != TokenType::END_OF_FILE) {
-        declaration();
-    }
-
-    consume(TokenType::END_OF_FILE, "Expected end of source.");
-    emitReturn();
-
-    return !m_parser->hadError;
+    AstBytecodeEmitter emitter(*this, astFrontend);
+    return emitter.emitModule();
 }
 
 TypeRef Compiler::tokenToType(const Token& token) const {
@@ -667,64 +585,6 @@ uint8_t Compiler::arithmeticOpcode(TokenType operatorType,
     }
 }
 
-bool Compiler::shouldPreserveCheckerGlobalType(uint8_t slot,
-                                               const TypeRef& newType) const {
-    if (!m_strictMode) {
-        return false;
-    }
-
-    if (slot >= m_globalNames.size() || slot >= m_globalTypes.size()) {
-        return false;
-    }
-
-    auto checkerIt = m_checkerTopLevelSymbolTypes.find(m_globalNames[slot]);
-    if (checkerIt == m_checkerTopLevelSymbolTypes.end() || !checkerIt->second) {
-        return false;
-    }
-
-    if (!newType || newType->isAny()) {
-        return true;
-    }
-
-    TypeRef checkerType = checkerIt->second;
-    if (!checkerType || checkerType->isAny()) {
-        return false;
-    }
-
-    return checkerType->toString() != newType->toString();
-}
-
-const TypeCheckerDeclarationType* Compiler::lookupCheckerDeclaration(
-    const Token& nameToken) const {
-    const std::string name(nameToken.start(), nameToken.length());
-    const size_t line = nameToken.line();
-    const size_t functionDepth =
-        m_contexts.empty() ? 0 : (m_contexts.size() - 1);
-    const size_t scopeDepth =
-        m_contexts.empty() ? 0
-                           : static_cast<size_t>(currentContext().scopeDepth);
-
-    for (auto it = m_checkerDeclarationTypes.rbegin();
-         it != m_checkerDeclarationTypes.rend(); ++it) {
-        if (it->line == line && it->functionDepth == functionDepth &&
-            it->scopeDepth == scopeDepth && it->name == name) {
-            return &(*it);
-        }
-    }
-
-    return nullptr;
-}
-
-TypeRef Compiler::lookupCheckerDeclarationType(const Token& nameToken) const {
-    if (!m_strictMode || m_checkerDeclarationTypes.empty()) {
-        return nullptr;
-    }
-
-    const TypeCheckerDeclarationType* declaration =
-        lookupCheckerDeclaration(nameToken);
-    return declaration ? declaration->type : nullptr;
-}
-
 TypeRef Compiler::inferVariableType(const Token& name) const {
     const auto& locals = currentContext().locals;
     for (int index = static_cast<int>(locals.size()) - 1; index >= 0; --index) {
@@ -930,14 +790,9 @@ uint8_t Compiler::globalSlot(const Token& name) {
     }
 
     uint8_t slot = static_cast<uint8_t>(m_globalNames.size());
-    TypeRef checkerType = nullptr;
-    auto checkerTypeIt = m_checkerTopLevelSymbolTypes.find(globalName);
-    if (checkerTypeIt != m_checkerTopLevelSymbolTypes.end()) {
-        checkerType = checkerTypeIt->second;
-    }
     m_globalSlots.emplace(globalName, slot);
     m_globalNames.push_back(std::move(globalName));
-    m_globalTypes.push_back(checkerType);
+    m_globalTypes.push_back(TypeInfo::makeAny());
     m_globalConstness.push_back(false);
     return slot;
 }
@@ -1087,14 +942,6 @@ uint8_t Compiler::parseVariable(const std::string& message,
     consume(TokenType::IDENTIFIER, message);
 
     TypeRef normalized = declaredType ? declaredType : TypeInfo::makeAny();
-    if (const TypeCheckerDeclarationType* declaration =
-            lookupCheckerDeclaration(m_parser->previous)) {
-        if (declaration->type) {
-            normalized = declaration->type;
-        }
-        isConst = isConst || declaration->isConst;
-    }
-
     if (currentContext().scopeDepth > 0) {
         addLocal(m_parser->previous, normalized, isConst);
         return 0;
@@ -1102,9 +949,7 @@ uint8_t Compiler::parseVariable(const std::string& message,
 
     uint8_t slot = globalSlot(m_parser->previous);
     if (slot < m_globalTypes.size()) {
-        if (!shouldPreserveCheckerGlobalType(slot, normalized)) {
-            m_globalTypes[slot] = normalized;
-        }
+        m_globalTypes[slot] = normalized;
     }
     if (slot < m_globalConstness.size()) {
         m_globalConstness[slot] = isConst;

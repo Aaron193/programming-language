@@ -1,0 +1,7 @@
+#!strict
+fn one() i32 {
+    print("call")
+    return 1
+}
+
+print(one() + 2)

@@ -94,7 +94,6 @@ class AstSemanticAnalyzerImpl {
     AstSemanticModel* m_model = nullptr;
 
     std::vector<std::unordered_map<std::string, SymbolInfo>> m_scopes;
-    std::unordered_set<std::string> m_declaredGlobalSymbols;
     TypeCheckerMetadata m_metadata;
     std::unordered_map<std::string, std::unordered_map<int, std::string>>
         m_classOperatorMethods;
@@ -135,22 +134,13 @@ class AstSemanticAnalyzerImpl {
                       bool isConst = false) {
         m_scopes.back()[name] =
             SymbolInfo{type ? type : TypeInfo::makeAny(), isConst};
-        if (m_scopes.size() == 1) {
-            m_declaredGlobalSymbols.emplace(name);
-        }
     }
 
     void recordDeclarationType(const AstNodeInfo& node, const std::string& name,
                                const TypeRef& type, size_t line,
                                bool isConst = false) {
-        TypeCheckerDeclarationType declaration;
-        declaration.line = line;
-        declaration.functionDepth = m_functionContexts.size();
-        declaration.scopeDepth = m_scopes.empty() ? 0 : (m_scopes.size() - 1);
-        declaration.name = name;
-        declaration.type = type ? type : TypeInfo::makeAny();
-        declaration.isConst = isConst;
-        m_metadata.declarationTypes.push_back(std::move(declaration));
+        (void)name;
+        (void)line;
         recordNodeType(node, type);
         recordNodeConstness(node, isConst);
     }
@@ -2117,13 +2107,6 @@ class AstSemanticAnalyzerImpl {
         for (const auto& item : module.items) {
             if (item) {
                 analyzeItem(*item);
-            }
-        }
-
-        for (const auto& symbolName : m_declaredGlobalSymbols) {
-            auto it = m_scopes.front().find(symbolName);
-            if (it != m_scopes.front().end()) {
-                m_metadata.topLevelSymbolTypes[symbolName] = it->second.type;
             }
         }
 

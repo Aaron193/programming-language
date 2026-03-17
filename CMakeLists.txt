@@ -49,11 +49,11 @@ target_include_directories(ast_parser_smoke
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 
-add_executable(ast_emitter_parity
-    tests/ast_emitter_parity.cpp
+add_executable(ast_emitter_regression
+    tests/ast_emitter_regression.cpp
     ${AST_PARSER_SMOKE_SOURCES}
 )
-target_include_directories(ast_emitter_parity
+target_include_directories(ast_emitter_regression
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 

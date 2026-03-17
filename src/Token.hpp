@@ -117,6 +117,7 @@ class Token {
           m_lexeme(""),
           m_length(0),
           m_line(0) {}
+    static Token synthetic(TokenType type, std::string lexeme, size_t line);
     TokenType type() const { return m_type; }
     const char* start() const { return m_lexeme.c_str(); }
     size_t length() const { return m_length; }

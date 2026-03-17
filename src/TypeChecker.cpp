@@ -20,6 +20,15 @@
 
 namespace {
 
+struct LegacyDeclarationType {
+    size_t line = 0;
+    size_t functionDepth = 0;
+    size_t scopeDepth = 0;
+    std::string name;
+    TypeRef type;
+    bool isConst = false;
+};
+
 bool isTypeToken(TokenType type) {
     switch (type) {
         case TokenType::TYPE_I8:
@@ -145,7 +154,7 @@ class CheckerImpl {
 
     std::vector<std::unordered_map<std::string, SymbolInfo>> m_scopes;
     std::unordered_set<std::string> m_declaredGlobalSymbols;
-    std::vector<TypeCheckerDeclarationType> m_declarationTypes;
+    std::vector<LegacyDeclarationType> m_declarationTypes;
     std::unordered_map<std::string, std::string> m_superclassOf;
     std::unordered_map<std::string, std::unordered_map<std::string, TypeRef>>
         m_classFieldTypes;
@@ -766,7 +775,7 @@ class CheckerImpl {
 
     void recordDeclarationType(const std::string& name, const TypeRef& type,
                                size_t line, bool isConst = false) {
-        TypeCheckerDeclarationType declaration;
+        LegacyDeclarationType declaration;
         declaration.line = line;
         declaration.functionDepth = m_functionContexts.size();
         declaration.scopeDepth = m_scopes.empty() ? 0 : (m_scopes.size() - 1);
@@ -3046,13 +3055,6 @@ class CheckerImpl {
         out.classFieldTypes = m_classFieldTypes;
         out.classMethodSignatures = m_classMethodSignatures;
         out.superclassOf = m_superclassOf;
-        out.declarationTypes = m_declarationTypes;
-        for (const auto& symbolName : m_declaredGlobalSymbols) {
-            auto it = m_scopes.front().find(symbolName);
-            if (it != m_scopes.front().end()) {
-                out.topLevelSymbolTypes[symbolName] = it->second.type;
-            }
-        }
         return out;
     }
 };
@@ -3063,405 +3065,8 @@ bool TypeChecker::collectSymbols(
     std::string_view source, std::unordered_set<std::string>& outClassNames,
     std::unordered_map<std::string, TypeRef>& outFunctionSignatures,
     std::unordered_map<std::string, TypeRef>* outTypeAliases) {
-    if (collectSymbolsFromAst(source, outClassNames, outFunctionSignatures,
-                              outTypeAliases)) {
-        return true;
-    }
-
-    outClassNames.clear();
-    if (outTypeAliases != nullptr) {
-        outTypeAliases->clear();
-    }
-
-    {
-        Scanner scanner(source);
-        while (true) {
-            Token token = scanner.nextToken();
-            if (token.type() == TokenType::END_OF_FILE) {
-                break;
-            }
-
-            if (token.type() != TokenType::TYPE) {
-                continue;
-            }
-
-            Token name = scanner.nextToken();
-            while (name.type() == TokenType::ERROR) {
-                name = scanner.nextToken();
-            }
-
-            if (name.type() != TokenType::IDENTIFIER) {
-                continue;
-            }
-
-            std::string typeName(name.start(), name.length());
-            Token next = scanner.nextToken();
-            while (next.type() == TokenType::ERROR) {
-                next = scanner.nextToken();
-            }
-
-            if (next.type() == TokenType::STRUCT || next.type() == TokenType::LESS ||
-                next.type() == TokenType::OPEN_CURLY) {
-                outClassNames.emplace(typeName);
-            }
-        }
-    }
-
-    Scanner scanner(source);
-    bool hasBufferedToken = false;
-    Token bufferedToken;
-
-    auto nextToken = [&]() -> Token {
-        if (hasBufferedToken) {
-            hasBufferedToken = false;
-            return bufferedToken;
-        }
-        return scanner.nextToken();
-    };
-
-    auto peekToken = [&]() -> Token {
-        if (!hasBufferedToken) {
-            bufferedToken = scanner.nextToken();
-            hasBufferedToken = true;
-        }
-        return bufferedToken;
-    };
-
-    auto tokenToType = [&](const Token& token) -> TypeRef {
-        switch (token.type()) {
-            case TokenType::TYPE_I8:
-                return TypeInfo::makeI8();
-            case TokenType::TYPE_I16:
-                return TypeInfo::makeI16();
-            case TokenType::TYPE_I32:
-                return TypeInfo::makeI32();
-            case TokenType::TYPE_I64:
-                return TypeInfo::makeI64();
-            case TokenType::TYPE_U8:
-                return TypeInfo::makeU8();
-            case TokenType::TYPE_U16:
-                return TypeInfo::makeU16();
-            case TokenType::TYPE_U32:
-                return TypeInfo::makeU32();
-            case TokenType::TYPE_U64:
-                return TypeInfo::makeU64();
-            case TokenType::TYPE_USIZE:
-                return TypeInfo::makeUSize();
-            case TokenType::TYPE_F32:
-                return TypeInfo::makeF32();
-            case TokenType::TYPE_F64:
-                return TypeInfo::makeF64();
-            case TokenType::TYPE_BOOL:
-                return TypeInfo::makeBool();
-            case TokenType::TYPE_STR:
-                return TypeInfo::makeStr();
-            case TokenType::TYPE_FN:
-                return nullptr;
-            case TokenType::TYPE_VOID:
-                return TypeInfo::makeVoid();
-            case TokenType::TYPE_NULL_KW:
-                return TypeInfo::makeNull();
-            case TokenType::IDENTIFIER: {
-                std::string className(token.start(), token.length());
-                if (outTypeAliases != nullptr) {
-                    auto aliasIt = outTypeAliases->find(className);
-                    if (aliasIt != outTypeAliases->end()) {
-                        return aliasIt->second;
-                    }
-                }
-                if (outClassNames.find(className) != outClassNames.end()) {
-                    return TypeInfo::makeClass(className);
-                }
-                return nullptr;
-            }
-            default:
-                return nullptr;
-        }
-    };
-
-    std::function<TypeRef(const Token&)> parseTypeFromToken;
-    parseTypeFromToken = [&](const Token& token) -> TypeRef {
-        auto applyOptionalSuffix = [&](TypeRef baseType) -> TypeRef {
-            if (!baseType) {
-                return nullptr;
-            }
-
-            while (peekToken().type() == TokenType::QUESTION) {
-                nextToken();
-                baseType = TypeInfo::makeOptional(baseType);
-            }
-
-            return baseType;
-        };
-
-        if (token.type() == TokenType::TYPE_FN) {
-            Token openParen = nextToken();
-            if (openParen.type() != TokenType::OPEN_PAREN) {
-                return nullptr;
-            }
-
-            std::vector<TypeRef> params;
-            Token cursor = nextToken();
-            if (cursor.type() != TokenType::CLOSE_PAREN) {
-                while (true) {
-                    TypeRef parameterType = parseTypeFromToken(cursor);
-                    if (!parameterType || parameterType->isVoid()) {
-                        return nullptr;
-                    }
-                    params.push_back(parameterType);
-
-                    Token delimiter = nextToken();
-                    if (delimiter.type() == TokenType::COMMA) {
-                        cursor = nextToken();
-                        continue;
-                    }
-                    if (delimiter.type() != TokenType::CLOSE_PAREN) {
-                        return nullptr;
-                    }
-                    break;
-                }
-            }
-
-            Token arrow = nextToken();
-            TypeRef returnType = parseTypeFromToken(arrow);
-            if (!returnType) {
-                return nullptr;
-            }
-
-            return applyOptionalSuffix(
-                TypeInfo::makeFunction(params, returnType));
-        }
-
-        if (isTypeToken(token.type())) {
-            return applyOptionalSuffix(tokenToType(token));
-        }
-
-        if (token.type() != TokenType::IDENTIFIER) {
-            return nullptr;
-        }
-
-        std::string name(token.start(), token.length());
-        if (isHandleTypeNameText(name)) {
-            Token lessToken = nextToken();
-            if (lessToken.type() != TokenType::LESS) {
-                return nullptr;
-            }
-
-            Token namespaceToken = nextToken();
-            if (namespaceToken.type() != TokenType::IDENTIFIER) {
-                return nullptr;
-            }
-            std::string packageNamespace(namespaceToken.start(),
-                                         namespaceToken.length());
-            Token firstColon = nextToken();
-            if (firstColon.type() != TokenType::COLON ||
-                !isValidPackageIdPart(packageNamespace)) {
-                return nullptr;
-            }
-
-            Token packageToken = nextToken();
-            if (packageToken.type() != TokenType::IDENTIFIER) {
-                return nullptr;
-            }
-            std::string packageName(packageToken.start(), packageToken.length());
-            Token secondColon = nextToken();
-            if (secondColon.type() != TokenType::COLON ||
-                !isValidPackageIdPart(packageName)) {
-                return nullptr;
-            }
-
-            Token typeToken = nextToken();
-            if (typeToken.type() != TokenType::IDENTIFIER) {
-                return nullptr;
-            }
-            std::string typeName(typeToken.start(), typeToken.length());
-            Token greaterToken = nextToken();
-            if (greaterToken.type() != TokenType::GREATER ||
-                !isValidHandleTypeName(typeName)) {
-                return nullptr;
-            }
-
-            return applyOptionalSuffix(TypeInfo::makeNativeHandle(
-                makePackageId(packageNamespace, packageName), typeName));
-        }
-
-        if (isCollectionTypeNameText(name)) {
-            Token lessToken = nextToken();
-            if (lessToken.type() != TokenType::LESS) {
-                return nullptr;
-            }
-
-            if (name == "Array") {
-                TypeRef elementType = parseTypeFromToken(nextToken());
-                Token greaterToken = nextToken();
-                if (!elementType || greaterToken.type() != TokenType::GREATER) {
-                    return nullptr;
-                }
-                return applyOptionalSuffix(TypeInfo::makeArray(elementType));
-            }
-
-            if (name == "Set") {
-                TypeRef elementType = parseTypeFromToken(nextToken());
-                Token greaterToken = nextToken();
-                if (!elementType || greaterToken.type() != TokenType::GREATER) {
-                    return nullptr;
-                }
-                return applyOptionalSuffix(TypeInfo::makeSet(elementType));
-            }
-
-            TypeRef keyType = parseTypeFromToken(nextToken());
-            if (!keyType) {
-                return nullptr;
-            }
-            Token commaToken = nextToken();
-            if (commaToken.type() != TokenType::COMMA) {
-                return nullptr;
-            }
-            TypeRef valueType = parseTypeFromToken(nextToken());
-            if (!valueType) {
-                return nullptr;
-            }
-            Token greaterToken = nextToken();
-            if (greaterToken.type() != TokenType::GREATER) {
-                return nullptr;
-            }
-            return applyOptionalSuffix(TypeInfo::makeDict(keyType, valueType));
-        }
-
-        if (outClassNames.find(name) != outClassNames.end()) {
-            return applyOptionalSuffix(TypeInfo::makeClass(name));
-        }
-
-        if (outTypeAliases != nullptr) {
-            auto aliasIt = outTypeAliases->find(name);
-            if (aliasIt != outTypeAliases->end()) {
-                return applyOptionalSuffix(aliasIt->second);
-            }
-        }
-
-        return nullptr;
-    };
-
-    int classDepth = 0;
-
-    while (true) {
-        Token token = nextToken();
-        if (token.type() == TokenType::END_OF_FILE) {
-            return true;
-        }
-
-        if (token.type() == TokenType::OPEN_CURLY) {
-            classDepth++;
-            continue;
-        }
-        if (token.type() == TokenType::CLOSE_CURLY) {
-            if (classDepth > 0) {
-                classDepth--;
-            }
-            continue;
-        }
-
-        if (classDepth == 0 && token.type() == TokenType::TYPE) {
-            Token typeName = nextToken();
-            if (typeName.type() != TokenType::IDENTIFIER) {
-                continue;
-            }
-
-            Token shape = nextToken();
-            if (shape.type() == TokenType::STRUCT || shape.type() == TokenType::LESS ||
-                shape.type() == TokenType::OPEN_CURLY) {
-                if (shape.type() == TokenType::OPEN_CURLY) {
-                    classDepth++;
-                }
-                continue;
-            }
-
-            TypeRef aliasedType = parseTypeFromToken(shape);
-            if (aliasedType && outTypeAliases != nullptr) {
-                (*outTypeAliases)[std::string(typeName.start(), typeName.length())] =
-                    aliasedType;
-            }
-            continue;
-        }
-
-        if (classDepth != 0 || token.type() != TokenType::TYPE_FN) {
-            continue;
-        }
-
-        if (peekToken().type() != TokenType::IDENTIFIER) {
-            continue;
-        }
-
-        Token functionName = nextToken();
-        if (functionName.type() != TokenType::IDENTIFIER) {
-            continue;
-        }
-
-        if (peekToken().type() != TokenType::OPEN_PAREN) {
-            continue;
-        }
-
-        Token openParen = nextToken();
-        if (openParen.type() != TokenType::OPEN_PAREN) {
-            continue;
-        }
-
-        std::vector<TypeRef> params;
-        Token current = nextToken();
-        if (current.type() != TokenType::CLOSE_PAREN) {
-            while (true) {
-                TypeRef parameterType = nullptr;
-
-                Token nameToken = current;
-                if (nameToken.type() != TokenType::IDENTIFIER) {
-                    break;
-                }
-
-                Token typeToken = nextToken();
-                if (isTypeToken(typeToken.type()) ||
-                    typeToken.type() == TokenType::IDENTIFIER ||
-                    typeToken.type() == TokenType::TYPE_FN) {
-                    parameterType = parseTypeFromToken(typeToken);
-                    if (!parameterType) {
-                        parameterType = TypeInfo::makeAny();
-                    }
-                } else {
-                    parameterType = TypeInfo::makeAny();
-                    break;
-                }
-
-                params.push_back(parameterType);
-
-                Token delimiter = nextToken();
-                if (delimiter.type() == TokenType::COMMA) {
-                    current = nextToken();
-                    continue;
-                }
-
-                if (delimiter.type() != TokenType::CLOSE_PAREN) {
-                    break;
-                }
-
-                current = delimiter;
-                break;
-            }
-        }
-
-        TypeRef returnType = TypeInfo::makeAny();
-        Token maybeReturn = nextToken();
-        if (maybeReturn.type() != TokenType::OPEN_CURLY &&
-            maybeReturn.type() != TokenType::END_OF_FILE) {
-            TypeRef typedReturn = parseTypeFromToken(maybeReturn);
-            if (typedReturn) {
-                returnType = typedReturn;
-            }
-        }
-
-        std::string functionNameText(functionName.start(),
-                                     functionName.length());
-        outFunctionSignatures[functionNameText] =
-            TypeInfo::makeFunction(params, returnType);
-    }
+    return collectSymbolsFromAst(source, outClassNames, outFunctionSignatures,
+                                 outTypeAliases);
 }
 
 bool TypeChecker::check(
@@ -3471,21 +3076,22 @@ bool TypeChecker::check(
     std::vector<TypeError>& out, TypeCheckerMetadata* outMetadata) {
     AstModule module;
     AstParser parser(source);
-    if (parser.parseModule(module)) {
-        AstSemanticModel semanticModel;
-        analyzeAstSemantics(module, classNames, typeAliases,
-                            functionSignatures, out, &semanticModel);
-        if (outMetadata) {
-            *outMetadata = semanticModel.metadata;
+    out.clear();
+    if (!parser.parseModule(module)) {
+        for (const auto& error : parser.errors()) {
+            out.push_back(TypeError{error.line, error.message});
         }
-        return out.empty();
+        if (outMetadata) {
+            *outMetadata = TypeCheckerMetadata{};
+        }
+        return false;
     }
 
-    CheckerImpl checker(source, classNames, typeAliases, functionSignatures,
-                        out);
-    checker.run();
+    AstSemanticModel semanticModel;
+    analyzeAstSemantics(module, classNames, typeAliases, functionSignatures,
+                        out, &semanticModel);
     if (outMetadata) {
-        *outMetadata = checker.metadata();
+        *outMetadata = semanticModel.metadata;
     }
     return out.empty();
 }

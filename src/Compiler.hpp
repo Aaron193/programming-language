@@ -14,7 +14,6 @@
 #include "GC.hpp"
 #include "NativePackage.hpp"
 #include "Scanner.hpp"
-#include "TypeChecker.hpp"
 #include "TypeInfo.hpp"
 
 struct Parser {
@@ -46,7 +45,6 @@ enum Precedence {
 enum class CompilerEmitterMode {
     Auto,
     ForceAst,
-    ForceLegacy,
 };
 
 class Compiler {
@@ -123,8 +121,6 @@ class Compiler {
     std::unordered_map<std::string, std::unordered_map<int, std::string>>
         m_classOperatorMethods;
     std::unordered_map<std::string, std::string> m_superclassOf;
-    std::unordered_map<std::string, TypeRef> m_checkerTopLevelSymbolTypes;
-    std::vector<TypeCheckerDeclarationType> m_checkerDeclarationTypes;
     std::vector<TypeRef> m_globalTypes;
     std::vector<bool> m_globalConstness;
     std::vector<TypeRef> m_exprTypeStack;
@@ -193,11 +189,6 @@ class Compiler {
     bool emitCompoundBinary(TokenType assignmentType,
                             const TypeRef& leftType = TypeInfo::makeAny(),
                             const TypeRef& rightType = TypeInfo::makeAny());
-    bool shouldPreserveCheckerGlobalType(uint8_t slot,
-                                         const TypeRef& newType) const;
-    const TypeCheckerDeclarationType* lookupCheckerDeclaration(
-        const Token& nameToken) const;
-    TypeRef lookupCheckerDeclarationType(const Token& nameToken) const;
     TypeRef inferVariableType(const Token& name) const;
     TypeRef lookupClassFieldType(const std::string& className,
                                  const std::string& fieldName) const;

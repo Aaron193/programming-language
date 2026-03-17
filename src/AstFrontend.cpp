@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include "AstOptimizer.hpp"
 #include "AstParser.hpp"
 #include "AstSymbolCollector.hpp"
 
@@ -33,11 +34,29 @@ AstFrontendBuildStatus buildAstFrontend(std::string_view source,
                             outFrontend.typeAliases,
                             outFrontend.functionSignatures, outErrors,
                             &outFrontend.semanticModel);
+        if (!outErrors.empty()) {
+            return AstFrontendBuildStatus::SemanticError;
+        }
+
+        optimizeAst(outFrontend.module, outFrontend.semanticModel);
+        outFrontend.semanticModel = AstSemanticModel{};
+        outErrors.clear();
+        analyzeAstSemantics(outFrontend.module, outFrontend.classNames,
+                            outFrontend.typeAliases,
+                            outFrontend.functionSignatures, outErrors,
+                            &outFrontend.semanticModel);
         return outErrors.empty() ? AstFrontendBuildStatus::Success
                                  : AstFrontendBuildStatus::SemanticError;
     }
 
     std::vector<TypeError> ignoredErrors;
+    analyzeAstSemantics(outFrontend.module, outFrontend.classNames,
+                        outFrontend.typeAliases,
+                        outFrontend.functionSignatures, ignoredErrors,
+                        &outFrontend.semanticModel);
+    optimizeAst(outFrontend.module, outFrontend.semanticModel);
+    outFrontend.semanticModel = AstSemanticModel{};
+    ignoredErrors.clear();
     analyzeAstSemantics(outFrontend.module, outFrontend.classNames,
                         outFrontend.typeAliases,
                         outFrontend.functionSignatures, ignoredErrors,
