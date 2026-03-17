@@ -1,0 +1,10 @@
+#!strict
+print(6i32 & 3i32)
+print(6i32 | 3i32)
+print(6i32 ^ 3i32)
+print(~6i32)
+print(8u8 << 1u8)
+print(32u16 >> 2u8)
+print(8i64 >> 1i64)
+print(12u8 & 10u16)
+print(1u8 | 6u16 & 3u8)

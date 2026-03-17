@@ -195,7 +195,7 @@ class ConstantEvaluator {
                 } else if constexpr (std::is_same_v<T, AstUnaryExpr>) {
                     return evaluateUnary(expr, value, out);
                 } else if constexpr (std::is_same_v<T, AstBinaryExpr>) {
-                    return evaluateBinary(value, out);
+                    return evaluateBinary(expr, value, out);
                 } else {
                     return false;
                 }
@@ -296,6 +296,20 @@ class ConstantEvaluator {
                     return false;
                 }
                 outValue = static_cast<double>(value.unsignedValue);
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    bool constantToBitwiseUnsigned(const ConstantValue& value,
+                                   uint64_t& outValue) const {
+        switch (value.kind) {
+            case ConstantValue::Kind::SignedInteger:
+                outValue = static_cast<uint64_t>(value.signedValue);
+                return true;
+            case ConstantValue::Kind::UnsignedInteger:
+                outValue = value.unsignedValue;
                 return true;
             default:
                 return false;
@@ -597,12 +611,105 @@ class ConstantEvaluator {
         return false;
     }
 
-    bool evaluateBinary(const AstBinaryExpr& binary, ConstantValue& out) const {
+    bool evaluateBitwiseBinary(const AstExpr& expr, const AstBinaryExpr& binary,
+                               const ConstantValue& left,
+                               const ConstantValue& right,
+                               ConstantValue& out) const {
+        uint64_t lhs = 0;
+        uint64_t rhs = 0;
+        if (!constantToBitwiseUnsigned(left, lhs) ||
+            !constantToBitwiseUnsigned(right, rhs)) {
+            return false;
+        }
+
+        uint64_t result = 0;
+        switch (binary.op.type()) {
+            case TokenType::AMPERSAND:
+                result = lhs & rhs;
+                break;
+            case TokenType::PIPE:
+                result = lhs | rhs;
+                break;
+            case TokenType::CARET:
+                result = lhs ^ rhs;
+                break;
+            default:
+                return false;
+        }
+
+        TypeRef resultType = nodeType(expr.node.id);
+        const bool signedResult =
+            resultType ? resultType->isSigned()
+                       : (left.kind == ConstantValue::Kind::SignedInteger &&
+                          right.kind == ConstantValue::Kind::SignedInteger);
+        if (signedResult) {
+            out.kind = ConstantValue::Kind::SignedInteger;
+            out.signedValue = static_cast<int64_t>(result);
+        } else {
+            out.kind = ConstantValue::Kind::UnsignedInteger;
+            out.unsignedValue = result;
+        }
+        return true;
+    }
+
+    bool evaluateShiftBinary(const AstBinaryExpr& binary,
+                             const ConstantValue& left,
+                             const ConstantValue& right,
+                             ConstantValue& out) const {
+        uint64_t rawAmount = 0;
+        if (!constantToBitwiseUnsigned(right, rawAmount)) {
+            return false;
+        }
+        const uint32_t amount = static_cast<uint32_t>(rawAmount) & 63u;
+
+        if (left.kind == ConstantValue::Kind::SignedInteger) {
+            out.kind = ConstantValue::Kind::SignedInteger;
+            if (binary.op.type() == TokenType::SHIFT_LEFT_TOKEN) {
+                out.signedValue = static_cast<int64_t>(
+                    static_cast<uint64_t>(left.signedValue) << amount);
+                return true;
+            }
+            if (binary.op.type() == TokenType::SHIFT_RIGHT_TOKEN) {
+                out.signedValue = left.signedValue >> amount;
+                return true;
+            }
+            return false;
+        }
+
+        if (left.kind == ConstantValue::Kind::UnsignedInteger) {
+            out.kind = ConstantValue::Kind::UnsignedInteger;
+            if (binary.op.type() == TokenType::SHIFT_LEFT_TOKEN) {
+                out.unsignedValue = left.unsignedValue << amount;
+                return true;
+            }
+            if (binary.op.type() == TokenType::SHIFT_RIGHT_TOKEN) {
+                out.unsignedValue = left.unsignedValue >> amount;
+                return true;
+            }
+            return false;
+        }
+
+        return false;
+    }
+
+    bool evaluateBinary(const AstExpr& expr, const AstBinaryExpr& binary,
+                        ConstantValue& out) const {
         ConstantValue left;
         ConstantValue right;
         if (!binary.left || !binary.right || !evaluate(*binary.left, left) ||
             !evaluate(*binary.right, right)) {
             return false;
+        }
+
+        if (binary.op.type() == TokenType::AMPERSAND ||
+            binary.op.type() == TokenType::PIPE ||
+            binary.op.type() == TokenType::CARET) {
+            return evaluateBitwiseBinary(expr, binary, left, right, out);
+        }
+
+        if (binary.op.type() == TokenType::SHIFT_LEFT_TOKEN ||
+            binary.op.type() == TokenType::SHIFT_RIGHT_TOKEN) {
+            return evaluateShiftBinary(binary, left, right, out);
         }
 
         switch (binary.op.type()) {
@@ -668,6 +775,49 @@ class ConstantEvaluator {
 void optimizeExpr(AstExpr& expr, const ConstantEvaluator& evaluator);
 void optimizeStmt(AstStmt& stmt, const ConstantEvaluator& evaluator);
 void optimizeItem(AstItem& item, const ConstantEvaluator& evaluator);
+bool stmtAlwaysReturns(const AstStmt& stmt);
+bool itemAlwaysReturns(const AstItem& item);
+
+bool blockAlwaysReturns(const AstBlockStmt& block) {
+    for (auto it = block.items.rbegin(); it != block.items.rend(); ++it) {
+        if (*it) {
+            return itemAlwaysReturns(**it);
+        }
+    }
+    return false;
+}
+
+bool stmtAlwaysReturns(const AstStmt& stmt) {
+    return std::visit(
+        [&](const auto& value) -> bool {
+            using T = std::decay_t<decltype(value)>;
+            if constexpr (std::is_same_v<T, AstReturnStmt>) {
+                return true;
+            } else if constexpr (std::is_same_v<T, AstBlockStmt>) {
+                return blockAlwaysReturns(value);
+            } else if constexpr (std::is_same_v<T, AstIfStmt>) {
+                return value.thenBranch && value.elseBranch &&
+                       stmtAlwaysReturns(*value.thenBranch) &&
+                       stmtAlwaysReturns(*value.elseBranch);
+            } else {
+                return false;
+            }
+        },
+        stmt.value);
+}
+
+bool itemAlwaysReturns(const AstItem& item) {
+    return std::visit(
+        [&](const auto& value) -> bool {
+            using T = std::decay_t<decltype(value)>;
+            if constexpr (std::is_same_v<T, AstStmtPtr>) {
+                return value && stmtAlwaysReturns(*value);
+            } else {
+                return false;
+            }
+        },
+        item.value);
+}
 
 void replaceStmtWith(AstStmt& target, AstStmtPtr replacement) {
     if (!replacement) {
@@ -768,6 +918,20 @@ void optimizeStmt(AstStmt& stmt, const ConstantEvaluator& evaluator) {
                     if (item) {
                         optimizeItem(*item, evaluator);
                     }
+                }
+
+                size_t reachableCount = value.items.size();
+                for (size_t index = 0; index < value.items.size(); ++index) {
+                    if (value.items[index] &&
+                        itemAlwaysReturns(*value.items[index])) {
+                        reachableCount = index + 1;
+                        break;
+                    }
+                }
+                if (reachableCount < value.items.size()) {
+                    value.items.erase(value.items.begin() +
+                                          static_cast<ptrdiff_t>(reachableCount),
+                                      value.items.end());
                 }
             } else if constexpr (std::is_same_v<T, AstExprStmt>) {
                 if (value.expression) {

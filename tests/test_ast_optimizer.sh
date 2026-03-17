@@ -168,4 +168,48 @@ if ! grep -q "CALL" <<< "$side_effect_disassembly" || ! grep -q "ADD" <<< "$side
     exit 1
 fi
 
-echo "[PASS] AST optimizer folds pure constants and preserves side-effectful expressions."
+run_and_capture "$SCRIPT_DIR/sample_ast_opt_bitwise_shift_fold.mog" \
+    bitwise_output bitwise_status bitwise_disassembly bitwise_disassembly_status
+
+if [[ $bitwise_status -ne 0 || $bitwise_disassembly_status -ne 0 ]]; then
+    echo "[FAIL] bitwise/shift-fold sample failed"
+    echo "$bitwise_output"
+    echo "$bitwise_disassembly"
+    exit 1
+fi
+
+if [[ "$bitwise_output" != $'2\n7\n5\n-7\n16\n8\n4\n8\n3' ]]; then
+    echo "[FAIL] bitwise/shift-fold sample produced unexpected output"
+    echo "$bitwise_output"
+    exit 1
+fi
+
+if grep -Eq "BITWISE_AND|BITWISE_OR|BITWISE_XOR|BITWISE_NOT|SHIFT_LEFT|SHIFT_RIGHT" <<< "$bitwise_disassembly"; then
+    echo "[FAIL] bitwise/shift-fold sample still emits bitwise or shift opcodes"
+    echo "$bitwise_disassembly"
+    exit 1
+fi
+
+run_and_capture "$SCRIPT_DIR/sample_ast_opt_unreachable_return.mog" \
+    return_output return_status return_disassembly return_disassembly_status
+
+if [[ $return_status -ne 0 || $return_disassembly_status -ne 0 ]]; then
+    echo "[FAIL] unreachable-return sample failed"
+    echo "$return_output"
+    echo "$return_disassembly"
+    exit 1
+fi
+
+if [[ "$return_output" != "7" ]]; then
+    echo "[FAIL] unreachable-return sample produced unexpected output"
+    echo "$return_output"
+    exit 1
+fi
+
+if grep -q "after" <<< "$return_disassembly"; then
+    echo "[FAIL] unreachable-return sample still emits dead constants or statements"
+    echo "$return_disassembly"
+    exit 1
+fi
+
+echo "[PASS] AST optimizer folds pure constants, removes unreachable return tails, and preserves side-effectful expressions."
