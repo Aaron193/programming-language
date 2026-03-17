@@ -1,0 +1,12 @@
+fn lhsTrue() bool {
+    print("lhs-true")
+    return true
+}
+
+fn lhsFalse() bool {
+    print("lhs-false")
+    return false
+}
+
+print(lhsTrue() && true)
+print(lhsFalse() || false)

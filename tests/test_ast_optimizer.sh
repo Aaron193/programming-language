@@ -253,6 +253,28 @@ if grep -Eq "JUMP_IF_FALSE|JUMP_IF_FALSE_POP" <<< "$short_circuit_disassembly" |
     exit 1
 fi
 
+run_and_capture_strict "$SCRIPT_DIR/sample_ast_opt_logical_rhs_identity.mog" \
+    logical_rhs_output logical_rhs_status logical_rhs_disassembly logical_rhs_disassembly_status
+
+if [[ $logical_rhs_status -ne 0 || $logical_rhs_disassembly_status -ne 0 ]]; then
+    echo "[FAIL] logical-rhs-identity sample failed"
+    echo "$logical_rhs_output"
+    echo "$logical_rhs_disassembly"
+    exit 1
+fi
+
+if [[ "$logical_rhs_output" != $'lhs-true\ntrue\nlhs-false\nfalse' ]]; then
+    echo "[FAIL] logical-rhs-identity sample produced unexpected output"
+    echo "$logical_rhs_output"
+    exit 1
+fi
+
+if grep -Eq "JUMP_IF_FALSE|JUMP_IF_FALSE_POP" <<< "$logical_rhs_disassembly" || grep -q "JUMP " <<< "$logical_rhs_disassembly"; then
+    echo "[FAIL] logical-rhs-identity sample still emits short-circuit jumps"
+    echo "$logical_rhs_disassembly"
+    exit 1
+fi
+
 run_and_capture_strict "$SCRIPT_DIR/sample_ast_opt_logical_pure_drop.mog" \
     logical_drop_output logical_drop_status logical_drop_disassembly logical_drop_disassembly_status
 
@@ -263,7 +285,7 @@ if [[ $logical_drop_status -ne 0 || $logical_drop_disassembly_status -ne 0 ]]; t
     exit 1
 fi
 
-if [[ "$logical_drop_output" != $'false\ntrue' ]]; then
+if [[ "$logical_drop_output" != $'false\ntrue\nfalse\ntrue' ]]; then
     echo "[FAIL] logical-pure-drop sample produced unexpected output"
     echo "$logical_drop_output"
     exit 1
@@ -272,6 +294,28 @@ fi
 if grep -Eq "JUMP_IF_FALSE|JUMP_IF_FALSE_POP" <<< "$logical_drop_disassembly" || grep -q "JUMP " <<< "$logical_drop_disassembly"; then
     echo "[FAIL] logical-pure-drop sample still emits short-circuit jumps"
     echo "$logical_drop_disassembly"
+    exit 1
+fi
+
+run_and_capture_strict "$SCRIPT_DIR/sample_ast_opt_logical_impure_guard.mog" \
+    logical_impure_output logical_impure_status logical_impure_disassembly logical_impure_disassembly_status
+
+if [[ $logical_impure_status -ne 0 || $logical_impure_disassembly_status -ne 0 ]]; then
+    echo "[FAIL] logical-impure-guard sample failed"
+    echo "$logical_impure_output"
+    echo "$logical_impure_disassembly"
+    exit 1
+fi
+
+if [[ "$logical_impure_output" != $'call-true\nfalse\ncall-false\ntrue' ]]; then
+    echo "[FAIL] logical-impure-guard sample produced unexpected output"
+    echo "$logical_impure_output"
+    exit 1
+fi
+
+if ! grep -q "CALL" <<< "$logical_impure_disassembly" || ! grep -Eq "JUMP_IF_FALSE|JUMP_IF_FALSE_POP|JUMP " <<< "$logical_impure_disassembly"; then
+    echo "[FAIL] logical-impure-guard sample dropped required short-circuit control flow"
+    echo "$logical_impure_disassembly"
     exit 1
 fi
 
@@ -448,6 +492,72 @@ fi
 if grep -Eq "JUMP_IF_FALSE|JUMP_IF_FALSE_POP" <<< "$non_strict_short_disassembly" || grep -q "JUMP " <<< "$non_strict_short_disassembly"; then
     echo "[FAIL] non-strict short-circuit sample still emits short-circuit jumps"
     echo "$non_strict_short_disassembly"
+    exit 1
+fi
+
+run_and_capture_non_strict "$SCRIPT_DIR/sample_ast_opt_non_strict_logical_rhs_identity.mog" \
+    non_strict_rhs_output non_strict_rhs_status non_strict_rhs_disassembly non_strict_rhs_disassembly_status
+
+if [[ $non_strict_rhs_status -ne 0 || $non_strict_rhs_disassembly_status -ne 0 ]]; then
+    echo "[FAIL] non-strict logical-rhs-identity sample failed"
+    echo "$non_strict_rhs_output"
+    echo "$non_strict_rhs_disassembly"
+    exit 1
+fi
+
+if [[ "$non_strict_rhs_output" != $'lhs-true\ntrue\nlhs-false\nfalse' ]]; then
+    echo "[FAIL] non-strict logical-rhs-identity sample produced unexpected output"
+    echo "$non_strict_rhs_output"
+    exit 1
+fi
+
+if grep -Eq "JUMP_IF_FALSE|JUMP_IF_FALSE_POP" <<< "$non_strict_rhs_disassembly" || grep -q "JUMP " <<< "$non_strict_rhs_disassembly"; then
+    echo "[FAIL] non-strict logical-rhs-identity sample still emits short-circuit jumps"
+    echo "$non_strict_rhs_disassembly"
+    exit 1
+fi
+
+run_and_capture_non_strict "$SCRIPT_DIR/sample_ast_opt_non_strict_logical_pure_drop.mog" \
+    non_strict_drop_output non_strict_drop_status non_strict_drop_disassembly non_strict_drop_disassembly_status
+
+if [[ $non_strict_drop_status -ne 0 || $non_strict_drop_disassembly_status -ne 0 ]]; then
+    echo "[FAIL] non-strict logical-pure-drop sample failed"
+    echo "$non_strict_drop_output"
+    echo "$non_strict_drop_disassembly"
+    exit 1
+fi
+
+if [[ "$non_strict_drop_output" != $'false\ntrue\nfalse\ntrue' ]]; then
+    echo "[FAIL] non-strict logical-pure-drop sample produced unexpected output"
+    echo "$non_strict_drop_output"
+    exit 1
+fi
+
+if grep -Eq "JUMP_IF_FALSE|JUMP_IF_FALSE_POP" <<< "$non_strict_drop_disassembly" || grep -q "JUMP " <<< "$non_strict_drop_disassembly"; then
+    echo "[FAIL] non-strict logical-pure-drop sample still emits short-circuit jumps"
+    echo "$non_strict_drop_disassembly"
+    exit 1
+fi
+
+run_and_capture_non_strict "$SCRIPT_DIR/sample_ast_opt_non_strict_logical_impure_guard.mog" \
+    non_strict_impure_output non_strict_impure_status non_strict_impure_disassembly non_strict_impure_disassembly_status
+
+if [[ $non_strict_impure_status -ne 0 || $non_strict_impure_disassembly_status -ne 0 ]]; then
+    echo "[FAIL] non-strict logical-impure-guard sample failed"
+    echo "$non_strict_impure_output"
+    echo "$non_strict_impure_disassembly"
+    exit 1
+fi
+
+if [[ "$non_strict_impure_output" != $'call-true\nfalse\ncall-false\ntrue' ]]; then
+    echo "[FAIL] non-strict logical-impure-guard sample produced unexpected output"
+    echo "$non_strict_impure_output"
+    exit 1
+fi
+
+if ! grep -q "CALL" <<< "$non_strict_impure_disassembly" || ! grep -Eq "JUMP_IF_FALSE|JUMP_IF_FALSE_POP|JUMP " <<< "$non_strict_impure_disassembly"; then
+    echo "[FAIL] non-strict logical-impure-guard sample dropped required short-circuit control flow"
+    echo "$non_strict_impure_disassembly"
     exit 1
 fi
 

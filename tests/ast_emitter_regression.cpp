@@ -144,6 +144,8 @@ std::vector<std::filesystem::path> defaultCorpus(
         repoRoot / "tests/sample_strict_loop_optimizations.mog",
         repoRoot / "tests/sample_ast_opt_dead_for_decl_init.mog",
         repoRoot / "tests/sample_ast_opt_identity_fold.mog",
+        repoRoot / "tests/sample_ast_opt_logical_rhs_identity.mog",
+        repoRoot / "tests/sample_ast_opt_non_strict_logical_pure_drop.mog",
         repoRoot / "tests/sample_ast_opt_non_strict_short_circuit.mog",
     };
 }

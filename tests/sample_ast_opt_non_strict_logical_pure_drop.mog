@@ -1,4 +1,3 @@
-#!strict
 var yes bool = true
 var no bool = false
 

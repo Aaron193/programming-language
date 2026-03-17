@@ -1023,41 +1023,71 @@ bool simplifyIdentityBinary(AstExpr& expr, AstBinaryExpr& binary,
 
 bool simplifyLogicalBinary(AstExpr& expr, AstBinaryExpr& binary,
                            const ConstantEvaluator& evaluator) {
-    if (!binary.left || !binary.right ||
-        !sameKnownType(evaluator, expr.node.id, binary.right->node.id)) {
+    if (!binary.left || !binary.right) {
         return false;
     }
 
     bool leftValue = false;
-    if (!tryEvaluateConditionBool(*binary.left, evaluator, leftValue)) {
-        return false;
-    }
+    bool rightValue = false;
+    const bool hasLeftConstant =
+        tryEvaluateConditionBool(*binary.left, evaluator, leftValue);
+    const bool hasRightConstant =
+        tryEvaluateConditionBool(*binary.right, evaluator, rightValue);
+
+    auto replaceWithBoolLiteral = [&](bool value) {
+        expr = evaluator.makeLiteralExpr(
+            expr, ConstantValue{ConstantValue::Kind::Boolean, 0, 0, 0.0,
+                                value});
+        return true;
+    };
 
     switch (binary.op.type()) {
         case TokenType::LOGICAL_AND:
-            if (leftValue) {
-                return replaceWithOperandIfTypeMatches(expr, binary.right,
-                                                       evaluator);
+            if (hasLeftConstant) {
+                if (leftValue) {
+                    return replaceWithOperandIfTypeMatches(expr, binary.right,
+                                                           evaluator);
+                }
+                if (!isDefinitelyPure(*binary.right)) {
+                    return false;
+                }
+                return replaceWithBoolLiteral(false);
             }
-            if (!isDefinitelyPure(*binary.right)) {
-                return false;
+
+            if (hasRightConstant) {
+                if (rightValue) {
+                    return replaceWithOperandIfTypeMatches(expr, binary.left,
+                                                           evaluator);
+                }
+                if (!isDefinitelyPure(*binary.left)) {
+                    return false;
+                }
+                return replaceWithBoolLiteral(false);
             }
-            expr = evaluator.makeLiteralExpr(
-                expr, ConstantValue{ConstantValue::Kind::Boolean, 0, 0, 0.0,
-                                    false});
-            return true;
+            return false;
         case TokenType::LOGICAL_OR:
-            if (!leftValue) {
-                return replaceWithOperandIfTypeMatches(expr, binary.right,
-                                                       evaluator);
+            if (hasLeftConstant) {
+                if (!leftValue) {
+                    return replaceWithOperandIfTypeMatches(expr, binary.right,
+                                                           evaluator);
+                }
+                if (!isDefinitelyPure(*binary.right)) {
+                    return false;
+                }
+                return replaceWithBoolLiteral(true);
             }
-            if (!isDefinitelyPure(*binary.right)) {
-                return false;
+
+            if (hasRightConstant) {
+                if (!rightValue) {
+                    return replaceWithOperandIfTypeMatches(expr, binary.left,
+                                                           evaluator);
+                }
+                if (!isDefinitelyPure(*binary.left)) {
+                    return false;
+                }
+                return replaceWithBoolLiteral(true);
             }
-            expr = evaluator.makeLiteralExpr(
-                expr, ConstantValue{ConstantValue::Kind::Boolean, 0, 0, 0.0,
-                                    true});
-            return true;
+            return false;
         default:
             return false;
     }
