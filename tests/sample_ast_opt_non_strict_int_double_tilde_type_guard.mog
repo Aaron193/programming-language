@@ -1,0 +1,5 @@
+fn id(x) {
+    return x
+}
+
+print(~~id(7i32))

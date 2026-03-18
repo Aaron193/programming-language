@@ -473,6 +473,94 @@ if grep -q "NOT" <<< "$double_not_disassembly"; then
     exit 1
 fi
 
+run_and_capture_strict "$SCRIPT_DIR/sample_ast_opt_int_double_tilde.mog" \
+    double_tilde_output double_tilde_status double_tilde_disassembly double_tilde_disassembly_status
+
+if [[ $double_tilde_status -ne 0 || $double_tilde_disassembly_status -ne 0 ]]; then
+    echo "[FAIL] integer-double-tilde sample failed"
+    echo "$double_tilde_output"
+    echo "$double_tilde_disassembly"
+    exit 1
+fi
+
+if [[ "$double_tilde_output" != $'call\n7\n0' ]]; then
+    echo "[FAIL] integer-double-tilde sample produced unexpected output"
+    echo "$double_tilde_output"
+    exit 1
+fi
+
+if grep -q "BITWISE_NOT" <<< "$double_tilde_disassembly"; then
+    echo "[FAIL] integer-double-tilde sample still emits bitwise not opcodes"
+    echo "$double_tilde_disassembly"
+    exit 1
+fi
+
+run_and_capture_strict "$SCRIPT_DIR/sample_ast_opt_mul_zero.mog" \
+    mul_zero_output mul_zero_status mul_zero_disassembly mul_zero_disassembly_status
+
+if [[ $mul_zero_status -ne 0 || $mul_zero_disassembly_status -ne 0 ]]; then
+    echo "[FAIL] multiply-zero sample failed"
+    echo "$mul_zero_output"
+    echo "$mul_zero_disassembly"
+    exit 1
+fi
+
+if [[ "$mul_zero_output" != $'0\n0' ]]; then
+    echo "[FAIL] multiply-zero sample produced unexpected output"
+    echo "$mul_zero_output"
+    exit 1
+fi
+
+if grep -Eq "IMULT|UMULT|MULT" <<< "$mul_zero_disassembly"; then
+    echo "[FAIL] multiply-zero sample still emits multiply opcodes"
+    echo "$mul_zero_disassembly"
+    exit 1
+fi
+
+run_and_capture_strict "$SCRIPT_DIR/sample_ast_opt_mul_zero_impure_guard.mog" \
+    mul_zero_impure_output mul_zero_impure_status mul_zero_impure_disassembly mul_zero_impure_disassembly_status
+
+if [[ $mul_zero_impure_status -ne 0 || $mul_zero_impure_disassembly_status -ne 0 ]]; then
+    echo "[FAIL] multiply-zero impure-guard sample failed"
+    echo "$mul_zero_impure_output"
+    echo "$mul_zero_impure_disassembly"
+    exit 1
+fi
+
+if [[ "$mul_zero_impure_output" != $'call\n0\ncall\n0' ]]; then
+    echo "[FAIL] multiply-zero impure-guard sample produced unexpected output"
+    echo "$mul_zero_impure_output"
+    exit 1
+fi
+
+if ! grep -q "CALL" <<< "$mul_zero_impure_disassembly" || ! grep -Eq "IMULT|UMULT|MULT" <<< "$mul_zero_impure_disassembly"; then
+    echo "[FAIL] multiply-zero impure-guard sample dropped required call or multiply opcodes"
+    echo "$mul_zero_impure_disassembly"
+    exit 1
+fi
+
+run_and_capture_strict "$SCRIPT_DIR/sample_ast_opt_mul_zero_type_guard.mog" \
+    mul_zero_type_guard_output mul_zero_type_guard_status mul_zero_type_guard_disassembly mul_zero_type_guard_disassembly_status
+
+if [[ $mul_zero_type_guard_status -ne 0 || $mul_zero_type_guard_disassembly_status -ne 0 ]]; then
+    echo "[FAIL] multiply-zero type-guard sample failed"
+    echo "$mul_zero_type_guard_output"
+    echo "$mul_zero_type_guard_disassembly"
+    exit 1
+fi
+
+if [[ "$mul_zero_type_guard_output" != "0" ]]; then
+    echo "[FAIL] multiply-zero type-guard sample produced unexpected output"
+    echo "$mul_zero_type_guard_output"
+    exit 1
+fi
+
+if ! grep -Eq "IMULT|UMULT|MULT" <<< "$mul_zero_type_guard_disassembly"; then
+    echo "[FAIL] multiply-zero type-guard sample was rewritten across type promotion"
+    echo "$mul_zero_type_guard_disassembly"
+    exit 1
+fi
+
 run_and_capture_strict "$SCRIPT_DIR/sample_ast_opt_bitwise_and_zero.mog" \
     and_zero_output and_zero_status and_zero_disassembly and_zero_disassembly_status
 
@@ -734,6 +822,116 @@ fi
 if grep -q "NOT" <<< "$non_strict_double_not_disassembly"; then
     echo "[FAIL] non-strict double-not sample still emits unary not opcodes"
     echo "$non_strict_double_not_disassembly"
+    exit 1
+fi
+
+run_and_capture_non_strict "$SCRIPT_DIR/sample_ast_opt_non_strict_int_double_tilde.mog" \
+    non_strict_double_tilde_output non_strict_double_tilde_status non_strict_double_tilde_disassembly non_strict_double_tilde_disassembly_status
+
+if [[ $non_strict_double_tilde_status -ne 0 || $non_strict_double_tilde_disassembly_status -ne 0 ]]; then
+    echo "[FAIL] non-strict integer-double-tilde sample failed"
+    echo "$non_strict_double_tilde_output"
+    echo "$non_strict_double_tilde_disassembly"
+    exit 1
+fi
+
+if [[ "$non_strict_double_tilde_output" != $'call\n7\n0' ]]; then
+    echo "[FAIL] non-strict integer-double-tilde sample produced unexpected output"
+    echo "$non_strict_double_tilde_output"
+    exit 1
+fi
+
+if grep -q "BITWISE_NOT" <<< "$non_strict_double_tilde_disassembly"; then
+    echo "[FAIL] non-strict integer-double-tilde sample still emits bitwise not opcodes"
+    echo "$non_strict_double_tilde_disassembly"
+    exit 1
+fi
+
+run_and_capture_non_strict "$SCRIPT_DIR/sample_ast_opt_non_strict_int_double_tilde_type_guard.mog" \
+    non_strict_double_tilde_guard_output non_strict_double_tilde_guard_status non_strict_double_tilde_guard_disassembly non_strict_double_tilde_guard_disassembly_status
+
+if [[ $non_strict_double_tilde_guard_status -ne 0 || $non_strict_double_tilde_guard_disassembly_status -ne 0 ]]; then
+    echo "[FAIL] non-strict integer-double-tilde type-guard sample failed"
+    echo "$non_strict_double_tilde_guard_output"
+    echo "$non_strict_double_tilde_guard_disassembly"
+    exit 1
+fi
+
+if [[ "$non_strict_double_tilde_guard_output" != "7" ]]; then
+    echo "[FAIL] non-strict integer-double-tilde type-guard sample produced unexpected output"
+    echo "$non_strict_double_tilde_guard_output"
+    exit 1
+fi
+
+if ! grep -q "BITWISE_NOT" <<< "$non_strict_double_tilde_guard_disassembly"; then
+    echo "[FAIL] non-strict integer-double-tilde type-guard sample was rewritten with any-typed operands"
+    echo "$non_strict_double_tilde_guard_disassembly"
+    exit 1
+fi
+
+run_and_capture_non_strict "$SCRIPT_DIR/sample_ast_opt_non_strict_mul_zero.mog" \
+    non_strict_mul_zero_output non_strict_mul_zero_status non_strict_mul_zero_disassembly non_strict_mul_zero_disassembly_status
+
+if [[ $non_strict_mul_zero_status -ne 0 || $non_strict_mul_zero_disassembly_status -ne 0 ]]; then
+    echo "[FAIL] non-strict multiply-zero sample failed"
+    echo "$non_strict_mul_zero_output"
+    echo "$non_strict_mul_zero_disassembly"
+    exit 1
+fi
+
+if [[ "$non_strict_mul_zero_output" != $'0\n0' ]]; then
+    echo "[FAIL] non-strict multiply-zero sample produced unexpected output"
+    echo "$non_strict_mul_zero_output"
+    exit 1
+fi
+
+if grep -Eq "IMULT|UMULT|MULT" <<< "$non_strict_mul_zero_disassembly"; then
+    echo "[FAIL] non-strict multiply-zero sample still emits multiply opcodes"
+    echo "$non_strict_mul_zero_disassembly"
+    exit 1
+fi
+
+run_and_capture_non_strict "$SCRIPT_DIR/sample_ast_opt_non_strict_mul_zero_impure_guard.mog" \
+    non_strict_mul_zero_impure_output non_strict_mul_zero_impure_status non_strict_mul_zero_impure_disassembly non_strict_mul_zero_impure_disassembly_status
+
+if [[ $non_strict_mul_zero_impure_status -ne 0 || $non_strict_mul_zero_impure_disassembly_status -ne 0 ]]; then
+    echo "[FAIL] non-strict multiply-zero impure-guard sample failed"
+    echo "$non_strict_mul_zero_impure_output"
+    echo "$non_strict_mul_zero_impure_disassembly"
+    exit 1
+fi
+
+if [[ "$non_strict_mul_zero_impure_output" != $'call\n0\ncall\n0' ]]; then
+    echo "[FAIL] non-strict multiply-zero impure-guard sample produced unexpected output"
+    echo "$non_strict_mul_zero_impure_output"
+    exit 1
+fi
+
+if ! grep -q "CALL" <<< "$non_strict_mul_zero_impure_disassembly" || ! grep -Eq "IMULT|UMULT|MULT" <<< "$non_strict_mul_zero_impure_disassembly"; then
+    echo "[FAIL] non-strict multiply-zero impure-guard sample dropped required call or multiply opcodes"
+    echo "$non_strict_mul_zero_impure_disassembly"
+    exit 1
+fi
+
+run_and_capture_non_strict "$SCRIPT_DIR/sample_ast_opt_non_strict_mul_zero_type_guard.mog" \
+    non_strict_mul_zero_type_guard_output non_strict_mul_zero_type_guard_status non_strict_mul_zero_type_guard_disassembly non_strict_mul_zero_type_guard_disassembly_status
+
+if [[ $non_strict_mul_zero_type_guard_status -ne 0 || $non_strict_mul_zero_type_guard_disassembly_status -ne 0 ]]; then
+    echo "[FAIL] non-strict multiply-zero type-guard sample failed"
+    echo "$non_strict_mul_zero_type_guard_output"
+    echo "$non_strict_mul_zero_type_guard_disassembly"
+    exit 1
+fi
+
+if [[ "$non_strict_mul_zero_type_guard_output" != "0" ]]; then
+    echo "[FAIL] non-strict multiply-zero type-guard sample produced unexpected output"
+    echo "$non_strict_mul_zero_type_guard_output"
+    exit 1
+fi
+
+if ! grep -Eq "IMULT|UMULT|MULT" <<< "$non_strict_mul_zero_type_guard_disassembly"; then
+    echo "[FAIL] non-strict multiply-zero type-guard sample was rewritten across type promotion"
+    echo "$non_strict_mul_zero_type_guard_disassembly"
     exit 1
 fi
 

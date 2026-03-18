@@ -12,6 +12,11 @@ bool isKnownBoolType(const ConstantEvaluator& evaluator, AstNodeId id) {
     return type && type->kind == TypeKind::BOOL;
 }
 
+bool isKnownIntegerType(const ConstantEvaluator& evaluator, AstNodeId id) {
+    TypeRef type = evaluator.typeOf(id);
+    return type && type->isInteger();
+}
+
 bool replaceWithOperandIfTypeMatches(AstExpr& expr, AstExprPtr& operand,
                                      const ConstantEvaluator& evaluator) {
     if (!operand || !canReuseOperandAsResult(expr, *operand, evaluator)) {
@@ -35,15 +40,35 @@ bool replaceWithLogicalNotOfOperandIfTypeMatches(
 
 bool simplifyUnaryExpr(AstExpr& expr, const ConstantEvaluator& evaluator) {
     auto* unary = std::get_if<AstUnaryExpr>(&expr.value);
-    if (!unary || unary->op.type() != TokenType::BANG || !unary->operand ||
-        !isKnownBoolType(evaluator, expr.node.id)) {
+    if (!unary || !unary->operand) {
+        return false;
+    }
+
+    if (unary->op.type() == TokenType::BANG) {
+        if (!isKnownBoolType(evaluator, expr.node.id)) {
+            return false;
+        }
+
+        auto* nestedUnary = std::get_if<AstUnaryExpr>(&unary->operand->value);
+        if (!nestedUnary || nestedUnary->op.type() != TokenType::BANG ||
+            !nestedUnary->operand ||
+            !isKnownBoolType(evaluator, nestedUnary->operand->node.id)) {
+            return false;
+        }
+
+        return replaceWithOperandIfTypeMatches(expr, nestedUnary->operand,
+                                               evaluator);
+    }
+
+    if (unary->op.type() != TokenType::TILDE ||
+        !isKnownIntegerType(evaluator, expr.node.id)) {
         return false;
     }
 
     auto* nestedUnary = std::get_if<AstUnaryExpr>(&unary->operand->value);
-    if (!nestedUnary || nestedUnary->op.type() != TokenType::BANG ||
+    if (!nestedUnary || nestedUnary->op.type() != TokenType::TILDE ||
         !nestedUnary->operand ||
-        !isKnownBoolType(evaluator, nestedUnary->operand->node.id)) {
+        !isKnownIntegerType(evaluator, nestedUnary->operand->node.id)) {
         return false;
     }
 
@@ -133,6 +158,18 @@ bool simplifyIdentityBinary(AstExpr& expr, AstBinaryExpr& binary,
         case TokenType::STAR:
             if (!exprType->isNumeric()) {
                 return false;
+            }
+            if (exprType->isInteger()) {
+                if (hasRightConstant && isZeroConstant(rightConstant) &&
+                    isDefinitelyPure(*binary.left)) {
+                    return replaceWithOperandIfTypeMatches(expr, binary.right,
+                                                           evaluator);
+                }
+                if (hasLeftConstant && isZeroConstant(leftConstant) &&
+                    isDefinitelyPure(*binary.right)) {
+                    return replaceWithOperandIfTypeMatches(expr, binary.left,
+                                                           evaluator);
+                }
             }
             if (hasRightConstant && isOneConstant(rightConstant)) {
                 return replaceWithOperandIfTypeMatches(expr, binary.left,

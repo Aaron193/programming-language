@@ -486,6 +486,148 @@ bool checkSyntheticNotSpanRegression() {
     return true;
 }
 
+bool checkIntegerDoubleTildeRefreshContract() {
+    constexpr std::string_view kSource =
+        "fn value() i32 {\n"
+        "  return 7i32\n"
+        "}\n"
+        "print(~~value())\n"
+        "print(~~0i32)\n";
+
+    SemanticPipelineResult pipeline;
+    std::string error;
+    if (!buildSemanticPipeline(kSource, pipeline, error)) {
+        std::cerr << "[FAIL] integer double-tilde setup failed: " << error
+                  << '\n';
+        return false;
+    }
+
+    AstExpr* firstExpr = topLevelPrintExpr(pipeline.module, 0);
+    AstExpr* secondExpr = topLevelPrintExpr(pipeline.module, 1);
+    if (!require(firstExpr != nullptr,
+                 "missing first integer double-tilde expression after optimization") ||
+        !require(secondExpr != nullptr,
+                 "missing second integer double-tilde expression after optimization")) {
+        return false;
+    }
+
+    if (!require(firstExpr->node.id == pipeline.preIdentityExprId &&
+                     secondExpr->node.id == pipeline.preFoldedExprId,
+                 "integer double-tilde rewrites should preserve original node ids")) {
+        return false;
+    }
+
+    if (!require(std::holds_alternative<AstCallExpr>(firstExpr->value),
+                 "integer double-tilde should collapse to the original call expression") ||
+        !require(std::holds_alternative<AstLiteralExpr>(secondExpr->value),
+                 "constant integer double-tilde should fold to a literal")) {
+        return false;
+    }
+
+    auto firstType = pipeline.refreshed.nodeTypes.find(firstExpr->node.id);
+    auto secondType = pipeline.refreshed.nodeTypes.find(secondExpr->node.id);
+    if (!require(firstType != pipeline.refreshed.nodeTypes.end() &&
+                     firstType->second &&
+                     firstType->second->kind == TypeKind::I32,
+                 "refreshed semantics should keep the first integer double-tilde node typed as i32") ||
+        !require(secondType != pipeline.refreshed.nodeTypes.end() &&
+                     secondType->second &&
+                     secondType->second->kind == TypeKind::I32,
+                 "refreshed semantics should keep the second integer double-tilde node typed as i32")) {
+        return false;
+    }
+
+    GC gc;
+    Chunk chunk;
+    Compiler compiler;
+    compiler.setGC(&gc);
+    compiler.setStrictMode(true);
+    if (!require(compiler.compile(kSource, chunk, "<frontend-int-double-tilde>"),
+                 "compiler should lower successfully after integer double-tilde rewrites")) {
+        return false;
+    }
+
+    const std::string disassembly = captureChunkDisassembly(chunk);
+    if (!require(disassembly.find("BITWISE_NOT") == std::string::npos,
+                 "lowered chunk should not emit bitwise not opcodes for integer double-tilde rewrites")) {
+        return false;
+    }
+
+    std::cout << "[PASS] integer double-tilde refresh contract\n";
+    return true;
+}
+
+bool checkIntegerMultiplyZeroRefreshContract() {
+    constexpr std::string_view kSource =
+        "var value i32 = 7i32\n"
+        "print(value * 0i32)\n"
+        "print(0i32 * value)\n";
+
+    SemanticPipelineResult pipeline;
+    std::string error;
+    if (!buildSemanticPipeline(kSource, pipeline, error)) {
+        std::cerr << "[FAIL] integer multiply-zero setup failed: " << error
+                  << '\n';
+        return false;
+    }
+
+    AstExpr* firstExpr = topLevelPrintExpr(pipeline.module, 0);
+    AstExpr* secondExpr = topLevelPrintExpr(pipeline.module, 1);
+    if (!require(firstExpr != nullptr,
+                 "missing first integer multiply-zero expression after optimization") ||
+        !require(secondExpr != nullptr,
+                 "missing second integer multiply-zero expression after optimization")) {
+        return false;
+    }
+
+    if (!require(firstExpr->node.id == pipeline.preIdentityExprId &&
+                     secondExpr->node.id == pipeline.preFoldedExprId,
+                 "integer multiply-zero rewrites should preserve original node ids")) {
+        return false;
+    }
+
+    const auto* firstLiteral = std::get_if<AstLiteralExpr>(&firstExpr->value);
+    const auto* secondLiteral = std::get_if<AstLiteralExpr>(&secondExpr->value);
+    if (!require(firstLiteral != nullptr && secondLiteral != nullptr,
+                 "integer multiply-zero rewrites should collapse to zero literals")) {
+        return false;
+    }
+
+    auto firstType = pipeline.refreshed.nodeTypes.find(firstExpr->node.id);
+    auto secondType = pipeline.refreshed.nodeTypes.find(secondExpr->node.id);
+    if (!require(firstType != pipeline.refreshed.nodeTypes.end() &&
+                     firstType->second &&
+                     firstType->second->kind == TypeKind::I32,
+                 "refreshed semantics should keep the first multiply-zero node typed as i32") ||
+        !require(secondType != pipeline.refreshed.nodeTypes.end() &&
+                     secondType->second &&
+                     secondType->second->kind == TypeKind::I32,
+                 "refreshed semantics should keep the second multiply-zero node typed as i32")) {
+        return false;
+    }
+
+    GC gc;
+    Chunk chunk;
+    Compiler compiler;
+    compiler.setGC(&gc);
+    compiler.setStrictMode(true);
+    if (!require(compiler.compile(kSource, chunk, "<frontend-mul-zero>"),
+                 "compiler should lower successfully after integer multiply-zero rewrites")) {
+        return false;
+    }
+
+    const std::string disassembly = captureChunkDisassembly(chunk);
+    if (!require(disassembly.find("IMULT") == std::string::npos &&
+                     disassembly.find("UMULT") == std::string::npos &&
+                     disassembly.find("MULT") == std::string::npos,
+                 "lowered chunk should not emit multiply opcodes for integer multiply-zero rewrites")) {
+        return false;
+    }
+
+    std::cout << "[PASS] integer multiply-zero refresh contract\n";
+    return true;
+}
+
 bool checkParserDiagnosticSpans() {
     constexpr std::string_view kSource =
         "print(\n"
@@ -804,6 +946,12 @@ int main() {
         return 1;
     }
     if (!checkSyntheticNotSpanRegression()) {
+        return 1;
+    }
+    if (!checkIntegerDoubleTildeRefreshContract()) {
+        return 1;
+    }
+    if (!checkIntegerMultiplyZeroRefreshContract()) {
         return 1;
     }
     if (!checkParserDiagnosticSpans()) {
