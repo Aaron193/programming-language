@@ -175,6 +175,11 @@ run_expect_compile_error \
     "1:9" || failed=1
 
 run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/import_native_handle_binding_type_mismatch.mog" \
+    "cannot assign imported value 'function(i64) -> handle<examples:counter:CounterHandle>' to binding 'create' of type 'function(i64) -> handle<examples:math:CounterHandle>'" \
+    "1:9" || failed=1
+
+run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/import_cycle_frontend.mog" \
     "Circular import detected" || failed=1
 

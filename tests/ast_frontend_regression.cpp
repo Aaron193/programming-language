@@ -828,6 +828,83 @@ bool checkTypedImportFrontendRegression(const std::filesystem::path& repoRoot) {
     return true;
 }
 
+bool checkNativeHandleTypeFrontendRegression(
+    const std::filesystem::path& repoRoot) {
+    const std::filesystem::path sourcePath =
+        repoRoot / "tests/sample_import_native_handle_frontend_typed.mog";
+    const std::string source = readFile(sourcePath);
+
+    AstFrontendImportCache importCache;
+    AstFrontendOptions options;
+    options.sourcePath = sourcePath.string();
+    options.packageSearchPaths = {(repoRoot / "build/packages").string()};
+    options.importCache = &importCache;
+
+    AstFrontendResult frontend;
+    std::vector<TypeError> errors;
+    const AstFrontendBuildStatus status =
+        buildAstFrontend(stripStrictDirectiveLine(source), options,
+                         AstFrontendMode::StrictChecked, errors, frontend);
+    if (!require(status == AstFrontendBuildStatus::Success,
+                 "native handle typed import sample should build through the AST frontend")) {
+        return false;
+    }
+
+    AstDestructuredImportStmt* importStmt =
+        topLevelDestructuredImport(frontend.module);
+    if (!require(importStmt != nullptr,
+                 "native handle typed import sample should contain a destructured import")) {
+        return false;
+    }
+    if (!require(importStmt->bindings.size() == 3,
+                 "native handle typed import sample should contain three bindings")) {
+        return false;
+    }
+
+    const TypeRef createType =
+        frontend.semanticModel.nodeTypes.at(importStmt->bindings[0].node.id);
+    const TypeRef readType =
+        frontend.semanticModel.nodeTypes.at(importStmt->bindings[1].node.id);
+    const TypeRef addType =
+        frontend.semanticModel.nodeTypes.at(importStmt->bindings[2].node.id);
+    if (!require(createType &&
+                     createType->toString() ==
+                         "function(i64) -> handle<examples:counter:CounterHandle>",
+                 "native handle create binding should keep the expected handle return type")) {
+        return false;
+    }
+    if (!require(readType &&
+                     readType->toString() ==
+                         "function(handle<examples:counter:CounterHandle>) -> i64",
+                 "native handle read binding should keep the expected handle parameter type")) {
+        return false;
+    }
+    if (!require(addType &&
+                     addType->toString() ==
+                         "function(handle<examples:counter:CounterHandle>, i64) -> i64",
+                 "native handle add binding should keep the expected handle parameter type")) {
+        return false;
+    }
+
+    auto exportedForward =
+        frontend.semanticModel.exportedSymbolTypes.find("forward");
+    if (!require(exportedForward != frontend.semanticModel.exportedSymbolTypes.end() &&
+                     exportedForward->second &&
+                     exportedForward->second->toString() ==
+                         "function(handle<examples:counter:CounterHandle>) -> handle<examples:counter:CounterHandle>",
+                 "native handle function export should preserve aliased handle parameter and return types")) {
+        return false;
+    }
+
+    if (!checkCanonicalLoweringStable(sourcePath,
+                                      "native handle typed importer sample")) {
+        return false;
+    }
+
+    std::cout << "[PASS] native handle frontend regression\n";
+    return true;
+}
+
 bool checkTypedImportDiagnosticRegression(const std::filesystem::path& repoRoot) {
     const auto expectStrictError = [&](const std::filesystem::path& path,
                                        size_t line, size_t column,
@@ -873,6 +950,14 @@ bool checkTypedImportDiagnosticRegression(const std::filesystem::path& repoRoot)
             repoRoot / "tests/types/errors/import_native_binding_type_mismatch.mog",
             1, 9, "function(i64, i64) -> i64",
             "native typed import mismatch sample")) {
+        return false;
+    }
+
+    if (!expectStrictError(
+            repoRoot /
+                "tests/types/errors/import_native_handle_binding_type_mismatch.mog",
+            1, 9, "function(i64) -> handle<examples:counter:CounterHandle>",
+            "native handle typed import mismatch sample")) {
         return false;
     }
 
@@ -967,6 +1052,9 @@ int main() {
         return 1;
     }
     if (!checkTypedImportFrontendRegression(repoRoot)) {
+        return 1;
+    }
+    if (!checkNativeHandleTypeFrontendRegression(repoRoot)) {
         return 1;
     }
     if (!checkTypedImportDiagnosticRegression(repoRoot)) {
