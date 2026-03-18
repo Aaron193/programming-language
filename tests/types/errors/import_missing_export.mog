@@ -1,0 +1,4 @@
+#!strict
+const { Missing } = @import("../../modules/math.mog")
+
+print(Missing)

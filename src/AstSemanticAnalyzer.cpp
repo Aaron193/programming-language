@@ -90,6 +90,8 @@ class AstSemanticAnalyzerImpl {
     const std::unordered_set<std::string>& m_classNames;
     std::unordered_map<std::string, TypeRef> m_typeAliases;
     const std::unordered_map<std::string, TypeRef>& m_functionSignatures;
+    const std::unordered_map<AstNodeId, AstImportedModuleInterface>&
+        m_importedModules;
     std::vector<TypeError>& m_errors;
     AstSemanticModel* m_model = nullptr;
 
@@ -984,6 +986,16 @@ class AstSemanticAnalyzerImpl {
         return out;
     }
 
+    const AstImportedModuleInterface* lookupImportedModule(
+        AstNodeId nodeId) const {
+        auto it = m_importedModules.find(nodeId);
+        if (it == m_importedModules.end()) {
+            return nullptr;
+        }
+
+        return &it->second;
+    }
+
     void predeclareClassMetadata(const AstModule& module) {
         for (const auto& item : module.items) {
             if (!item) {
@@ -1802,6 +1814,10 @@ class AstSemanticAnalyzerImpl {
             analyzeExpr(*stmt.initializer);
         }
 
+        const AstImportedModuleInterface* importedModule =
+            stmt.initializer ? lookupImportedModule(stmt.initializer->node.id)
+                             : nullptr;
+
         for (const auto& binding : stmt.bindings) {
             const std::string localName =
                 binding.localName.has_value() ? tokenText(*binding.localName)
@@ -1809,9 +1825,44 @@ class AstSemanticAnalyzerImpl {
             const size_t line = binding.localName.has_value()
                                     ? binding.localName->line()
                                     : binding.exportedName.line();
-            defineSymbol(localName, TypeInfo::makeAny(), true);
-            recordDeclarationType(binding.node, localName, TypeInfo::makeAny(),
-                                  line, true);
+            TypeRef importedType = TypeInfo::makeAny();
+            if (!importedModule) {
+                importedType = TypeInfo::makeAny();
+            } else {
+                auto exportIt = importedModule->exportTypes.find(
+                    tokenText(binding.exportedName));
+                if (exportIt == importedModule->exportTypes.end()) {
+                    addError(binding.exportedName,
+                             "Type error: imported module '" +
+                                 importedModule->importTarget.displayName +
+                                 "' has no export '" +
+                                 tokenText(binding.exportedName) + "'.");
+                } else if (exportIt->second) {
+                    importedType = exportIt->second;
+                }
+            }
+
+            TypeRef finalType = importedType;
+            if (binding.expectedType) {
+                TypeRef expectedType = requireTypeExpr(
+                    binding.expectedType.get(), binding.exportedName.span(),
+                    "Type error: expected type after ':' in import binding.");
+                if (!expectedType) {
+                    expectedType = TypeInfo::makeAny();
+                }
+
+                if (!isAssignableType(importedType, expectedType)) {
+                    addError(binding.exportedName,
+                             "Type error: cannot assign imported value '" +
+                                 importedType->toString() + "' to binding '" +
+                                 localName + "' of type '" +
+                                 expectedType->toString() + "'.");
+                }
+                finalType = expectedType;
+            }
+
+            defineSymbol(localName, finalType, true);
+            recordDeclarationType(binding.node, localName, finalType, line, true);
             recordNodeConstness(binding.node, true);
         }
 
@@ -2101,10 +2152,13 @@ class AstSemanticAnalyzerImpl {
         const std::unordered_set<std::string>& classNames,
         const std::unordered_map<std::string, TypeRef>& typeAliases,
         const std::unordered_map<std::string, TypeRef>& functionSignatures,
+        const std::unordered_map<AstNodeId, AstImportedModuleInterface>&
+            importedModules,
         std::vector<TypeError>& errors, AstSemanticModel* model)
         : m_classNames(classNames),
           m_typeAliases(typeAliases),
           m_functionSignatures(functionSignatures),
+          m_importedModules(importedModules),
           m_errors(errors),
           m_model(model) {
         m_scopes.emplace_back();
@@ -2124,6 +2178,7 @@ class AstSemanticAnalyzerImpl {
         }
 
         if (m_model) {
+            m_model->importedModules = m_importedModules;
             m_model->classOperatorMethods = m_classOperatorMethods;
             m_model->metadata = m_metadata;
         }
@@ -2137,9 +2192,11 @@ bool analyzeAstSemantics(
     const std::unordered_set<std::string>& classNames,
     const std::unordered_map<std::string, TypeRef>& typeAliases,
     const std::unordered_map<std::string, TypeRef>& functionSignatures,
+    const std::unordered_map<AstNodeId, AstImportedModuleInterface>&
+        importedModules,
     std::vector<TypeError>& out, AstSemanticModel* outModel) {
     AstSemanticAnalyzerImpl analyzer(classNames, typeAliases, functionSignatures,
-                                     out, outModel);
+                                     importedModules, out, outModel);
     analyzer.run(module);
     return out.empty();
 }

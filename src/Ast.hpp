@@ -200,6 +200,7 @@ struct AstImportBinding {
     AstNodeInfo node;
     Token exportedName;
     std::optional<Token> localName;
+    std::unique_ptr<AstTypeExpr> expectedType;
 };
 
 struct AstDestructuredImportStmt {

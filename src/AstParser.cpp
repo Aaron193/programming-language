@@ -1256,6 +1256,7 @@ AstStmtPtr AstParser::parseVariableDeclarationStatement(bool allowForClause) {
                 AstImportBinding binding;
                 binding.node = makeNodeInfo(m_current);
                 binding.exportedName = m_current;
+                SourceSpan bindingSpan = m_current.span();
                 advance();
                 if (match(TokenType::AS_KW)) {
                     if (!check(TokenType::IDENTIFIER)) {
@@ -1263,8 +1264,24 @@ AstStmtPtr AstParser::parseVariableDeclarationStatement(bool allowForClause) {
                         return nullptr;
                     }
                     binding.localName = m_current;
+                    bindingSpan =
+                        combineSourceSpans(bindingSpan, m_current.span());
                     advance();
                 }
+                if (match(TokenType::COLON)) {
+                    if (!isTypedTypeAnnotationStart()) {
+                        errorAtSpan(m_previous.span(),
+                                    "Expected type after ':' in import binding.");
+                        return nullptr;
+                    }
+                    binding.expectedType = parseTypeExpr();
+                    if (!binding.expectedType) {
+                        return nullptr;
+                    }
+                    bindingSpan = combineSourceSpans(
+                        bindingSpan, binding.expectedType->node.span);
+                }
+                binding.node = makeNodeInfo(bindingSpan);
                 destructuredDecl.bindings.push_back(std::move(binding));
             } while (match(TokenType::COMMA));
         }

@@ -119,10 +119,6 @@ class Compiler {
     void errorAtSpan(const SourceSpan& span, const std::string& message);
     void errorAtLine(size_t line, const std::string& message);
 
-    bool resolveImportExportTypes(
-        const ImportTarget& importTarget,
-        std::unordered_map<std::string, TypeRef>& outExportTypes,
-        std::string& outError);
     TypeRef tokenToType(const Token& token) const;
     TypeRef lookupClassFieldType(const std::string& className,
                                  const std::string& fieldName) const;

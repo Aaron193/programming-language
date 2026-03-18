@@ -138,6 +138,7 @@ std::vector<std::filesystem::path> defaultCorpus(
         repoRoot / "tests/sample_import_alias.mog",
         repoRoot / "tests/sample_import_class.mog",
         repoRoot / "tests/sample_import_frontend_identity.mog",
+        repoRoot / "tests/sample_import_frontend_typed.mog",
         repoRoot / "tests/sample_import_frontend_nested_strict.mog",
         repoRoot / "tests/sample_import_nested.mog",
         repoRoot / "tests/newline/sample_newline_call_suffix.mog",

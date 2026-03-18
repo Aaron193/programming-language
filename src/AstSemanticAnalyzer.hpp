@@ -6,11 +6,19 @@
 #include <vector>
 
 #include "Ast.hpp"
+#include "NativePackage.hpp"
 #include "TypeChecker.hpp"
+
+struct AstImportedModuleInterface {
+    ImportTarget importTarget;
+    std::unordered_map<std::string, TypeRef> exportTypes;
+};
 
 struct AstSemanticModel {
     std::unordered_map<AstNodeId, TypeRef> nodeTypes;
     std::unordered_map<AstNodeId, bool> nodeConstness;
+    std::unordered_map<AstNodeId, AstImportedModuleInterface> importedModules;
+    std::unordered_map<std::string, TypeRef> exportedSymbolTypes;
     std::unordered_map<std::string, std::unordered_map<int, std::string>>
         classOperatorMethods;
     TypeCheckerMetadata metadata;
@@ -21,5 +29,7 @@ bool analyzeAstSemantics(
     const std::unordered_set<std::string>& classNames,
     const std::unordered_map<std::string, TypeRef>& typeAliases,
     const std::unordered_map<std::string, TypeRef>& functionSignatures,
+    const std::unordered_map<AstNodeId, AstImportedModuleInterface>&
+        importedModules,
     std::vector<TypeError>& out,
     AstSemanticModel* outModel = nullptr);

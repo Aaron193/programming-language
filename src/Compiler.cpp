@@ -1,9 +1,7 @@
 #include "Compiler.hpp"
 
 #include <algorithm>
-#include <fstream>
 #include <iostream>
-#include <iterator>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -11,47 +9,9 @@
 
 #include "AstBytecodeEmitter.hpp"
 #include "AstFrontend.hpp"
-#include "ModuleResolver.hpp"
 #include "StdLib.hpp"
 
 namespace {
-
-bool hasStrictDirective(std::string_view source) {
-    return source.rfind("#!strict", 0) == 0;
-}
-
-std::string_view stripStrictDirectiveLine(std::string_view source) {
-    if (!hasStrictDirective(source)) {
-        return source;
-    }
-
-    size_t newlinePos = source.find('\n');
-    if (newlinePos == std::string_view::npos) {
-        return std::string_view();
-    }
-
-    return source.substr(newlinePos + 1);
-}
-
-bool validateNativePackageImport(const ImportTarget& importTarget,
-                                 const NativePackageDescriptor& descriptor,
-                                 std::string& outError) {
-    outError.clear();
-
-    if (importTarget.kind != ImportTargetKind::NATIVE_PACKAGE) {
-        return true;
-    }
-
-    if (descriptor.packageNamespace != importTarget.packageNamespace ||
-        descriptor.packageName != importTarget.packageName) {
-        outError = "Native package '" + importTarget.rawSpecifier +
-                   "' declared '" + descriptor.packageId +
-                   "' in registration metadata.";
-        return false;
-    }
-
-    return true;
-}
 
 void printDiagnosticPrefix(const SourceSpan& span) {
     std::cerr << "[error][compile][line " << span.line() << ":" << span.column()
@@ -116,8 +76,14 @@ bool Compiler::compile(std::string_view source, Chunk& chunk,
     AstFrontendMode frontendMode = m_strictMode
                                        ? AstFrontendMode::StrictChecked
                                        : AstFrontendMode::LoweringOnly;
+    AstFrontendImportCache importCache;
+    AstFrontendOptions frontendOptions;
+    frontendOptions.sourcePath = sourcePath;
+    frontendOptions.packageSearchPaths = m_packageSearchPaths;
+    frontendOptions.importCache = &importCache;
     AstFrontendBuildStatus astStatus =
-        buildAstFrontend(source, frontendMode, astErrors, astFrontend);
+        buildAstFrontend(source, frontendOptions, frontendMode, astErrors,
+                         astFrontend);
 
     if (astStatus != AstFrontendBuildStatus::Success) {
         reportAstFrontendFailure(astStatus, astErrors, m_emitterMode);
@@ -187,69 +153,6 @@ TypeRef Compiler::tokenToType(const Token& token) const {
         default:
             return nullptr;
     }
-}
-
-bool Compiler::resolveImportExportTypes(
-    const ImportTarget& importTarget,
-    std::unordered_map<std::string, TypeRef>& outExportTypes,
-    std::string& outError) {
-    outExportTypes.clear();
-
-    if (importTarget.kind == ImportTargetKind::NATIVE_PACKAGE) {
-        NativePackageDescriptor packageDescriptor;
-        if (!loadNativePackageDescriptor(importTarget.resolvedPath,
-                                         packageDescriptor, outError, false,
-                                         nullptr)) {
-            return false;
-        }
-
-        if (!validateNativePackageImport(importTarget, packageDescriptor,
-                                         outError)) {
-            return false;
-        }
-
-        outExportTypes = std::move(packageDescriptor.exportTypes);
-        return true;
-    }
-
-    std::ifstream file(importTarget.resolvedPath);
-    if (!file) {
-        outError = "Failed to open module '" + importTarget.resolvedPath + "'.";
-        return false;
-    }
-
-    std::string source((std::istreambuf_iterator<char>(file)),
-                       std::istreambuf_iterator<char>());
-
-    Chunk chunk;
-    Compiler moduleCompiler;
-    moduleCompiler.setGC(m_gc);
-    moduleCompiler.setPackageSearchPaths(m_packageSearchPaths);
-    moduleCompiler.setEmitterMode(m_emitterMode);
-    moduleCompiler.setStrictMode(m_strictMode || hasStrictDirective(source));
-
-    if (!moduleCompiler.compile(stripStrictDirectiveLine(source), chunk,
-                                importTarget.resolvedPath)) {
-        outError = "Failed to type-check imported module '" +
-                   importTarget.resolvedPath + "'.";
-        return false;
-    }
-
-    std::unordered_map<std::string, TypeRef> moduleGlobals;
-    const auto& names = moduleCompiler.globalNames();
-    const auto& types = moduleCompiler.globalTypes();
-    for (size_t i = 0; i < names.size(); ++i) {
-        moduleGlobals[names[i]] =
-            i < types.size() && types[i] ? types[i] : TypeInfo::makeAny();
-    }
-
-    for (const auto& name : moduleCompiler.exportedNames()) {
-        auto it = moduleGlobals.find(name);
-        outExportTypes[name] =
-            it != moduleGlobals.end() ? it->second : TypeInfo::makeAny();
-    }
-
-    return true;
 }
 
 void Compiler::emitByte(uint8_t byte, size_t line) {

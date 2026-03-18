@@ -108,6 +108,27 @@ AstExpr* topLevelPrintExpr(AstModule& module, size_t printIndex) {
     return nullptr;
 }
 
+AstDestructuredImportStmt* topLevelDestructuredImport(AstModule& module) {
+    for (auto& item : module.items) {
+        if (!item) {
+            continue;
+        }
+
+        auto* stmtPtr = std::get_if<AstStmtPtr>(&item->value);
+        if (!stmtPtr || !*stmtPtr) {
+            continue;
+        }
+
+        auto* importStmt =
+            std::get_if<AstDestructuredImportStmt>(&(*stmtPtr)->value);
+        if (importStmt) {
+            return importStmt;
+        }
+    }
+
+    return nullptr;
+}
+
 bool buildSemanticPipeline(std::string_view source,
                            SemanticPipelineResult& outResult,
                            std::string& outError) {
@@ -135,7 +156,7 @@ bool buildSemanticPipeline(std::string_view source,
     std::vector<TypeError> errors;
     analyzeAstSemantics(outResult.module, outResult.classNames,
                         outResult.typeAliases, outResult.functionSignatures,
-                        errors, &outResult.preOptimization);
+                        {}, errors, &outResult.preOptimization);
     if (!errors.empty()) {
         outError = errors.front().message;
         return false;
@@ -146,7 +167,7 @@ bool buildSemanticPipeline(std::string_view source,
     errors.clear();
     analyzeAstSemantics(outResult.module, outResult.classNames,
                         outResult.typeAliases, outResult.functionSignatures,
-                        errors, &outResult.refreshed);
+                        {}, errors, &outResult.refreshed);
     if (!errors.empty()) {
         outError = errors.front().message;
         return false;
@@ -362,8 +383,9 @@ bool checkSemanticDiagnosticSpans() {
 
     AstFrontendResult frontend;
     std::vector<TypeError> errors;
+    const AstFrontendOptions options;
     const AstFrontendBuildStatus status = buildAstFrontend(
-        kSource, AstFrontendMode::StrictChecked, errors, frontend);
+        kSource, options, AstFrontendMode::StrictChecked, errors, frontend);
     if (!require(status == AstFrontendBuildStatus::SemanticError,
                  "indented strict semantic sample should fail semantic analysis")) {
         return false;
@@ -392,8 +414,9 @@ bool checkCallableDiagnosticSpans() {
 
         AstFrontendResult frontend;
         std::vector<TypeError> errors;
+        const AstFrontendOptions options;
         const AstFrontendBuildStatus status = buildAstFrontend(
-            kSource, AstFrontendMode::StrictChecked, errors, frontend);
+            kSource, options, AstFrontendMode::StrictChecked, errors, frontend);
         if (!require(status == AstFrontendBuildStatus::SemanticError,
                      "closure mismatch sample should fail semantic analysis") ||
             !require(!errors.empty(),
@@ -410,8 +433,9 @@ bool checkCallableDiagnosticSpans() {
 
         AstFrontendResult frontend;
         std::vector<TypeError> errors;
+        const AstFrontendOptions options;
         const AstFrontendBuildStatus status = buildAstFrontend(
-            kSource, AstFrontendMode::StrictChecked, errors, frontend);
+            kSource, options, AstFrontendMode::StrictChecked, errors, frontend);
         if (!require(status == AstFrontendBuildStatus::SemanticError,
                      "lambda parameter sample should fail semantic analysis") ||
             !require(errors.size() == 1,
@@ -430,8 +454,9 @@ bool checkCallableDiagnosticSpans() {
 
         AstFrontendResult frontend;
         std::vector<TypeError> errors;
+        const AstFrontendOptions options;
         const AstFrontendBuildStatus status = buildAstFrontend(
-            kSource, AstFrontendMode::StrictChecked, errors, frontend);
+            kSource, options, AstFrontendMode::StrictChecked, errors, frontend);
         if (!require(status == AstFrontendBuildStatus::SemanticError,
                      "lambda block-body sample should fail semantic analysis") ||
             !require(errors.size() == 1,
@@ -460,6 +485,127 @@ bool checkImportedModuleRegression(const std::filesystem::path& repoRoot) {
     }
 
     std::cout << "[PASS] imported frontend regression\n";
+    return true;
+}
+
+bool checkTypedImportFrontendRegression(const std::filesystem::path& repoRoot) {
+    const std::filesystem::path sourcePath =
+        repoRoot / "tests/sample_import_frontend_typed.mog";
+    const std::string source = readFile(sourcePath);
+
+    AstFrontendImportCache importCache;
+    AstFrontendOptions options;
+    options.sourcePath = sourcePath.string();
+    options.packageSearchPaths = {(repoRoot / "build/packages").string()};
+    options.importCache = &importCache;
+
+    AstFrontendResult frontend;
+    std::vector<TypeError> errors;
+    const AstFrontendBuildStatus status =
+        buildAstFrontend(stripStrictDirectiveLine(source), options,
+                         AstFrontendMode::StrictChecked, errors, frontend);
+    if (!require(status == AstFrontendBuildStatus::Success,
+                 "typed import sample should build through the AST frontend")) {
+        return false;
+    }
+
+    AstDestructuredImportStmt* importStmt =
+        topLevelDestructuredImport(frontend.module);
+    if (!require(importStmt != nullptr,
+                 "typed import sample should contain a destructured import")) {
+        return false;
+    }
+    if (!require(importStmt->bindings.size() == 2,
+                 "typed import sample should contain two bindings")) {
+        return false;
+    }
+
+    const TypeRef addType =
+        frontend.semanticModel.nodeTypes.at(importStmt->bindings[0].node.id);
+    const TypeRef piType =
+        frontend.semanticModel.nodeTypes.at(importStmt->bindings[1].node.id);
+    if (!require(addType && addType->toString() == "function(i32, i32) -> i32",
+                 "typed import function binding should keep the declared type")) {
+        return false;
+    }
+    if (!require(piType && piType->toString() == "f64",
+                 "typed import constant binding should keep the declared type")) {
+        return false;
+    }
+    if (!require(frontend.semanticModel.importedModules.count(
+                     importStmt->initializer->node.id) == 1,
+                 "typed import initializer should keep resolved import metadata")) {
+        return false;
+    }
+    if (!require(frontend.semanticModel.exportedSymbolTypes.empty(),
+                 "typed import sample should not synthesize public exports")) {
+        return false;
+    }
+
+    if (!checkCanonicalLoweringStable(sourcePath, "typed importer sample")) {
+        return false;
+    }
+
+    std::cout << "[PASS] typed import frontend regression\n";
+    return true;
+}
+
+bool checkTypedImportDiagnosticRegression(const std::filesystem::path& repoRoot) {
+    const auto expectStrictError = [&](const std::filesystem::path& path,
+                                       size_t line, size_t column,
+                                       const std::string& needle,
+                                       const std::string& description) {
+        const std::string source = readFile(path);
+        AstFrontendImportCache importCache;
+        AstFrontendOptions options;
+        options.sourcePath = path.string();
+        options.packageSearchPaths = {(repoRoot / "build/packages").string()};
+        options.importCache = &importCache;
+
+        AstFrontendResult frontend;
+        std::vector<TypeError> errors;
+        const AstFrontendBuildStatus status = buildAstFrontend(
+            stripStrictDirectiveLine(source), options,
+            AstFrontendMode::StrictChecked, errors, frontend);
+        return require(status == AstFrontendBuildStatus::SemanticError,
+                       description + " should fail semantic analysis") &&
+               require(!errors.empty(),
+                       description + " should report a semantic error") &&
+               require(errors.front().line == line &&
+                           errors.front().column == column,
+                       description + " should report the expected location") &&
+               require(errors.front().message.find(needle) != std::string::npos,
+                       description + " should report the expected message");
+    };
+
+    if (!expectStrictError(repoRoot /
+                               "tests/types/errors/import_binding_type_mismatch.mog",
+                           1, 9, "cannot assign imported value",
+                           "typed import mismatch sample")) {
+        return false;
+    }
+
+    if (!expectStrictError(repoRoot / "tests/types/errors/import_missing_export.mog",
+                           1, 9, "has no export 'Missing'",
+                           "missing export sample")) {
+        return false;
+    }
+
+    if (!expectStrictError(
+            repoRoot / "tests/types/errors/import_native_binding_type_mismatch.mog",
+            1, 9, "function(i64, i64) -> i64",
+            "native typed import mismatch sample")) {
+        return false;
+    }
+
+    if (!expectStrictError(repoRoot /
+                               "tests/types/errors/import_cycle_frontend.mog",
+                           1, 21, "Circular import detected",
+                           "import cycle sample")) {
+        return false;
+    }
+
+    std::cout << "[PASS] typed import diagnostic regression\n";
     return true;
 }
 
@@ -528,6 +674,12 @@ int main() {
         return 1;
     }
     if (!checkImportedModuleRegression(repoRoot)) {
+        return 1;
+    }
+    if (!checkTypedImportFrontendRegression(repoRoot)) {
+        return 1;
+    }
+    if (!checkTypedImportDiagnosticRegression(repoRoot)) {
         return 1;
     }
     if (!checkNewlineOptimizationRegression(repoRoot)) {

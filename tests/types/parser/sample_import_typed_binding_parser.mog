@@ -1,0 +1,4 @@
+const { Add: fn(i32, i32) i32, PI as Tau: f64 } = @import("./modules/math.mog")
+
+print(Add(3, 4))
+print(Tau)

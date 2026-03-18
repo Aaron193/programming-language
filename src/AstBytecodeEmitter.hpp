@@ -140,26 +140,6 @@ inline NumericLiteralInfo parseNumericLiteralInfo(const std::string& literal) {
     return info;
 }
 
-inline bool validateNativePackageImport(
-    const ImportTarget& importTarget, const NativePackageDescriptor& descriptor,
-    std::string& outError) {
-    outError.clear();
-
-    if (importTarget.kind != ImportTargetKind::NATIVE_PACKAGE) {
-        return true;
-    }
-
-    if (descriptor.packageNamespace != importTarget.packageNamespace ||
-        descriptor.packageName != importTarget.packageName) {
-        outError = "Native package '" + importTarget.rawSpecifier +
-                   "' declared '" + descriptor.packageId +
-                   "' in registration metadata.";
-        return false;
-    }
-
-    return true;
-}
-
 }  // namespace ast_bytecode_emitter_detail
 
 class AstBytecodeEmitter {
@@ -447,43 +427,14 @@ class AstBytecodeEmitter {
         return m_compiler.lookupClassFieldSlot(objectType->className, fieldName);
     }
 
-    ImportTarget parseImportTarget(const Token& pathToken, size_t line) {
-        if (m_compiler.m_sourcePath.empty()) {
-            errorAtToken(pathToken,
-                         "@import(...) is not allowed in interactive mode.");
-            return ImportTarget{};
+    const AstImportedModuleInterface* importedModuleForNode(
+        AstNodeId nodeId) const {
+        auto it = m_frontend.importedModules.find(nodeId);
+        if (it == m_frontend.importedModules.end()) {
+            return nullptr;
         }
 
-        std::string pathText(pathToken.start(), pathToken.length());
-        if (pathText.length() < 2) {
-            errorAtToken(pathToken, "Invalid import path.");
-            return ImportTarget{};
-        }
-
-        std::string rawPath = pathText.substr(1, pathText.length() - 2);
-        ImportTarget importTarget;
-        std::string resolveError;
-        if (!resolveImportTarget(m_compiler.m_sourcePath, rawPath,
-                                 m_compiler.m_packageSearchPaths, importTarget,
-                                 resolveError)) {
-            errorAtToken(pathToken, resolveError);
-            return ImportTarget{};
-        }
-
-        if (importTarget.kind == ImportTargetKind::NATIVE_PACKAGE) {
-            NativePackageDescriptor packageDescriptor;
-            std::string packageError;
-            if (!loadNativePackageDescriptor(importTarget.resolvedPath,
-                                             packageDescriptor, packageError,
-                                             false, nullptr) ||
-                !ast_bytecode_emitter_detail::validateNativePackageImport(
-                    importTarget, packageDescriptor, packageError)) {
-                errorAtToken(pathToken, packageError);
-                return ImportTarget{};
-            }
-        }
-
-        return importTarget;
+        return &it->second;
     }
 
     void emitExportName(const Token& nameToken, size_t line) {
@@ -749,22 +700,19 @@ class AstBytecodeEmitter {
 
         const auto& importExpr =
             std::get<AstImportExpr>(stmt.initializer->value);
-        ImportTarget importTarget = parseImportTarget(importExpr.path, line);
-        if (importTarget.canonicalId.empty()) {
-            return;
-        }
-
-        std::unordered_map<std::string, TypeRef> moduleExportTypes;
-        std::string moduleTypeError;
-        if (!m_compiler.resolveImportExportTypes(importTarget, moduleExportTypes,
-                                                 moduleTypeError)) {
-            errorAtToken(importExpr.path, moduleTypeError);
+        const AstImportedModuleInterface* importedModule =
+            importedModuleForNode(stmt.initializer->node.id);
+        if (importedModule == nullptr ||
+            importedModule->importTarget.canonicalId.empty()) {
+            errorAtToken(importExpr.path,
+                         "Internal frontend error: unresolved import target.");
             return;
         }
 
         emitBytes(OpCode::IMPORT_MODULE,
                   m_compiler.makeConstant(
-                      m_compiler.makeStringValue(importTarget.canonicalId)),
+                      m_compiler.makeStringValue(
+                          importedModule->importTarget.canonicalId)),
                   line);
 
         for (const auto& binding : stmt.bindings) {
@@ -1519,15 +1467,19 @@ class AstBytecodeEmitter {
                     emitClosureObject(compiled, expr.node.line);
                     m_compiler.pushExprType(nodeType(expr.node));
                 } else if constexpr (std::is_same_v<T, AstImportExpr>) {
-                    ImportTarget importTarget =
-                        parseImportTarget(value.path, expr.node.line);
-                    if (!importTarget.canonicalId.empty()) {
+                    const AstImportedModuleInterface* importedModule =
+                        importedModuleForNode(expr.node.id);
+                    if (importedModule != nullptr &&
+                        !importedModule->importTarget.canonicalId.empty()) {
                         emitBytes(
                             OpCode::IMPORT_MODULE,
                             m_compiler.makeConstant(m_compiler.makeStringValue(
-                                importTarget.canonicalId)),
+                                importedModule->importTarget.canonicalId)),
                             expr.node.line);
                     } else {
+                        errorAtToken(value.path,
+                                     "Internal frontend error: unresolved "
+                                     "import target.");
                         emitByte(OpCode::NIL, expr.node.line);
                     }
                     m_compiler.pushExprType(nodeType(expr.node));

@@ -159,6 +159,25 @@ run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/assign_handle_foreign_type.mog" \
     "cannot assign 'handle<examples:counter:CounterHandle>' to variable 'bad' of type 'handle<examples:math:CounterHandle>'" || failed=1
 
+run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/import_binding_type_mismatch.mog" \
+    "cannot assign imported value 'function(i32, i32) -> i32' to binding 'Add' of type 'function(f64, f64) -> f64'" \
+    "1:9" || failed=1
+
+run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/import_missing_export.mog" \
+    "imported module" \
+    "1:9" || failed=1
+
+run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/import_native_binding_type_mismatch.mog" \
+    "cannot assign imported value 'function(i64, i64) -> i64' to binding 'addI64' of type 'function(f64, f64) -> f64'" \
+    "1:9" || failed=1
+
+run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/import_cycle_frontend.mog" \
+    "Circular import detected" || failed=1
+
 if [[ $failed -ne 0 ]]; then
     exit 1
 fi
