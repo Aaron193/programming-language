@@ -887,7 +887,7 @@ bool checkNativeHandleTypeFrontendRegression(
     }
 
     auto exportedForward =
-        frontend.semanticModel.exportedSymbolTypes.find("forward");
+        frontend.semanticModel.exportedSymbolTypes.find("Forward");
     if (!require(exportedForward != frontend.semanticModel.exportedSymbolTypes.end() &&
                      exportedForward->second &&
                      exportedForward->second->toString() ==

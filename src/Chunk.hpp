@@ -568,6 +568,7 @@ struct UpvalueObject : GcObject {
 struct ClosureObject : GcObject {
     FunctionObject* function = nullptr;
     std::vector<UpvalueObject*> upvalues;
+    ModuleObject* module = nullptr;
 
     void trace(GC& gc) override;
 };
@@ -651,6 +652,10 @@ struct ModuleObject : GcObject {
     std::string path;
     std::unordered_map<std::string, Value> exports;
     std::unordered_map<std::string, TypeRef> exportTypes;
+    std::vector<std::string> globalNames;
+    std::vector<TypeRef> globalTypes;
+    std::vector<Value> globalValues;
+    std::vector<bool> globalDefined;
 
     void trace(GC& gc) override;
 };

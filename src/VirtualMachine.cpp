@@ -1438,7 +1438,8 @@ Status VirtualMachine::callClosure(ClosureObject* closure,
                                          calleeIndex + 1,
                                          calleeIndex,
                                          receiver,
-                                         closure};
+                                         closure,
+                                         closure ? closure->module : nullptr};
     m_activeFrame = &m_frames[m_frameCount - 1];
     return Status::OK;
 }
@@ -2695,37 +2696,45 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
         VM_CASE(DEFINE_GLOBAL_SLOT) {
             uint8_t slot = readByte();
-            if (slot >= m_globalValues.size()) {
+            auto& globalValues = currentGlobalValues();
+            auto& globalDefined = currentGlobalDefined();
+            if (slot >= globalValues.size()) {
                 return runtimeError("Invalid global slot.");
             }
-            m_globalValues[slot] = m_stack.pop();
-            m_globalDefined[slot] = true;
+            globalValues[slot] = m_stack.pop();
+            globalDefined[slot] = true;
             DISPATCH();
         }
 
         VM_CASE(GET_GLOBAL_SLOT) {
             uint8_t slot = readByte();
-            if (slot >= m_globalValues.size() || !m_globalDefined[slot]) {
-                std::string name = slot < m_globalNames.size()
-                                       ? m_globalNames[slot]
+            auto& globalValues = currentGlobalValues();
+            auto& globalDefined = currentGlobalDefined();
+            auto& globalNames = currentGlobalNames();
+            if (slot >= globalValues.size() || !globalDefined[slot]) {
+                std::string name = slot < globalNames.size()
+                                       ? globalNames[slot]
                                        : "<unknown>";
                 return runtimeError("Undefined variable '" + name + "'.");
             }
 
-            m_stack.push(m_globalValues[slot]);
+            m_stack.push(globalValues[slot]);
             DISPATCH();
         }
 
         VM_CASE(SET_GLOBAL_SLOT) {
             uint8_t slot = readByte();
-            if (slot >= m_globalValues.size() || !m_globalDefined[slot]) {
-                std::string name = slot < m_globalNames.size()
-                                       ? m_globalNames[slot]
+            auto& globalValues = currentGlobalValues();
+            auto& globalDefined = currentGlobalDefined();
+            auto& globalNames = currentGlobalNames();
+            if (slot >= globalValues.size() || !globalDefined[slot]) {
+                std::string name = slot < globalNames.size()
+                                       ? globalNames[slot]
                                        : "<unknown>";
                 return runtimeError("Undefined variable '" + name + "'.");
             }
 
-            m_globalValues[slot] = m_stack.peekUnchecked(0);
+            globalValues[slot] = m_stack.peekUnchecked(0);
             DISPATCH();
         }
 
@@ -3276,6 +3285,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
             auto function = constant.asFunction();
             auto closure = gcAlloc<ClosureObject>();
             closure->function = function;
+            closure->module = currentGlobalModule();
             closure->upvalues.reserve(function->upvalueCount);
             m_stack.push(Value(closure));
 
@@ -3797,6 +3807,21 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
             auto* module = gcAlloc<ModuleObject>();
             module->path = path;
+            module->globalNames = m_compiler.globalNames();
+            module->globalTypes = m_compiler.globalTypes();
+            if (module->globalTypes.size() < module->globalNames.size()) {
+                module->globalTypes.resize(module->globalNames.size(),
+                                           TypeInfo::makeAny());
+            }
+            module->globalValues.assign(module->globalNames.size(), Value());
+            module->globalDefined.assign(module->globalNames.size(), false);
+            for (size_t i = 0; i < module->globalNames.size(); ++i) {
+                auto nativeIt = m_nativeGlobals.find(module->globalNames[i]);
+                if (nativeIt != m_nativeGlobals.end()) {
+                    module->globalValues[i] = nativeIt->second;
+                    module->globalDefined[i] = true;
+                }
+            }
 
             auto savedGlobalNames = m_globalNames;
             auto savedGlobalTypes = m_globalTypes;
@@ -3829,6 +3854,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
             auto closure = gcAlloc<ClosureObject>();
             closure->function = function;
+            closure->module = module;
             closure->upvalues = {};
 
             m_stack.push(Value(closure));
@@ -3876,10 +3902,12 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
             if (m_currentModule != nullptr) {
                 Value value = m_stack.peekUnchecked(0);
                 TypeRef declaredType = TypeInfo::makeAny();
-                for (size_t i = 0; i < m_globalNames.size(); ++i) {
-                    if (m_globalNames[i] == name) {
-                        if (i < m_globalTypes.size() && m_globalTypes[i]) {
-                            declaredType = m_globalTypes[i];
+                auto& globalNames = currentGlobalNames();
+                auto& globalTypes = currentGlobalTypes();
+                for (size_t i = 0; i < globalNames.size(); ++i) {
+                    if (globalNames[i] == name) {
+                        if (i < globalTypes.size() && globalTypes[i]) {
+                            declaredType = globalTypes[i];
                         }
                         break;
                     }
@@ -4292,7 +4320,7 @@ Status VirtualMachine::interpret(std::string_view source, bool printReturnValue,
     }
 
     m_frames[m_frameCount++] =
-        CallFrame{&chunk, chunk.getBytes(), 0, 0, nullptr, nullptr};
+        CallFrame{&chunk, chunk.getBytes(), 0, 0, nullptr, nullptr, nullptr};
     m_activeFrame = &m_frames[m_frameCount - 1];
 
     Value returnValue;

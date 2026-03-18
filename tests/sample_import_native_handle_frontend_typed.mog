@@ -3,12 +3,12 @@ type Counter handle<examples:counter:CounterHandle>
 const { create: fn(i64) Counter, read: fn(Counter) i64, add: fn(Counter, i64) i64 } =
     @import("examples:counter")
 
-fn forward(value Counter) Counter {
+fn Forward(value Counter) Counter {
     return value
 }
 
 const first Counter = create(10i64)
-const second Counter = forward(first)
+const second Counter = Forward(first)
 
 print(read(second))
 print(add(second, 5i64))

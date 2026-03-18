@@ -368,6 +368,7 @@ void UpvalueObject::trace(GC& gc) {
 
 void ClosureObject::trace(GC& gc) {
     gc.markObject(function);
+    gc.markObject(module);
     for (auto* upvalue : upvalues) {
         gc.markObject(upvalue);
     }
@@ -436,6 +437,12 @@ void IteratorObject::trace(GC& gc) {
 }
 
 void ModuleObject::trace(GC& gc) {
+    for (size_t index = 0; index < globalValues.size(); ++index) {
+        if (index < globalDefined.size() && globalDefined[index]) {
+            gc.markValue(globalValues[index]);
+        }
+    }
+
     for (const auto& [name, value] : exports) {
         (void)name;
         gc.markValue(value);
