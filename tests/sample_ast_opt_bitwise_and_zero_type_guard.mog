@@ -1,0 +1,4 @@
+#!strict
+var value u16 = 5u16
+
+print(0u8 & value)

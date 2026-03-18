@@ -856,6 +856,10 @@ AstItemPtr makeItemPtr(AstStmtPtr stmt) {
     return item;
 }
 
+AstExprPtr makeExprPtr(AstExpr&& expr) {
+    return std::make_unique<AstExpr>(std::move(expr));
+}
+
 bool isEmptyBlockStmt(const AstStmt& stmt) {
     const auto* block = std::get_if<AstBlockStmt>(&stmt.value);
     return block && block->items.empty();
@@ -875,6 +879,20 @@ void replaceExprPreservingNode(AstExpr& target, AstExprPtr replacement) {
     }
     replacement->node = target.node;
     target = std::move(*replacement);
+}
+
+void replaceExprWithLogicalNotPreservingNode(AstExpr& target,
+                                             AstExprPtr operand) {
+    if (!operand) {
+        return;
+    }
+
+    AstExpr replacement;
+    AstUnaryExpr logicalNot;
+    logicalNot.op = Token::synthetic(TokenType::BANG, "!", target.node.span);
+    logicalNot.operand = std::move(operand);
+    replacement.value = std::move(logicalNot);
+    replaceExprPreservingNode(target, makeExprPtr(std::move(replacement)));
 }
 
 bool sameKnownType(const ConstantEvaluator& evaluator, AstNodeId lhs,

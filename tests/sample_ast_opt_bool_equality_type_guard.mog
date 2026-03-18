@@ -1,0 +1,5 @@
+#!strict
+var value i32 = 1
+
+print(value == 1i32)
+print(1i32 != value)

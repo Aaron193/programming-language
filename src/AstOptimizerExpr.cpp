@@ -7,6 +7,11 @@ namespace ast_optimizer_detail {
 
 namespace {
 
+bool isKnownBoolType(const ConstantEvaluator& evaluator, AstNodeId id) {
+    TypeRef type = evaluator.typeOf(id);
+    return type && type->kind == TypeKind::BOOL;
+}
+
 bool replaceWithOperandIfTypeMatches(AstExpr& expr, AstExprPtr& operand,
                                      const ConstantEvaluator& evaluator) {
     if (!operand || !canReuseOperandAsResult(expr, *operand, evaluator)) {
@@ -14,6 +19,79 @@ bool replaceWithOperandIfTypeMatches(AstExpr& expr, AstExprPtr& operand,
     }
     replaceExprPreservingNode(expr, std::move(operand));
     return true;
+}
+
+bool replaceWithLogicalNotOfOperandIfTypeMatches(
+    AstExpr& expr, AstExprPtr& operand, const ConstantEvaluator& evaluator) {
+    if (!operand || !isKnownBoolType(evaluator, expr.node.id) ||
+        !isKnownBoolType(evaluator, operand->node.id) ||
+        !canReuseOperandAsResult(expr, *operand, evaluator)) {
+        return false;
+    }
+
+    replaceExprWithLogicalNotPreservingNode(expr, std::move(operand));
+    return true;
+}
+
+bool simplifyUnaryExpr(AstExpr& expr, const ConstantEvaluator& evaluator) {
+    auto* unary = std::get_if<AstUnaryExpr>(&expr.value);
+    if (!unary || unary->op.type() != TokenType::BANG || !unary->operand ||
+        !isKnownBoolType(evaluator, expr.node.id)) {
+        return false;
+    }
+
+    auto* nestedUnary = std::get_if<AstUnaryExpr>(&unary->operand->value);
+    if (!nestedUnary || nestedUnary->op.type() != TokenType::BANG ||
+        !nestedUnary->operand ||
+        !isKnownBoolType(evaluator, nestedUnary->operand->node.id)) {
+        return false;
+    }
+
+    return replaceWithOperandIfTypeMatches(expr, nestedUnary->operand,
+                                           evaluator);
+}
+
+bool simplifyBooleanEqualityBinary(AstExpr& expr, AstBinaryExpr& binary,
+                                   const ConstantEvaluator& evaluator) {
+    if (!binary.left || !binary.right || !isKnownBoolType(evaluator, expr.node.id) ||
+        !isKnownBoolType(evaluator, binary.left->node.id) ||
+        !isKnownBoolType(evaluator, binary.right->node.id)) {
+        return false;
+    }
+
+    const auto simplifyAgainstConstant = [&](AstExprPtr& operand,
+                                             bool constantValue) {
+        switch (binary.op.type()) {
+            case TokenType::EQUAL_EQUAL:
+                if (constantValue) {
+                    return replaceWithOperandIfTypeMatches(expr, operand,
+                                                           evaluator);
+                }
+                return replaceWithLogicalNotOfOperandIfTypeMatches(
+                    expr, operand, evaluator);
+            case TokenType::BANG_EQUAL:
+                if (!constantValue) {
+                    return replaceWithOperandIfTypeMatches(expr, operand,
+                                                           evaluator);
+                }
+                return replaceWithLogicalNotOfOperandIfTypeMatches(
+                    expr, operand, evaluator);
+            default:
+                return false;
+        }
+    };
+
+    bool leftValue = false;
+    if (tryEvaluateConditionBool(*binary.left, evaluator, leftValue)) {
+        return simplifyAgainstConstant(binary.right, leftValue);
+    }
+
+    bool rightValue = false;
+    if (tryEvaluateConditionBool(*binary.right, evaluator, rightValue)) {
+        return simplifyAgainstConstant(binary.left, rightValue);
+    }
+
+    return false;
 }
 
 bool simplifyIdentityBinary(AstExpr& expr, AstBinaryExpr& binary,
@@ -69,6 +147,21 @@ bool simplifyIdentityBinary(AstExpr& expr, AstBinaryExpr& binary,
             return exprType->isNumeric() && hasRightConstant &&
                    isOneConstant(rightConstant) &&
                    replaceWithOperandIfTypeMatches(expr, binary.left, evaluator);
+        case TokenType::AMPERSAND:
+            if (!exprType->isInteger()) {
+                return false;
+            }
+            if (hasRightConstant && isZeroConstant(rightConstant) &&
+                isDefinitelyPure(*binary.left)) {
+                return replaceWithOperandIfTypeMatches(expr, binary.right,
+                                                       evaluator);
+            }
+            if (hasLeftConstant && isZeroConstant(leftConstant) &&
+                isDefinitelyPure(*binary.right)) {
+                return replaceWithOperandIfTypeMatches(expr, binary.left,
+                                                       evaluator);
+            }
+            return false;
         case TokenType::PIPE:
         case TokenType::CARET:
             if (!exprType->isInteger()) {
@@ -176,6 +269,11 @@ bool simplifyBinaryExpr(AstExpr& expr, const ConstantEvaluator& evaluator) {
     }
 
     binary = std::get_if<AstBinaryExpr>(&expr.value);
+    if (binary && simplifyBooleanEqualityBinary(expr, *binary, evaluator)) {
+        return true;
+    }
+
+    binary = std::get_if<AstBinaryExpr>(&expr.value);
     return binary && simplifyIdentityBinary(expr, *binary, evaluator);
 }
 
@@ -256,6 +354,8 @@ void optimizeExprTree(AstExpr& expr, const ConstantEvaluator& evaluator) {
             }
         },
         expr.value);
+
+    simplifyUnaryExpr(expr, evaluator);
 
     // Keep the rewrite order explicit: simplify local algebra/logical
     // identities first, then collapse any expression that is now constant.

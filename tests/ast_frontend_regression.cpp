@@ -350,6 +350,142 @@ bool checkSemanticRefreshContract() {
     return true;
 }
 
+bool checkBooleanIdentityRefreshContract() {
+    constexpr std::string_view kSource =
+        "var yes bool = true\n"
+        "print(yes == true)\n"
+        "print(false != yes)\n";
+
+    SemanticPipelineResult pipeline;
+    std::string error;
+    if (!buildSemanticPipeline(kSource, pipeline, error)) {
+        std::cerr << "[FAIL] bool identity refresh setup failed: " << error
+                  << '\n';
+        return false;
+    }
+
+    AstExpr* firstExpr = topLevelPrintExpr(pipeline.module, 0);
+    AstExpr* secondExpr = topLevelPrintExpr(pipeline.module, 1);
+    if (!require(firstExpr != nullptr,
+                 "missing first bool identity expression after optimization") ||
+        !require(secondExpr != nullptr,
+                 "missing second bool identity expression after optimization")) {
+        return false;
+    }
+
+    if (!require(firstExpr->node.id == pipeline.preIdentityExprId &&
+                     secondExpr->node.id == pipeline.preFoldedExprId,
+                 "bool identity rewrites should preserve original node ids")) {
+        return false;
+    }
+
+    if (!require(std::holds_alternative<AstIdentifierExpr>(firstExpr->value) &&
+                     std::holds_alternative<AstIdentifierExpr>(secondExpr->value),
+                 "bool identity rewrites should collapse to identifiers")) {
+        return false;
+    }
+
+    auto firstType = pipeline.refreshed.nodeTypes.find(firstExpr->node.id);
+    auto secondType = pipeline.refreshed.nodeTypes.find(secondExpr->node.id);
+    if (!require(firstType != pipeline.refreshed.nodeTypes.end() &&
+                     firstType->second &&
+                     firstType->second->kind == TypeKind::BOOL,
+                 "refreshed semantics should keep the first bool identity node typed as bool") ||
+        !require(secondType != pipeline.refreshed.nodeTypes.end() &&
+                     secondType->second &&
+                     secondType->second->kind == TypeKind::BOOL,
+                 "refreshed semantics should keep the second bool identity node typed as bool")) {
+        return false;
+    }
+
+    GC gc;
+    Chunk chunk;
+    Compiler compiler;
+    compiler.setGC(&gc);
+    compiler.setStrictMode(true);
+    if (!require(compiler.compile(kSource, chunk, "<frontend-bool-identity>"),
+                 "compiler should lower successfully after bool identity rewrites")) {
+        return false;
+    }
+
+    const std::string disassembly = captureChunkDisassembly(chunk);
+    if (!require(disassembly.find("EQUAL") == std::string::npos &&
+                     disassembly.find("NOT_EQUAL") == std::string::npos,
+                 "lowered chunk should not emit equality opcodes for bool identity rewrites")) {
+        return false;
+    }
+
+    std::cout << "[PASS] bool identity refresh contract\n";
+    return true;
+}
+
+bool checkSyntheticNotSpanRegression() {
+    constexpr std::string_view kSource =
+        "var yes bool = true\n"
+        "print(yes == false)\n"
+        "print(true)\n";
+
+    SemanticPipelineResult pipeline;
+    std::string error;
+    if (!buildSemanticPipeline(kSource, pipeline, error)) {
+        std::cerr << "[FAIL] synthetic not span setup failed: " << error
+                  << '\n';
+        return false;
+    }
+
+    AstExpr* notExpr = topLevelPrintExpr(pipeline.module, 0);
+    if (!require(notExpr != nullptr,
+                 "missing synthesized not expression after optimization")) {
+        return false;
+    }
+
+    if (!require(notExpr->node.id == pipeline.preIdentityExprId,
+                 "synthesized not rewrite should preserve the original node id")) {
+        return false;
+    }
+
+    const auto* unary = std::get_if<AstUnaryExpr>(&notExpr->value);
+    if (!require(unary != nullptr && unary->operand != nullptr,
+                 "bool equality false rewrite should synthesize a unary not expression")) {
+        return false;
+    }
+
+    if (!require(unary->op.type() == TokenType::BANG &&
+                     unary->op.line() == notExpr->node.line &&
+                     unary->op.span().start.offset == notExpr->node.span.start.offset &&
+                     unary->op.span().end.offset == notExpr->node.span.end.offset,
+                 "synthetic unary not should keep the replaced expression span")) {
+        return false;
+    }
+
+    auto notType = pipeline.refreshed.nodeTypes.find(notExpr->node.id);
+    if (!require(notType != pipeline.refreshed.nodeTypes.end() &&
+                     notType->second && notType->second->kind == TypeKind::BOOL,
+                 "refreshed semantics should type the synthesized not node as bool")) {
+        return false;
+    }
+
+    GC gc;
+    Chunk chunk;
+    Compiler compiler;
+    compiler.setGC(&gc);
+    compiler.setStrictMode(true);
+    if (!require(compiler.compile(kSource, chunk, "<frontend-synth-not>"),
+                 "compiler should lower successfully after synthesized not rewrite")) {
+        return false;
+    }
+
+    const std::string disassembly = captureChunkDisassembly(chunk);
+    if (!require(disassembly.find("EQUAL") == std::string::npos &&
+                     disassembly.find("NOT") != std::string::npos,
+                 "lowered chunk should emit unary not instead of equality for the synthesized rewrite")) {
+        return false;
+    }
+
+    std::cout << "[PASS] synthetic not spans\n";
+    return true;
+}
+
 bool checkParserDiagnosticSpans() {
     constexpr std::string_view kSource =
         "print(\n"
@@ -662,6 +798,12 @@ int main() {
     const std::filesystem::path repoRoot = std::filesystem::current_path();
 
     if (!checkSemanticRefreshContract()) {
+        return 1;
+    }
+    if (!checkBooleanIdentityRefreshContract()) {
+        return 1;
+    }
+    if (!checkSyntheticNotSpanRegression()) {
         return 1;
     }
     if (!checkParserDiagnosticSpans()) {

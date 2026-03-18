@@ -1,0 +1,4 @@
+var value i32 = 7
+
+print(value & 0i32)
+print(0i32 & value)

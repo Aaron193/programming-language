@@ -72,6 +72,7 @@ bool isDefinitelyPure(const AstExpr& expr);
 
 AstStmtPtr makeStmtPtr(AstStmt&& stmt);
 AstItemPtr makeItemPtr(AstStmtPtr stmt);
+AstExprPtr makeExprPtr(AstExpr&& expr);
 bool isEmptyBlockStmt(const AstStmt& stmt);
 
 // Statement rewrites keep the outer statement node so later phases continue to
@@ -81,6 +82,8 @@ void replaceStmtPreservingNode(AstStmt& target, AstStmtPtr replacement);
 // Expression rewrites preserve the replaced node id and line because refreshed
 // post-optimization semantics are still keyed by the original expression node.
 void replaceExprPreservingNode(AstExpr& target, AstExprPtr replacement);
+void replaceExprWithLogicalNotPreservingNode(AstExpr& target,
+                                             AstExprPtr operand);
 
 bool sameKnownType(const ConstantEvaluator& evaluator, AstNodeId lhs,
                    AstNodeId rhs);

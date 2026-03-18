@@ -429,6 +429,138 @@ if grep -q "after" <<< "$return_disassembly"; then
     exit 1
 fi
 
+run_and_capture_strict "$SCRIPT_DIR/sample_ast_opt_bool_equality_identity.mog" \
+    bool_identity_output bool_identity_status bool_identity_disassembly bool_identity_disassembly_status
+
+if [[ $bool_identity_status -ne 0 || $bool_identity_disassembly_status -ne 0 ]]; then
+    echo "[FAIL] bool-equality-identity sample failed"
+    echo "$bool_identity_output"
+    echo "$bool_identity_disassembly"
+    exit 1
+fi
+
+if [[ "$bool_identity_output" != $'lhs-true\ntrue\nlhs-true\ntrue\nlhs-false\ntrue\nlhs-false\ntrue' ]]; then
+    echo "[FAIL] bool-equality-identity sample produced unexpected output"
+    echo "$bool_identity_output"
+    exit 1
+fi
+
+if grep -Eq "EQUAL|NOT_EQUAL" <<< "$bool_identity_disassembly"; then
+    echo "[FAIL] bool-equality-identity sample still emits equality opcodes"
+    echo "$bool_identity_disassembly"
+    exit 1
+fi
+
+run_and_capture_strict "$SCRIPT_DIR/sample_ast_opt_double_not.mog" \
+    double_not_output double_not_status double_not_disassembly double_not_disassembly_status
+
+if [[ $double_not_status -ne 0 || $double_not_disassembly_status -ne 0 ]]; then
+    echo "[FAIL] double-not sample failed"
+    echo "$double_not_output"
+    echo "$double_not_disassembly"
+    exit 1
+fi
+
+if [[ "$double_not_output" != $'call\ntrue\nfalse' ]]; then
+    echo "[FAIL] double-not sample produced unexpected output"
+    echo "$double_not_output"
+    exit 1
+fi
+
+if grep -q "NOT" <<< "$double_not_disassembly"; then
+    echo "[FAIL] double-not sample still emits unary not opcodes"
+    echo "$double_not_disassembly"
+    exit 1
+fi
+
+run_and_capture_strict "$SCRIPT_DIR/sample_ast_opt_bitwise_and_zero.mog" \
+    and_zero_output and_zero_status and_zero_disassembly and_zero_disassembly_status
+
+if [[ $and_zero_status -ne 0 || $and_zero_disassembly_status -ne 0 ]]; then
+    echo "[FAIL] bitwise-and-zero sample failed"
+    echo "$and_zero_output"
+    echo "$and_zero_disassembly"
+    exit 1
+fi
+
+if [[ "$and_zero_output" != $'0\n0' ]]; then
+    echo "[FAIL] bitwise-and-zero sample produced unexpected output"
+    echo "$and_zero_output"
+    exit 1
+fi
+
+if grep -q "BITWISE_AND" <<< "$and_zero_disassembly"; then
+    echo "[FAIL] bitwise-and-zero sample still emits bitwise and opcodes"
+    echo "$and_zero_disassembly"
+    exit 1
+fi
+
+run_and_capture_strict "$SCRIPT_DIR/sample_ast_opt_bitwise_and_zero_impure_guard.mog" \
+    and_zero_impure_output and_zero_impure_status and_zero_impure_disassembly and_zero_impure_disassembly_status
+
+if [[ $and_zero_impure_status -ne 0 || $and_zero_impure_disassembly_status -ne 0 ]]; then
+    echo "[FAIL] bitwise-and-zero impure-guard sample failed"
+    echo "$and_zero_impure_output"
+    echo "$and_zero_impure_disassembly"
+    exit 1
+fi
+
+if [[ "$and_zero_impure_output" != $'call\n0\ncall\n0' ]]; then
+    echo "[FAIL] bitwise-and-zero impure-guard sample produced unexpected output"
+    echo "$and_zero_impure_output"
+    exit 1
+fi
+
+if ! grep -q "CALL" <<< "$and_zero_impure_disassembly" || ! grep -q "BITWISE_AND" <<< "$and_zero_impure_disassembly"; then
+    echo "[FAIL] bitwise-and-zero impure-guard sample dropped required call or bitwise and opcodes"
+    echo "$and_zero_impure_disassembly"
+    exit 1
+fi
+
+run_and_capture_strict "$SCRIPT_DIR/sample_ast_opt_bool_equality_type_guard.mog" \
+    bool_type_guard_output bool_type_guard_status bool_type_guard_disassembly bool_type_guard_disassembly_status
+
+if [[ $bool_type_guard_status -ne 0 || $bool_type_guard_disassembly_status -ne 0 ]]; then
+    echo "[FAIL] bool-equality type-guard sample failed"
+    echo "$bool_type_guard_output"
+    echo "$bool_type_guard_disassembly"
+    exit 1
+fi
+
+if [[ "$bool_type_guard_output" != $'true\nfalse' ]]; then
+    echo "[FAIL] bool-equality type-guard sample produced unexpected output"
+    echo "$bool_type_guard_output"
+    exit 1
+fi
+
+if ! grep -Eq "EQUAL|NOT_EQUAL" <<< "$bool_type_guard_disassembly"; then
+    echo "[FAIL] bool-equality type-guard sample was rewritten despite non-bool operands"
+    echo "$bool_type_guard_disassembly"
+    exit 1
+fi
+
+run_and_capture_strict "$SCRIPT_DIR/sample_ast_opt_bitwise_and_zero_type_guard.mog" \
+    and_zero_type_guard_output and_zero_type_guard_status and_zero_type_guard_disassembly and_zero_type_guard_disassembly_status
+
+if [[ $and_zero_type_guard_status -ne 0 || $and_zero_type_guard_disassembly_status -ne 0 ]]; then
+    echo "[FAIL] bitwise-and-zero type-guard sample failed"
+    echo "$and_zero_type_guard_output"
+    echo "$and_zero_type_guard_disassembly"
+    exit 1
+fi
+
+if [[ "$and_zero_type_guard_output" != "0" ]]; then
+    echo "[FAIL] bitwise-and-zero type-guard sample produced unexpected output"
+    echo "$and_zero_type_guard_output"
+    exit 1
+fi
+
+if ! grep -q "BITWISE_AND" <<< "$and_zero_type_guard_disassembly"; then
+    echo "[FAIL] bitwise-and-zero type-guard sample was rewritten across type promotion"
+    echo "$and_zero_type_guard_disassembly"
+    exit 1
+fi
+
 run_and_capture_non_strict "$SCRIPT_DIR/sample_ast_opt_non_strict_dead_for.mog" \
     non_strict_for_output non_strict_for_status non_strict_for_disassembly non_strict_for_disassembly_status
 
@@ -558,6 +690,138 @@ fi
 if ! grep -q "CALL" <<< "$non_strict_impure_disassembly" || ! grep -Eq "JUMP_IF_FALSE|JUMP_IF_FALSE_POP|JUMP " <<< "$non_strict_impure_disassembly"; then
     echo "[FAIL] non-strict logical-impure-guard sample dropped required short-circuit control flow"
     echo "$non_strict_impure_disassembly"
+    exit 1
+fi
+
+run_and_capture_non_strict "$SCRIPT_DIR/sample_ast_opt_non_strict_bool_equality_identity.mog" \
+    non_strict_bool_identity_output non_strict_bool_identity_status non_strict_bool_identity_disassembly non_strict_bool_identity_disassembly_status
+
+if [[ $non_strict_bool_identity_status -ne 0 || $non_strict_bool_identity_disassembly_status -ne 0 ]]; then
+    echo "[FAIL] non-strict bool-equality-identity sample failed"
+    echo "$non_strict_bool_identity_output"
+    echo "$non_strict_bool_identity_disassembly"
+    exit 1
+fi
+
+if [[ "$non_strict_bool_identity_output" != $'lhs-true\ntrue\nlhs-true\ntrue\nlhs-false\ntrue\nlhs-false\ntrue' ]]; then
+    echo "[FAIL] non-strict bool-equality-identity sample produced unexpected output"
+    echo "$non_strict_bool_identity_output"
+    exit 1
+fi
+
+if grep -Eq "EQUAL|NOT_EQUAL" <<< "$non_strict_bool_identity_disassembly"; then
+    echo "[FAIL] non-strict bool-equality-identity sample still emits equality opcodes"
+    echo "$non_strict_bool_identity_disassembly"
+    exit 1
+fi
+
+run_and_capture_non_strict "$SCRIPT_DIR/sample_ast_opt_non_strict_double_not.mog" \
+    non_strict_double_not_output non_strict_double_not_status non_strict_double_not_disassembly non_strict_double_not_disassembly_status
+
+if [[ $non_strict_double_not_status -ne 0 || $non_strict_double_not_disassembly_status -ne 0 ]]; then
+    echo "[FAIL] non-strict double-not sample failed"
+    echo "$non_strict_double_not_output"
+    echo "$non_strict_double_not_disassembly"
+    exit 1
+fi
+
+if [[ "$non_strict_double_not_output" != $'call\ntrue\nfalse' ]]; then
+    echo "[FAIL] non-strict double-not sample produced unexpected output"
+    echo "$non_strict_double_not_output"
+    exit 1
+fi
+
+if grep -q "NOT" <<< "$non_strict_double_not_disassembly"; then
+    echo "[FAIL] non-strict double-not sample still emits unary not opcodes"
+    echo "$non_strict_double_not_disassembly"
+    exit 1
+fi
+
+run_and_capture_non_strict "$SCRIPT_DIR/sample_ast_opt_non_strict_bitwise_and_zero.mog" \
+    non_strict_and_zero_output non_strict_and_zero_status non_strict_and_zero_disassembly non_strict_and_zero_disassembly_status
+
+if [[ $non_strict_and_zero_status -ne 0 || $non_strict_and_zero_disassembly_status -ne 0 ]]; then
+    echo "[FAIL] non-strict bitwise-and-zero sample failed"
+    echo "$non_strict_and_zero_output"
+    echo "$non_strict_and_zero_disassembly"
+    exit 1
+fi
+
+if [[ "$non_strict_and_zero_output" != $'0\n0' ]]; then
+    echo "[FAIL] non-strict bitwise-and-zero sample produced unexpected output"
+    echo "$non_strict_and_zero_output"
+    exit 1
+fi
+
+if grep -q "BITWISE_AND" <<< "$non_strict_and_zero_disassembly"; then
+    echo "[FAIL] non-strict bitwise-and-zero sample still emits bitwise and opcodes"
+    echo "$non_strict_and_zero_disassembly"
+    exit 1
+fi
+
+run_and_capture_non_strict "$SCRIPT_DIR/sample_ast_opt_non_strict_bitwise_and_zero_impure_guard.mog" \
+    non_strict_and_zero_impure_output non_strict_and_zero_impure_status non_strict_and_zero_impure_disassembly non_strict_and_zero_impure_disassembly_status
+
+if [[ $non_strict_and_zero_impure_status -ne 0 || $non_strict_and_zero_impure_disassembly_status -ne 0 ]]; then
+    echo "[FAIL] non-strict bitwise-and-zero impure-guard sample failed"
+    echo "$non_strict_and_zero_impure_output"
+    echo "$non_strict_and_zero_impure_disassembly"
+    exit 1
+fi
+
+if [[ "$non_strict_and_zero_impure_output" != $'call\n0\ncall\n0' ]]; then
+    echo "[FAIL] non-strict bitwise-and-zero impure-guard sample produced unexpected output"
+    echo "$non_strict_and_zero_impure_output"
+    exit 1
+fi
+
+if ! grep -q "CALL" <<< "$non_strict_and_zero_impure_disassembly" || ! grep -q "BITWISE_AND" <<< "$non_strict_and_zero_impure_disassembly"; then
+    echo "[FAIL] non-strict bitwise-and-zero impure-guard sample dropped required call or bitwise and opcodes"
+    echo "$non_strict_and_zero_impure_disassembly"
+    exit 1
+fi
+
+run_and_capture_non_strict "$SCRIPT_DIR/sample_ast_opt_non_strict_bool_equality_type_guard.mog" \
+    non_strict_bool_type_guard_output non_strict_bool_type_guard_status non_strict_bool_type_guard_disassembly non_strict_bool_type_guard_disassembly_status
+
+if [[ $non_strict_bool_type_guard_status -ne 0 || $non_strict_bool_type_guard_disassembly_status -ne 0 ]]; then
+    echo "[FAIL] non-strict bool-equality type-guard sample failed"
+    echo "$non_strict_bool_type_guard_output"
+    echo "$non_strict_bool_type_guard_disassembly"
+    exit 1
+fi
+
+if [[ "$non_strict_bool_type_guard_output" != $'true\nfalse' ]]; then
+    echo "[FAIL] non-strict bool-equality type-guard sample produced unexpected output"
+    echo "$non_strict_bool_type_guard_output"
+    exit 1
+fi
+
+if ! grep -Eq "EQUAL|NOT_EQUAL" <<< "$non_strict_bool_type_guard_disassembly"; then
+    echo "[FAIL] non-strict bool-equality type-guard sample was rewritten despite non-bool operands"
+    echo "$non_strict_bool_type_guard_disassembly"
+    exit 1
+fi
+
+run_and_capture_non_strict "$SCRIPT_DIR/sample_ast_opt_non_strict_bitwise_and_zero_type_guard.mog" \
+    non_strict_and_zero_type_guard_output non_strict_and_zero_type_guard_status non_strict_and_zero_type_guard_disassembly non_strict_and_zero_type_guard_disassembly_status
+
+if [[ $non_strict_and_zero_type_guard_status -ne 0 || $non_strict_and_zero_type_guard_disassembly_status -ne 0 ]]; then
+    echo "[FAIL] non-strict bitwise-and-zero type-guard sample failed"
+    echo "$non_strict_and_zero_type_guard_output"
+    echo "$non_strict_and_zero_type_guard_disassembly"
+    exit 1
+fi
+
+if [[ "$non_strict_and_zero_type_guard_output" != "0" ]]; then
+    echo "[FAIL] non-strict bitwise-and-zero type-guard sample produced unexpected output"
+    echo "$non_strict_and_zero_type_guard_output"
+    exit 1
+fi
+
+if ! grep -q "BITWISE_AND" <<< "$non_strict_and_zero_type_guard_disassembly"; then
+    echo "[FAIL] non-strict bitwise-and-zero type-guard sample was rewritten across type promotion"
+    echo "$non_strict_and_zero_type_guard_disassembly"
     exit 1
 fi
 

@@ -1,0 +1,8 @@
+#!strict
+fn value() bool {
+    print("call")
+    return true
+}
+
+print(!!value())
+print(!(!false))
