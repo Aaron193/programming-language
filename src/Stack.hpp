@@ -20,30 +20,38 @@ class Stack {
     ~Stack() = default;
 
     void push(const T& value) {
+#ifndef NDEBUG
         if (m_top >= static_cast<int>(m_capacity) - 1) {
             throw std::overflow_error("Stack overflow.");
         }
+#endif
         m_data[++m_top] = value;
     }
 
     void push(T&& value) {
+#ifndef NDEBUG
         if (m_top >= static_cast<int>(m_capacity) - 1) {
             throw std::overflow_error("Stack overflow.");
         }
+#endif
         m_data[++m_top] = std::move(value);
     }
 
     T pop() {
+#ifndef NDEBUG
         if (m_top < 0) {
             throw std::underflow_error("Stack underflow.");
         }
+#endif
         return m_data[m_top--];
     }
 
     T popMove() {
+#ifndef NDEBUG
         if (m_top < 0) {
             throw std::underflow_error("Stack underflow.");
         }
+#endif
         return std::move(m_data[m_top--]);
     }
 
@@ -127,24 +135,36 @@ class Stack {
         }
     }
 
+    void setAtUnchecked(size_t index, const T& value) { m_data[index] = value; }
+
+    void setAtUnchecked(size_t index, T&& value) {
+        m_data[index] = std::move(value);
+    }
+
     void popN(size_t count) {
+#ifndef NDEBUG
         if (count > size()) {
             throw std::underflow_error("Stack underflow.");
         }
+#endif
         m_top -= static_cast<int>(count);
     }
 
     void replaceTop(const T& value) {
+#ifndef NDEBUG
         if (m_top < 0) {
             throw std::underflow_error("Stack underflow.");
         }
+#endif
         m_data[m_top] = value;
     }
 
     void replaceTop(T&& value) {
+#ifndef NDEBUG
         if (m_top < 0) {
             throw std::underflow_error("Stack underflow.");
         }
+#endif
         m_data[m_top] = std::move(value);
     }
 
@@ -153,17 +173,21 @@ class Stack {
     void replaceTopUnchecked(T&& value) { m_data[m_top] = std::move(value); }
 
     void replaceTopPair(const T& value) {
+#ifndef NDEBUG
         if (m_top < 1) {
             throw std::underflow_error("Stack underflow.");
         }
+#endif
         m_data[m_top - 1] = value;
         --m_top;
     }
 
     void replaceTopPair(T&& value) {
+#ifndef NDEBUG
         if (m_top < 1) {
             throw std::underflow_error("Stack underflow.");
         }
+#endif
         m_data[m_top - 1] = std::move(value);
         --m_top;
     }

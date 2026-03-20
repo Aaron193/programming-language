@@ -78,6 +78,7 @@ struct FunctionObject : GcObject {
     std::string name;
     std::vector<std::string> parameters;
     std::unique_ptr<Chunk> chunk;
+    uint8_t arity = 0;
     uint8_t upvalueCount = 0;
 
     void trace(GC& gc) override;
@@ -254,6 +255,8 @@ enum OpCode {
     INT_TO_FLOAT,
     FLOAT_TO_INT,
     INT_TO_STR,
+    CONCAT_STRING_LITERAL_INT,
+    GET_INDEX_STRING_LITERAL_INT,
     CHECK_INSTANCE_TYPE,
     INT_NEGATE,
     ITER_INIT,

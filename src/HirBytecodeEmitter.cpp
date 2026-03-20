@@ -337,6 +337,51 @@ const HirStmt* HirBytecodeEmitter::stmtPtr(
     return id ? &m_module.stmt(*id) : nullptr;
 }
 
+namespace {
+bool isStringifyCall(const HirModule& module, const HirExpr& expr) {
+    const auto* call = std::get_if<HirCallExpr>(&expr.value);
+    if (call == nullptr || call->arguments.size() != 1) {
+        return false;
+    }
+
+    const auto* callee = std::get_if<HirBindingExpr>(
+        &module.expr(*call->callee).value);
+    if (callee == nullptr) {
+        return false;
+    }
+
+    std::string_view calleeName(callee->name.start(), callee->name.length());
+    if (calleeName != "str" && calleeName != "toString") {
+        return false;
+    }
+
+    TypeRef argType = module.expr(call->arguments.front()).node.type;
+    return argType && (argType->isInteger() || argType->isFloat());
+}
+
+bool matchStringLiteralIntConcat(const HirModule& module, const HirExpr& expr,
+                                 std::string& outPrefix,
+                                 HirExprId& outArgument) {
+    const auto* binary = std::get_if<HirBinaryExpr>(&expr.value);
+    if (binary == nullptr || binary->op.type() != TokenType::PLUS) {
+        return false;
+    }
+
+    const auto* leftLiteral =
+        std::get_if<HirLiteralExpr>(&module.expr(*binary->left).value);
+    if (leftLiteral == nullptr || leftLiteral->token.type() != TokenType::STRING ||
+        !isStringifyCall(module, module.expr(*binary->right))) {
+        return false;
+    }
+
+    std::string token(leftLiteral->token.start(), leftLiteral->token.length());
+    outPrefix = token.substr(1, token.length() - 2);
+    const auto& call = std::get<HirCallExpr>(module.expr(*binary->right).value);
+    outArgument = call.arguments.front();
+    return true;
+}
+}  // namespace
+
 void HirBytecodeEmitter::emitArguments(const std::vector<HirExprId>& arguments,
                                        size_t line, uint8_t& argCount) {
     argCount = 0;
@@ -424,6 +469,7 @@ Compiler::CompiledFunction HirBytecodeEmitter::compileFunction(
     function->name = name;
     function->parameters = std::move(parameterNames);
     function->chunk = std::move(functionChunk);
+    function->arity = static_cast<uint8_t>(function->parameters.size());
     function->upvalueCount =
         static_cast<uint8_t>(functionContext.upvalues.size());
     return Compiler::CompiledFunction{
@@ -1117,6 +1163,22 @@ void HirBytecodeEmitter::emitExpr(const HirExpr& expr) {
                     return;
                 }
 
+                if (value.op.type() == TokenType::PLUS) {
+                    std::string prefix;
+                    HirExprId argumentId{};
+                    if (matchStringLiteralIntConcat(m_module, expr, prefix,
+                                                    argumentId)) {
+                        emitExpr(m_module.expr(argumentId));
+                        m_compiler.popExprType();
+                        emitBytes(OpCode::CONCAT_STRING_LITERAL_INT,
+                                  m_compiler.makeConstant(
+                                      m_compiler.makeStringValue(prefix)),
+                                  expr.node.line);
+                        m_compiler.pushExprType(nodeType(expr.node));
+                        return;
+                    }
+                }
+
                 emitExpr(m_module.expr(*value.left));
                 TypeRef leftType = m_compiler.popExprType();
                 emitExpr(m_module.expr(*value.right));
@@ -1312,11 +1374,26 @@ void HirBytecodeEmitter::emitExpr(const HirExpr& expr) {
                 }
                 m_compiler.pushExprType(nodeType(expr.node));
             } else if constexpr (std::is_same_v<T, HirIndexExpr>) {
-                emitExpr(m_module.expr(*value.object));
-                m_compiler.popExprType();
-                emitExpr(m_module.expr(*value.index));
-                m_compiler.popExprType();
-                emitByte(OpCode::GET_INDEX, expr.node.line);
+                std::string prefix;
+                HirExprId argumentId{};
+                if (matchStringLiteralIntConcat(m_module,
+                                                m_module.expr(*value.index),
+                                                prefix, argumentId)) {
+                    emitExpr(m_module.expr(*value.object));
+                    m_compiler.popExprType();
+                    emitExpr(m_module.expr(argumentId));
+                    m_compiler.popExprType();
+                    emitBytes(OpCode::GET_INDEX_STRING_LITERAL_INT,
+                              m_compiler.makeConstant(
+                                  m_compiler.makeStringValue(prefix)),
+                              expr.node.line);
+                } else {
+                    emitExpr(m_module.expr(*value.object));
+                    m_compiler.popExprType();
+                    emitExpr(m_module.expr(*value.index));
+                    m_compiler.popExprType();
+                    emitByte(OpCode::GET_INDEX, expr.node.line);
+                }
                 m_compiler.pushExprType(nodeType(expr.node));
             } else if constexpr (std::is_same_v<T, HirCastExpr>) {
                 emitExpr(m_module.expr(*value.expression));

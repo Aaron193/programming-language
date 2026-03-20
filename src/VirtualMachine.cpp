@@ -1459,9 +1459,9 @@ Status VirtualMachine::callClosure(ClosureObject* closure,
                                    uint8_t argumentCount,
                                    InstanceObject* receiver) {
     auto function = closure->function;
-    if (function->parameters.size() != argumentCount) {
+    if (function->arity != argumentCount) {
         return runtimeError("Function '" + function->name + "' expected " +
-                            std::to_string(function->parameters.size()) +
+                            std::to_string(function->arity) +
                             " arguments but got " +
                             std::to_string(static_cast<int>(argumentCount)) +
                             ".");
@@ -1943,7 +1943,7 @@ Status VirtualMachine::callValue(Value callee, uint8_t argumentCount,
         instance->fieldSlots.resize(instance->klass->fieldNames.size());
         instance->initializedFieldSlots.assign(
             instance->klass->fieldNames.size(), 0);
-        m_stack.setAt(calleeIndex, Value(instance));
+        m_stack.setAtUnchecked(calleeIndex, Value(instance));
         return Status::OK;
     }
 
@@ -2198,6 +2198,8 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
         VM_OPCODE_ADDR(INT_TO_FLOAT),
         VM_OPCODE_ADDR(FLOAT_TO_INT),
         VM_OPCODE_ADDR(INT_TO_STR),
+        VM_OPCODE_ADDR(CONCAT_STRING_LITERAL_INT),
+        VM_OPCODE_ADDR(GET_INDEX_STRING_LITERAL_INT),
         VM_OPCODE_ADDR(CHECK_INSTANCE_TYPE),
         VM_OPCODE_ADDR(INT_NEGATE),
         VM_OPCODE_ADDR(ITER_INIT),
@@ -2788,8 +2790,8 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
         VM_CASE(SET_LOCAL) {
             uint8_t slot = readByte();
-            m_stack.setAt(currentFrame().slotBase + slot,
-                          m_stack.peekUnchecked(0));
+            m_stack.setAtUnchecked(currentFrame().slotBase + slot,
+                                   m_stack.peekUnchecked(0));
             DISPATCH();
         }
 
@@ -2810,7 +2812,8 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
             if (upvalue->isClosed) {
                 upvalue->closed = m_stack.peekUnchecked(0);
             } else {
-                m_stack.setAt(upvalue->stackIndex, m_stack.peekUnchecked(0));
+                m_stack.setAtUnchecked(upvalue->stackIndex,
+                                       m_stack.peekUnchecked(0));
             }
             DISPATCH();
         }
@@ -3296,7 +3299,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                                 instance->klass->fieldNames.size());
                             instance->initializedFieldSlots.assign(
                                 instance->klass->fieldNames.size(), 0);
-                            m_stack.setAt(calleeIndex, Value(instance));
+                            m_stack.setAtUnchecked(calleeIndex, Value(instance));
                         }
                         break;
                     }
@@ -3746,7 +3749,8 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                     break;
             }
 
-            m_stack.setAt(currentFrame().slotBase + slot, std::move(nextValue));
+            m_stack.setAtUnchecked(currentFrame().slotBase + slot,
+                                   std::move(nextValue));
             DISPATCH();
         }
 
@@ -4230,6 +4234,67 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 DISPATCH();
             }
             return runtimeError("Cannot cast value to str.");
+        }
+
+        VM_CASE(CONCAT_STRING_LITERAL_INT) {
+            const std::string& prefix = readConstant().asString();
+            Value value = m_stack.pop();
+
+            std::string result;
+            result.reserve(prefix.size() + 24);
+            result += prefix;
+
+            if (value.isSignedInt()) {
+                appendFastInteger(result, value.asSignedInt());
+            } else if (value.isUnsignedInt()) {
+                appendFastInteger(result, value.asUnsignedInt());
+            } else if (value.isNumber()) {
+                result += std::to_string(value.asNumber());
+            } else {
+                return runtimeError(
+                    "String concatenation suffix must be numeric.");
+            }
+
+            m_stack.push(makeStringValue(std::move(result)));
+            DISPATCH();
+        }
+
+        VM_CASE(GET_INDEX_STRING_LITERAL_INT) {
+            const std::string& prefix = readConstant().asString();
+            Value suffix = m_stack.pop();
+            const Value& container = m_stack.topUnchecked();
+
+            if (!container.isDict()) {
+                return runtimeError(
+                    "String-key literal lookup is only supported on dict.");
+            }
+
+            std::string key;
+            key.reserve(prefix.size() + 24);
+            key += prefix;
+            if (suffix.isSignedInt()) {
+                appendFastInteger(key, suffix.asSignedInt());
+            } else if (suffix.isUnsignedInt()) {
+                appendFastInteger(key, suffix.asUnsignedInt());
+            } else if (suffix.isNumber()) {
+                key += std::to_string(suffix.asNumber());
+            } else {
+                return runtimeError("Dictionary key suffix must be numeric.");
+            }
+
+            StringObject tempKey;
+            tempKey.value = std::move(key);
+            tempKey.hashValue = std::hash<std::string>{}(tempKey.value);
+            tempKey.isInterned = false;
+
+            auto dict = container.asDict();
+            auto it = dict->map.find(Value(&tempKey));
+            if (it == dict->map.end()) {
+                return runtimeError("Dictionary key not found.");
+            }
+
+            m_stack.replaceTopUnchecked(it->second);
+            DISPATCH();
         }
 
         VM_CASE(CHECK_INSTANCE_TYPE) {
