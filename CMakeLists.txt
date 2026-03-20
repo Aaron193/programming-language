@@ -65,6 +65,14 @@ target_include_directories(ast_frontend_regression
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 
+add_executable(frontend_benchmark
+    tests/frontend_benchmark.cpp
+    ${AST_PARSER_SMOKE_SOURCES}
+)
+target_include_directories(frontend_benchmark
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+
 add_library(examples_math_package MODULE
     packages/examples/math/package.cpp
 )

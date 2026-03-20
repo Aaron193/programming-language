@@ -154,5 +154,6 @@ class VirtualMachine {
                      bool traceEnabled = false, bool disassembleEnabled = false,
                      const std::string& sourcePath = "",
                      bool strictMode = false,
-                     bool frontendTimingsEnabled = false);
+                     bool frontendTimingsEnabled = false,
+                     bool frontendTimingsJsonEnabled = false);
 };

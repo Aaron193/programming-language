@@ -91,6 +91,7 @@ class Compiler {
     std::vector<std::string> m_packageSearchPaths;
     std::string m_sourcePath;
     AstFrontendResult::Timings m_lastFrontendTimings;
+    AstFrontendModuleGraphCache m_frontendModuleGraph;
     bool m_strictMode = false;
     CompilerEmitterMode m_emitterMode = CompilerEmitterMode::Auto;
     bool m_hadError = false;

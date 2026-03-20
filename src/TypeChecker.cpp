@@ -22,9 +22,7 @@ bool TypeChecker::check(
     AstParser parser(source);
     out.clear();
     if (!parser.parseModule(module)) {
-        for (const auto& error : parser.errors()) {
-            out.push_back(TypeError{error.span, error.message});
-        }
+        out = parser.errors();
         if (outMetadata) {
             *outMetadata = AstBindingMetadata{};
         }

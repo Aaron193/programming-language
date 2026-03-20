@@ -202,7 +202,33 @@ static void printFrontendTimings(const AstFrontendResult::Timings& timings) {
               << " check=" << timings.initialTypecheckMicros << "us"
               << " hir=" << timings.hirLowerMicros << "us"
               << " hir-optimize=" << timings.hirOptimizeMicros << "us"
+              << " cache-hit=" << timings.moduleCacheHits
+              << " cache-miss=" << timings.moduleCacheMisses
+              << " cache-rebuild=" << timings.moduleCacheRebuilds
+              << " diagnostics=" << timings.diagnosticCount
+              << " interned=" << timings.internedIdentifierCount
               << " total=" << timings.totalMicros << "us" << std::endl;
+}
+
+static void printFrontendTimingsJson(const AstFrontendResult::Timings& timings) {
+    std::cerr << "{"
+              << "\"parseMicros\":" << timings.parseMicros << ","
+              << "\"symbolCollectionMicros\":" << timings.symbolCollectionMicros
+              << ","
+              << "\"importResolutionMicros\":" << timings.importResolutionMicros
+              << ","
+              << "\"initialBindMicros\":" << timings.initialBindMicros << ","
+              << "\"initialTypecheckMicros\":" << timings.initialTypecheckMicros
+              << ","
+              << "\"hirLowerMicros\":" << timings.hirLowerMicros << ","
+              << "\"hirOptimizeMicros\":" << timings.hirOptimizeMicros << ","
+              << "\"moduleCacheHits\":" << timings.moduleCacheHits << ","
+              << "\"moduleCacheMisses\":" << timings.moduleCacheMisses << ","
+              << "\"moduleCacheRebuilds\":" << timings.moduleCacheRebuilds << ","
+              << "\"diagnosticCount\":" << timings.diagnosticCount << ","
+              << "\"internedIdentifierCount\":" << timings.internedIdentifierCount
+              << ","
+              << "\"totalMicros\":" << timings.totalMicros << "}" << std::endl;
 }
 
 static bool toArrayIndex(const Value& value, size_t& index) {
@@ -4281,7 +4307,8 @@ Status VirtualMachine::interpret(std::string_view source, bool printReturnValue,
                                  bool traceEnabled, bool disassembleEnabled,
                                  const std::string& sourcePath,
                                  bool strictMode,
-                                 bool frontendTimingsEnabled) {
+                                 bool frontendTimingsEnabled,
+                                 bool frontendTimingsJsonEnabled) {
     Chunk chunk;
     resetRuntimeState();
     m_defaultStrictMode = strictMode || hasStrictDirective(source);
@@ -4297,6 +4324,9 @@ Status VirtualMachine::interpret(std::string_view source, bool printReturnValue,
 
     if (frontendTimingsEnabled) {
         printFrontendTimings(m_compiler.lastFrontendTimings());
+    }
+    if (frontendTimingsJsonEnabled) {
+        printFrontendTimingsJson(m_compiler.lastFrontendTimings());
     }
 
     if (m_disassembleEnabled) {

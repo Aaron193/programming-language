@@ -1,9 +1,11 @@
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -37,6 +39,16 @@ std::string readFile(const std::filesystem::path& path) {
 
     return std::string((std::istreambuf_iterator<char>(input)),
                        std::istreambuf_iterator<char>());
+}
+
+bool writeFile(const std::filesystem::path& path, std::string_view contents) {
+    std::ofstream output(path);
+    if (!output) {
+        return false;
+    }
+
+    output << contents;
+    return output.good();
 }
 
 std::string captureChunkDisassembly(const Chunk& chunk) {
@@ -801,11 +813,11 @@ bool checkTypedImportFrontendRegression(const std::filesystem::path& repoRoot) {
         repoRoot / "tests/sample_import_frontend_typed.mog";
     const std::string source = readFile(sourcePath);
 
-    AstFrontendImportCache importCache;
+    AstFrontendModuleGraphCache moduleGraphCache;
     AstFrontendOptions options;
     options.sourcePath = sourcePath.string();
     options.packageSearchPaths = {(repoRoot / "build/packages").string()};
-    options.importCache = &importCache;
+    options.moduleGraphCache = &moduleGraphCache;
 
     AstFrontendResult frontend;
     std::vector<TypeError> errors;
@@ -906,11 +918,11 @@ bool checkNativeHandleTypeFrontendRegression(
         repoRoot / "tests/sample_import_native_handle_frontend_typed.mog";
     const std::string source = readFile(sourcePath);
 
-    AstFrontendImportCache importCache;
+    AstFrontendModuleGraphCache moduleGraphCache;
     AstFrontendOptions options;
     options.sourcePath = sourcePath.string();
     options.packageSearchPaths = {(repoRoot / "build/packages").string()};
-    options.importCache = &importCache;
+    options.moduleGraphCache = &moduleGraphCache;
 
     AstFrontendResult frontend;
     std::vector<TypeError> errors;
@@ -983,11 +995,11 @@ bool checkTypedImportDiagnosticRegression(const std::filesystem::path& repoRoot)
                                        const std::string& needle,
                                        const std::string& description) {
         const std::string source = readFile(path);
-        AstFrontendImportCache importCache;
+        AstFrontendModuleGraphCache moduleGraphCache;
         AstFrontendOptions options;
         options.sourcePath = path.string();
         options.packageSearchPaths = {(repoRoot / "build/packages").string()};
-        options.importCache = &importCache;
+        options.moduleGraphCache = &moduleGraphCache;
 
         AstFrontendResult frontend;
         std::vector<TypeError> errors;
@@ -1040,6 +1052,121 @@ bool checkTypedImportDiagnosticRegression(const std::filesystem::path& repoRoot)
     }
 
     std::cout << "[PASS] typed import diagnostic regression\n";
+    return true;
+}
+
+bool checkStructuredDiagnosticRegression(const std::filesystem::path& repoRoot) {
+    const std::filesystem::path path =
+        repoRoot / "tests/types/errors/import_cycle_frontend.mog";
+    const std::string source = readFile(path);
+    AstFrontendModuleGraphCache moduleGraphCache;
+    AstFrontendOptions options;
+    options.sourcePath = path.string();
+    options.moduleGraphCache = &moduleGraphCache;
+
+    AstFrontendResult frontend;
+    std::vector<TypeError> errors;
+    const AstFrontendBuildStatus status = buildAstFrontend(
+        source, options, AstFrontendMode::StrictChecked, errors, frontend);
+    const bool sawRootImportSpecifier =
+        !errors.empty() &&
+        std::any_of(errors.front().importTrace.begin(),
+                    errors.front().importTrace.end(),
+                    [](const FrontendImportTraceFrame& frame) {
+                        return frame.rawSpecifier == "../../modules/cycle_a.mog";
+                    });
+    if (!require(status == AstFrontendBuildStatus::SemanticError,
+                 "structured diagnostic sample should fail semantic analysis") ||
+        !require(!errors.empty(),
+                 "structured diagnostic sample should report errors") ||
+        !require(errors.front().code == "import.cycle",
+                 "structured diagnostic sample should keep the import cycle code") ||
+        !require(errors.front().line == 2 && errors.front().column == 21,
+                 "structured diagnostic sample should keep the import-site span") ||
+        !require(!errors.front().importTrace.empty(),
+                 "structured diagnostic sample should carry an import trace") ||
+        !require(sawRootImportSpecifier,
+                 "structured diagnostic sample should report the raw import specifier")) {
+        return false;
+    }
+
+    std::cout << "[PASS] structured diagnostic regression\n";
+    return true;
+}
+
+bool checkModuleGraphCacheRegression() {
+    const std::filesystem::path tempRoot =
+        std::filesystem::temp_directory_path() / "mog_frontend_cache_regression";
+    std::error_code ec;
+    std::filesystem::create_directories(tempRoot, ec);
+    if (!require(!ec, "module graph cache regression should create its temp directory")) {
+        return false;
+    }
+
+    const std::filesystem::path depPath = tempRoot / "dep.mog";
+    const std::filesystem::path importerPath = tempRoot / "main.mog";
+    if (!require(writeFile(depPath, "#!strict\nconst Value i32 = 1i32\n"),
+                 "module graph cache regression should write the dependency sample") ||
+        !require(writeFile(importerPath,
+                           "#!strict\nconst { Value: i32 } = @import(\"./dep.mog\")\nprint(Value)\n"),
+                 "module graph cache regression should write the importer sample")) {
+        return false;
+    }
+
+    AstFrontendModuleGraphCache moduleGraphCache;
+    AstFrontendOptions options;
+    options.sourcePath = importerPath.string();
+    options.moduleGraphCache = &moduleGraphCache;
+
+    const std::string importerSource = readFile(importerPath);
+    AstFrontendResult firstFrontend;
+    std::vector<TypeError> errors;
+    const AstFrontendBuildStatus firstStatus =
+        buildAstFrontend(importerSource, options, AstFrontendMode::StrictChecked,
+                         errors, firstFrontend);
+    if (!require(firstStatus == AstFrontendBuildStatus::Success,
+                 "module graph cache regression first build should succeed") ||
+        !require(firstFrontend.timings.moduleCacheMisses >= 1,
+                 "module graph cache regression first build should miss the cache")) {
+        return false;
+    }
+
+    AstFrontendResult secondFrontend;
+    errors.clear();
+    const AstFrontendBuildStatus secondStatus =
+        buildAstFrontend(importerSource, options, AstFrontendMode::StrictChecked,
+                         errors, secondFrontend);
+    if (!require(secondStatus == AstFrontendBuildStatus::Success,
+                 "module graph cache regression second build should succeed") ||
+        !require(secondFrontend.timings.moduleCacheHits >= 1,
+                 "module graph cache regression second build should reuse the cache")) {
+        return false;
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    if (!require(writeFile(depPath, "#!strict\nconst Value str = \"oops\"\n"),
+                 "module graph cache regression should rewrite the dependency sample")) {
+        return false;
+    }
+
+    AstFrontendResult thirdFrontend;
+    errors.clear();
+    const AstFrontendBuildStatus thirdStatus =
+        buildAstFrontend(importerSource, options, AstFrontendMode::StrictChecked,
+                         errors, thirdFrontend);
+    if (!require(thirdStatus == AstFrontendBuildStatus::SemanticError,
+                 "module graph cache regression third build should fail after invalidation") ||
+        !require(thirdFrontend.timings.moduleCacheRebuilds >= 1,
+                 "module graph cache regression third build should rebuild stale modules") ||
+        !require(!errors.empty(),
+                 "module graph cache regression third build should report errors") ||
+        !require(errors.front().message.find("cannot assign imported value") !=
+                     std::string::npos,
+                 "module graph cache regression third build should report the updated type mismatch")) {
+        return false;
+    }
+
+    std::cout << "[PASS] module graph cache regression\n";
     return true;
 }
 
@@ -1129,6 +1256,12 @@ int main() {
         return 1;
     }
     if (!checkTypedImportDiagnosticRegression(repoRoot)) {
+        return 1;
+    }
+    if (!checkStructuredDiagnosticRegression(repoRoot)) {
+        return 1;
+    }
+    if (!checkModuleGraphCacheRegression()) {
         return 1;
     }
     if (!checkNewlineOptimizationRegression(repoRoot)) {

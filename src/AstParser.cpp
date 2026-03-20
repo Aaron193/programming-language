@@ -177,7 +177,7 @@ void AstParser::errorAtLine(size_t line, const std::string& message) {
 
 void AstParser::errorAtSpan(const SourceSpan& span, const std::string& message) {
     m_hadError = true;
-    m_errors.push_back(ParseError{span, message});
+    m_errors.push_back(ParseError{span, message, "parse.error"});
 }
 
 void AstParser::rejectStraySemicolon() {

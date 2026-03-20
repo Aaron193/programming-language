@@ -11,23 +11,47 @@
 #include "Ast.hpp"
 #include "Hir.hpp"
 #include "AstSemanticAnalyzer.hpp"
+#include "FrontendInterner.hpp"
 #include "SourceLocation.hpp"
 #include "TypeChecker.hpp"
 
-struct AstFrontendImportCache {
-    std::unordered_map<std::string, AstImportedModuleInterface> resolvedModules;
+enum class AstFrontendMode {
+    StrictChecked,
+    LoweringOnly,
+};
+
+struct FrontendFileFingerprint {
+    bool valid = false;
+    uint64_t size = 0;
+    int64_t modifiedNanos = 0;
+};
+
+struct AstFrontendModuleGraphNode {
+    AstFrontendMode mode = AstFrontendMode::StrictChecked;
+    FrontendFileFingerprint fingerprint;
+    AstImportedModuleInterface importedInterface;
+    std::vector<std::string> dependencies;
+    std::vector<TypeError> diagnostics;
+    bool buildSucceeded = false;
+};
+
+struct AstFrontendModuleGraphStats {
+    uint64_t hits = 0;
+    uint64_t misses = 0;
+    uint64_t rebuilds = 0;
+};
+
+struct AstFrontendModuleGraphCache {
+    std::unordered_map<std::string, AstFrontendModuleGraphNode> nodes;
     std::unordered_set<std::string> modulesInProgress;
+    FrontendIdentifierInterner identifierInterner;
+    AstFrontendModuleGraphStats stats;
 };
 
 struct AstFrontendOptions {
     std::string sourcePath;
     std::vector<std::string> packageSearchPaths;
-    AstFrontendImportCache* importCache = nullptr;
-};
-
-enum class AstFrontendMode {
-    StrictChecked,
-    LoweringOnly,
+    AstFrontendModuleGraphCache* moduleGraphCache = nullptr;
 };
 
 enum class AstFrontendBuildStatus {
@@ -45,6 +69,11 @@ struct AstFrontendResult {
         uint64_t initialTypecheckMicros = 0;
         uint64_t hirLowerMicros = 0;
         uint64_t hirOptimizeMicros = 0;
+        uint64_t moduleCacheHits = 0;
+        uint64_t moduleCacheMisses = 0;
+        uint64_t moduleCacheRebuilds = 0;
+        uint64_t diagnosticCount = 0;
+        uint64_t internedIdentifierCount = 0;
         uint64_t totalMicros = 0;
     };
 

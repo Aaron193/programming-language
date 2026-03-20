@@ -8,28 +8,12 @@
 #include <vector>
 
 #include "Ast.hpp"
+#include "FrontendDiagnostic.hpp"
 #include "Scanner.hpp"
 
 class AstParser {
    public:
-    struct ParseError {
-        size_t line = 0;
-        size_t column = 1;
-        SourceSpan span = makePointSpan(1, 1);
-        std::string message;
-
-        ParseError() = default;
-        ParseError(size_t lineValue, std::string messageValue)
-            : line(lineValue == 0 ? 1 : lineValue),
-              column(1),
-              span(makePointSpan(lineValue == 0 ? 1 : lineValue, 1)),
-              message(std::move(messageValue)) {}
-        ParseError(SourceSpan spanValue, std::string messageValue)
-            : line(spanValue.line()),
-              column(spanValue.column()),
-              span(std::move(spanValue)),
-              message(std::move(messageValue)) {}
-    };
+    using ParseError = FrontendDiagnostic;
 
     explicit AstParser(std::string_view source);
 

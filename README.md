@@ -68,7 +68,7 @@ print(1
 - Runtime error reporting with source line numbers
 - Runtime call stack traces
 - Compile error reporting with source line numbers
-- Optional diagnostics flags (`--trace`, `--show-return`, `--disassemble`, `--frontend-timings`)
+- Optional diagnostics flags (`--trace`, `--show-return`, `--disassemble`, `--frontend-timings`, `--frontend-timings-json`)
 - Interactive REPL when no source file is provided
 
 ## Built-in Native Functions
@@ -114,7 +114,14 @@ Inspect frontend phase timings while compiling:
 ```
 
 The timing summary reports parse, symbol collection, import resolution, bind,
-type-check, HIR lowering, HIR optimization, and total frontend time.
+type-check, HIR lowering, HIR optimization, cache stats, and total frontend
+time.
+
+Emit the same frontend metrics as JSON:
+
+```bash
+./build/interpreter --frontend-timings-json path/to/program.mog
+```
 
 Or start REPL:
 
@@ -160,6 +167,7 @@ Run additional suites:
 ./tests/test_package_validation.sh
 ./tests/test_syntax_breakage.sh
 ./tests/test_newline_syntax.sh
+./tests/test_frontend_benchmark.sh
 ```
 
 ## Benchmarks
@@ -206,6 +214,14 @@ Compare Mog benchmarks against the Python equivalents:
   --label-b python \
   --iterations 7 \
   --warmup 1
+```
+
+Measure frontend compile-time only with the dedicated helper:
+
+```bash
+./build/frontend_benchmark tests/sample_var.mog
+./build/frontend_benchmark --json tests/sample_var.mog
+./benchmarks/compare_frontend_benchmarks.sh --iterations 7 --warmup 1
 ```
 
 ## Profiling

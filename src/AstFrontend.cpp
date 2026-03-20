@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <string>
@@ -34,10 +35,7 @@ bool hasStrictDirective(std::string_view source) {
 
 void appendParserErrors(const AstParser& parser,
                         std::vector<TypeError>& outErrors) {
-    outErrors.clear();
-    for (const auto& error : parser.errors()) {
-        outErrors.push_back(TypeError{error.span, error.message});
-    }
+    outErrors = parser.errors();
 }
 
 TypeRef nodeTypeOrAny(const AstSemanticModel& model, AstNodeId nodeId) {
@@ -50,9 +48,10 @@ TypeRef nodeTypeOrAny(const AstSemanticModel& model, AstNodeId nodeId) {
 }
 
 bool validateNativePackageImport(const ImportTarget& importTarget,
+                                 const SourceSpan& importSpan,
                                  const NativePackageDescriptor& descriptor,
-                                 std::string& outError) {
-    outError.clear();
+                                 TypeError& outError) {
+    outError = TypeError{};
 
     if (importTarget.kind != ImportTargetKind::NATIVE_PACKAGE) {
         return true;
@@ -60,16 +59,111 @@ bool validateNativePackageImport(const ImportTarget& importTarget,
 
     if (descriptor.packageNamespace != importTarget.packageNamespace ||
         descriptor.packageName != importTarget.packageName) {
-        outError = "Native package '" + importTarget.rawSpecifier +
-                   "' declared '" + descriptor.packageId +
-                   "' in registration metadata.";
+        outError = TypeError{importSpan,
+                             "Native package '" + importTarget.rawSpecifier +
+                                 "' declared '" + descriptor.packageId +
+                                 "' in registration metadata.",
+                             "import.native_package_metadata_mismatch"};
         return false;
     }
 
     return true;
 }
 
-void collectExportedSymbolTypes(AstFrontendResult& frontend) {
+const std::string& internLexeme(FrontendIdentifierInterner* interner,
+                                const Token& token,
+                                std::string& fallbackStorage) {
+    fallbackStorage = tokenLexeme(token);
+    if (interner == nullptr) {
+        return fallbackStorage;
+    }
+
+    return interner->value(interner->intern(fallbackStorage));
+}
+
+FrontendFileFingerprint fingerprintForPath(const std::string& path) {
+    FrontendFileFingerprint fingerprint;
+    std::error_code ec;
+    const auto fileSize = std::filesystem::file_size(path, ec);
+    if (ec) {
+        return fingerprint;
+    }
+
+    const auto writeTime = std::filesystem::last_write_time(path, ec);
+    if (ec) {
+        return fingerprint;
+    }
+
+    fingerprint.valid = true;
+    fingerprint.size = static_cast<uint64_t>(fileSize);
+    fingerprint.modifiedNanos = writeTime.time_since_epoch().count();
+    return fingerprint;
+}
+
+bool fingerprintMatches(const FrontendFileFingerprint& fingerprint,
+                        const std::string& path) {
+    if (!fingerprint.valid) {
+        return false;
+    }
+
+    const FrontendFileFingerprint current = fingerprintForPath(path);
+    return current.valid && current.size == fingerprint.size &&
+           current.modifiedNanos == fingerprint.modifiedNanos;
+}
+
+bool moduleGraphNodeUpToDate(const AstFrontendModuleGraphCache& cache,
+                             const std::string& canonicalId,
+                             std::unordered_set<std::string>& visiting) {
+    auto nodeIt = cache.nodes.find(canonicalId);
+    if (nodeIt == cache.nodes.end()) {
+        return false;
+    }
+
+    if (!visiting.emplace(canonicalId).second) {
+        return true;
+    }
+
+    const auto& node = nodeIt->second;
+    if (!fingerprintMatches(node.fingerprint,
+                            node.importedInterface.importTarget.resolvedPath)) {
+        visiting.erase(canonicalId);
+        return false;
+    }
+
+    for (const auto& dependency : node.dependencies) {
+        if (!moduleGraphNodeUpToDate(cache, dependency, visiting)) {
+            visiting.erase(canonicalId);
+            return false;
+        }
+    }
+
+    visiting.erase(canonicalId);
+    return true;
+}
+
+std::vector<std::string> collectDependencyIds(const AstFrontendResult& frontend) {
+    std::vector<std::string> dependencies;
+    dependencies.reserve(frontend.importedModules.size());
+    for (const auto& [nodeId, importedModule] : frontend.importedModules) {
+        (void)nodeId;
+        dependencies.push_back(importedModule.importTarget.canonicalId);
+    }
+
+    std::sort(dependencies.begin(), dependencies.end());
+    dependencies.erase(std::unique(dependencies.begin(), dependencies.end()),
+                       dependencies.end());
+    return dependencies;
+}
+
+void appendImportTrace(std::vector<TypeError>& diagnostics,
+                       const FrontendImportTraceFrame& frame) {
+    for (auto& diagnostic : diagnostics) {
+        diagnostic.addImportTrace(frame);
+    }
+}
+
+void collectExportedSymbolTypes(AstFrontendResult& frontend,
+                                FrontendIdentifierInterner* interner) {
     frontend.semanticModel.exportedSymbolTypes.clear();
 
     for (const auto& item : frontend.module.items) {
@@ -81,8 +175,9 @@ void collectExportedSymbolTypes(AstFrontendResult& frontend) {
             [&](const auto& value) {
                 using T = std::decay_t<decltype(value)>;
                 if constexpr (std::is_same_v<T, AstFunctionDecl>) {
-                    const std::string name =
-                        std::string(value.name.start(), value.name.length());
+                    std::string fallbackName;
+                    const std::string& name =
+                        internLexeme(interner, value.name, fallbackName);
                     if (!isPublicSymbolName(name)) {
                         return;
                     }
@@ -100,8 +195,9 @@ void collectExportedSymbolTypes(AstFrontendResult& frontend) {
                     frontend.semanticModel.exportedSymbolTypes[name] =
                         exportedType;
                 } else if constexpr (std::is_same_v<T, AstClassDecl>) {
-                    const std::string name =
-                        std::string(value.name.start(), value.name.length());
+                    std::string fallbackName;
+                    const std::string& name =
+                        internLexeme(interner, value.name, fallbackName);
                     if (!isPublicSymbolName(name)) {
                         return;
                     }
@@ -123,8 +219,9 @@ void collectExportedSymbolTypes(AstFrontendResult& frontend) {
                         return;
                     }
 
-                    const std::string name =
-                        std::string(varDecl->name.start(), varDecl->name.length());
+                    std::string fallbackName;
+                    const std::string& name =
+                        internLexeme(interner, varDecl->name, fallbackName);
                     if (!isPublicSymbolName(name)) {
                         return;
                     }
@@ -138,21 +235,40 @@ void collectExportedSymbolTypes(AstFrontendResult& frontend) {
 }
 
 bool buildImportedModuleInterface(const ImportTarget& importTarget,
+                                  const SourceSpan& importSpan,
                                   const AstFrontendOptions& options,
                                   AstFrontendMode mode,
-                                  AstFrontendImportCache& cache,
+                                  AstFrontendModuleGraphCache& cache,
                                   AstImportedModuleInterface& outInterface,
-                                  std::string& outError) {
-    outError.clear();
+                                  std::vector<TypeError>& outDiagnostics) {
+    outDiagnostics.clear();
 
-    auto cachedIt = cache.resolvedModules.find(importTarget.canonicalId);
-    if (cachedIt != cache.resolvedModules.end()) {
-        outInterface = cachedIt->second;
-        return true;
+    auto cachedIt = cache.nodes.find(importTarget.canonicalId);
+    if (cachedIt != cache.nodes.end()) {
+        std::unordered_set<std::string> visiting;
+        if (cachedIt->second.mode == mode &&
+            moduleGraphNodeUpToDate(cache, importTarget.canonicalId, visiting)) {
+            cache.stats.hits++;
+            if (cachedIt->second.buildSucceeded) {
+                outInterface = cachedIt->second.importedInterface;
+                return true;
+            }
+
+            outDiagnostics = cachedIt->second.diagnostics;
+            return false;
+        }
+
+        cache.stats.rebuilds++;
+        cache.nodes.erase(cachedIt);
     }
+    cache.stats.misses++;
 
     if (!cache.modulesInProgress.insert(importTarget.canonicalId).second) {
-        outError = "Circular import detected: '" + importTarget.displayName + "'.";
+        outDiagnostics.push_back(
+            TypeError{importSpan,
+                      "Circular import detected: '" + importTarget.displayName +
+                          "'.",
+                      "import.cycle"});
         return false;
     }
 
@@ -162,14 +278,31 @@ bool buildImportedModuleInterface(const ImportTarget& importTarget,
 
     AstImportedModuleInterface importedInterface;
     importedInterface.importTarget = importTarget;
+    AstFrontendModuleGraphNode cachedNode;
+    cachedNode.mode = mode;
+    cachedNode.fingerprint = fingerprintForPath(importTarget.resolvedPath);
+    cachedNode.importedInterface.importTarget = importTarget;
 
     if (importTarget.kind == ImportTargetKind::NATIVE_PACKAGE) {
         NativePackageDescriptor packageDescriptor;
+        std::string packageError;
+        TypeError importError;
         if (!loadNativePackageDescriptor(importTarget.resolvedPath,
-                                         packageDescriptor, outError, false,
-                                         nullptr) ||
-            !validateNativePackageImport(importTarget, packageDescriptor,
-                                         outError)) {
+                                         packageDescriptor, packageError, false,
+                                         nullptr)) {
+            outDiagnostics.push_back(TypeError{
+                importSpan, packageError, "import.native_package_load"});
+            cachedNode.diagnostics = outDiagnostics;
+            cache.nodes[importTarget.canonicalId] = cachedNode;
+            clearInProgress();
+            return false;
+        }
+        if (!validateNativePackageImport(importTarget, importSpan,
+                                         packageDescriptor,
+                                         importError)) {
+            outDiagnostics.push_back(importError);
+            cachedNode.diagnostics = outDiagnostics;
+            cache.nodes[importTarget.canonicalId] = cachedNode;
             clearInProgress();
             return false;
         }
@@ -178,7 +311,13 @@ bool buildImportedModuleInterface(const ImportTarget& importTarget,
     } else {
         std::ifstream file(importTarget.resolvedPath);
         if (!file) {
-            outError = "Failed to open module '" + importTarget.resolvedPath + "'.";
+            outDiagnostics.push_back(
+                TypeError{importSpan,
+                          "Failed to open module '" + importTarget.resolvedPath +
+                              "'.",
+                          "import.module_open_failed"});
+            cachedNode.diagnostics = outDiagnostics;
+            cache.nodes[importTarget.canonicalId] = cachedNode;
             clearInProgress();
             return false;
         }
@@ -195,26 +334,35 @@ bool buildImportedModuleInterface(const ImportTarget& importTarget,
         AstFrontendOptions importedOptions;
         importedOptions.sourcePath = importTarget.resolvedPath;
         importedOptions.packageSearchPaths = options.packageSearchPaths;
-        importedOptions.importCache = &cache;
+        importedOptions.moduleGraphCache = &cache;
         const AstFrontendBuildStatus status =
             buildAstFrontend(source, importedOptions, importedMode, importedErrors,
                              importedFrontend);
         if (status != AstFrontendBuildStatus::Success) {
-            if (!importedErrors.empty()) {
-                outError = importedErrors.front().message;
-            } else {
-                outError = "Failed to type-check imported module '" +
-                           importTarget.resolvedPath + "'.";
+            outDiagnostics = importedErrors;
+            if (outDiagnostics.empty()) {
+                outDiagnostics.push_back(TypeError{
+                    importSpan,
+                    "Failed to type-check imported module '" +
+                        importTarget.resolvedPath + "'.",
+                    "import.module_build_failed"});
             }
+            cachedNode.dependencies = collectDependencyIds(importedFrontend);
+            cachedNode.diagnostics = outDiagnostics;
+            cache.nodes[importTarget.canonicalId] = cachedNode;
             clearInProgress();
             return false;
         }
 
         importedInterface.exportTypes =
             importedFrontend.semanticModel.exportedSymbolTypes;
+        cachedNode.dependencies = collectDependencyIds(importedFrontend);
     }
 
-    cache.resolvedModules[importTarget.canonicalId] = importedInterface;
+    cachedNode.importedInterface = importedInterface;
+    cachedNode.buildSucceeded = true;
+    cachedNode.diagnostics.clear();
+    cache.nodes[importTarget.canonicalId] = cachedNode;
     outInterface = std::move(importedInterface);
     clearInProgress();
     return true;
@@ -224,7 +372,7 @@ class FrontendImportResolver {
    public:
     FrontendImportResolver(AstFrontendResult& frontend,
                            const AstFrontendOptions& options,
-                           AstFrontendImportCache& cache,
+                           AstFrontendModuleGraphCache& cache,
                            std::vector<TypeError>& errors)
         : m_frontend(frontend),
           m_options(options),
@@ -244,11 +392,32 @@ class FrontendImportResolver {
    private:
     AstFrontendResult& m_frontend;
     const AstFrontendOptions& m_options;
-    AstFrontendImportCache& m_cache;
+    AstFrontendModuleGraphCache& m_cache;
     std::vector<TypeError>& m_errors;
 
-    void addError(const SourceSpan& span, const std::string& message) {
-        m_errors.push_back(TypeError{span, message});
+    void addError(const SourceSpan& span, const std::string& message,
+                  std::string code = "import.error") {
+        m_errors.push_back(TypeError{span, message, std::move(code)});
+    }
+
+    void addImportDiagnostics(const AstImportExpr& importExpr,
+                              const ImportTarget& importTarget,
+                              std::vector<TypeError> diagnostics) {
+        for (auto& diagnostic : diagnostics) {
+            if (diagnostic.code.rfind("import.", 0) == 0) {
+                diagnostic.span = importExpr.path.span();
+                diagnostic.line = diagnostic.span.line();
+                diagnostic.column = diagnostic.span.column();
+            }
+        }
+        appendImportTrace(
+            diagnostics,
+            FrontendImportTraceFrame{importExpr.path.span(), m_options.sourcePath,
+                                     importTarget.rawSpecifier,
+                                     importTarget.canonicalId});
+        m_errors.insert(m_errors.end(),
+                        std::make_move_iterator(diagnostics.begin()),
+                        std::make_move_iterator(diagnostics.end()));
     }
 
     void resolveItem(const AstItem& item) {
@@ -441,13 +610,15 @@ class FrontendImportResolver {
     void resolveImportExpr(AstNodeId nodeId, const AstImportExpr& importExpr) {
         if (m_options.sourcePath.empty()) {
             addError(importExpr.path.span(),
-                     "@import(...) is not allowed in interactive mode.");
+                     "@import(...) is not allowed in interactive mode.",
+                     "import.interactive_mode");
             return;
         }
 
         std::string pathText(importExpr.path.start(), importExpr.path.length());
         if (pathText.length() < 2) {
-            addError(importExpr.path.span(), "Invalid import path.");
+            addError(importExpr.path.span(), "Invalid import path.",
+                     "import.invalid_path");
             return;
         }
 
@@ -457,15 +628,24 @@ class FrontendImportResolver {
         if (!resolveImportTarget(m_options.sourcePath, rawPath,
                                  m_options.packageSearchPaths, importTarget,
                                  resolveError)) {
-            addError(importExpr.path.span(), resolveError);
+            addError(importExpr.path.span(), resolveError, "import.resolve_failed");
             return;
         }
 
         AstImportedModuleInterface importedInterface;
-        if (!buildImportedModuleInterface(importTarget, m_options,
+        std::vector<TypeError> importDiagnostics;
+        if (!buildImportedModuleInterface(importTarget, importExpr.path.span(),
+                                          m_options,
                                           m_frontend.mode, m_cache,
-                                          importedInterface, resolveError)) {
-            addError(importExpr.path.span(), resolveError);
+                                          importedInterface, importDiagnostics)) {
+            if (importDiagnostics.empty()) {
+                addError(importExpr.path.span(),
+                         "Failed to build imported module interface.",
+                         "import.interface_build_failed");
+            } else {
+                addImportDiagnostics(importExpr, importTarget,
+                                     std::move(importDiagnostics));
+            }
             return;
         }
 
@@ -501,7 +681,8 @@ bool bindAndCheckFrontend(const AstFrontendResult& frontend,
 }
 
 AstFrontendBuildStatus runSemanticPhases(AstFrontendResult& frontend,
-                                         std::vector<TypeError>& outErrors) {
+                                         std::vector<TypeError>& outErrors,
+                                         FrontendIdentifierInterner* interner) {
     if (frontend.mode == AstFrontendMode::StrictChecked) {
         if (!bindAndCheckFrontend(frontend, outErrors, &frontend.bindings,
                                   &frontend.semanticModel,
@@ -524,7 +705,7 @@ AstFrontendBuildStatus runSemanticPhases(AstFrontendResult& frontend,
     frontend.timings.hirOptimizeMicros +=
         measureMicros([&]() { optimizeHir(*frontend.hirModule); });
 
-    collectExportedSymbolTypes(frontend);
+    collectExportedSymbolTypes(frontend, interner);
     outErrors.clear();
     return AstFrontendBuildStatus::Success;
 }
@@ -537,7 +718,22 @@ AstFrontendBuildStatus buildAstFrontend(std::string_view source,
                                         std::vector<TypeError>& outErrors,
                                         AstFrontendResult& outFrontend) {
     const auto totalStart = std::chrono::steady_clock::now();
+    const AstFrontendModuleGraphStats initialGraphStats =
+        options.moduleGraphCache ? options.moduleGraphCache->stats
+                                 : AstFrontendModuleGraphStats{};
     auto finalizeTotal = [&]() {
+        if (options.moduleGraphCache != nullptr) {
+            outFrontend.timings.moduleCacheHits =
+                options.moduleGraphCache->stats.hits - initialGraphStats.hits;
+            outFrontend.timings.moduleCacheMisses =
+                options.moduleGraphCache->stats.misses - initialGraphStats.misses;
+            outFrontend.timings.moduleCacheRebuilds =
+                options.moduleGraphCache->stats.rebuilds -
+                initialGraphStats.rebuilds;
+            outFrontend.timings.internedIdentifierCount =
+                options.moduleGraphCache->identifierInterner.size();
+        }
+        outFrontend.timings.diagnosticCount = outErrors.size();
         outFrontend.timings.totalMicros = static_cast<uint64_t>(
             std::chrono::duration_cast<std::chrono::microseconds>(
                 std::chrono::steady_clock::now() - totalStart)
@@ -576,10 +772,10 @@ AstFrontendBuildStatus buildAstFrontend(std::string_view source,
                               &outFrontend.typeAliases);
     });
 
-    AstFrontendImportCache localImportCache;
-    AstFrontendImportCache& importCache =
-        options.importCache ? *options.importCache : localImportCache;
-    FrontendImportResolver importResolver(outFrontend, options, importCache,
+    AstFrontendModuleGraphCache localModuleGraphCache;
+    AstFrontendModuleGraphCache& moduleGraphCache =
+        options.moduleGraphCache ? *options.moduleGraphCache : localModuleGraphCache;
+    FrontendImportResolver importResolver(outFrontend, options, moduleGraphCache,
                                           outErrors);
     const bool importSuccess = [&]() {
         bool success = false;
@@ -592,7 +788,11 @@ AstFrontendBuildStatus buildAstFrontend(std::string_view source,
         return AstFrontendBuildStatus::SemanticError;
     }
 
-    const AstFrontendBuildStatus status = runSemanticPhases(outFrontend, outErrors);
+    const AstFrontendBuildStatus status =
+        runSemanticPhases(outFrontend, outErrors,
+                          options.moduleGraphCache
+                              ? &options.moduleGraphCache->identifierInterner
+                              : nullptr);
     finalizeTotal();
     return status;
 }

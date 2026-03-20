@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "AstFrontend.hpp"
+#include "FrontendDiagnostic.hpp"
 #include "FrontendTypeUtils.hpp"
 #include "HirBytecodeEmitter.hpp"
 #include "StdLib.hpp"
@@ -24,23 +25,23 @@ bool reportAstFrontendFailure(AstFrontendBuildStatus status,
                               CompilerEmitterMode emitterMode) {
     if (status == AstFrontendBuildStatus::SemanticError) {
         for (const auto& error : errors) {
-            printDiagnosticPrefix(error.span);
-            std::cerr << error.message << std::endl;
+            printFrontendDiagnostic(std::cerr, error, "compile");
         }
         return true;
     }
 
     if (status == AstFrontendBuildStatus::ParseFailed) {
         for (const auto& error : errors) {
-            printDiagnosticPrefix(error.span);
-            std::cerr << error.message << std::endl;
+            printFrontendDiagnostic(std::cerr, error, "compile");
         }
-        printDiagnosticPrefix(makePointSpan(1, 1));
-        std::cerr << "AST frontend failed to parse source";
+        FrontendDiagnostic parseFailure{
+            makePointSpan(1, 1), "AST frontend failed to parse source",
+            "parse.failed"};
         if (emitterMode == CompilerEmitterMode::ForceHir) {
-            std::cerr << " for forced HIR emission";
+            parseFailure.message += " for forced HIR emission";
         }
-        std::cerr << "." << std::endl;
+        parseFailure.message += ".";
+        printFrontendDiagnostic(std::cerr, parseFailure, "compile");
         return true;
     }
 
@@ -78,11 +79,10 @@ bool Compiler::compile(std::string_view source, Chunk& chunk,
     AstFrontendMode frontendMode = m_strictMode
                                        ? AstFrontendMode::StrictChecked
                                        : AstFrontendMode::LoweringOnly;
-    AstFrontendImportCache importCache;
     AstFrontendOptions frontendOptions;
     frontendOptions.sourcePath = sourcePath;
     frontendOptions.packageSearchPaths = m_packageSearchPaths;
-    frontendOptions.importCache = &importCache;
+    frontendOptions.moduleGraphCache = &m_frontendModuleGraph;
     AstFrontendBuildStatus astStatus =
         buildAstFrontend(source, frontendOptions, frontendMode, astErrors,
                          astFrontend);
