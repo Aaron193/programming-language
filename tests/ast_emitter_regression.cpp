@@ -17,19 +17,6 @@ bool hasStrictDirective(std::string_view source) {
     return source.rfind("#!strict", 0) == 0;
 }
 
-std::string stripStrictDirectiveLine(std::string_view source) {
-    if (!hasStrictDirective(source)) {
-        return std::string(source);
-    }
-
-    size_t newlinePos = source.find('\n');
-    if (newlinePos == std::string_view::npos) {
-        return std::string();
-    }
-
-    return std::string(source.substr(newlinePos + 1));
-}
-
 std::string readFile(const std::filesystem::path& path) {
     std::ifstream input(path);
     if (!input) {
@@ -113,8 +100,7 @@ bool compileWithMode(const std::filesystem::path& path, CompilerEmitterMode mode
     compiler.setEmitterMode(mode);
     compiler.setStrictMode(hasStrictDirective(source));
 
-    const std::string strippedSource = stripStrictDirectiveLine(source);
-    if (!compiler.compile(strippedSource, outChunk, path.string())) {
+    if (!compiler.compile(source, outChunk, path.string())) {
         return false;
     }
 

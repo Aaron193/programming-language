@@ -13,6 +13,7 @@ fi
 
 bash "$SCRIPT_DIR/test_ast_parser.sh" &&
 bash "$SCRIPT_DIR/test_typechecker_errors.sh" &&
+bash "$SCRIPT_DIR/test_ast_compiler_findings.sh" &&
 bash "$SCRIPT_DIR/test_ast_optimizer.sh" &&
 bash "$SCRIPT_DIR/test_ast_emitter_regression.sh" &&
 bash "$SCRIPT_DIR/test_newline_syntax.sh" &&

@@ -2,6 +2,21 @@
 
 #include <cstring>
 
+namespace {
+
+bool startsWithStrictDirective(const char* text) {
+    constexpr const char* kDirective = "#!strict";
+    constexpr size_t kDirectiveLength = 8;
+    if (std::strncmp(text, kDirective, kDirectiveLength) != 0) {
+        return false;
+    }
+
+    const char boundary = text[kDirectiveLength];
+    return boundary == '\0' || boundary == '\n' || boundary == '\r';
+}
+
+}  // namespace
+
 Scanner::Scanner(std::string_view source)
     : m_source(source.data()),
       m_start(source.data()),
@@ -29,6 +44,17 @@ bool Scanner::isEOF() { return *m_current == '\0'; }
 void Scanner::skipWhitespace() {
     while (true) {
         char c = peek();
+        if (m_offset == 0 && m_line == 1 && m_column == 1 && c == '#' &&
+            startsWithStrictDirective(m_current)) {
+            while (peek() != '\n' && !isEOF()) {
+                advance();
+            }
+            if (peek() == '\n') {
+                advance();
+            }
+            continue;
+        }
+
         if (c == ' ' || c == '\t' || c == '\v' || c == '\f' || c == '\r') {
             advance();
         } else if (c == '\n') {

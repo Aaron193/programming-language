@@ -161,19 +161,6 @@ static bool hasStrictDirective(std::string_view source) {
     return source.rfind("#!strict", 0) == 0;
 }
 
-static std::string_view stripStrictDirectiveLine(std::string_view source) {
-    if (!hasStrictDirective(source)) {
-        return source;
-    }
-
-    size_t newlinePos = source.find('\n');
-    if (newlinePos == std::string_view::npos) {
-        return std::string_view();
-    }
-
-    return source.substr(newlinePos + 1);
-}
-
 static std::string valueToString(const Value& value) {
     if (value.isString()) return value.asString();
     if (value.isSignedInt()) return fastIntegerToString(value.asSignedInt());
@@ -905,6 +892,23 @@ static bool valueMatchesType(const Value& value, const TypeRef& expected) {
 
     TypeRef actual = inferRuntimeType(value);
     return isAssignable(actual, expected);
+}
+
+static bool valueMatchesExportedType(const Value& value, const TypeRef& expected) {
+    if (valueMatchesType(value, expected)) {
+        return true;
+    }
+
+    if (!expected || expected->isAny()) {
+        return true;
+    }
+
+    if (expected->kind == TypeKind::CLASS && value.isClass()) {
+        auto* klass = value.asClass();
+        return klass != nullptr && klass->name == expected->className;
+    }
+
+    return false;
 }
 
 UpvalueObject* VirtualMachine::captureUpvalue(size_t stackIndex) {
@@ -1977,7 +1981,7 @@ Status VirtualMachine::invokeProperty(size_t instructionOffset,
 
         auto typeIt = module->exportTypes.find(name);
         if (typeIt != module->exportTypes.end() &&
-            !valueMatchesType(it->second, typeIt->second)) {
+            !valueMatchesExportedType(it->second, typeIt->second)) {
             return runtimeError("Type error: module export '" + name +
                                 "' from '" + module->path + "' expected '" +
                                 typeIt->second->toString() + "', got '" +
@@ -2904,7 +2908,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
                 auto typeIt = module->exportTypes.find(name);
                 if (typeIt != module->exportTypes.end() &&
-                    !valueMatchesType(it->second, typeIt->second)) {
+                    !valueMatchesExportedType(it->second, typeIt->second)) {
                     return runtimeError(
                         "Type error: module export '" + name + "' from '" +
                         module->path + "' expected '" +
@@ -3792,7 +3796,6 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
             std::string source((std::istreambuf_iterator<char>(file)),
                                std::istreambuf_iterator<char>());
-            std::string_view compileSource = stripStrictDirectiveLine(source);
             bool importStrict =
                 m_defaultStrictMode || hasStrictDirective(source);
 
@@ -3800,7 +3803,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
             Chunk importedChunk;
             m_compiler.setStrictMode(importStrict);
-            if (!m_compiler.compile(compileSource, importedChunk, path)) {
+            if (!m_compiler.compile(source, importedChunk, path)) {
                 m_importStack.erase(path);
                 return Status::COMPILATION_ERROR;
             }
@@ -3914,7 +3917,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 }
 
                 if (declaredType && !declaredType->isAny() &&
-                    !valueMatchesType(value, declaredType)) {
+                    !valueMatchesExportedType(value, declaredType)) {
                     return runtimeError("Type error: cannot export '" + name +
                                         "' as '" + declaredType->toString() +
                                         "' from module '" +
@@ -4267,7 +4270,6 @@ Status VirtualMachine::interpret(std::string_view source, bool printReturnValue,
                                  bool traceEnabled, bool disassembleEnabled,
                                  const std::string& sourcePath,
                                  bool strictMode) {
-    std::string_view compileSource = stripStrictDirectiveLine(source);
     Chunk chunk;
     resetRuntimeState();
     m_defaultStrictMode = strictMode || hasStrictDirective(source);
@@ -4277,7 +4279,7 @@ Status VirtualMachine::interpret(std::string_view source, bool printReturnValue,
     m_traceEnabled = traceEnabled;
     m_disassembleEnabled = disassembleEnabled;
 
-    if (!m_compiler.compile(compileSource, chunk, sourcePath)) {
+    if (!m_compiler.compile(source, chunk, sourcePath)) {
         return Status::COMPILATION_ERROR;
     }
 

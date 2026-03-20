@@ -18,19 +18,6 @@ bool hasStrictDirective(std::string_view source) {
     return source.rfind("#!strict", 0) == 0;
 }
 
-std::string_view stripStrictDirectiveLine(std::string_view source) {
-    if (!hasStrictDirective(source)) {
-        return source;
-    }
-
-    size_t newlinePos = source.find('\n');
-    if (newlinePos == std::string_view::npos) {
-        return std::string_view();
-    }
-
-    return source.substr(newlinePos + 1);
-}
-
 void appendParserErrors(const AstParser& parser,
                         std::vector<TypeError>& outErrors) {
     outErrors.clear();
@@ -196,8 +183,8 @@ bool buildImportedModuleInterface(const ImportTarget& importTarget,
         importedOptions.packageSearchPaths = options.packageSearchPaths;
         importedOptions.importCache = &cache;
         const AstFrontendBuildStatus status =
-            buildAstFrontend(stripStrictDirectiveLine(source), importedOptions,
-                             importedMode, importedErrors, importedFrontend);
+            buildAstFrontend(source, importedOptions, importedMode, importedErrors,
+                             importedFrontend);
         if (status != AstFrontendBuildStatus::Success) {
             if (!importedErrors.empty()) {
                 outError = importedErrors.front().message;

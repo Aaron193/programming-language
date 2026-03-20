@@ -1,6 +1,7 @@
 #include "AstBytecodeEmitter.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <memory>
 #include <type_traits>
 #include <utility>
@@ -135,6 +136,29 @@ NumericLiteralInfo parseNumericLiteralInfo(const std::string& literal) {
     return info;
 }
 
+bool parseNumericLiteralValue(const NumericLiteralInfo& info, Value& outValue) {
+    try {
+        if (info.isFloat) {
+            const double parsed = std::stod(info.core);
+            if (!std::isfinite(parsed)) {
+                return false;
+            }
+            outValue = Value(parsed);
+            return true;
+        }
+
+        if (info.isUnsigned) {
+            outValue = Value(static_cast<uint64_t>(std::stoull(info.core)));
+            return true;
+        }
+
+        outValue = Value(static_cast<int64_t>(std::stoll(info.core)));
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
 }  // namespace ast_bytecode_emitter_detail
 
 AstBytecodeEmitter::AstBytecodeEmitter(Compiler& compiler,
@@ -179,10 +203,12 @@ TypeRef AstBytecodeEmitter::resolveTypeExpr(const AstTypeExpr* typeExpr) const {
             return TypeInfo::makeArray(
                 resolveTypeExpr(typeExpr->elementType.get()));
         case AstTypeKind::DICT:
-            return TypeInfo::makeDict(resolveTypeExpr(typeExpr->keyType.get()),
-                                      resolveTypeExpr(typeExpr->valueType.get()));
+            return TypeInfo::makeDict(
+                resolveTypeExpr(typeExpr->keyType.get()),
+                resolveTypeExpr(typeExpr->valueType.get()));
         case AstTypeKind::SET:
-            return TypeInfo::makeSet(resolveTypeExpr(typeExpr->elementType.get()));
+            return TypeInfo::makeSet(
+                resolveTypeExpr(typeExpr->elementType.get()));
         case AstTypeKind::OPTIONAL:
             return TypeInfo::makeOptional(
                 resolveTypeExpr(typeExpr->innerType.get()));
@@ -300,7 +326,8 @@ void AstBytecodeEmitter::emitCoerceToType(const TypeRef& sourceType,
     }
 
     if (sourceType->isInteger() && targetType->isInteger()) {
-        const bool sameSignedness = sourceType->isSigned() == targetType->isSigned();
+        const bool sameSignedness =
+            sourceType->isSigned() == targetType->isSigned();
         if (sameSignedness && sourceType->bitWidth() < targetType->bitWidth()) {
             emitByte(OpCode::WIDEN_INT, line);
             emitByte(static_cast<uint8_t>(targetType->kind), line);
@@ -339,7 +366,8 @@ bool AstBytecodeEmitter::emitCompoundBinary(TokenType assignmentType,
         case TokenType::STAR_EQUAL:
         case TokenType::SLASH_EQUAL:
             emitByte(
-                m_compiler.arithmeticOpcode(assignmentType, arithmeticType), line);
+                m_compiler.arithmeticOpcode(assignmentType, arithmeticType),
+                line);
             return true;
         case TokenType::AMPERSAND_EQUAL:
             emitByte(OpCode::BITWISE_AND, line);
@@ -415,8 +443,8 @@ TypeRef AstBytecodeEmitter::lookupClassMethodType(
     return methodType ? methodType : TypeInfo::makeAny();
 }
 
-int AstBytecodeEmitter::lookupClassFieldSlot(const TypeRef& objectType,
-                                             const std::string& fieldName) const {
+int AstBytecodeEmitter::lookupClassFieldSlot(
+    const TypeRef& objectType, const std::string& fieldName) const {
     if (!objectType || objectType->kind != TypeKind::CLASS) {
         return -1;
     }
@@ -439,7 +467,8 @@ void AstBytecodeEmitter::emitExportName(const Token& nameToken, size_t line) {
 
     uint8_t slot = m_compiler.globalSlot(nameToken);
     emitBytes(OpCode::GET_GLOBAL_SLOT, slot, line);
-    emitBytes(OpCode::EXPORT_NAME, m_compiler.identifierConstant(nameToken), line);
+    emitBytes(OpCode::EXPORT_NAME, m_compiler.identifierConstant(nameToken),
+              line);
     emitByte(OpCode::POP, line);
 }
 
@@ -459,8 +488,8 @@ void AstBytecodeEmitter::emitArguments(const std::vector<AstExprPtr>& arguments,
 
 void AstBytecodeEmitter::emitClosureObject(
     const Compiler::CompiledFunction& compiled, size_t line) {
-    emitBytes(OpCode::CLOSURE, m_compiler.makeConstant(Value(compiled.function)),
-              line);
+    emitBytes(OpCode::CLOSURE,
+              m_compiler.makeConstant(Value(compiled.function)), line);
     for (const auto& upvalue : compiled.upvalues) {
         emitByte(static_cast<uint8_t>(upvalue.isLocal ? 1 : 0), line);
         emitByte(upvalue.index, line);
@@ -476,11 +505,11 @@ Compiler::CompiledFunction AstBytecodeEmitter::compileFunction(
     m_compiler.m_chunk = functionChunk.get();
 
     TypeRef functionType = nodeType(functionNode);
-    TypeRef returnType =
-        functionType && functionType->kind == TypeKind::FUNCTION &&
-                functionType->returnType
-            ? functionType->returnType
-            : TypeInfo::makeAny();
+    TypeRef returnType = functionType &&
+                                 functionType->kind == TypeKind::FUNCTION &&
+                                 functionType->returnType
+                             ? functionType->returnType
+                             : TypeInfo::makeAny();
 
     m_compiler.m_contexts.push_back(
         Compiler::FunctionContext{{}, {}, 1, true, isMethod, returnType});
@@ -522,8 +551,8 @@ Compiler::CompiledFunction AstBytecodeEmitter::compileFunction(
     if (m_compiler.m_gc == nullptr) {
         errorAtNode(functionNode,
                     "Internal compiler error: GC allocator unavailable.");
-        return Compiler::CompiledFunction{nullptr, {}, std::move(parameterTypes),
-                                          functionContext.returnType};
+        return Compiler::CompiledFunction{
+            nullptr, {}, std::move(parameterTypes), functionContext.returnType};
     }
 
     auto function = m_compiler.m_gc->allocate<FunctionObject>();
@@ -533,8 +562,8 @@ Compiler::CompiledFunction AstBytecodeEmitter::compileFunction(
     function->upvalueCount =
         static_cast<uint8_t>(functionContext.upvalues.size());
     return Compiler::CompiledFunction{
-        function, std::move(functionContext.upvalues), std::move(parameterTypes),
-        functionContext.returnType};
+        function, std::move(functionContext.upvalues),
+        std::move(parameterTypes), functionContext.returnType};
 }
 
 void AstBytecodeEmitter::emitFunctionBody(const AstStmt& body) {
@@ -570,10 +599,9 @@ void AstBytecodeEmitter::emitFunctionDecl(const AstFunctionDecl& functionDecl) {
         }
     }
 
-    Compiler::CompiledFunction compiled =
-        compileFunction(tokenText(functionDecl.name), functionDecl.params,
-                        functionDecl.node, functionDecl.body.get(), nullptr,
-                        false);
+    Compiler::CompiledFunction compiled = compileFunction(
+        tokenText(functionDecl.name), functionDecl.params, functionDecl.node,
+        functionDecl.body.get(), nullptr, false);
     emitClosureObject(compiled, line);
     defineVariable(variable, line);
 
@@ -599,6 +627,13 @@ void AstBytecodeEmitter::emitClassDecl(const AstClassDecl& classDecl) {
     m_compiler.m_currentClass = &classContext;
 
     uint8_t variable = m_compiler.globalSlot(classDecl.name);
+    TypeRef classType = nodeType(classDecl.node);
+    if (!classType || classType->isAny()) {
+        classType = TypeInfo::makeClass(tokenText(classDecl.name));
+    }
+    if (variable < m_compiler.m_globalTypes.size()) {
+        m_compiler.m_globalTypes[variable] = classType;
+    }
     emitBytes(OpCode::CLASS_OP, m_compiler.identifierConstant(classDecl.name),
               line);
     defineVariable(variable, line);
@@ -613,9 +648,9 @@ void AstBytecodeEmitter::emitClassDecl(const AstClassDecl& classDecl) {
     }
 
     for (const auto& method : classDecl.methods) {
-        Compiler::CompiledFunction compiled = compileFunction(
-            tokenText(method.name), method.params, method.node, method.body.get(),
-            nullptr, true);
+        Compiler::CompiledFunction compiled =
+            compileFunction(tokenText(method.name), method.params, method.node,
+                            method.body.get(), nullptr, true);
         emitClosureObject(compiled, method.node.line);
         emitBytes(OpCode::METHOD, m_compiler.identifierConstant(method.name),
                   method.node.line);
@@ -623,8 +658,8 @@ void AstBytecodeEmitter::emitClassDecl(const AstClassDecl& classDecl) {
 
     emitByte(OpCode::POP, line);
 
-    if (isPublicSymbolName(
-            std::string_view(classDecl.name.start(), classDecl.name.length()))) {
+    if (isPublicSymbolName(std::string_view(classDecl.name.start(),
+                                            classDecl.name.length()))) {
         emitExportName(classDecl.name, line);
     }
 
@@ -673,8 +708,8 @@ void AstBytecodeEmitter::emitVarDecl(const AstVarDeclStmt& stmt,
     defineVariable(global, line);
 
     if (allowExport && m_compiler.currentContext().scopeDepth == 0 &&
-        isPublicSymbolName(std::string_view(stmt.name.start(),
-                                            stmt.name.length()))) {
+        isPublicSymbolName(
+            std::string_view(stmt.name.start(), stmt.name.length()))) {
         emitExportName(stmt.name, line);
     }
 }
@@ -687,7 +722,8 @@ void AstBytecodeEmitter::emitDestructuredImport(
             errorAtNode(stmt.initializer->node,
                         "Expected '@import(...)' in destructured import.");
         } else {
-            errorAtLine(line, "Expected '@import(...)' in destructured import.");
+            errorAtLine(line,
+                        "Expected '@import(...)' in destructured import.");
         }
         return;
     }
@@ -708,8 +744,8 @@ void AstBytecodeEmitter::emitDestructuredImport(
               line);
 
     for (const auto& binding : stmt.bindings) {
-        Token localName =
-            binding.localName.has_value() ? *binding.localName : binding.exportedName;
+        Token localName = binding.localName.has_value() ? *binding.localName
+                                                        : binding.exportedName;
         TypeRef bindingType = nodeType(binding.node);
         emitByte(OpCode::DUP, binding.node.line);
         emitBytes(OpCode::GET_PROPERTY,
@@ -781,7 +817,8 @@ void AstBytecodeEmitter::emitStmt(const AstStmt& stmt) {
                 emitByte(OpCode::PRINT_OP, stmt.node.line);
             } else if constexpr (std::is_same_v<T, AstReturnStmt>) {
                 if (!m_compiler.currentContext().inFunction) {
-                    errorAtNode(stmt.node, "Cannot return from top-level code.");
+                    errorAtNode(stmt.node,
+                                "Cannot return from top-level code.");
                     return;
                 }
 
@@ -791,8 +828,8 @@ void AstBytecodeEmitter::emitStmt(const AstStmt& stmt) {
                     emitCoerceToType(expressionType,
                                      m_compiler.currentContext().returnType,
                                      stmt.node.line);
-                    emitCheckInstanceType(m_compiler.currentContext().returnType,
-                                          stmt.node.line);
+                    emitCheckInstanceType(
+                        m_compiler.currentContext().returnType, stmt.node.line);
                 } else {
                     emitByte(OpCode::NIL, stmt.node.line);
                 }
@@ -800,7 +837,8 @@ void AstBytecodeEmitter::emitStmt(const AstStmt& stmt) {
             } else if constexpr (std::is_same_v<T, AstIfStmt>) {
                 emitExpr(*value.condition);
                 m_compiler.popExprType();
-                int thenJump = emitJump(OpCode::JUMP_IF_FALSE_POP, stmt.node.line);
+                int thenJump =
+                    emitJump(OpCode::JUMP_IF_FALSE_POP, stmt.node.line);
                 emitStmt(*value.thenBranch);
                 int endJump = emitJump(OpCode::JUMP, stmt.node.line);
                 patchJump(thenJump);
@@ -812,7 +850,8 @@ void AstBytecodeEmitter::emitStmt(const AstStmt& stmt) {
                 int loopStart = m_compiler.currentChunk()->count();
                 emitExpr(*value.condition);
                 m_compiler.popExprType();
-                int exitJump = emitJump(OpCode::JUMP_IF_FALSE_POP, stmt.node.line);
+                int exitJump =
+                    emitJump(OpCode::JUMP_IF_FALSE_POP, stmt.node.line);
                 emitStmt(*value.body);
                 emitLoop(loopStart, stmt.node.line);
                 patchJump(exitJump);
@@ -844,7 +883,8 @@ void AstBytecodeEmitter::emitStmt(const AstStmt& stmt) {
                 if (value.condition) {
                     emitExpr(*value.condition);
                     m_compiler.popExprType();
-                    exitJump = emitJump(OpCode::JUMP_IF_FALSE_POP, stmt.node.line);
+                    exitJump =
+                        emitJump(OpCode::JUMP_IF_FALSE_POP, stmt.node.line);
                 }
 
                 if (value.increment) {
@@ -879,7 +919,8 @@ void AstBytecodeEmitter::emitStmt(const AstStmt& stmt) {
                 emitByte(OpCode::ITER_INIT, stmt.node.line);
 
                 int loopStart = m_compiler.currentChunk()->count();
-                int exitJump = emitJump(OpCode::ITER_HAS_NEXT_JUMP, stmt.node.line);
+                int exitJump =
+                    emitJump(OpCode::ITER_HAS_NEXT_JUMP, stmt.node.line);
                 emitBytes(OpCode::ITER_NEXT_SET_LOCAL, loopVariableSlot,
                           stmt.node.line);
                 emitStmt(*value.body);
@@ -921,13 +962,14 @@ void AstBytecodeEmitter::emitAssignmentToVariable(
         return;
     }
 
-    if (op.type() == TokenType::PLUS_PLUS || op.type() == TokenType::MINUS_MINUS) {
+    if (op.type() == TokenType::PLUS_PLUS ||
+        op.type() == TokenType::MINUS_MINUS) {
         emitBytes(resolved.getOp, resolved.arg, line);
         emitConstant(Value(static_cast<int64_t>(1)), line);
-        emitByte(m_compiler.arithmeticOpcode(
-                     op.type() == TokenType::PLUS_PLUS ? TokenType::PLUS
-                                                       : TokenType::MINUS,
-                     declaredType),
+        emitByte(m_compiler.arithmeticOpcode(op.type() == TokenType::PLUS_PLUS
+                                                 ? TokenType::PLUS
+                                                 : TokenType::MINUS,
+                                             declaredType),
                  line);
         emitCoerceToType(declaredType, declaredType, line);
         emitBytes(resolved.setOp, resolved.arg, line);
@@ -945,12 +987,13 @@ void AstBytecodeEmitter::emitAssignmentToVariable(
         op.type() == TokenType::STAR_EQUAL ||
         op.type() == TokenType::SLASH_EQUAL) {
         resultType = numericPromotion(declaredType, rhsType);
-    } else if (
-        ast_bytecode_emitter_detail::isBitwiseAssignmentOperator(op.type())) {
-        resultType =
-            ast_bytecode_emitter_detail::bitwiseResultType(declaredType, rhsType);
+    } else if (ast_bytecode_emitter_detail::isBitwiseAssignmentOperator(
+                   op.type())) {
+        resultType = ast_bytecode_emitter_detail::bitwiseResultType(
+            declaredType, rhsType);
     }
-    emitCoerceToType(resultType ? resultType : declaredType, declaredType, line);
+    emitCoerceToType(resultType ? resultType : declaredType, declaredType,
+                     line);
     emitBytes(resolved.setOp, resolved.arg, line);
     m_compiler.pushExprType(declaredType);
 }
@@ -984,7 +1027,8 @@ void AstBytecodeEmitter::emitAssignmentToMember(const AstMemberExpr& target,
         return;
     }
 
-    if (op.type() == TokenType::PLUS_PLUS || op.type() == TokenType::MINUS_MINUS) {
+    if (op.type() == TokenType::PLUS_PLUS ||
+        op.type() == TokenType::MINUS_MINUS) {
         emitByte(OpCode::DUP, line);
         if (knownField) {
             emitBytes(OpCode::GET_FIELD_SLOT, static_cast<uint8_t>(fieldSlot),
@@ -1009,7 +1053,8 @@ void AstBytecodeEmitter::emitAssignmentToMember(const AstMemberExpr& target,
 
     emitByte(OpCode::DUP, line);
     if (knownField) {
-        emitBytes(OpCode::GET_FIELD_SLOT, static_cast<uint8_t>(fieldSlot), line);
+        emitBytes(OpCode::GET_FIELD_SLOT, static_cast<uint8_t>(fieldSlot),
+                  line);
     } else {
         emitBytes(OpCode::GET_PROPERTY,
                   m_compiler.identifierConstant(target.member), line);
@@ -1018,7 +1063,8 @@ void AstBytecodeEmitter::emitAssignmentToMember(const AstMemberExpr& target,
     TypeRef rhsType = m_compiler.popExprType();
     emitCompoundBinary(op.type(), memberType, rhsType, line);
     if (knownField) {
-        emitBytes(OpCode::SET_FIELD_SLOT, static_cast<uint8_t>(fieldSlot), line);
+        emitBytes(OpCode::SET_FIELD_SLOT, static_cast<uint8_t>(fieldSlot),
+                  line);
     } else {
         emitBytes(OpCode::SET_PROPERTY,
                   m_compiler.identifierConstant(target.member), line);
@@ -1037,7 +1083,8 @@ void AstBytecodeEmitter::emitAssignmentToIndex(const AstIndexExpr& target,
 
     TypeRef elementType = TypeInfo::makeAny();
     if (containerType) {
-        if (containerType->kind == TypeKind::ARRAY && containerType->elementType) {
+        if (containerType->kind == TypeKind::ARRAY &&
+            containerType->elementType) {
             elementType = containerType->elementType;
         } else if (containerType->kind == TypeKind::DICT &&
                    containerType->valueType) {
@@ -1049,12 +1096,13 @@ void AstBytecodeEmitter::emitAssignmentToIndex(const AstIndexExpr& target,
         emitExpr(*valueExpr);
         TypeRef rhsType = m_compiler.popExprType();
         emitByte(OpCode::SET_INDEX, line);
-        m_compiler.pushExprType((elementType && !elementType->isAny()) ? elementType
-                                                                       : rhsType);
+        m_compiler.pushExprType(
+            (elementType && !elementType->isAny()) ? elementType : rhsType);
         return;
     }
 
-    if (op.type() == TokenType::PLUS_PLUS || op.type() == TokenType::MINUS_MINUS) {
+    if (op.type() == TokenType::PLUS_PLUS ||
+        op.type() == TokenType::MINUS_MINUS) {
         emitByte(OpCode::DUP2, line);
         emitByte(OpCode::GET_INDEX, line);
         emitConstant(Value(static_cast<int64_t>(1)), line);
@@ -1091,35 +1139,35 @@ void AstBytecodeEmitter::emitExpr(const AstExpr& expr) {
                         emitByte(OpCode::NIL, expr.node.line);
                         break;
                     case TokenType::STRING: {
-                        std::string token(value.token.start(), value.token.length());
+                        std::string token(value.token.start(),
+                                          value.token.length());
                         std::string str = token.substr(1, token.length() - 2);
-                        emitConstant(m_compiler.makeStringValue(str), expr.node.line);
+                        emitConstant(m_compiler.makeStringValue(str),
+                                     expr.node.line);
                         break;
                     }
                     case TokenType::NUMBER: {
                         std::string literal(value.token.start(),
                                             value.token.length());
-                        auto literalInfo =
-                            ast_bytecode_emitter_detail::parseNumericLiteralInfo(
-                                literal);
+                        auto literalInfo = ast_bytecode_emitter_detail::
+                            parseNumericLiteralInfo(literal);
                         if (!literalInfo.valid) {
-                            errorAtToken(value.token,
-                                         "Invalid numeric literal '" + literal +
-                                             "'.");
+                            errorAtToken(
+                                value.token,
+                                "Invalid numeric literal '" + literal + "'.");
                             emitByte(OpCode::NIL, expr.node.line);
                             break;
                         }
-                        if (literalInfo.isFloat) {
-                            emitConstant(std::stod(literalInfo.core), expr.node.line);
-                        } else if (literalInfo.isUnsigned) {
-                            emitConstant(
-                                static_cast<uint64_t>(std::stoull(literalInfo.core)),
-                                expr.node.line);
-                        } else {
-                            emitConstant(
-                                static_cast<int64_t>(std::stoll(literalInfo.core)),
-                                expr.node.line);
+                        Value parsed;
+                        if (!ast_bytecode_emitter_detail::
+                                parseNumericLiteralValue(literalInfo, parsed)) {
+                            errorAtToken(
+                                value.token,
+                                "Invalid numeric literal '" + literal + "'.");
+                            emitByte(OpCode::NIL, expr.node.line);
+                            break;
                         }
+                        emitConstant(parsed, expr.node.line);
                         break;
                     }
                     default:
@@ -1157,13 +1205,14 @@ void AstBytecodeEmitter::emitExpr(const AstExpr& expr) {
                 if (const auto* identifier =
                         std::get_if<AstIdentifierExpr>(&value.operand->value)) {
                     emitAssignmentToVariable(*identifier, value.op,
-                                             value.operand.get(), expr.node.line);
-                } else if (const auto* member =
-                               std::get_if<AstMemberExpr>(&value.operand->value)) {
-                    emitAssignmentToMember(*member, value.op, value.operand.get(),
-                                           expr.node.line);
-                } else if (const auto* index =
-                               std::get_if<AstIndexExpr>(&value.operand->value)) {
+                                             value.operand.get(),
+                                             expr.node.line);
+                } else if (const auto* member = std::get_if<AstMemberExpr>(
+                               &value.operand->value)) {
+                    emitAssignmentToMember(*member, value.op,
+                                           value.operand.get(), expr.node.line);
+                } else if (const auto* index = std::get_if<AstIndexExpr>(
+                               &value.operand->value)) {
                     emitAssignmentToIndex(*index, value.op, value.operand.get(),
                                           expr.node.line);
                 } else {
@@ -1175,7 +1224,8 @@ void AstBytecodeEmitter::emitExpr(const AstExpr& expr) {
                 if (value.op.type() == TokenType::LOGICAL_AND) {
                     emitExpr(*value.left);
                     TypeRef leftType = m_compiler.popExprType();
-                    int endJump = emitJump(OpCode::JUMP_IF_FALSE, expr.node.line);
+                    int endJump =
+                        emitJump(OpCode::JUMP_IF_FALSE, expr.node.line);
                     emitByte(OpCode::POP, expr.node.line);
                     emitExpr(*value.right);
                     TypeRef rightType = m_compiler.popExprType();
@@ -1189,7 +1239,8 @@ void AstBytecodeEmitter::emitExpr(const AstExpr& expr) {
                 if (value.op.type() == TokenType::LOGICAL_OR) {
                     emitExpr(*value.left);
                     TypeRef leftType = m_compiler.popExprType();
-                    int elseJump = emitJump(OpCode::JUMP_IF_FALSE, expr.node.line);
+                    int elseJump =
+                        emitJump(OpCode::JUMP_IF_FALSE, expr.node.line);
                     int endJump = emitJump(OpCode::JUMP, expr.node.line);
                     patchJump(elseJump);
                     emitByte(OpCode::POP, expr.node.line);
@@ -1208,15 +1259,16 @@ void AstBytecodeEmitter::emitExpr(const AstExpr& expr) {
                 TypeRef rightType = m_compiler.popExprType();
 
                 if (leftType && leftType->kind == TypeKind::CLASS) {
-                    auto classIt =
-                        m_compiler.m_classOperatorMethods.find(leftType->className);
+                    auto classIt = m_compiler.m_classOperatorMethods.find(
+                        leftType->className);
                     if (classIt != m_compiler.m_classOperatorMethods.end()) {
                         auto opIt = classIt->second.find(value.op.type());
                         if (opIt != classIt->second.end()) {
                             emitByte(OpCode::INVOKE, expr.node.line);
-                            emitByte(m_compiler.makeConstant(
-                                         m_compiler.makeStringValue(opIt->second)),
-                                     expr.node.line);
+                            emitByte(
+                                m_compiler.makeConstant(
+                                    m_compiler.makeStringValue(opIt->second)),
+                                expr.node.line);
                             emitByte(1, expr.node.line);
                             m_compiler.pushExprType(nodeType(expr.node));
                             return;
@@ -1232,8 +1284,8 @@ void AstBytecodeEmitter::emitExpr(const AstExpr& expr) {
                             rightType->kind == TypeKind::STR) {
                             emitByte(OpCode::ADD, expr.node.line);
                         } else if (promotedNumeric) {
-                            emitByte(m_compiler.arithmeticOpcode(value.op.type(),
-                                                                 promotedNumeric),
+                            emitByte(m_compiler.arithmeticOpcode(
+                                         value.op.type(), promotedNumeric),
                                      expr.node.line);
                         } else {
                             emitByte(OpCode::ADD, expr.node.line);
@@ -1243,8 +1295,8 @@ void AstBytecodeEmitter::emitExpr(const AstExpr& expr) {
                     case TokenType::STAR:
                     case TokenType::SLASH:
                         if (promotedNumeric) {
-                            emitByte(m_compiler.arithmeticOpcode(value.op.type(),
-                                                                 promotedNumeric),
+                            emitByte(m_compiler.arithmeticOpcode(
+                                         value.op.type(), promotedNumeric),
                                      expr.node.line);
                         } else {
                             emitByte(value.op.type() == TokenType::MINUS
@@ -1274,13 +1326,13 @@ void AstBytecodeEmitter::emitExpr(const AstExpr& expr) {
                                  expr.node.line);
                         break;
                     case TokenType::LESS:
-                        emitByte((m_compiler.m_strictMode && promotedNumeric &&
-                                  promotedNumeric->isInteger())
-                                     ? (promotedNumeric->isSigned()
-                                            ? OpCode::ILESS
-                                            : OpCode::ULESS)
-                                     : OpCode::LESS_THAN,
-                                 expr.node.line);
+                        emitByte(
+                            (m_compiler.m_strictMode && promotedNumeric &&
+                             promotedNumeric->isInteger())
+                                ? (promotedNumeric->isSigned() ? OpCode::ILESS
+                                                               : OpCode::ULESS)
+                                : OpCode::LESS_THAN,
+                            expr.node.line);
                         break;
                     case TokenType::LESS_EQUAL:
                         emitByte((m_compiler.m_strictMode && promotedNumeric &&
@@ -1319,14 +1371,14 @@ void AstBytecodeEmitter::emitExpr(const AstExpr& expr) {
             } else if constexpr (std::is_same_v<T, AstAssignmentExpr>) {
                 if (const auto* identifier =
                         std::get_if<AstIdentifierExpr>(&value.target->value)) {
-                    emitAssignmentToVariable(*identifier, value.op, value.value.get(),
-                                             expr.node.line);
-                } else if (const auto* member =
-                               std::get_if<AstMemberExpr>(&value.target->value)) {
+                    emitAssignmentToVariable(*identifier, value.op,
+                                             value.value.get(), expr.node.line);
+                } else if (const auto* member = std::get_if<AstMemberExpr>(
+                               &value.target->value)) {
                     emitAssignmentToMember(*member, value.op, value.value.get(),
                                            expr.node.line);
-                } else if (const auto* index =
-                               std::get_if<AstIndexExpr>(&value.target->value)) {
+                } else if (const auto* index = std::get_if<AstIndexExpr>(
+                               &value.target->value)) {
                     emitAssignmentToIndex(*index, value.op, value.value.get(),
                                           expr.node.line);
                 } else {
@@ -1337,10 +1389,12 @@ void AstBytecodeEmitter::emitExpr(const AstExpr& expr) {
             } else if constexpr (std::is_same_v<T, AstCallExpr>) {
                 if (const auto* member =
                         std::get_if<AstMemberExpr>(&value.callee->value)) {
-                    if (std::holds_alternative<AstSuperExpr>(member->object->value)) {
+                    if (std::holds_alternative<AstSuperExpr>(
+                            member->object->value)) {
                         emitByte(OpCode::GET_THIS, expr.node.line);
                         uint8_t argCount = 0;
-                        emitArguments(value.arguments, expr.node.line, argCount);
+                        emitArguments(value.arguments, expr.node.line,
+                                      argCount);
                         emitByte(OpCode::INVOKE_SUPER, expr.node.line);
                         emitByte(m_compiler.identifierConstant(member->member),
                                  expr.node.line);
@@ -1400,7 +1454,9 @@ void AstBytecodeEmitter::emitExpr(const AstExpr& expr) {
                 emitExpr(*value.expression);
                 m_compiler.popExprType();
                 TypeRef targetType = nodeType(expr.node);
-                if (targetType && targetType->isInteger()) {
+                if (targetType && targetType->kind == TypeKind::CLASS) {
+                    emitCheckInstanceType(targetType, expr.node.line);
+                } else if (targetType && targetType->isInteger()) {
                     emitBytes(OpCode::NARROW_INT,
                               static_cast<uint8_t>(targetType->kind),
                               expr.node.line);
@@ -1411,10 +1467,9 @@ void AstBytecodeEmitter::emitExpr(const AstExpr& expr) {
                 }
                 m_compiler.pushExprType(targetType);
             } else if constexpr (std::is_same_v<T, AstFunctionExpr>) {
-                Compiler::CompiledFunction compiled =
-                    compileFunction("<closure>", value.params, expr.node,
-                                    value.blockBody.get(),
-                                    value.expressionBody.get(), false);
+                Compiler::CompiledFunction compiled = compileFunction(
+                    "<closure>", value.params, expr.node, value.blockBody.get(),
+                    value.expressionBody.get(), false);
                 emitClosureObject(compiled, expr.node.line);
                 m_compiler.pushExprType(nodeType(expr.node));
             } else if constexpr (std::is_same_v<T, AstImportExpr>) {
@@ -1422,10 +1477,11 @@ void AstBytecodeEmitter::emitExpr(const AstExpr& expr) {
                     importedModuleForNode(expr.node.id);
                 if (importedModule != nullptr &&
                     !importedModule->importTarget.canonicalId.empty()) {
-                    emitBytes(OpCode::IMPORT_MODULE,
-                              m_compiler.makeConstant(m_compiler.makeStringValue(
-                                  importedModule->importTarget.canonicalId)),
-                              expr.node.line);
+                    emitBytes(
+                        OpCode::IMPORT_MODULE,
+                        m_compiler.makeConstant(m_compiler.makeStringValue(
+                            importedModule->importTarget.canonicalId)),
+                        expr.node.line);
                 } else {
                     errorAtToken(value.path,
                                  "Internal frontend error: unresolved import "

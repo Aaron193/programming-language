@@ -37,19 +37,6 @@ bool hasStrictDirective(std::string_view source) {
     return source.rfind("#!strict", 0) == 0;
 }
 
-std::string stripStrictDirectiveLine(std::string_view source) {
-    if (!hasStrictDirective(source)) {
-        return std::string(source);
-    }
-
-    size_t newlinePos = source.find('\n');
-    if (newlinePos == std::string_view::npos) {
-        return std::string();
-    }
-
-    return std::string(source.substr(newlinePos + 1));
-}
-
 std::string readFile(const std::filesystem::path& path) {
     std::ifstream input(path);
     if (!input) {
@@ -191,8 +178,7 @@ bool compileFileCanonical(const std::filesystem::path& path,
     compiler.setEmitterMode(emitterMode);
     compiler.setStrictMode(hasStrictDirective(source));
 
-    const std::string strippedSource = stripStrictDirectiveLine(source);
-    if (!compiler.compile(strippedSource, chunk, path.string())) {
+    if (!compiler.compile(source, chunk, path.string())) {
         return false;
     }
 
@@ -780,8 +766,8 @@ bool checkTypedImportFrontendRegression(const std::filesystem::path& repoRoot) {
     AstFrontendResult frontend;
     std::vector<TypeError> errors;
     const AstFrontendBuildStatus status =
-        buildAstFrontend(stripStrictDirectiveLine(source), options,
-                         AstFrontendMode::StrictChecked, errors, frontend);
+        buildAstFrontend(source, options, AstFrontendMode::StrictChecked, errors,
+                         frontend);
     if (!require(status == AstFrontendBuildStatus::Success,
                  "typed import sample should build through the AST frontend")) {
         return false;
@@ -843,8 +829,8 @@ bool checkNativeHandleTypeFrontendRegression(
     AstFrontendResult frontend;
     std::vector<TypeError> errors;
     const AstFrontendBuildStatus status =
-        buildAstFrontend(stripStrictDirectiveLine(source), options,
-                         AstFrontendMode::StrictChecked, errors, frontend);
+        buildAstFrontend(source, options, AstFrontendMode::StrictChecked, errors,
+                         frontend);
     if (!require(status == AstFrontendBuildStatus::Success,
                  "native handle typed import sample should build through the AST frontend")) {
         return false;
@@ -920,8 +906,7 @@ bool checkTypedImportDiagnosticRegression(const std::filesystem::path& repoRoot)
         AstFrontendResult frontend;
         std::vector<TypeError> errors;
         const AstFrontendBuildStatus status = buildAstFrontend(
-            stripStrictDirectiveLine(source), options,
-            AstFrontendMode::StrictChecked, errors, frontend);
+            source, options, AstFrontendMode::StrictChecked, errors, frontend);
         return require(status == AstFrontendBuildStatus::SemanticError,
                        description + " should fail semantic analysis") &&
                require(!errors.empty(),
@@ -935,20 +920,20 @@ bool checkTypedImportDiagnosticRegression(const std::filesystem::path& repoRoot)
 
     if (!expectStrictError(repoRoot /
                                "tests/types/errors/import_binding_type_mismatch.mog",
-                           1, 9, "cannot assign imported value",
+                           2, 9, "cannot assign imported value",
                            "typed import mismatch sample")) {
         return false;
     }
 
     if (!expectStrictError(repoRoot / "tests/types/errors/import_missing_export.mog",
-                           1, 9, "has no export 'Missing'",
+                           2, 9, "has no export 'Missing'",
                            "missing export sample")) {
         return false;
     }
 
     if (!expectStrictError(
             repoRoot / "tests/types/errors/import_native_binding_type_mismatch.mog",
-            1, 9, "function(i64, i64) -> i64",
+            2, 9, "function(i64, i64) -> i64",
             "native typed import mismatch sample")) {
         return false;
     }
@@ -956,14 +941,14 @@ bool checkTypedImportDiagnosticRegression(const std::filesystem::path& repoRoot)
     if (!expectStrictError(
             repoRoot /
                 "tests/types/errors/import_native_handle_binding_type_mismatch.mog",
-            1, 9, "function(i64) -> handle<examples:counter:CounterHandle>",
+            2, 9, "function(i64) -> handle<examples:counter:CounterHandle>",
             "native handle typed import mismatch sample")) {
         return false;
     }
 
     if (!expectStrictError(repoRoot /
                                "tests/types/errors/import_cycle_frontend.mog",
-                           1, 21, "Circular import detected",
+                           2, 21, "Circular import detected",
                            "import cycle sample")) {
         return false;
     }

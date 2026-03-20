@@ -187,6 +187,8 @@ void Compiler::pushCallResultType(const TypeRef& calleeType) {
     if (calleeType && calleeType->kind == TypeKind::FUNCTION &&
         calleeType->returnType) {
         pushExprType(calleeType->returnType);
+    } else if (calleeType && calleeType->kind == TypeKind::CLASS) {
+        pushExprType(calleeType);
     } else {
         pushExprType(TypeInfo::makeAny());
     }
