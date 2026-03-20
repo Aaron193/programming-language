@@ -87,10 +87,8 @@ HirBytecodeEmitter::HirBytecodeEmitter(Compiler& compiler,
       m_terminalLine(terminalLine == 0 ? 1 : terminalLine) {}
 
 bool HirBytecodeEmitter::emitModule() {
-    for (const auto& item : m_module.items) {
-        if (item) {
-            emitItem(*item);
-        }
+    for (const HirItemId itemId : m_module.items) {
+        emitItem(m_module.item(itemId));
     }
 
     emitReturn(lastModuleLine());
@@ -329,11 +327,21 @@ void HirBytecodeEmitter::emitExportName(const Token& nameToken, size_t line) {
     emitByte(OpCode::POP, line);
 }
 
-void HirBytecodeEmitter::emitArguments(const std::vector<HirExprPtr>& arguments,
+const HirExpr* HirBytecodeEmitter::exprPtr(
+    const std::optional<HirExprId>& id) const {
+    return id ? &m_module.expr(*id) : nullptr;
+}
+
+const HirStmt* HirBytecodeEmitter::stmtPtr(
+    const std::optional<HirStmtId>& id) const {
+    return id ? &m_module.stmt(*id) : nullptr;
+}
+
+void HirBytecodeEmitter::emitArguments(const std::vector<HirExprId>& arguments,
                                        size_t line, uint8_t& argCount) {
     argCount = 0;
-    for (const auto& argument : arguments) {
-        emitExpr(*argument);
+    for (const HirExprId argumentId : arguments) {
+        emitExpr(m_module.expr(argumentId));
         m_compiler.popExprType();
         if (argCount == UINT8_MAX) {
             errorAtLine(line, "Cannot have more than 255 arguments.");
@@ -425,10 +433,8 @@ Compiler::CompiledFunction HirBytecodeEmitter::compileFunction(
 
 void HirBytecodeEmitter::emitFunctionBody(const HirStmt& body) {
     if (const auto* block = std::get_if<HirBlockStmt>(&body.value)) {
-        for (const auto& item : block->items) {
-            if (item) {
-                emitItem(*item);
-            }
+        for (const HirItemId itemId : block->items) {
+            emitItem(m_module.item(itemId));
         }
         return;
     }
@@ -452,7 +458,7 @@ void HirBytecodeEmitter::emitFunctionDecl(const HirFunctionDecl& functionDecl) {
 
     Compiler::CompiledFunction compiled = compileFunction(
         tokenText(functionDecl.name), functionDecl.params, functionDecl.node,
-        functionDecl.body.get(), nullptr, false);
+        stmtPtr(functionDecl.body), nullptr, false);
     emitClosureObject(compiled, line);
     defineVariable(variable, line);
 
@@ -501,7 +507,7 @@ void HirBytecodeEmitter::emitClassDecl(const HirClassDecl& classDecl) {
     for (const auto& method : classDecl.methods) {
         Compiler::CompiledFunction compiled =
             compileFunction(tokenText(method.name), method.params, method.node,
-                            method.body.get(), nullptr, true);
+                            stmtPtr(method.body), nullptr, true);
         emitClosureObject(compiled, method.node.line);
         emitBytes(OpCode::METHOD, m_compiler.identifierConstant(method.name),
                   method.node.line);
@@ -536,7 +542,7 @@ void HirBytecodeEmitter::emitVarDecl(const HirVarDeclStmt& stmt,
 
     TypeRef initializerType = TypeInfo::makeAny();
     if (stmt.initializer) {
-        emitExpr(*stmt.initializer);
+        emitExpr(m_module.expr(*stmt.initializer));
         initializerType = m_compiler.popExprType();
     } else {
         emitByte(OpCode::NIL, line);
@@ -567,10 +573,11 @@ void HirBytecodeEmitter::emitVarDecl(const HirVarDeclStmt& stmt,
 
 void HirBytecodeEmitter::emitDestructuredImport(
     const HirDestructuredImportStmt& stmt, size_t line) {
-    if (!stmt.initializer ||
-        !std::holds_alternative<HirImportExpr>(stmt.initializer->value)) {
-        if (stmt.initializer) {
-            errorAtNode(stmt.initializer->node,
+    const HirExpr* initializer = exprPtr(stmt.initializer);
+    if (!initializer ||
+        !std::holds_alternative<HirImportExpr>(initializer->value)) {
+        if (initializer) {
+            errorAtNode(initializer->node,
                         "Expected '@import(...)' in destructured import.");
         } else {
             errorAtLine(line,
@@ -579,7 +586,7 @@ void HirBytecodeEmitter::emitDestructuredImport(
         return;
     }
 
-    const auto& importExpr = std::get<HirImportExpr>(stmt.initializer->value);
+    const auto& importExpr = std::get<HirImportExpr>(initializer->value);
     if (importExpr.importedModule.importTarget.canonicalId.empty()) {
         errorAtToken(importExpr.path,
                      "Internal frontend error: unresolved import target.");
@@ -628,10 +635,8 @@ void HirBytecodeEmitter::emitItem(const HirItem& item) {
                 emitClassDecl(value);
             } else if constexpr (std::is_same_v<T, HirFunctionDecl>) {
                 emitFunctionDecl(value);
-            } else if constexpr (std::is_same_v<T, HirStmtPtr>) {
-                if (value) {
-                    emitStmt(*value);
-                }
+            } else if constexpr (std::is_same_v<T, HirStmtId>) {
+                emitStmt(m_module.stmt(value));
             }
         },
         item.value);
@@ -643,21 +648,19 @@ void HirBytecodeEmitter::emitStmt(const HirStmt& stmt) {
             using T = std::decay_t<decltype(value)>;
             if constexpr (std::is_same_v<T, HirBlockStmt>) {
                 beginScope();
-                for (const auto& item : value.items) {
-                    if (item) {
-                        emitItem(*item);
-                    }
+                for (const HirItemId itemId : value.items) {
+                    emitItem(m_module.item(itemId));
                 }
                 endScope(stmt.node.line);
             } else if constexpr (std::is_same_v<T, HirExprStmt>) {
-                if (value.expression) {
-                    emitExpr(*value.expression);
+                if (const HirExpr* expression = exprPtr(value.expression)) {
+                    emitExpr(*expression);
                     m_compiler.popExprType();
                     emitByte(OpCode::POP, stmt.node.line);
                 }
             } else if constexpr (std::is_same_v<T, HirPrintStmt>) {
-                if (value.expression) {
-                    emitExpr(*value.expression);
+                if (const HirExpr* expression = exprPtr(value.expression)) {
+                    emitExpr(*expression);
                     m_compiler.popExprType();
                 } else {
                     emitByte(OpCode::NIL, stmt.node.line);
@@ -670,8 +673,8 @@ void HirBytecodeEmitter::emitStmt(const HirStmt& stmt) {
                     return;
                 }
 
-                if (value.value) {
-                    emitExpr(*value.value);
+                if (const HirExpr* returnValue = exprPtr(value.value)) {
+                    emitExpr(*returnValue);
                     TypeRef expressionType = m_compiler.popExprType();
                     emitCoerceToType(expressionType,
                                      m_compiler.currentContext().returnType,
@@ -683,24 +686,26 @@ void HirBytecodeEmitter::emitStmt(const HirStmt& stmt) {
                 }
                 emitByte(OpCode::RETURN, stmt.node.line);
             } else if constexpr (std::is_same_v<T, HirIfStmt>) {
-                emitExpr(*value.condition);
+                emitExpr(m_module.expr(*value.condition));
                 m_compiler.popExprType();
                 int thenJump =
                     emitJump(OpCode::JUMP_IF_FALSE_POP, stmt.node.line);
-                emitStmt(*value.thenBranch);
-                int endJump = emitJump(OpCode::JUMP, stmt.node.line);
-                patchJump(thenJump);
+                emitStmt(m_module.stmt(*value.thenBranch));
                 if (value.elseBranch) {
-                    emitStmt(*value.elseBranch);
+                    int endJump = emitJump(OpCode::JUMP, stmt.node.line);
+                    patchJump(thenJump);
+                    emitStmt(m_module.stmt(*value.elseBranch));
+                    patchJump(endJump);
+                } else {
+                    patchJump(thenJump);
                 }
-                patchJump(endJump);
             } else if constexpr (std::is_same_v<T, HirWhileStmt>) {
                 int loopStart = m_compiler.currentChunk()->count();
-                emitExpr(*value.condition);
+                emitExpr(m_module.expr(*value.condition));
                 m_compiler.popExprType();
                 int exitJump =
                     emitJump(OpCode::JUMP_IF_FALSE_POP, stmt.node.line);
-                emitStmt(*value.body);
+                emitStmt(m_module.stmt(*value.body));
                 emitLoop(loopStart, stmt.node.line);
                 patchJump(exitJump);
             } else if constexpr (std::is_same_v<T, HirVarDeclStmt>) {
@@ -708,28 +713,41 @@ void HirBytecodeEmitter::emitStmt(const HirStmt& stmt) {
             } else if constexpr (std::is_same_v<T, HirDestructuredImportStmt>) {
                 emitDestructuredImport(value, stmt.node.line);
             } else if constexpr (std::is_same_v<T, HirForStmt>) {
+                const auto emitForInitializer = [&]() {
+                    if (const HirStmt* initStmt = stmtPtr(value.initializer)) {
+                        if (const auto* initDecl =
+                                std::get_if<HirVarDeclStmt>(&initStmt->value)) {
+                            emitVarDecl(*initDecl, stmt.node.line, false);
+                        } else if (const auto* initExpr =
+                                       std::get_if<HirExprStmt>(&initStmt->value);
+                                   initExpr && initExpr->expression) {
+                            emitExpr(m_module.expr(*initExpr->expression));
+                            m_compiler.popExprType();
+                            emitByte(OpCode::POP, stmt.node.line);
+                        }
+                    }
+                };
+
                 beginScope();
 
-                if (const auto* initDecl =
-                        std::get_if<std::unique_ptr<HirVarDeclStmt>>(
-                            &value.initializer)) {
-                    if (initDecl->get() != nullptr) {
-                        emitVarDecl(**initDecl, stmt.node.line, false);
-                    }
-                } else if (const auto* initExpr =
-                               std::get_if<HirExprPtr>(&value.initializer)) {
-                    if (initExpr->get() != nullptr) {
-                        emitExpr(**initExpr);
-                        m_compiler.popExprType();
-                        emitByte(OpCode::POP, stmt.node.line);
+                if (value.condition) {
+                    const HirExpr& conditionExpr = m_module.expr(*value.condition);
+                    if (const auto* literal =
+                            std::get_if<HirLiteralExpr>(&conditionExpr.value);
+                        literal && literal->token.type() == TokenType::FALSE) {
+                        emitForInitializer();
+                        endScope(stmt.node.line);
+                        return;
                     }
                 }
+
+                emitForInitializer();
 
                 int loopStart = m_compiler.currentChunk()->count();
                 int exitJump = -1;
 
                 if (value.condition) {
-                    emitExpr(*value.condition);
+                    emitExpr(m_module.expr(*value.condition));
                     m_compiler.popExprType();
                     exitJump =
                         emitJump(OpCode::JUMP_IF_FALSE_POP, stmt.node.line);
@@ -738,7 +756,7 @@ void HirBytecodeEmitter::emitStmt(const HirStmt& stmt) {
                 if (value.increment) {
                     int bodyJump = emitJump(OpCode::JUMP, stmt.node.line);
                     int incrementStart = m_compiler.currentChunk()->count();
-                    emitExpr(*value.increment);
+                    emitExpr(m_module.expr(*value.increment));
                     m_compiler.popExprType();
                     emitByte(OpCode::POP, stmt.node.line);
                     emitLoop(loopStart, stmt.node.line);
@@ -746,7 +764,7 @@ void HirBytecodeEmitter::emitStmt(const HirStmt& stmt) {
                     patchJump(bodyJump);
                 }
 
-                emitStmt(*value.body);
+                emitStmt(m_module.stmt(*value.body));
                 emitLoop(loopStart, stmt.node.line);
                 if (exitJump != -1) {
                     patchJump(exitJump);
@@ -762,7 +780,7 @@ void HirBytecodeEmitter::emitStmt(const HirStmt& stmt) {
                 uint8_t loopVariableSlot = static_cast<uint8_t>(
                     m_compiler.currentContext().locals.size() - 1);
 
-                emitExpr(*value.iterable);
+                emitExpr(m_module.expr(*value.iterable));
                 m_compiler.popExprType();
                 emitByte(OpCode::ITER_INIT, stmt.node.line);
 
@@ -771,7 +789,7 @@ void HirBytecodeEmitter::emitStmt(const HirStmt& stmt) {
                     emitJump(OpCode::ITER_HAS_NEXT_JUMP, stmt.node.line);
                 emitBytes(OpCode::ITER_NEXT_SET_LOCAL, loopVariableSlot,
                           stmt.node.line);
-                emitStmt(*value.body);
+                emitStmt(m_module.stmt(*value.body));
                 emitLoop(loopStart, stmt.node.line);
                 patchJump(exitJump);
                 emitByte(OpCode::POP, stmt.node.line);
@@ -850,7 +868,7 @@ void HirBytecodeEmitter::emitAssignmentToMember(const HirMemberExpr& target,
                                                 const Token& op,
                                                 const HirExpr* valueExpr,
                                                 size_t line) {
-    emitExpr(*target.object);
+    emitExpr(m_module.expr(*target.object));
     TypeRef objectType = m_compiler.popExprType();
     std::string propertyName = tokenText(target.member);
     int fieldSlot = lookupClassFieldSlot(objectType, propertyName);
@@ -924,9 +942,9 @@ void HirBytecodeEmitter::emitAssignmentToIndex(const HirIndexExpr& target,
                                                const Token& op,
                                                const HirExpr* valueExpr,
                                                size_t line) {
-    emitExpr(*target.object);
+    emitExpr(m_module.expr(*target.object));
     TypeRef containerType = m_compiler.popExprType();
-    emitExpr(*target.index);
+    emitExpr(m_module.expr(*target.index));
     m_compiler.popExprType();
 
     TypeRef elementType = TypeInfo::makeAny();
@@ -1025,7 +1043,7 @@ void HirBytecodeEmitter::emitExpr(const HirExpr& expr) {
             } else if constexpr (std::is_same_v<T, HirBindingExpr>) {
                 emitVariableRead(value.name, expr.node.line);
             } else if constexpr (std::is_same_v<T, HirUnaryExpr>) {
-                emitExpr(*value.operand);
+                emitExpr(m_module.expr(*value.operand));
                 TypeRef operandType = m_compiler.popExprType();
                 switch (value.op.type()) {
                     case TokenType::BANG:
@@ -1047,18 +1065,19 @@ void HirBytecodeEmitter::emitExpr(const HirExpr& expr) {
                 }
                 m_compiler.pushExprType(nodeType(expr.node));
             } else if constexpr (std::is_same_v<T, HirUpdateExpr>) {
+                const HirExpr& operand = m_module.expr(*value.operand);
                 if (const auto* identifier =
-                        std::get_if<HirBindingExpr>(&value.operand->value)) {
+                        std::get_if<HirBindingExpr>(&operand.value)) {
                     emitAssignmentToVariable(*identifier, value.op,
-                                             value.operand.get(),
+                                             &operand,
                                              expr.node.line);
                 } else if (const auto* member = std::get_if<HirMemberExpr>(
-                               &value.operand->value)) {
-                    emitAssignmentToMember(*member, value.op,
-                                           value.operand.get(), expr.node.line);
+                               &operand.value)) {
+                    emitAssignmentToMember(*member, value.op, &operand,
+                                           expr.node.line);
                 } else if (const auto* index = std::get_if<HirIndexExpr>(
-                               &value.operand->value)) {
-                    emitAssignmentToIndex(*index, value.op, value.operand.get(),
+                               &operand.value)) {
+                    emitAssignmentToIndex(*index, value.op, &operand,
                                           expr.node.line);
                 } else {
                     errorAtNode(expr.node, "Invalid assignment target.");
@@ -1067,12 +1086,12 @@ void HirBytecodeEmitter::emitExpr(const HirExpr& expr) {
                 }
             } else if constexpr (std::is_same_v<T, HirBinaryExpr>) {
                 if (value.op.type() == TokenType::LOGICAL_AND) {
-                    emitExpr(*value.left);
+                    emitExpr(m_module.expr(*value.left));
                     TypeRef leftType = m_compiler.popExprType();
                     int endJump =
                         emitJump(OpCode::JUMP_IF_FALSE, expr.node.line);
                     emitByte(OpCode::POP, expr.node.line);
-                    emitExpr(*value.right);
+                    emitExpr(m_module.expr(*value.right));
                     TypeRef rightType = m_compiler.popExprType();
                     patchJump(endJump);
                     m_compiler.pushExprType((leftType && !leftType->isAny())
@@ -1082,14 +1101,14 @@ void HirBytecodeEmitter::emitExpr(const HirExpr& expr) {
                 }
 
                 if (value.op.type() == TokenType::LOGICAL_OR) {
-                    emitExpr(*value.left);
+                    emitExpr(m_module.expr(*value.left));
                     TypeRef leftType = m_compiler.popExprType();
                     int elseJump =
                         emitJump(OpCode::JUMP_IF_FALSE, expr.node.line);
                     int endJump = emitJump(OpCode::JUMP, expr.node.line);
                     patchJump(elseJump);
                     emitByte(OpCode::POP, expr.node.line);
-                    emitExpr(*value.right);
+                    emitExpr(m_module.expr(*value.right));
                     TypeRef rightType = m_compiler.popExprType();
                     patchJump(endJump);
                     m_compiler.pushExprType((leftType && !leftType->isAny())
@@ -1098,9 +1117,9 @@ void HirBytecodeEmitter::emitExpr(const HirExpr& expr) {
                     return;
                 }
 
-                emitExpr(*value.left);
+                emitExpr(m_module.expr(*value.left));
                 TypeRef leftType = m_compiler.popExprType();
-                emitExpr(*value.right);
+                emitExpr(m_module.expr(*value.right));
                 TypeRef rightType = m_compiler.popExprType();
 
                 if (leftType && leftType->kind == TypeKind::CLASS) {
@@ -1214,17 +1233,19 @@ void HirBytecodeEmitter::emitExpr(const HirExpr& expr) {
                 }
                 m_compiler.pushExprType(nodeType(expr.node));
             } else if constexpr (std::is_same_v<T, HirAssignmentExpr>) {
+                const HirExpr& target = m_module.expr(*value.target);
+                const HirExpr* valueExpr = exprPtr(value.value);
                 if (const auto* identifier =
-                        std::get_if<HirBindingExpr>(&value.target->value)) {
+                        std::get_if<HirBindingExpr>(&target.value)) {
                     emitAssignmentToVariable(*identifier, value.op,
-                                             value.value.get(), expr.node.line);
+                                             valueExpr, expr.node.line);
                 } else if (const auto* member = std::get_if<HirMemberExpr>(
-                               &value.target->value)) {
-                    emitAssignmentToMember(*member, value.op, value.value.get(),
+                               &target.value)) {
+                    emitAssignmentToMember(*member, value.op, valueExpr,
                                            expr.node.line);
                 } else if (const auto* index = std::get_if<HirIndexExpr>(
-                               &value.target->value)) {
-                    emitAssignmentToIndex(*index, value.op, value.value.get(),
+                               &target.value)) {
+                    emitAssignmentToIndex(*index, value.op, valueExpr,
                                           expr.node.line);
                 } else {
                     errorAtNode(expr.node, "Invalid assignment target.");
@@ -1232,10 +1253,11 @@ void HirBytecodeEmitter::emitExpr(const HirExpr& expr) {
                     m_compiler.pushExprType(TypeInfo::makeAny());
                 }
             } else if constexpr (std::is_same_v<T, HirCallExpr>) {
+                const HirExpr& callee = m_module.expr(*value.callee);
                 if (const auto* member =
-                        std::get_if<HirMemberExpr>(&value.callee->value)) {
+                        std::get_if<HirMemberExpr>(&callee.value)) {
                     if (std::holds_alternative<HirSuperExpr>(
-                            member->object->value)) {
+                            m_module.expr(*member->object).value)) {
                         emitByte(OpCode::GET_THIS, expr.node.line);
                         uint8_t argCount = 0;
                         emitArguments(value.arguments, expr.node.line,
@@ -1248,7 +1270,7 @@ void HirBytecodeEmitter::emitExpr(const HirExpr& expr) {
                         return;
                     }
 
-                    emitExpr(*member->object);
+                    emitExpr(m_module.expr(*member->object));
                     m_compiler.popExprType();
                     uint8_t argCount = 0;
                     emitArguments(value.arguments, expr.node.line, argCount);
@@ -1260,14 +1282,15 @@ void HirBytecodeEmitter::emitExpr(const HirExpr& expr) {
                     return;
                 }
 
-                emitExpr(*value.callee);
+                emitExpr(callee);
                 TypeRef calleeType = m_compiler.popExprType();
                 uint8_t argCount = 0;
                 emitArguments(value.arguments, expr.node.line, argCount);
                 emitBytes(OpCode::CALL, argCount, expr.node.line);
                 m_compiler.pushCallResultType(calleeType);
             } else if constexpr (std::is_same_v<T, HirMemberExpr>) {
-                if (std::holds_alternative<HirSuperExpr>(value.object->value)) {
+                if (std::holds_alternative<HirSuperExpr>(
+                        m_module.expr(*value.object).value)) {
                     emitBytes(OpCode::GET_SUPER,
                               m_compiler.identifierConstant(value.member),
                               expr.node.line);
@@ -1275,7 +1298,7 @@ void HirBytecodeEmitter::emitExpr(const HirExpr& expr) {
                     return;
                 }
 
-                emitExpr(*value.object);
+                emitExpr(m_module.expr(*value.object));
                 TypeRef objectType = m_compiler.popExprType();
                 std::string propertyName = tokenText(value.member);
                 int fieldSlot = lookupClassFieldSlot(objectType, propertyName);
@@ -1289,14 +1312,14 @@ void HirBytecodeEmitter::emitExpr(const HirExpr& expr) {
                 }
                 m_compiler.pushExprType(nodeType(expr.node));
             } else if constexpr (std::is_same_v<T, HirIndexExpr>) {
-                emitExpr(*value.object);
+                emitExpr(m_module.expr(*value.object));
                 m_compiler.popExprType();
-                emitExpr(*value.index);
+                emitExpr(m_module.expr(*value.index));
                 m_compiler.popExprType();
                 emitByte(OpCode::GET_INDEX, expr.node.line);
                 m_compiler.pushExprType(nodeType(expr.node));
             } else if constexpr (std::is_same_v<T, HirCastExpr>) {
-                emitExpr(*value.expression);
+                emitExpr(m_module.expr(*value.expression));
                 m_compiler.popExprType();
                 TypeRef targetType = nodeType(expr.node);
                 if (targetType && targetType->kind == TypeKind::CLASS) {
@@ -1313,8 +1336,8 @@ void HirBytecodeEmitter::emitExpr(const HirExpr& expr) {
                 m_compiler.pushExprType(targetType);
             } else if constexpr (std::is_same_v<T, HirFunctionExpr>) {
                 Compiler::CompiledFunction compiled = compileFunction(
-                    "<closure>", value.params, expr.node, value.blockBody.get(),
-                    value.expressionBody.get(), false);
+                    "<closure>", value.params, expr.node, stmtPtr(value.blockBody),
+                    exprPtr(value.expressionBody), false);
                 emitClosureObject(compiled, expr.node.line);
                 m_compiler.pushExprType(nodeType(expr.node));
             } else if constexpr (std::is_same_v<T, HirImportExpr>) {
@@ -1340,8 +1363,8 @@ void HirBytecodeEmitter::emitExpr(const HirExpr& expr) {
                 m_compiler.pushExprType(TypeInfo::makeAny());
             } else if constexpr (std::is_same_v<T, HirArrayLiteralExpr>) {
                 uint8_t count = 0;
-                for (const auto& element : value.elements) {
-                    emitExpr(*element);
+                for (const HirExprId elementId : value.elements) {
+                    emitExpr(m_module.expr(elementId));
                     m_compiler.popExprType();
                     if (count == UINT8_MAX) {
                         errorAtNode(expr.node,
@@ -1356,9 +1379,9 @@ void HirBytecodeEmitter::emitExpr(const HirExpr& expr) {
             } else if constexpr (std::is_same_v<T, HirDictLiteralExpr>) {
                 uint8_t pairCount = 0;
                 for (const auto& entry : value.entries) {
-                    emitExpr(*entry.key);
+                    emitExpr(m_module.expr(*entry.key));
                     m_compiler.popExprType();
-                    emitExpr(*entry.value);
+                    emitExpr(m_module.expr(*entry.value));
                     m_compiler.popExprType();
                     if (pairCount == UINT8_MAX) {
                         errorAtNode(expr.node,

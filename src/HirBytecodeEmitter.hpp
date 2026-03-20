@@ -50,7 +50,9 @@ class HirBytecodeEmitter {
     int lookupClassFieldSlot(const TypeRef& objectType,
                              const std::string& fieldName) const;
     void emitExportName(const Token& nameToken, size_t line);
-    void emitArguments(const std::vector<HirExprPtr>& arguments, size_t line,
+    const HirExpr* exprPtr(const std::optional<HirExprId>& id) const;
+    const HirStmt* stmtPtr(const std::optional<HirStmtId>& id) const;
+    void emitArguments(const std::vector<HirExprId>& arguments, size_t line,
                        uint8_t& argCount);
     void emitClosureObject(const Compiler::CompiledFunction& compiled,
                            size_t line);

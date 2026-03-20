@@ -101,23 +101,19 @@ AstExpr* topLevelPrintExpr(AstModule& module, size_t printIndex) {
 
 HirExpr* topLevelHirPrintExpr(HirModule& module, size_t printIndex) {
     size_t seen = 0;
-    for (auto& item : module.items) {
-        if (!item) {
+    for (HirItemId itemId : module.items) {
+        auto* stmtId = std::get_if<HirStmtId>(&module.item(itemId).value);
+        if (!stmtId) {
             continue;
         }
 
-        auto* stmtPtr = std::get_if<HirStmtPtr>(&item->value);
-        if (!stmtPtr || !*stmtPtr) {
-            continue;
-        }
-
-        auto* printStmt = std::get_if<HirPrintStmt>(&(*stmtPtr)->value);
+        auto* printStmt = std::get_if<HirPrintStmt>(&module.stmt(*stmtId).value);
         if (!printStmt || !printStmt->expression) {
             continue;
         }
 
         if (seen == printIndex) {
-            return printStmt->expression.get();
+            return &module.expr(*printStmt->expression);
         }
         ++seen;
     }
@@ -147,18 +143,14 @@ AstDestructuredImportStmt* topLevelDestructuredImport(AstModule& module) {
 }
 
 HirDestructuredImportStmt* topLevelHirDestructuredImport(HirModule& module) {
-    for (auto& item : module.items) {
-        if (!item) {
-            continue;
-        }
-
-        auto* stmtPtr = std::get_if<HirStmtPtr>(&item->value);
-        if (!stmtPtr || !*stmtPtr) {
+    for (HirItemId itemId : module.items) {
+        auto* stmtId = std::get_if<HirStmtId>(&module.item(itemId).value);
+        if (!stmtId) {
             continue;
         }
 
         auto* importStmt =
-            std::get_if<HirDestructuredImportStmt>(&(*stmtPtr)->value);
+            std::get_if<HirDestructuredImportStmt>(&module.stmt(*stmtId).value);
         if (importStmt) {
             return importStmt;
         }
@@ -486,7 +478,7 @@ bool checkSyntheticNotSpanRegression() {
     }
 
     const auto* unary = std::get_if<HirUnaryExpr>(&notExpr->value);
-    if (!require(unary != nullptr && unary->operand != nullptr,
+    if (!require(unary != nullptr && unary->operand.has_value(),
                  "bool equality false rewrite should synthesize a unary not expression")) {
         return false;
     }
@@ -878,8 +870,10 @@ bool checkTypedImportFrontendRegression(const std::filesystem::path& repoRoot) {
         return false;
     }
 
+    HirExpr& hirImportInitializer =
+        frontend.hirModule->expr(*hirImportStmt->initializer);
     const auto* hirImportExpr =
-        std::get_if<HirImportExpr>(&hirImportStmt->initializer->value);
+        std::get_if<HirImportExpr>(&hirImportInitializer.value);
     if (!require(hirImportExpr != nullptr,
                  "typed import HIR initializer should stay an import expression")) {
         return false;

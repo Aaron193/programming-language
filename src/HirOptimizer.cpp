@@ -36,6 +36,19 @@ struct ConstantValue {
 namespace {
 
 constexpr uint64_t kMaxExactIntegerInDouble = 9007199254740992ULL;
+HirModule* g_module = nullptr;
+
+HirExpr& exprRef(HirExprId id) {
+    return g_module->expr(id);
+}
+
+HirStmt& stmtRef(HirStmtId id) {
+    return g_module->stmt(id);
+}
+
+HirItem& itemRef(HirItemId id) {
+    return g_module->item(id);
+}
 
 bool addOverflow(int64_t lhs, int64_t rhs, int64_t& out) {
     return __builtin_add_overflow(lhs, rhs, &out);
@@ -93,7 +106,8 @@ struct ConstantEvaluator {
                 } else if constexpr (std::is_same_v<T, HirBinaryExpr>) {
                     return evaluateBinary(expr, value, out);
                 } else if constexpr (std::is_same_v<T, HirCastExpr>) {
-                    return value.expression && evaluate(*value.expression, out);
+                    return value.expression &&
+                           evaluate(exprRef(*value.expression), out);
                 } else {
                     return false;
                 }
@@ -253,7 +267,7 @@ struct ConstantEvaluator {
 
     bool evaluateUnary(const HirUnaryExpr& unary, ConstantValue& out) const {
         ConstantValue operand;
-        if (!unary.operand || !evaluate(*unary.operand, operand)) {
+        if (!unary.operand || !evaluate(exprRef(*unary.operand), operand)) {
             return false;
         }
 
@@ -306,8 +320,8 @@ struct ConstantEvaluator {
             return false;
         }
 
-        TypeRef promoted = numericPromotion(typeOf(binary.left->node),
-                                            typeOf(binary.right->node));
+        TypeRef promoted = numericPromotion(typeOf(exprRef(*binary.left).node),
+                                            typeOf(exprRef(*binary.right).node));
         if (!promoted) {
             return false;
         }
@@ -589,8 +603,9 @@ struct ConstantEvaluator {
                         ConstantValue& out) const {
         ConstantValue left;
         ConstantValue right;
-        if (!binary.left || !binary.right || !evaluate(*binary.left, left) ||
-            !evaluate(*binary.right, right)) {
+        if (!binary.left || !binary.right ||
+            !evaluate(exprRef(*binary.left), left) ||
+            !evaluate(exprRef(*binary.right), right)) {
             return false;
         }
 
@@ -684,9 +699,7 @@ void optimizeItemTree(HirItem& item, const ConstantEvaluator& evaluator);
 
 bool blockIsDefinitelyTerminal(const HirBlockStmt& block) {
     for (auto it = block.items.rbegin(); it != block.items.rend(); ++it) {
-        if (*it) {
-            return isDefinitelyTerminal(**it);
-        }
+        return isDefinitelyTerminal(itemRef(*it));
     }
     return false;
 }
@@ -701,8 +714,8 @@ bool isDefinitelyTerminal(const HirStmt& stmt) {
                 return blockIsDefinitelyTerminal(value);
             } else if constexpr (std::is_same_v<T, HirIfStmt>) {
                 return value.thenBranch && value.elseBranch &&
-                       isDefinitelyTerminal(*value.thenBranch) &&
-                       isDefinitelyTerminal(*value.elseBranch);
+                       isDefinitelyTerminal(stmtRef(*value.thenBranch)) &&
+                       isDefinitelyTerminal(stmtRef(*value.elseBranch));
             } else {
                 return false;
             }
@@ -714,8 +727,8 @@ bool isDefinitelyTerminal(const HirItem& item) {
     return std::visit(
         [&](const auto& value) -> bool {
             using T = std::decay_t<decltype(value)>;
-            if constexpr (std::is_same_v<T, HirStmtPtr>) {
-                return value && isDefinitelyTerminal(*value);
+            if constexpr (std::is_same_v<T, HirStmtId>) {
+                return isDefinitelyTerminal(stmtRef(value));
             } else {
                 return false;
             }
@@ -733,13 +746,14 @@ bool isDefinitelyPure(const HirExpr& expr) {
                           std::is_same_v<T, HirSuperExpr>) {
                 return true;
             } else if constexpr (std::is_same_v<T, HirUnaryExpr>) {
-                return value.operand && isDefinitelyPure(*value.operand);
+                return value.operand && isDefinitelyPure(exprRef(*value.operand));
             } else if constexpr (std::is_same_v<T, HirBinaryExpr>) {
                 return value.left && value.right &&
-                       isDefinitelyPure(*value.left) &&
-                       isDefinitelyPure(*value.right);
+                       isDefinitelyPure(exprRef(*value.left)) &&
+                       isDefinitelyPure(exprRef(*value.right));
             } else if constexpr (std::is_same_v<T, HirCastExpr>) {
-                return value.expression && isDefinitelyPure(*value.expression);
+                return value.expression &&
+                       isDefinitelyPure(exprRef(*value.expression));
             } else {
                 return false;
             }
@@ -747,18 +761,18 @@ bool isDefinitelyPure(const HirExpr& expr) {
         expr.value);
 }
 
-HirStmtPtr makeStmtPtr(HirStmt&& stmt) {
-    return std::make_unique<HirStmt>(std::move(stmt));
+HirStmtId makeStmtId(HirStmt&& stmt) {
+    return g_module->addStmt(std::move(stmt));
 }
 
-HirItemPtr makeItemPtr(HirStmtPtr stmt) {
-    auto item = std::make_unique<HirItem>();
-    item->value = std::move(stmt);
-    return item;
+HirItemId makeItemId(HirStmtId stmtId) {
+    HirItem item;
+    item.value = stmtId;
+    return g_module->addItem(std::move(item));
 }
 
-HirExprPtr makeExprPtr(HirExpr&& expr) {
-    return std::make_unique<HirExpr>(std::move(expr));
+HirExprId makeExprId(HirExpr&& expr) {
+    return g_module->addExpr(std::move(expr));
 }
 
 bool isEmptyBlockStmt(const HirStmt& stmt) {
@@ -766,24 +780,27 @@ bool isEmptyBlockStmt(const HirStmt& stmt) {
     return block && block->items.empty();
 }
 
-void replaceStmtPreservingNode(HirStmt& target, HirStmtPtr replacement) {
+void replaceStmtPreservingNode(HirStmt& target,
+                               const std::optional<HirStmtId>& replacement) {
     if (!replacement) {
         target.value = HirBlockStmt{};
         return;
     }
-    target.value = std::move(replacement->value);
+    target.value = stmtRef(*replacement).value;
 }
 
-void replaceExprPreservingNode(HirExpr& target, HirExprPtr replacement) {
+void replaceExprPreservingNode(HirExpr& target,
+                               const std::optional<HirExprId>& replacement) {
     if (!replacement) {
         return;
     }
-    replacement->node = target.node;
-    target = std::move(*replacement);
+    HirExpr replacementExpr = exprRef(*replacement);
+    replacementExpr.node = target.node;
+    target = std::move(replacementExpr);
 }
 
 void replaceExprWithLogicalNotPreservingNode(HirExpr& target,
-                                             HirExprPtr operand) {
+                                             const std::optional<HirExprId>& operand) {
     if (!operand) {
         return;
     }
@@ -792,9 +809,9 @@ void replaceExprWithLogicalNotPreservingNode(HirExpr& target,
     replacement.node = target.node;
     HirUnaryExpr logicalNot;
     logicalNot.op = Token::synthetic(TokenType::BANG, "!", target.node.span);
-    logicalNot.operand = std::move(operand);
+    logicalNot.operand = operand;
     replacement.value = std::move(logicalNot);
-    replaceExprPreservingNode(target, makeExprPtr(std::move(replacement)));
+    replaceExprPreservingNode(target, makeExprId(std::move(replacement)));
 }
 
 bool sameKnownType(const ConstantEvaluator& evaluator, const HirNodeInfo& lhs,
@@ -846,24 +863,26 @@ bool isKnownIntegerType(const ConstantEvaluator& evaluator,
     return type && type->isInteger();
 }
 
-bool replaceWithOperandIfTypeMatches(HirExpr& expr, HirExprPtr& operand,
+bool replaceWithOperandIfTypeMatches(HirExpr& expr,
+                                     std::optional<HirExprId>& operand,
                                      const ConstantEvaluator& evaluator) {
-    if (!operand || !canReuseOperandAsResult(expr, *operand, evaluator)) {
+    if (!operand || !canReuseOperandAsResult(expr, exprRef(*operand), evaluator)) {
         return false;
     }
-    replaceExprPreservingNode(expr, std::move(operand));
+    replaceExprPreservingNode(expr, operand);
     return true;
 }
 
 bool replaceWithLogicalNotOfOperandIfTypeMatches(
-    HirExpr& expr, HirExprPtr& operand, const ConstantEvaluator& evaluator) {
+    HirExpr& expr, std::optional<HirExprId>& operand,
+    const ConstantEvaluator& evaluator) {
     if (!operand || !isKnownBoolType(evaluator, expr.node) ||
-        !isKnownBoolType(evaluator, operand->node) ||
-        !canReuseOperandAsResult(expr, *operand, evaluator)) {
+        !isKnownBoolType(evaluator, exprRef(*operand).node) ||
+        !canReuseOperandAsResult(expr, exprRef(*operand), evaluator)) {
         return false;
     }
 
-    replaceExprWithLogicalNotPreservingNode(expr, std::move(operand));
+    replaceExprWithLogicalNotPreservingNode(expr, operand);
     return true;
 }
 
@@ -878,10 +897,11 @@ bool simplifyUnaryExpr(HirExpr& expr, const ConstantEvaluator& evaluator) {
             return false;
         }
 
-        auto* nestedUnary = std::get_if<HirUnaryExpr>(&unary->operand->value);
+        auto* nestedUnary =
+            std::get_if<HirUnaryExpr>(&exprRef(*unary->operand).value);
         if (!nestedUnary || nestedUnary->op.type() != TokenType::BANG ||
             !nestedUnary->operand ||
-            !isKnownBoolType(evaluator, nestedUnary->operand->node)) {
+            !isKnownBoolType(evaluator, exprRef(*nestedUnary->operand).node)) {
             return false;
         }
 
@@ -894,10 +914,11 @@ bool simplifyUnaryExpr(HirExpr& expr, const ConstantEvaluator& evaluator) {
         return false;
     }
 
-    auto* nestedUnary = std::get_if<HirUnaryExpr>(&unary->operand->value);
+    auto* nestedUnary =
+        std::get_if<HirUnaryExpr>(&exprRef(*unary->operand).value);
     if (!nestedUnary || nestedUnary->op.type() != TokenType::TILDE ||
         !nestedUnary->operand ||
-        !isKnownIntegerType(evaluator, nestedUnary->operand->node)) {
+        !isKnownIntegerType(evaluator, exprRef(*nestedUnary->operand).node)) {
         return false;
     }
 
@@ -909,12 +930,12 @@ bool simplifyBooleanEqualityBinary(HirExpr& expr, HirBinaryExpr& binary,
                                    const ConstantEvaluator& evaluator) {
     if (!binary.left || !binary.right ||
         !isKnownBoolType(evaluator, expr.node) ||
-        !isKnownBoolType(evaluator, binary.left->node) ||
-        !isKnownBoolType(evaluator, binary.right->node)) {
+        !isKnownBoolType(evaluator, exprRef(*binary.left).node) ||
+        !isKnownBoolType(evaluator, exprRef(*binary.right).node)) {
         return false;
     }
 
-    const auto simplifyAgainstConstant = [&](HirExprPtr& operand,
+    const auto simplifyAgainstConstant = [&](std::optional<HirExprId>& operand,
                                              bool constantValue) {
         switch (binary.op.type()) {
             case TokenType::EQUAL_EQUAL:
@@ -937,12 +958,12 @@ bool simplifyBooleanEqualityBinary(HirExpr& expr, HirBinaryExpr& binary,
     };
 
     bool leftValue = false;
-    if (tryEvaluateConditionBool(*binary.left, evaluator, leftValue)) {
+    if (tryEvaluateConditionBool(exprRef(*binary.left), evaluator, leftValue)) {
         return simplifyAgainstConstant(binary.right, leftValue);
     }
 
     bool rightValue = false;
-    if (tryEvaluateConditionBool(*binary.right, evaluator, rightValue)) {
+    if (tryEvaluateConditionBool(exprRef(*binary.right), evaluator, rightValue)) {
         return simplifyAgainstConstant(binary.left, rightValue);
     }
 
@@ -963,9 +984,9 @@ bool simplifyIdentityBinary(HirExpr& expr, HirBinaryExpr& binary,
     ConstantValue leftConstant;
     ConstantValue rightConstant;
     const bool hasLeftConstant =
-        tryEvaluateConstant(*binary.left, evaluator, leftConstant);
+        tryEvaluateConstant(exprRef(*binary.left), evaluator, leftConstant);
     const bool hasRightConstant =
-        tryEvaluateConstant(*binary.right, evaluator, rightConstant);
+        tryEvaluateConstant(exprRef(*binary.right), evaluator, rightConstant);
 
     switch (binary.op.type()) {
         case TokenType::PLUS:
@@ -991,12 +1012,12 @@ bool simplifyIdentityBinary(HirExpr& expr, HirBinaryExpr& binary,
             }
             if (exprType->isInteger()) {
                 if (hasRightConstant && isZeroConstant(rightConstant) &&
-                    isDefinitelyPure(*binary.left)) {
+                    isDefinitelyPure(exprRef(*binary.left))) {
                     return replaceWithOperandIfTypeMatches(expr, binary.right,
                                                            evaluator);
                 }
                 if (hasLeftConstant && isZeroConstant(leftConstant) &&
-                    isDefinitelyPure(*binary.right)) {
+                    isDefinitelyPure(exprRef(*binary.right))) {
                     return replaceWithOperandIfTypeMatches(expr, binary.left,
                                                            evaluator);
                 }
@@ -1019,12 +1040,12 @@ bool simplifyIdentityBinary(HirExpr& expr, HirBinaryExpr& binary,
                 return false;
             }
             if (hasRightConstant && isZeroConstant(rightConstant) &&
-                isDefinitelyPure(*binary.left)) {
+                isDefinitelyPure(exprRef(*binary.left))) {
                 return replaceWithOperandIfTypeMatches(expr, binary.right,
                                                        evaluator);
             }
             if (hasLeftConstant && isZeroConstant(leftConstant) &&
-                isDefinitelyPure(*binary.right)) {
+                isDefinitelyPure(exprRef(*binary.right))) {
                 return replaceWithOperandIfTypeMatches(expr, binary.left,
                                                        evaluator);
             }
@@ -1062,9 +1083,9 @@ bool simplifyLogicalBinary(HirExpr& expr, HirBinaryExpr& binary,
     bool leftValue = false;
     bool rightValue = false;
     const bool hasLeftConstant =
-        tryEvaluateConditionBool(*binary.left, evaluator, leftValue);
+        tryEvaluateConditionBool(exprRef(*binary.left), evaluator, leftValue);
     const bool hasRightConstant =
-        tryEvaluateConditionBool(*binary.right, evaluator, rightValue);
+        tryEvaluateConditionBool(exprRef(*binary.right), evaluator, rightValue);
 
     auto replaceWithBoolLiteral = [&](bool value) {
         expr = evaluator.makeLiteralExpr(
@@ -1080,7 +1101,7 @@ bool simplifyLogicalBinary(HirExpr& expr, HirBinaryExpr& binary,
                     return replaceWithOperandIfTypeMatches(expr, binary.right,
                                                            evaluator);
                 }
-                if (!isDefinitelyPure(*binary.right)) {
+                if (!isDefinitelyPure(exprRef(*binary.right))) {
                     return false;
                 }
                 return replaceWithBoolLiteral(false);
@@ -1091,7 +1112,7 @@ bool simplifyLogicalBinary(HirExpr& expr, HirBinaryExpr& binary,
                     return replaceWithOperandIfTypeMatches(expr, binary.left,
                                                            evaluator);
                 }
-                if (!isDefinitelyPure(*binary.left)) {
+                if (!isDefinitelyPure(exprRef(*binary.left))) {
                     return false;
                 }
                 return replaceWithBoolLiteral(false);
@@ -1103,7 +1124,7 @@ bool simplifyLogicalBinary(HirExpr& expr, HirBinaryExpr& binary,
                     return replaceWithOperandIfTypeMatches(expr, binary.right,
                                                            evaluator);
                 }
-                if (!isDefinitelyPure(*binary.right)) {
+                if (!isDefinitelyPure(exprRef(*binary.right))) {
                     return false;
                 }
                 return replaceWithBoolLiteral(true);
@@ -1114,7 +1135,7 @@ bool simplifyLogicalBinary(HirExpr& expr, HirBinaryExpr& binary,
                     return replaceWithOperandIfTypeMatches(expr, binary.left,
                                                            evaluator);
                 }
-                if (!isDefinitelyPure(*binary.left)) {
+                if (!isDefinitelyPure(exprRef(*binary.left))) {
                     return false;
                 }
                 return replaceWithBoolLiteral(true);
@@ -1150,70 +1171,66 @@ void optimizeExprTree(HirExpr& expr, const ConstantEvaluator& evaluator) {
             using T = std::decay_t<decltype(value)>;
             if constexpr (std::is_same_v<T, HirUnaryExpr>) {
                 if (value.operand) {
-                    optimizeExprTree(*value.operand, evaluator);
+                    optimizeExprTree(exprRef(*value.operand), evaluator);
                 }
             } else if constexpr (std::is_same_v<T, HirUpdateExpr>) {
                 if (value.operand) {
-                    optimizeExprTree(*value.operand, evaluator);
+                    optimizeExprTree(exprRef(*value.operand), evaluator);
                 }
             } else if constexpr (std::is_same_v<T, HirBinaryExpr>) {
                 if (value.left) {
-                    optimizeExprTree(*value.left, evaluator);
+                    optimizeExprTree(exprRef(*value.left), evaluator);
                 }
                 if (value.right) {
-                    optimizeExprTree(*value.right, evaluator);
+                    optimizeExprTree(exprRef(*value.right), evaluator);
                 }
             } else if constexpr (std::is_same_v<T, HirAssignmentExpr>) {
                 if (value.target) {
-                    optimizeExprTree(*value.target, evaluator);
+                    optimizeExprTree(exprRef(*value.target), evaluator);
                 }
                 if (value.value) {
-                    optimizeExprTree(*value.value, evaluator);
+                    optimizeExprTree(exprRef(*value.value), evaluator);
                 }
             } else if constexpr (std::is_same_v<T, HirCallExpr>) {
                 if (value.callee) {
-                    optimizeExprTree(*value.callee, evaluator);
+                    optimizeExprTree(exprRef(*value.callee), evaluator);
                 }
-                for (auto& argument : value.arguments) {
-                    if (argument) {
-                        optimizeExprTree(*argument, evaluator);
-                    }
+                for (HirExprId argumentId : value.arguments) {
+                    optimizeExprTree(exprRef(argumentId), evaluator);
                 }
             } else if constexpr (std::is_same_v<T, HirMemberExpr>) {
                 if (value.object) {
-                    optimizeExprTree(*value.object, evaluator);
+                    optimizeExprTree(exprRef(*value.object), evaluator);
                 }
             } else if constexpr (std::is_same_v<T, HirIndexExpr>) {
                 if (value.object) {
-                    optimizeExprTree(*value.object, evaluator);
+                    optimizeExprTree(exprRef(*value.object), evaluator);
                 }
                 if (value.index) {
-                    optimizeExprTree(*value.index, evaluator);
+                    optimizeExprTree(exprRef(*value.index), evaluator);
                 }
             } else if constexpr (std::is_same_v<T, HirCastExpr>) {
                 if (value.expression) {
-                    optimizeExprTree(*value.expression, evaluator);
+                    optimizeExprTree(exprRef(*value.expression), evaluator);
                 }
             } else if constexpr (std::is_same_v<T, HirFunctionExpr>) {
                 if (value.blockBody) {
-                    optimizeStmtTree(*value.blockBody, evaluator);
+                    optimizeStmtTree(stmtRef(*value.blockBody), evaluator);
                 }
                 if (value.expressionBody) {
-                    optimizeExprTree(*value.expressionBody, evaluator);
+                    optimizeExprTree(exprRef(*value.expressionBody), evaluator);
                 }
             } else if constexpr (std::is_same_v<T, HirArrayLiteralExpr>) {
-                for (auto& element : value.elements) {
-                    if (element) {
-                        optimizeExprTree(*element, evaluator);
-                    }
+                for (HirExprId elementId : value.elements) {
+                    optimizeExprTree(exprRef(elementId), evaluator);
                 }
             } else if constexpr (std::is_same_v<T, HirDictLiteralExpr>) {
                 for (auto& entry : value.entries) {
                     if (entry.key) {
-                        optimizeExprTree(*entry.key, evaluator);
+                        optimizeExprTree(exprRef(*entry.key), evaluator);
                     }
                     if (entry.value) {
-                        optimizeExprTree(*entry.value, evaluator);
+                        optimizeExprTree(exprRef(*entry.value), evaluator);
                     }
                 }
             }
@@ -1232,7 +1249,7 @@ void optimizeExprTree(HirExpr& expr, const ConstantEvaluator& evaluator) {
 void pruneUnreachableBlockItems(HirBlockStmt& block) {
     size_t reachableCount = block.items.size();
     for (size_t index = 0; index < block.items.size(); ++index) {
-        if (block.items[index] && isDefinitelyTerminal(*block.items[index])) {
+        if (isDefinitelyTerminal(itemRef(block.items[index]))) {
             reachableCount = index + 1;
             break;
         }
@@ -1246,79 +1263,59 @@ void pruneUnreachableBlockItems(HirBlockStmt& block) {
 }
 
 void removeNoOpBlockItems(HirBlockStmt& block) {
-    std::vector<HirItemPtr> kept;
+    std::vector<HirItemId> kept;
     kept.reserve(block.items.size());
-    for (auto& item : block.items) {
-        if (!item) {
-            continue;
-        }
-
+    for (HirItemId itemId : block.items) {
         bool keepItem = true;
         std::visit(
             [&](const auto& value) {
                 using T = std::decay_t<decltype(value)>;
-                if constexpr (std::is_same_v<T, HirStmtPtr>) {
-                    keepItem = value && !isEmptyBlockStmt(*value);
+                if constexpr (std::is_same_v<T, HirStmtId>) {
+                    keepItem = !isEmptyBlockStmt(stmtRef(value));
                 }
             },
-            item->value);
+            itemRef(itemId).value);
 
         if (keepItem) {
-            kept.push_back(std::move(item));
+            kept.push_back(itemId);
         }
     }
 
     block.items = std::move(kept);
 }
 
-HirStmtPtr takeForInitializerStmt(HirForStmt& loop) {
-    if (auto* initDecl = std::get_if<std::unique_ptr<HirVarDeclStmt>>(
-            &loop.initializer)) {
-        if (!*initDecl) {
-            return nullptr;
-        }
-
-        HirStmt stmt;
-        stmt.node = (*initDecl)->node;
-        stmt.value = std::move(**initDecl);
-        *initDecl = nullptr;
-        loop.initializer = std::monostate{};
-        return makeStmtPtr(std::move(stmt));
+std::optional<HirStmtId> takeForInitializerStmt(HirForStmt& loop) {
+    if (!loop.initializer) {
+        return std::nullopt;
     }
 
-    auto* initExpr = std::get_if<HirExprPtr>(&loop.initializer);
-    if (!initExpr || !*initExpr) {
-        return nullptr;
-    }
-
-    HirStmt stmt;
-    stmt.node = (*initExpr)->node;
-    stmt.value = HirExprStmt{std::move(*initExpr)};
-    loop.initializer = std::monostate{};
-    return makeStmtPtr(std::move(stmt));
+    const HirStmtId initializer = *loop.initializer;
+    loop.initializer.reset();
+    return initializer;
 }
 
-HirStmtPtr makeForFalseReplacement(HirForStmt& loop, const HirStmt& original) {
+HirStmtId makeForFalseReplacement(HirForStmt& loop, const HirStmt& original) {
     HirBlockStmt block;
-    if (HirStmtPtr initializer = takeForInitializerStmt(loop)) {
-        block.items.push_back(makeItemPtr(std::move(initializer)));
+    if (std::optional<HirStmtId> initializer = takeForInitializerStmt(loop)) {
+        block.items.push_back(makeItemId(*initializer));
     }
 
     HirStmt stmt;
     stmt.node = original.node;
     stmt.value = std::move(block);
-    return makeStmtPtr(std::move(stmt));
+    return makeStmtId(std::move(stmt));
 }
 
 void optimizeStmtTree(HirStmt& stmt, const ConstantEvaluator& evaluator) {
+    std::optional<HirStmtId> replacementStmt;
+    bool replaceWithEmptyBlock = false;
+
     std::visit(
         [&](auto& value) {
             using T = std::decay_t<decltype(value)>;
             if constexpr (std::is_same_v<T, HirBlockStmt>) {
-                for (auto& item : value.items) {
-                    if (item) {
-                        optimizeItemTree(*item, evaluator);
-                    }
+                for (HirItemId itemId : value.items) {
+                    optimizeItemTree(itemRef(itemId), evaluator);
                 }
 
                 removeNoOpBlockItems(value);
@@ -1326,105 +1323,113 @@ void optimizeStmtTree(HirStmt& stmt, const ConstantEvaluator& evaluator) {
                 removeNoOpBlockItems(value);
             } else if constexpr (std::is_same_v<T, HirExprStmt>) {
                 if (value.expression) {
-                    optimizeExprTree(*value.expression, evaluator);
+                    optimizeExprTree(exprRef(*value.expression), evaluator);
                 }
             } else if constexpr (std::is_same_v<T, HirPrintStmt>) {
                 if (value.expression) {
-                    optimizeExprTree(*value.expression, evaluator);
+                    optimizeExprTree(exprRef(*value.expression), evaluator);
                 }
             } else if constexpr (std::is_same_v<T, HirReturnStmt>) {
                 if (value.value) {
-                    optimizeExprTree(*value.value, evaluator);
+                    optimizeExprTree(exprRef(*value.value), evaluator);
                 }
             } else if constexpr (std::is_same_v<T, HirIfStmt>) {
                 if (value.condition) {
-                    optimizeExprTree(*value.condition, evaluator);
+                    optimizeExprTree(exprRef(*value.condition), evaluator);
                 }
                 if (value.thenBranch) {
-                    optimizeStmtTree(*value.thenBranch, evaluator);
+                    optimizeStmtTree(stmtRef(*value.thenBranch), evaluator);
                 }
                 if (value.elseBranch) {
-                    optimizeStmtTree(*value.elseBranch, evaluator);
+                    optimizeStmtTree(stmtRef(*value.elseBranch), evaluator);
                 }
 
                 bool condition = false;
                 if (!value.condition ||
-                    !tryEvaluateConditionBool(*value.condition, evaluator,
+                    !tryEvaluateConditionBool(exprRef(*value.condition), evaluator,
                                               condition)) {
                     return;
                 }
 
                 if (condition) {
-                    replaceStmtPreservingNode(stmt, std::move(value.thenBranch));
+                    replacementStmt = value.thenBranch;
                 } else if (value.elseBranch) {
-                    replaceStmtPreservingNode(stmt, std::move(value.elseBranch));
+                    replacementStmt = value.elseBranch;
                 } else {
-                    stmt.value = HirBlockStmt{};
+                    replaceWithEmptyBlock = true;
                 }
             } else if constexpr (std::is_same_v<T, HirWhileStmt>) {
                 if (value.condition) {
-                    optimizeExprTree(*value.condition, evaluator);
+                    optimizeExprTree(exprRef(*value.condition), evaluator);
                 }
                 if (value.body) {
-                    optimizeStmtTree(*value.body, evaluator);
+                    optimizeStmtTree(stmtRef(*value.body), evaluator);
                 }
 
                 bool condition = false;
                 if (value.condition &&
-                    tryEvaluateConditionBool(*value.condition, evaluator,
+                    tryEvaluateConditionBool(exprRef(*value.condition), evaluator,
                                              condition) &&
                     !condition) {
-                    stmt.value = HirBlockStmt{};
+                    replaceWithEmptyBlock = true;
                 }
             } else if constexpr (std::is_same_v<T, HirVarDeclStmt>) {
                 if (value.initializer) {
-                    optimizeExprTree(*value.initializer, evaluator);
+                    optimizeExprTree(exprRef(*value.initializer), evaluator);
                 }
             } else if constexpr (std::is_same_v<T, HirDestructuredImportStmt>) {
                 if (value.initializer) {
-                    optimizeExprTree(*value.initializer, evaluator);
+                    optimizeExprTree(exprRef(*value.initializer), evaluator);
                 }
             } else if constexpr (std::is_same_v<T, HirForStmt>) {
-                if (auto* initDecl =
-                        std::get_if<std::unique_ptr<HirVarDeclStmt>>(
-                            &value.initializer)) {
-                    if (*initDecl && (*initDecl)->initializer) {
-                        optimizeExprTree(*(*initDecl)->initializer, evaluator);
-                    }
-                } else if (auto* initExpr =
-                               std::get_if<HirExprPtr>(&value.initializer)) {
-                    if (*initExpr) {
-                        optimizeExprTree(**initExpr, evaluator);
+                if (value.initializer) {
+                    HirStmt& initializer = stmtRef(*value.initializer);
+                    if (auto* initDecl =
+                            std::get_if<HirVarDeclStmt>(&initializer.value)) {
+                        if (initDecl->initializer) {
+                            optimizeExprTree(exprRef(*initDecl->initializer),
+                                             evaluator);
+                        }
+                    } else if (auto* initExpr =
+                                   std::get_if<HirExprStmt>(&initializer.value);
+                               initExpr && initExpr->expression) {
+                        optimizeExprTree(exprRef(*initExpr->expression),
+                                         evaluator);
                     }
                 }
                 if (value.condition) {
-                    optimizeExprTree(*value.condition, evaluator);
+                    optimizeExprTree(exprRef(*value.condition), evaluator);
                 }
                 if (value.increment) {
-                    optimizeExprTree(*value.increment, evaluator);
+                    optimizeExprTree(exprRef(*value.increment), evaluator);
                 }
                 if (value.body) {
-                    optimizeStmtTree(*value.body, evaluator);
+                    optimizeStmtTree(stmtRef(*value.body), evaluator);
                 }
 
                 bool condition = false;
                 if (value.condition &&
-                    tryEvaluateConditionBool(*value.condition, evaluator,
+                    tryEvaluateConditionBool(exprRef(*value.condition), evaluator,
                                              condition) &&
                     !condition) {
-                    replaceStmtPreservingNode(stmt,
-                                              makeForFalseReplacement(value, stmt));
+                    return;
                 }
             } else if constexpr (std::is_same_v<T, HirForEachStmt>) {
                 if (value.iterable) {
-                    optimizeExprTree(*value.iterable, evaluator);
+                    optimizeExprTree(exprRef(*value.iterable), evaluator);
                 }
                 if (value.body) {
-                    optimizeStmtTree(*value.body, evaluator);
+                    optimizeStmtTree(stmtRef(*value.body), evaluator);
                 }
             }
         },
         stmt.value);
+
+    if (replacementStmt) {
+        replaceStmtPreservingNode(stmt, replacementStmt);
+    } else if (replaceWithEmptyBlock) {
+        stmt.value = HirBlockStmt{};
+    }
 }
 
 void optimizeItemTree(HirItem& item, const ConstantEvaluator& evaluator) {
@@ -1433,18 +1438,16 @@ void optimizeItemTree(HirItem& item, const ConstantEvaluator& evaluator) {
             using T = std::decay_t<decltype(value)>;
             if constexpr (std::is_same_v<T, HirFunctionDecl>) {
                 if (value.body) {
-                    optimizeStmtTree(*value.body, evaluator);
+                    optimizeStmtTree(stmtRef(*value.body), evaluator);
                 }
             } else if constexpr (std::is_same_v<T, HirClassDecl>) {
                 for (auto& method : value.methods) {
                     if (method.body) {
-                        optimizeStmtTree(*method.body, evaluator);
+                        optimizeStmtTree(stmtRef(*method.body), evaluator);
                     }
                 }
-            } else if constexpr (std::is_same_v<T, HirStmtPtr>) {
-                if (value) {
-                    optimizeStmtTree(*value, evaluator);
-                }
+            } else if constexpr (std::is_same_v<T, HirStmtId>) {
+                optimizeStmtTree(stmtRef(value), evaluator);
             }
         },
         item.value);
@@ -1455,10 +1458,9 @@ void optimizeItemTree(HirItem& item, const ConstantEvaluator& evaluator) {
 }  // namespace hir_optimizer_detail
 
 void optimizeHir(HirModule& module) {
+    hir_optimizer_detail::g_module = &module;
     hir_optimizer_detail::ConstantEvaluator evaluator;
-    for (auto& item : module.items) {
-        if (item) {
-            hir_optimizer_detail::optimizeItemTree(*item, evaluator);
-        }
+    for (HirItemId itemId : module.items) {
+        hir_optimizer_detail::optimizeItemTree(module.item(itemId), evaluator);
     }
 }

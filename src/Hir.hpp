@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstddef>
-#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -13,6 +12,9 @@
 #include "TypeInfo.hpp"
 
 using HirNodeId = size_t;
+using HirExprId = size_t;
+using HirStmtId = size_t;
+using HirItemId = size_t;
 
 struct HirNodeInfo {
     HirNodeId id = 0;
@@ -33,10 +35,6 @@ struct HirExpr;
 struct HirStmt;
 struct HirItem;
 
-using HirExprPtr = std::unique_ptr<HirExpr>;
-using HirStmtPtr = std::unique_ptr<HirStmt>;
-using HirItemPtr = std::unique_ptr<HirItem>;
-
 struct HirLiteralExpr {
     Token token;
 };
@@ -48,52 +46,52 @@ struct HirBindingExpr {
 
 struct HirUnaryExpr {
     Token op;
-    HirExprPtr operand;
+    std::optional<HirExprId> operand;
 };
 
 struct HirUpdateExpr {
     Token op;
-    HirExprPtr operand;
+    std::optional<HirExprId> operand;
     bool isPrefix = false;
 };
 
 struct HirBinaryExpr {
-    HirExprPtr left;
+    std::optional<HirExprId> left;
     Token op;
-    HirExprPtr right;
+    std::optional<HirExprId> right;
 };
 
 struct HirAssignmentExpr {
-    HirExprPtr target;
+    std::optional<HirExprId> target;
     Token op;
-    HirExprPtr value;
+    std::optional<HirExprId> value;
 };
 
 struct HirCallExpr {
-    HirExprPtr callee;
-    std::vector<HirExprPtr> arguments;
+    std::optional<HirExprId> callee;
+    std::vector<HirExprId> arguments;
 };
 
 struct HirMemberExpr {
-    HirExprPtr object;
+    std::optional<HirExprId> object;
     Token member;
 };
 
 struct HirIndexExpr {
-    HirExprPtr object;
-    HirExprPtr index;
+    std::optional<HirExprId> object;
+    std::optional<HirExprId> index;
 };
 
 struct HirCastExpr {
-    HirExprPtr expression;
+    std::optional<HirExprId> expression;
     TypeRef targetType = TypeInfo::makeAny();
 };
 
 struct HirFunctionExpr {
     std::vector<HirParameter> params;
     TypeRef returnType = TypeInfo::makeAny();
-    HirStmtPtr blockBody;
-    HirExprPtr expressionBody;
+    std::optional<HirStmtId> blockBody;
+    std::optional<HirExprId> expressionBody;
     bool usesFatArrow = false;
 };
 
@@ -113,12 +111,12 @@ struct HirSuperExpr {
 };
 
 struct HirArrayLiteralExpr {
-    std::vector<HirExprPtr> elements;
+    std::vector<HirExprId> elements;
 };
 
 struct HirDictEntry {
-    HirExprPtr key;
-    HirExprPtr value;
+    std::optional<HirExprId> key;
+    std::optional<HirExprId> value;
 };
 
 struct HirDictLiteralExpr {
@@ -138,30 +136,30 @@ struct HirExpr {
 };
 
 struct HirBlockStmt {
-    std::vector<HirItemPtr> items;
+    std::vector<HirItemId> items;
 };
 
 struct HirExprStmt {
-    HirExprPtr expression;
+    std::optional<HirExprId> expression;
 };
 
 struct HirPrintStmt {
-    HirExprPtr expression;
+    std::optional<HirExprId> expression;
 };
 
 struct HirReturnStmt {
-    HirExprPtr value;
+    std::optional<HirExprId> value;
 };
 
 struct HirIfStmt {
-    HirExprPtr condition;
-    HirStmtPtr thenBranch;
-    HirStmtPtr elseBranch;
+    std::optional<HirExprId> condition;
+    std::optional<HirStmtId> thenBranch;
+    std::optional<HirStmtId> elseBranch;
 };
 
 struct HirWhileStmt {
-    HirExprPtr condition;
-    HirStmtPtr body;
+    std::optional<HirExprId> condition;
+    std::optional<HirStmtId> body;
 };
 
 struct HirVarDeclStmt {
@@ -169,7 +167,7 @@ struct HirVarDeclStmt {
     bool isConst = false;
     Token name;
     TypeRef declaredType = TypeInfo::makeAny();
-    HirExprPtr initializer;
+    std::optional<HirExprId> initializer;
     bool omittedType = false;
 };
 
@@ -184,23 +182,22 @@ struct HirImportBinding {
 struct HirDestructuredImportStmt {
     bool isConst = false;
     std::vector<HirImportBinding> bindings;
-    HirExprPtr initializer;
+    std::optional<HirExprId> initializer;
 };
 
 struct HirForStmt {
-    std::variant<std::monostate, std::unique_ptr<HirVarDeclStmt>, HirExprPtr>
-        initializer;
-    HirExprPtr condition;
-    HirExprPtr increment;
-    HirStmtPtr body;
+    std::optional<HirStmtId> initializer;
+    std::optional<HirExprId> condition;
+    std::optional<HirExprId> increment;
+    std::optional<HirStmtId> body;
 };
 
 struct HirForEachStmt {
     bool isConst = false;
     Token name;
     TypeRef declaredType = TypeInfo::makeAny();
-    HirExprPtr iterable;
-    HirStmtPtr body;
+    std::optional<HirExprId> iterable;
+    std::optional<HirStmtId> body;
 };
 
 struct HirStmt {
@@ -218,7 +215,7 @@ struct HirFunctionDecl {
     Token name;
     std::vector<HirParameter> params;
     TypeRef returnType = TypeInfo::makeAny();
-    HirStmtPtr body;
+    std::optional<HirStmtId> body;
 };
 
 struct HirFieldDecl {
@@ -232,7 +229,7 @@ struct HirMethodDecl {
     Token name;
     std::vector<HirParameter> params;
     TypeRef returnType = TypeInfo::makeAny();
-    HirStmtPtr body;
+    std::optional<HirStmtId> body;
     std::vector<int> annotatedOperators;
 };
 
@@ -252,10 +249,44 @@ struct HirClassDecl {
 
 struct HirItem {
     HirNodeInfo node;
-    std::variant<HirTypeAliasDecl, HirClassDecl, HirFunctionDecl, HirStmtPtr>
+    std::variant<HirTypeAliasDecl, HirClassDecl, HirFunctionDecl, HirStmtId>
         value;
 };
 
 struct HirModule {
-    std::vector<HirItemPtr> items;
+    std::vector<HirItemId> items;
+    std::vector<HirExpr> exprArena;
+    std::vector<HirStmt> stmtArena;
+    std::vector<HirItem> itemArena;
+
+    void clear() {
+        items.clear();
+        exprArena.clear();
+        stmtArena.clear();
+        itemArena.clear();
+    }
+
+    HirExprId addExpr(HirExpr expr) {
+        exprArena.push_back(std::move(expr));
+        return exprArena.size();
+    }
+
+    HirStmtId addStmt(HirStmt stmt) {
+        stmtArena.push_back(std::move(stmt));
+        return stmtArena.size();
+    }
+
+    HirItemId addItem(HirItem item) {
+        itemArena.push_back(std::move(item));
+        return itemArena.size();
+    }
+
+    HirExpr& expr(HirExprId id) { return exprArena.at(id - 1); }
+    const HirExpr& expr(HirExprId id) const { return exprArena.at(id - 1); }
+
+    HirStmt& stmt(HirStmtId id) { return stmtArena.at(id - 1); }
+    const HirStmt& stmt(HirStmtId id) const { return stmtArena.at(id - 1); }
+
+    HirItem& item(HirItemId id) { return itemArena.at(id - 1); }
+    const HirItem& item(HirItemId id) const { return itemArena.at(id - 1); }
 };
