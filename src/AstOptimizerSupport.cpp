@@ -9,6 +9,7 @@
 #include <utility>
 #include <variant>
 
+#include "NumericLiteral.hpp"
 #include "Token.hpp"
 
 namespace ast_optimizer_detail {
@@ -39,110 +40,6 @@ bool subOverflow(uint64_t lhs, uint64_t rhs, uint64_t& out) {
 
 bool mulOverflow(uint64_t lhs, uint64_t rhs, uint64_t& out) {
     return __builtin_mul_overflow(lhs, rhs, &out);
-}
-
-std::string stripNumericSuffix(std::string text) {
-    auto strip = [&](std::string_view suffix) -> bool {
-        if (text.size() < suffix.size()) {
-            return false;
-        }
-        if (text.compare(text.size() - suffix.size(), suffix.size(),
-                         suffix.data()) != 0) {
-            return false;
-        }
-        text.resize(text.size() - suffix.size());
-        return true;
-    };
-
-    strip("usize") || strip("i16") || strip("i32") || strip("i64") ||
-        strip("u16") || strip("u32") || strip("u64") || strip("f32") ||
-        strip("f64") || strip("i8") || strip("u8") || strip("u");
-    return text;
-}
-
-bool parseSignedIntegerLiteral(const Token& token, int64_t& outValue) {
-    if (token.type() != TokenType::NUMBER) {
-        return false;
-    }
-
-    try {
-        size_t parsed = 0;
-        std::string text = stripNumericSuffix(
-            std::string(token.start(), token.length()));
-        long long value = std::stoll(text, &parsed, 10);
-        if (parsed != text.size()) {
-            return false;
-        }
-        outValue = static_cast<int64_t>(value);
-        return true;
-    } catch (...) {
-        return false;
-    }
-}
-
-bool parseUnsignedIntegerLiteral(const Token& token, uint64_t& outValue) {
-    if (token.type() != TokenType::NUMBER) {
-        return false;
-    }
-
-    try {
-        size_t parsed = 0;
-        std::string text = stripNumericSuffix(
-            std::string(token.start(), token.length()));
-        unsigned long long value = std::stoull(text, &parsed, 10);
-        if (parsed != text.size()) {
-            return false;
-        }
-        outValue = static_cast<uint64_t>(value);
-        return true;
-    } catch (...) {
-        return false;
-    }
-}
-
-bool parseFloatLiteral(const Token& token, double& outValue) {
-    if (token.type() != TokenType::NUMBER) {
-        return false;
-    }
-
-    try {
-        size_t parsed = 0;
-        std::string text = stripNumericSuffix(
-            std::string(token.start(), token.length()));
-        double value = std::stod(text, &parsed);
-        if (parsed != text.size() || !std::isfinite(value)) {
-            return false;
-        }
-        outValue = value;
-        return true;
-    } catch (...) {
-        return false;
-    }
-}
-
-std::string integerSuffix(TypeKind kind) {
-    switch (kind) {
-        case TypeKind::I8:
-            return "i8";
-        case TypeKind::I16:
-            return "i16";
-        case TypeKind::I32:
-            return "i32";
-        case TypeKind::I64:
-            return "i64";
-        case TypeKind::U8:
-            return "u8";
-        case TypeKind::U16:
-            return "u16";
-        case TypeKind::U32:
-            return "u32";
-        case TypeKind::U64:
-            return "u64";
-        case TypeKind::USIZE:
-            return "usize";
-        default:
-            return "";
-    }
 }
 
 std::string formatFloatCore(double value) {

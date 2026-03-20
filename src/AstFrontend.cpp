@@ -1,6 +1,7 @@
 #include "AstFrontend.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <fstream>
 #include <iterator>
 #include <string>
@@ -13,6 +14,16 @@
 #include "SyntaxRules.hpp"
 
 namespace {
+
+template <typename Func>
+uint64_t measureMicros(Func&& func) {
+    const auto start = std::chrono::steady_clock::now();
+    func();
+    const auto end = std::chrono::steady_clock::now();
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(end - start)
+            .count());
+}
 
 bool hasStrictDirective(std::string_view source) {
     return source.rfind("#!strict", 0) == 0;
@@ -470,25 +481,39 @@ void analyzeFrontendSemantics(const AstFrontendResult& frontend,
 AstFrontendBuildStatus runSemanticPhases(AstFrontendResult& frontend,
                                          std::vector<TypeError>& outErrors) {
     if (frontend.mode == AstFrontendMode::StrictChecked) {
-        analyzeFrontendSemantics(frontend, outErrors, &frontend.semanticModel);
+        frontend.timings.initialSemanticMicros +=
+            measureMicros([&]() {
+                analyzeFrontendSemantics(frontend, outErrors,
+                                         &frontend.semanticModel);
+            });
         if (!outErrors.empty()) {
             return AstFrontendBuildStatus::SemanticError;
         }
     } else {
         std::vector<TypeError> ignoredErrors;
-        analyzeFrontendSemantics(frontend, ignoredErrors, &frontend.semanticModel);
+        frontend.timings.initialSemanticMicros +=
+            measureMicros([&]() {
+                analyzeFrontendSemantics(frontend, ignoredErrors,
+                                         &frontend.semanticModel);
+            });
     }
 
     // The optimizer may read this semantic model while rewriting, but the
     // model becomes stale as soon as the AST mutates.
-    optimizeAst(frontend.module, frontend.semanticModel);
+    frontend.timings.optimizationMicros +=
+        measureMicros(
+            [&]() { optimizeAst(frontend.module, frontend.semanticModel); });
 
     // The refreshed model below is the only semantic state lowering is allowed
     // to consume. No frontend code should rely on pre-optimization metadata
     // after the AST has been rewritten.
     frontend.semanticModel = AstSemanticModel{};
     outErrors.clear();
-    analyzeFrontendSemantics(frontend, outErrors, &frontend.semanticModel);
+    frontend.timings.semanticRefreshMicros +=
+        measureMicros([&]() {
+            analyzeFrontendSemantics(frontend, outErrors,
+                                     &frontend.semanticModel);
+        });
 
     if (frontend.mode == AstFrontendMode::StrictChecked && !outErrors.empty()) {
         return AstFrontendBuildStatus::SemanticError;
@@ -506,15 +531,27 @@ AstFrontendBuildStatus buildAstFrontend(std::string_view source,
                                         AstFrontendMode mode,
                                         std::vector<TypeError>& outErrors,
                                         AstFrontendResult& outFrontend) {
+    const auto totalStart = std::chrono::steady_clock::now();
+    auto finalizeTotal = [&]() {
+        outFrontend.timings.totalMicros = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - totalStart)
+                .count());
+    };
     AstModule module;
     AstParser parser(source);
-    if (!parser.parseModule(module)) {
-        appendParserErrors(parser, outErrors);
-        return AstFrontendBuildStatus::ParseFailed;
-    }
-
     outFrontend = AstFrontendResult{};
     outFrontend.mode = mode;
+
+    bool parseSuccess = false;
+    outFrontend.timings.parseMicros = measureMicros([&]() {
+        parseSuccess = parser.parseModule(module);
+    });
+    if (!parseSuccess) {
+        appendParserErrors(parser, outErrors);
+        finalizeTotal();
+        return AstFrontendBuildStatus::ParseFailed;
+    }
     outFrontend.terminalLine =
         1 + static_cast<size_t>(std::count(source.begin(), source.end(), '\n'));
     size_t terminalColumn = 1;
@@ -528,18 +565,29 @@ AstFrontendBuildStatus buildAstFrontend(std::string_view source,
     outFrontend.terminalPosition =
         makeSourcePosition(source.size(), outFrontend.terminalLine, terminalColumn);
     outFrontend.module = std::move(module);
-    collectSymbolsFromAst(outFrontend.module, outFrontend.classNames,
-                          outFrontend.functionSignatures,
-                          &outFrontend.typeAliases);
+    outFrontend.timings.symbolCollectionMicros = measureMicros([&]() {
+        collectSymbolsFromAst(outFrontend.module, outFrontend.classNames,
+                              outFrontend.functionSignatures,
+                              &outFrontend.typeAliases);
+    });
 
     AstFrontendImportCache localImportCache;
     AstFrontendImportCache& importCache =
         options.importCache ? *options.importCache : localImportCache;
     FrontendImportResolver importResolver(outFrontend, options, importCache,
                                           outErrors);
-    if (!importResolver.run()) {
+    const bool importSuccess = [&]() {
+        bool success = false;
+        outFrontend.timings.importResolutionMicros = measureMicros(
+            [&]() { success = importResolver.run(); });
+        return success;
+    }();
+    if (!importSuccess) {
+        finalizeTotal();
         return AstFrontendBuildStatus::SemanticError;
     }
 
-    return runSemanticPhases(outFrontend, outErrors);
+    const AstFrontendBuildStatus status = runSemanticPhases(outFrontend, outErrors);
+    finalizeTotal();
+    return status;
 }

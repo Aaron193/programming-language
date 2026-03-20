@@ -7,6 +7,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "AstFrontend.hpp"
 #include "Chunk.hpp"
 #include "GC.hpp"
 #include "NativePackage.hpp"
@@ -89,6 +90,7 @@ class Compiler {
     std::vector<std::string> m_exportedNames;
     std::vector<std::string> m_packageSearchPaths;
     std::string m_sourcePath;
+    AstFrontendResult::Timings m_lastFrontendTimings;
     bool m_strictMode = false;
     CompilerEmitterMode m_emitterMode = CompilerEmitterMode::Auto;
     bool m_hadError = false;
@@ -150,6 +152,9 @@ class Compiler {
     const std::vector<TypeRef>& globalTypes() const { return m_globalTypes; }
     const std::vector<std::string>& exportedNames() const {
         return m_exportedNames;
+    }
+    const AstFrontendResult::Timings& lastFrontendTimings() const {
+        return m_lastFrontendTimings;
     }
     const std::unordered_map<std::string, TypeRef>& functionSignatures() const {
         return m_functionSignatures;

@@ -9,6 +9,7 @@
 
 #include "AstBytecodeEmitter.hpp"
 #include "AstFrontend.hpp"
+#include "FrontendTypeUtils.hpp"
 #include "StdLib.hpp"
 
 namespace {
@@ -67,6 +68,7 @@ bool Compiler::compile(std::string_view source, Chunk& chunk,
     m_exprTypeStack.clear();
     m_globalNames.clear();
     m_exportedNames.clear();
+    m_lastFrontendTimings = AstFrontendResult::Timings{};
     m_hadError = false;
     m_panicMode = false;
     registerStandardLibraryTypeSignatures(m_functionSignatures);
@@ -86,10 +88,12 @@ bool Compiler::compile(std::string_view source, Chunk& chunk,
                          astFrontend);
 
     if (astStatus != AstFrontendBuildStatus::Success) {
+        m_lastFrontendTimings = astFrontend.timings;
         reportAstFrontendFailure(astStatus, astErrors, m_emitterMode);
         return false;
     }
 
+    m_lastFrontendTimings = astFrontend.timings;
     m_classNames = astFrontend.classNames;
     m_typeAliases = astFrontend.typeAliases;
     m_functionSignatures = astFrontend.functionSignatures;
@@ -106,53 +110,12 @@ bool Compiler::compile(std::string_view source, Chunk& chunk,
 }
 
 TypeRef Compiler::tokenToType(const Token& token) const {
-    switch (token.type()) {
-        case TokenType::TYPE_I8:
-            return TypeInfo::makeI8();
-        case TokenType::TYPE_I16:
-            return TypeInfo::makeI16();
-        case TokenType::TYPE_I32:
-            return TypeInfo::makeI32();
-        case TokenType::TYPE_I64:
-            return TypeInfo::makeI64();
-        case TokenType::TYPE_U8:
-            return TypeInfo::makeU8();
-        case TokenType::TYPE_U16:
-            return TypeInfo::makeU16();
-        case TokenType::TYPE_U32:
-            return TypeInfo::makeU32();
-        case TokenType::TYPE_U64:
-            return TypeInfo::makeU64();
-        case TokenType::TYPE_USIZE:
-            return TypeInfo::makeUSize();
-        case TokenType::TYPE_F32:
-            return TypeInfo::makeF32();
-        case TokenType::TYPE_F64:
-            return TypeInfo::makeF64();
-        case TokenType::TYPE_BOOL:
-            return TypeInfo::makeBool();
-        case TokenType::TYPE_STR:
-            return TypeInfo::makeStr();
-        case TokenType::TYPE_FN:
-            return nullptr;
-        case TokenType::TYPE_VOID:
-            return TypeInfo::makeVoid();
-        case TokenType::TYPE_NULL_KW:
-            return TypeInfo::makeNull();
-        case TokenType::IDENTIFIER: {
-            std::string className(token.start(), token.length());
-            auto aliasIt = m_typeAliases.find(className);
-            if (aliasIt != m_typeAliases.end()) {
-                return aliasIt->second;
-            }
-            if (m_classNames.find(className) != m_classNames.end()) {
-                return TypeInfo::makeClass(className);
-            }
-            return nullptr;
-        }
-        default:
-            return nullptr;
+    if (token.type() == TokenType::TYPE_FN) {
+        return nullptr;
     }
+
+    return frontendTokenToType(token,
+                               FrontendTypeContext{m_classNames, m_typeAliases});
 }
 
 void Compiler::emitByte(uint8_t byte, size_t line) {

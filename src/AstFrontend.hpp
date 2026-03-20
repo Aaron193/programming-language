@@ -2,6 +2,7 @@
 
 #include <string>
 #include <string_view>
+#include <cstdint>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -34,6 +35,16 @@ enum class AstFrontendBuildStatus {
 };
 
 struct AstFrontendResult {
+    struct Timings {
+        uint64_t parseMicros = 0;
+        uint64_t symbolCollectionMicros = 0;
+        uint64_t importResolutionMicros = 0;
+        uint64_t initialSemanticMicros = 0;
+        uint64_t optimizationMicros = 0;
+        uint64_t semanticRefreshMicros = 0;
+        uint64_t totalMicros = 0;
+    };
+
     AstModule module;
     std::unordered_set<std::string> classNames;
     std::unordered_map<std::string, TypeRef> typeAliases;
@@ -43,6 +54,7 @@ struct AstFrontendResult {
     AstFrontendMode mode = AstFrontendMode::StrictChecked;
     size_t terminalLine = 1;
     SourcePosition terminalPosition = makeSourcePosition(0, 1, 1);
+    Timings timings;
 };
 
 AstFrontendBuildStatus buildAstFrontend(std::string_view source,

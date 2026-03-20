@@ -19,6 +19,8 @@ SHOW_RETURN_OUTPUT="$($INTERPRETER --show-return "$TARGET" 2>&1)"
 SHOW_RETURN_STATUS=$?
 DISASSEMBLE_OUTPUT="$($INTERPRETER --disassemble "$TARGET" 2>&1)"
 DISASSEMBLE_STATUS=$?
+FRONTEND_TIMINGS_OUTPUT="$($INTERPRETER --frontend-timings "$TARGET" 2>&1)"
+FRONTEND_TIMINGS_STATUS=$?
 set -e
 
 if [[ $TRACE_STATUS -ne 0 ]]; then
@@ -54,10 +56,21 @@ if ! grep -q "== disassembly ==" <<< "$DISASSEMBLE_OUTPUT"; then
     exit 1
 fi
 
-if ! grep -q "42" <<< "$TRACE_OUTPUT" || ! grep -q "42" <<< "$SHOW_RETURN_OUTPUT" || ! grep -q "42" <<< "$DISASSEMBLE_OUTPUT"; then
+if [[ $FRONTEND_TIMINGS_STATUS -ne 0 ]]; then
+    echo "[FAIL] --frontend-timings execution failed"
+    echo "$FRONTEND_TIMINGS_OUTPUT"
+    exit 1
+fi
+if ! grep -q "\\[frontend\\] parse=" <<< "$FRONTEND_TIMINGS_OUTPUT"; then
+    echo "[FAIL] --frontend-timings output missing timing summary"
+    echo "$FRONTEND_TIMINGS_OUTPUT"
+    exit 1
+fi
+
+if ! grep -q "42" <<< "$TRACE_OUTPUT" || ! grep -q "42" <<< "$SHOW_RETURN_OUTPUT" || ! grep -q "42" <<< "$DISASSEMBLE_OUTPUT" || ! grep -q "42" <<< "$FRONTEND_TIMINGS_OUTPUT"; then
     echo "[FAIL] expected program output missing for one or more flag runs"
     exit 1
 fi
 
-echo "[PASS] CLI flags --trace, --show-return, --disassemble work."
+echo "[PASS] CLI flags --trace, --show-return, --disassemble, --frontend-timings work."
 exit 0

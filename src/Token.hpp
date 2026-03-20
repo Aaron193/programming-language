@@ -132,3 +132,7 @@ class Token {
     size_t column() const { return m_column; }
     const SourceSpan& span() const { return m_span; }
 };
+
+inline std::string tokenLexeme(const Token& token) {
+    return std::string(token.start(), token.length());
+}

@@ -7,6 +7,9 @@
 #include <utility>
 #include <variant>
 
+#include "FrontendTypeUtils.hpp"
+#include "NumericLiteral.hpp"
+
 namespace ast_bytecode_emitter_detail {
 
 bool isBitwiseAssignmentOperator(TokenType type) {
@@ -49,91 +52,6 @@ TypeRef bitwiseResultType(const TypeRef& lhs, const TypeRef& rhs) {
         default:
             return TypeInfo::makeU64();
     }
-}
-
-struct NumericLiteralInfo {
-    std::string core;
-    TypeRef type;
-    bool isUnsigned = false;
-    bool isFloat = false;
-    bool valid = false;
-};
-
-NumericLiteralInfo parseNumericLiteralInfo(const std::string& literal) {
-    NumericLiteralInfo info;
-    info.core = literal;
-    info.valid = true;
-
-    auto assignSuffix = [&](size_t suffixLength, const TypeRef& suffixType,
-                            bool isUnsigned, bool isFloat) {
-        info.type = suffixType;
-        info.isUnsigned = isUnsigned;
-        info.isFloat = isFloat;
-        info.core = literal.substr(0, literal.length() - suffixLength);
-    };
-
-    if (literal.size() >= 5 &&
-        literal.compare(literal.size() - 5, 5, "usize") == 0) {
-        assignSuffix(5, TypeInfo::makeUSize(), true, false);
-    } else if (literal.size() >= 3 &&
-               literal.compare(literal.size() - 3, 3, "i16") == 0) {
-        assignSuffix(3, TypeInfo::makeI16(), false, false);
-    } else if (literal.size() >= 3 &&
-               literal.compare(literal.size() - 3, 3, "i32") == 0) {
-        assignSuffix(3, TypeInfo::makeI32(), false, false);
-    } else if (literal.size() >= 3 &&
-               literal.compare(literal.size() - 3, 3, "i64") == 0) {
-        assignSuffix(3, TypeInfo::makeI64(), false, false);
-    } else if (literal.size() >= 3 &&
-               literal.compare(literal.size() - 3, 3, "u16") == 0) {
-        assignSuffix(3, TypeInfo::makeU16(), true, false);
-    } else if (literal.size() >= 3 &&
-               literal.compare(literal.size() - 3, 3, "u32") == 0) {
-        assignSuffix(3, TypeInfo::makeU32(), true, false);
-    } else if (literal.size() >= 3 &&
-               literal.compare(literal.size() - 3, 3, "u64") == 0) {
-        assignSuffix(3, TypeInfo::makeU64(), true, false);
-    } else if (literal.size() >= 3 &&
-               literal.compare(literal.size() - 3, 3, "f32") == 0) {
-        assignSuffix(3, TypeInfo::makeF32(), false, true);
-    } else if (literal.size() >= 3 &&
-               literal.compare(literal.size() - 3, 3, "f64") == 0) {
-        assignSuffix(3, TypeInfo::makeF64(), false, true);
-    } else if (literal.size() >= 2 &&
-               literal.compare(literal.size() - 2, 2, "i8") == 0) {
-        assignSuffix(2, TypeInfo::makeI8(), false, false);
-    } else if (literal.size() >= 2 &&
-               literal.compare(literal.size() - 2, 2, "u8") == 0) {
-        assignSuffix(2, TypeInfo::makeU8(), true, false);
-    } else if (!literal.empty() && literal.back() == 'u') {
-        assignSuffix(1, TypeInfo::makeU32(), true, false);
-    }
-
-    if (info.core.empty()) {
-        info.valid = false;
-        return info;
-    }
-
-    const bool hasDecimalPoint = info.core.find('.') != std::string::npos;
-
-    if (!info.type) {
-        if (hasDecimalPoint) {
-            info.type = TypeInfo::makeF64();
-            info.isFloat = true;
-        } else {
-            info.type = TypeInfo::makeI32();
-        }
-    }
-
-    if (info.type->isFloat()) {
-        info.isFloat = true;
-    }
-
-    if (info.type->isInteger() && hasDecimalPoint) {
-        info.valid = false;
-    }
-
-    return info;
 }
 
 bool parseNumericLiteralValue(const NumericLiteralInfo& info, Value& outValue) {
@@ -185,40 +103,10 @@ TypeRef AstBytecodeEmitter::resolveTypeExpr(const AstTypeExpr* typeExpr) const {
         return TypeInfo::makeAny();
     }
 
-    switch (typeExpr->kind) {
-        case AstTypeKind::NAMED: {
-            TypeRef namedType = m_compiler.tokenToType(typeExpr->token);
-            return namedType ? namedType : TypeInfo::makeAny();
-        }
-        case AstTypeKind::FUNCTION: {
-            std::vector<TypeRef> params;
-            params.reserve(typeExpr->paramTypes.size());
-            for (const auto& paramType : typeExpr->paramTypes) {
-                params.push_back(resolveTypeExpr(paramType.get()));
-            }
-            return TypeInfo::makeFunction(
-                std::move(params), resolveTypeExpr(typeExpr->returnType.get()));
-        }
-        case AstTypeKind::ARRAY:
-            return TypeInfo::makeArray(
-                resolveTypeExpr(typeExpr->elementType.get()));
-        case AstTypeKind::DICT:
-            return TypeInfo::makeDict(
-                resolveTypeExpr(typeExpr->keyType.get()),
-                resolveTypeExpr(typeExpr->valueType.get()));
-        case AstTypeKind::SET:
-            return TypeInfo::makeSet(
-                resolveTypeExpr(typeExpr->elementType.get()));
-        case AstTypeKind::OPTIONAL:
-            return TypeInfo::makeOptional(
-                resolveTypeExpr(typeExpr->innerType.get()));
-        case AstTypeKind::NATIVE_HANDLE:
-            return TypeInfo::makeNativeHandle(
-                typeExpr->packageNamespace + ":" + typeExpr->packageName,
-                typeExpr->nativeHandleTypeName);
-    }
-
-    return TypeInfo::makeAny();
+    TypeRef resolved = frontendResolveTypeExpr(
+        *typeExpr, FrontendTypeContext{m_compiler.m_classNames,
+                                       m_compiler.m_typeAliases});
+    return resolved ? resolved : TypeInfo::makeAny();
 }
 
 size_t AstBytecodeEmitter::safeLine(size_t line) const {
@@ -1149,8 +1037,7 @@ void AstBytecodeEmitter::emitExpr(const AstExpr& expr) {
                     case TokenType::NUMBER: {
                         std::string literal(value.token.start(),
                                             value.token.length());
-                        auto literalInfo = ast_bytecode_emitter_detail::
-                            parseNumericLiteralInfo(literal);
+                        auto literalInfo = parseNumericLiteralInfo(literal);
                         if (!literalInfo.valid) {
                             errorAtToken(
                                 value.token,

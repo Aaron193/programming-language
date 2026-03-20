@@ -68,7 +68,7 @@ print(1
 - Runtime error reporting with source line numbers
 - Runtime call stack traces
 - Compile error reporting with source line numbers
-- Optional diagnostics flags (`--trace`, `--show-return`, `--disassemble`)
+- Optional diagnostics flags (`--trace`, `--show-return`, `--disassemble`, `--frontend-timings`)
 - Interactive REPL when no source file is provided
 
 ## Built-in Native Functions
@@ -105,6 +105,12 @@ Add extra native package roots if needed:
 
 ```bash
 ./build/interpreter --package-path /path/to/packages path/to/program.mog
+```
+
+Inspect frontend phase timings while compiling:
+
+```bash
+./build/interpreter --frontend-timings path/to/program.mog
 ```
 
 Or start REPL:

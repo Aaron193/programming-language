@@ -194,6 +194,16 @@ static std::string valueTypeName(const Value& value) {
     return "unknown";
 }
 
+static void printFrontendTimings(const AstFrontendResult::Timings& timings) {
+    std::cerr << "[frontend] parse=" << timings.parseMicros << "us"
+              << " symbols=" << timings.symbolCollectionMicros << "us"
+              << " imports=" << timings.importResolutionMicros << "us"
+              << " analyze=" << timings.initialSemanticMicros << "us"
+              << " optimize=" << timings.optimizationMicros << "us"
+              << " refresh=" << timings.semanticRefreshMicros << "us"
+              << " total=" << timings.totalMicros << "us" << std::endl;
+}
+
 static bool toArrayIndex(const Value& value, size_t& index) {
     if (!value.isAnyNumeric()) {
         return false;
@@ -4269,7 +4279,8 @@ void VirtualMachine::resetRuntimeState() {
 Status VirtualMachine::interpret(std::string_view source, bool printReturnValue,
                                  bool traceEnabled, bool disassembleEnabled,
                                  const std::string& sourcePath,
-                                 bool strictMode) {
+                                 bool strictMode,
+                                 bool frontendTimingsEnabled) {
     Chunk chunk;
     resetRuntimeState();
     m_defaultStrictMode = strictMode || hasStrictDirective(source);
@@ -4281,6 +4292,10 @@ Status VirtualMachine::interpret(std::string_view source, bool printReturnValue,
 
     if (!m_compiler.compile(source, chunk, sourcePath)) {
         return Status::COMPILATION_ERROR;
+    }
+
+    if (frontendTimingsEnabled) {
+        printFrontendTimings(m_compiler.lastFrontendTimings());
     }
 
     if (m_disassembleEnabled) {

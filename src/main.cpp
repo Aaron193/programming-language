@@ -13,6 +13,7 @@ struct CliOptions {
     bool trace = false;
     bool showReturn = false;
     bool disassemble = false;
+    bool frontendTimings = false;
     bool strict = false;
     std::string validatePackageDir;
     std::string sourceFile;
@@ -22,7 +23,7 @@ struct CliOptions {
 static void printUsage(const char* executable) {
     std::cout
         << "Usage: " << executable
-        << " [--trace] [--show-return] [--disassemble] [--strict]"
+        << " [--trace] [--show-return] [--disassemble] [--frontend-timings] [--strict]"
         << " [--package-path <dir>|--package-path=<dir>]"
         << " [--validate-package <dir>|--validate-package=<dir>]"
         << " [source.mog file]"
@@ -40,6 +41,8 @@ static bool parseArgs(int argc, char** argv, CliOptions& options) {
             options.showReturn = true;
         } else if (arg == "--disassemble") {
             options.disassemble = true;
+        } else if (arg == "--frontend-timings") {
+            options.frontendTimings = true;
         } else if (arg == "--strict") {
             options.strict = true;
         } else if (arg == "--package-path") {
@@ -143,7 +146,8 @@ static int runFile(const CliOptions& options) {
     vm.setPackageSearchPaths(options.packagePaths);
     Status status =
         vm.interpret(*source, options.showReturn, options.trace,
-                     options.disassemble, absolutePath, options.strict);
+                     options.disassemble, absolutePath, options.strict,
+                     options.frontendTimings);
 
     if (status == Status::COMPILATION_ERROR) {
         std::cerr << "Compilation error in source file: " << options.sourceFile
@@ -180,7 +184,8 @@ static int runRepl(const CliOptions& options) {
         }
 
         Status status = vm.interpret(line, options.showReturn, options.trace,
-                                     options.disassemble, "", options.strict);
+                                     options.disassemble, "", options.strict,
+                                     options.frontendTimings);
         if (status == Status::COMPILATION_ERROR) {
             std::cerr << "Compilation error." << std::endl;
             continue;

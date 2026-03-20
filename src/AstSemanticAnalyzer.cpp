@@ -11,7 +11,9 @@
 #include <variant>
 #include <vector>
 
+#include "FrontendTypeUtils.hpp"
 #include "NativePackage.hpp"
+#include "NumericLiteral.hpp"
 #include "SyntaxRules.hpp"
 
 namespace {
@@ -103,7 +105,7 @@ class AstSemanticAnalyzerImpl {
     std::vector<ClassCtx> m_classContexts;
 
     std::string tokenText(const Token& token) const {
-        return std::string(token.start(), token.length());
+        return tokenLexeme(token);
     }
 
     void addError(const SourceSpan& span, const std::string& message) {
@@ -304,99 +306,33 @@ class AstSemanticAnalyzerImpl {
     }
 
     TypeRef inferNumberLiteralType(const Token& token) {
-        std::string literal = tokenText(token);
-        std::string core = literal;
-
-        TypeRef inferredType = nullptr;
-        bool unsignedLiteral = false;
-        bool floatLiteral = false;
-
-        auto assignSuffix = [&](size_t suffixLength, const TypeRef& type,
-                                bool isUnsigned, bool isFloat) {
-            inferredType = type;
-            unsignedLiteral = isUnsigned;
-            floatLiteral = isFloat;
-            core = literal.substr(0, literal.length() - suffixLength);
-        };
-
-        if (literal.size() >= 5 &&
-            literal.compare(literal.size() - 5, 5, "usize") == 0) {
-            assignSuffix(5, TypeInfo::makeUSize(), true, false);
-        } else if (literal.size() >= 3 &&
-                   literal.compare(literal.size() - 3, 3, "i16") == 0) {
-            assignSuffix(3, TypeInfo::makeI16(), false, false);
-        } else if (literal.size() >= 3 &&
-                   literal.compare(literal.size() - 3, 3, "i32") == 0) {
-            assignSuffix(3, TypeInfo::makeI32(), false, false);
-        } else if (literal.size() >= 3 &&
-                   literal.compare(literal.size() - 3, 3, "i64") == 0) {
-            assignSuffix(3, TypeInfo::makeI64(), false, false);
-        } else if (literal.size() >= 3 &&
-                   literal.compare(literal.size() - 3, 3, "u16") == 0) {
-            assignSuffix(3, TypeInfo::makeU16(), true, false);
-        } else if (literal.size() >= 3 &&
-                   literal.compare(literal.size() - 3, 3, "u32") == 0) {
-            assignSuffix(3, TypeInfo::makeU32(), true, false);
-        } else if (literal.size() >= 3 &&
-                   literal.compare(literal.size() - 3, 3, "u64") == 0) {
-            assignSuffix(3, TypeInfo::makeU64(), true, false);
-        } else if (literal.size() >= 3 &&
-                   literal.compare(literal.size() - 3, 3, "f32") == 0) {
-            assignSuffix(3, TypeInfo::makeF32(), false, true);
-        } else if (literal.size() >= 3 &&
-                   literal.compare(literal.size() - 3, 3, "f64") == 0) {
-            assignSuffix(3, TypeInfo::makeF64(), false, true);
-        } else if (literal.size() >= 2 &&
-                   literal.compare(literal.size() - 2, 2, "i8") == 0) {
-            assignSuffix(2, TypeInfo::makeI8(), false, false);
-        } else if (literal.size() >= 2 &&
-                   literal.compare(literal.size() - 2, 2, "u8") == 0) {
-            assignSuffix(2, TypeInfo::makeU8(), true, false);
-        } else if (!literal.empty() && literal.back() == 'u') {
-            assignSuffix(1, TypeInfo::makeU32(), true, false);
-        }
-
-        if (core.empty()) {
+        const std::string literal = tokenText(token);
+        const NumericLiteralInfo parsed = parseNumericLiteralInfo(literal);
+        if (!parsed.valid) {
             addError(token.span(),
                      "Type error: invalid numeric literal '" + literal + "'.");
             return TypeInfo::makeAny();
         }
 
-        const bool hasDecimal = core.find('.') != std::string::npos;
-        if (!inferredType) {
-            if (hasDecimal) {
-                inferredType = TypeInfo::makeF64();
-                floatLiteral = true;
-            } else {
-                inferredType = TypeInfo::makeI32();
-            }
-        }
-
-        if (floatLiteral && unsignedLiteral) {
-            addError(token.span(), "Type error: invalid numeric literal '" +
-                                       literal + "'.");
-            return TypeInfo::makeAny();
-        }
-
         try {
-            if (hasDecimal) {
-                (void)std::stod(core);
-                return inferredType;
+            if (parsed.isFloat) {
+                (void)std::stod(parsed.core);
+                return parsed.type;
             }
 
-            if (unsignedLiteral || inferredType->isUnsigned()) {
-                unsigned long long value = std::stoull(core);
+            if (parsed.isUnsigned || parsed.type->isUnsigned()) {
+                unsigned long long value = std::stoull(parsed.core);
                 const auto checkRange = [&](unsigned long long maxValue) {
                     return value <= maxValue;
                 };
 
-                switch (inferredType->kind) {
+                switch (parsed.type->kind) {
                     case TypeKind::U8:
                         if (!checkRange(std::numeric_limits<uint8_t>::max())) {
                             addError(token.span(),
                                      "Type error: integer literal '" + literal +
                                          "' is out of range for type '" +
-                                         inferredType->toString() + "'.");
+                                         parsed.type->toString() + "'.");
                             return TypeInfo::makeAny();
                         }
                         break;
@@ -405,7 +341,7 @@ class AstSemanticAnalyzerImpl {
                             addError(token.span(),
                                      "Type error: integer literal '" + literal +
                                          "' is out of range for type '" +
-                                         inferredType->toString() + "'.");
+                                         parsed.type->toString() + "'.");
                             return TypeInfo::makeAny();
                         }
                         break;
@@ -414,7 +350,7 @@ class AstSemanticAnalyzerImpl {
                             addError(token.span(),
                                      "Type error: integer literal '" + literal +
                                          "' is out of range for type '" +
-                                         inferredType->toString() + "'.");
+                                         parsed.type->toString() + "'.");
                             return TypeInfo::makeAny();
                         }
                         break;
@@ -422,22 +358,22 @@ class AstSemanticAnalyzerImpl {
                         break;
                 }
 
-                return inferredType;
+                return parsed.type;
             }
 
-            long long value = std::stoll(core);
+            long long value = std::stoll(parsed.core);
             const auto checkRange = [&](long long minValue, long long maxValue) {
                 return value >= minValue && value <= maxValue;
             };
 
-            switch (inferredType->kind) {
+            switch (parsed.type->kind) {
                 case TypeKind::I8:
                     if (!checkRange(std::numeric_limits<int8_t>::min(),
                                     std::numeric_limits<int8_t>::max())) {
                         addError(token.span(),
                                  "Type error: integer literal '" + literal +
                                      "' is out of range for type '" +
-                                     inferredType->toString() + "'.");
+                                     parsed.type->toString() + "'.");
                         return TypeInfo::makeAny();
                     }
                     break;
@@ -447,7 +383,7 @@ class AstSemanticAnalyzerImpl {
                         addError(token.span(),
                                  "Type error: integer literal '" + literal +
                                      "' is out of range for type '" +
-                                     inferredType->toString() + "'.");
+                                     parsed.type->toString() + "'.");
                         return TypeInfo::makeAny();
                     }
                     break;
@@ -457,7 +393,7 @@ class AstSemanticAnalyzerImpl {
                         addError(token.span(),
                                  "Type error: integer literal '" + literal +
                                      "' is out of range for type '" +
-                                     inferredType->toString() + "'.");
+                                     parsed.type->toString() + "'.");
                         return TypeInfo::makeAny();
                     }
                     break;
@@ -465,7 +401,7 @@ class AstSemanticAnalyzerImpl {
                     break;
             }
 
-            return inferredType;
+            return parsed.type;
         } catch (...) {
             addError(token.span(),
                      "Type error: invalid numeric literal '" + literal + "'.");
@@ -485,51 +421,9 @@ class AstSemanticAnalyzerImpl {
     }
 
     TypeRef tokenToType(const Token& token) const {
-        switch (token.type()) {
-            case TokenType::TYPE_I8:
-                return TypeInfo::makeI8();
-            case TokenType::TYPE_I16:
-                return TypeInfo::makeI16();
-            case TokenType::TYPE_I32:
-                return TypeInfo::makeI32();
-            case TokenType::TYPE_I64:
-                return TypeInfo::makeI64();
-            case TokenType::TYPE_U8:
-                return TypeInfo::makeU8();
-            case TokenType::TYPE_U16:
-                return TypeInfo::makeU16();
-            case TokenType::TYPE_U32:
-                return TypeInfo::makeU32();
-            case TokenType::TYPE_U64:
-                return TypeInfo::makeU64();
-            case TokenType::TYPE_USIZE:
-                return TypeInfo::makeUSize();
-            case TokenType::TYPE_F32:
-                return TypeInfo::makeF32();
-            case TokenType::TYPE_F64:
-                return TypeInfo::makeF64();
-            case TokenType::TYPE_BOOL:
-                return TypeInfo::makeBool();
-            case TokenType::TYPE_STR:
-                return TypeInfo::makeStr();
-            case TokenType::TYPE_VOID:
-                return TypeInfo::makeVoid();
-            case TokenType::TYPE_NULL_KW:
-                return TypeInfo::makeNull();
-            case TokenType::IDENTIFIER: {
-                const std::string name = tokenText(token);
-                auto aliasIt = m_typeAliases.find(name);
-                if (aliasIt != m_typeAliases.end()) {
-                    return aliasIt->second;
-                }
-                if (m_classNames.find(name) != m_classNames.end()) {
-                    return TypeInfo::makeClass(name);
-                }
-                return nullptr;
-            }
-            default:
-                return nullptr;
-        }
+        return frontendTokenToType(token,
+                                   FrontendTypeContext{m_classNames,
+                                                       m_typeAliases});
     }
 
     TypeRef resolveTypeExpr(const AstTypeExpr& typeExpr) {

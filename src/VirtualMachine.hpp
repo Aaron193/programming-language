@@ -153,5 +153,6 @@ class VirtualMachine {
     Status interpret(std::string_view source, bool printReturnValue = false,
                      bool traceEnabled = false, bool disassembleEnabled = false,
                      const std::string& sourcePath = "",
-                     bool strictMode = false);
+                     bool strictMode = false,
+                     bool frontendTimingsEnabled = false);
 };
