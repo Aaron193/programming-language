@@ -11,26 +11,18 @@
 
 #include "Ast.hpp"
 #include "AstFrontend.hpp"
-#include "AstOptimizer.hpp"
 #include "AstParser.hpp"
-#include "AstSemanticAnalyzer.hpp"
-#include "AstSymbolCollector.hpp"
 #include "Chunk.hpp"
 #include "Compiler.hpp"
 #include "GC.hpp"
 
 namespace {
 
-struct SemanticPipelineResult {
-    AstModule module;
-    std::unordered_set<std::string> classNames;
-    std::unordered_map<std::string, TypeRef> typeAliases;
-    std::unordered_map<std::string, TypeRef> functionSignatures;
+struct OptimizedFrontendResult {
+    AstFrontendResult frontend;
     AstNodeId preIdentityExprId = 0;
     AstNodeId preFoldedExprId = 0;
     size_t preFoldedExprLine = 0;
-    AstSemanticModel preOptimization;
-    AstSemanticModel refreshed;
 };
 
 bool hasStrictDirective(std::string_view source) {
@@ -95,6 +87,32 @@ AstExpr* topLevelPrintExpr(AstModule& module, size_t printIndex) {
     return nullptr;
 }
 
+HirExpr* topLevelHirPrintExpr(HirModule& module, size_t printIndex) {
+    size_t seen = 0;
+    for (auto& item : module.items) {
+        if (!item) {
+            continue;
+        }
+
+        auto* stmtPtr = std::get_if<HirStmtPtr>(&item->value);
+        if (!stmtPtr || !*stmtPtr) {
+            continue;
+        }
+
+        auto* printStmt = std::get_if<HirPrintStmt>(&(*stmtPtr)->value);
+        if (!printStmt || !printStmt->expression) {
+            continue;
+        }
+
+        if (seen == printIndex) {
+            return printStmt->expression.get();
+        }
+        ++seen;
+    }
+
+    return nullptr;
+}
+
 AstDestructuredImportStmt* topLevelDestructuredImport(AstModule& module) {
     for (auto& item : module.items) {
         if (!item) {
@@ -137,21 +155,23 @@ HirDestructuredImportStmt* topLevelHirDestructuredImport(HirModule& module) {
     return nullptr;
 }
 
-bool buildSemanticPipeline(std::string_view source,
-                           SemanticPipelineResult& outResult,
-                           std::string& outError) {
+bool buildOptimizedFrontend(std::string_view source,
+                            OptimizedFrontendResult& outResult,
+                            std::string& outError) {
     outError.clear();
-    AstParser parser(source);
-    if (!parser.parseModule(outResult.module)) {
-        outError = "failed to parse inline regression source";
+    const AstFrontendOptions options;
+    std::vector<TypeError> errors;
+    const AstFrontendBuildStatus status = buildAstFrontend(
+        source, options, AstFrontendMode::StrictChecked, errors,
+        outResult.frontend);
+    if (status != AstFrontendBuildStatus::Success) {
+        outError = errors.empty() ? "failed to build optimized frontend"
+                                  : errors.front().message;
         return false;
     }
 
-    collectSymbolsFromAst(outResult.module, outResult.classNames,
-                          outResult.functionSignatures, &outResult.typeAliases);
-
-    AstExpr* preIdentityExpr = topLevelPrintExpr(outResult.module, 0);
-    AstExpr* preFoldedExpr = topLevelPrintExpr(outResult.module, 1);
+    AstExpr* preIdentityExpr = topLevelPrintExpr(outResult.frontend.module, 0);
+    AstExpr* preFoldedExpr = topLevelPrintExpr(outResult.frontend.module, 1);
     if (preIdentityExpr == nullptr || preFoldedExpr == nullptr) {
         outError = "failed to locate inline regression print expressions";
         return false;
@@ -160,27 +180,6 @@ bool buildSemanticPipeline(std::string_view source,
     outResult.preIdentityExprId = preIdentityExpr->node.id;
     outResult.preFoldedExprId = preFoldedExpr->node.id;
     outResult.preFoldedExprLine = preFoldedExpr->node.line;
-
-    std::vector<TypeError> errors;
-    analyzeAstSemantics(outResult.module, outResult.classNames,
-                        outResult.typeAliases, outResult.functionSignatures,
-                        {}, errors, &outResult.preOptimization);
-    if (!errors.empty()) {
-        outError = errors.front().message;
-        return false;
-    }
-
-    optimizeAst(outResult.module, outResult.preOptimization);
-
-    errors.clear();
-    analyzeAstSemantics(outResult.module, outResult.classNames,
-                        outResult.typeAliases, outResult.functionSignatures,
-                        {}, errors, &outResult.refreshed);
-    if (!errors.empty()) {
-        outError = errors.front().message;
-        return false;
-    }
-
     return true;
 }
 
@@ -235,15 +234,6 @@ bool checkCanonicalLoweringStable(const std::filesystem::path& path,
         return false;
     }
 
-    GC forcedGc;
-    Chunk forcedChunk;
-    std::string forcedDisassembly;
-    if (!require(compileFileCanonical(path, CompilerEmitterMode::ForceAst,
-                                      forcedGc, forcedChunk, forcedDisassembly),
-                 description + " should compile in forced AST mode")) {
-        return false;
-    }
-
     GC forcedHirGc;
     Chunk forcedHirChunk;
     std::string forcedHirDisassembly;
@@ -254,14 +244,13 @@ bool checkCanonicalLoweringStable(const std::filesystem::path& path,
         return false;
     }
 
-    return require(autoDisassembly == forcedDisassembly &&
-                       autoDisassembly == forcedHirDisassembly,
+    return require(autoDisassembly == forcedHirDisassembly,
                    description +
-                       " should lower identically in auto, forced AST, and forced HIR modes");
+                       " should lower identically in auto and forced HIR modes");
 }
 
-bool checkStrictForcedAstHasNoAdd(const std::filesystem::path& path,
-                                  const std::string& description) {
+bool checkStrictHirHasNoAdd(const std::filesystem::path& path,
+                            const std::string& description) {
     const std::string source = readFile(path);
     if (!require(!source.empty(), description + " should be readable")) {
         return false;
@@ -270,9 +259,9 @@ bool checkStrictForcedAstHasNoAdd(const std::filesystem::path& path,
     GC strictGc;
     Chunk strictChunk;
     std::string strictDisassembly;
-    if (!require(compileSourceCanonical(source, true, CompilerEmitterMode::ForceAst,
+    if (!require(compileSourceCanonical(source, true, CompilerEmitterMode::Auto,
                                         strictGc, strictChunk, strictDisassembly),
-                 description + " should compile in strict forced AST mode")) {
+                 description + " should compile in strict auto mode")) {
         return false;
     }
 
@@ -290,7 +279,7 @@ bool checkStrictForcedAstHasNoAdd(const std::filesystem::path& path,
                        strictDisassembly.find("IADD") == std::string::npos &&
                        strictDisassembly.find("ADD") == std::string::npos,
                    description +
-                       " should lower identically in strict AST/HIR modes without addition opcodes");
+                       " should lower identically in strict auto/HIR modes without addition opcodes");
 }
 
 bool checkSemanticRefreshContract() {
@@ -299,15 +288,21 @@ bool checkSemanticRefreshContract() {
         "print(value + 0i32)\n"
         "print(6i32 * 7i32)\n";
 
-    SemanticPipelineResult pipeline;
+    OptimizedFrontendResult pipeline;
     std::string error;
-    if (!buildSemanticPipeline(kSource, pipeline, error)) {
-        std::cerr << "[FAIL] semantic refresh setup failed: " << error << '\n';
+    if (!buildOptimizedFrontend(kSource, pipeline, error)) {
+        std::cerr << "[FAIL] semantic optimization setup failed: " << error
+                  << '\n';
         return false;
     }
 
-    AstExpr* identityExpr = topLevelPrintExpr(pipeline.module, 0);
-    AstExpr* foldedExpr = topLevelPrintExpr(pipeline.module, 1);
+    if (!require(pipeline.frontend.hirModule != nullptr,
+                 "frontend should lower the sample to HIR")) {
+        return false;
+    }
+
+    HirExpr* identityExpr = topLevelHirPrintExpr(*pipeline.frontend.hirModule, 0);
+    HirExpr* foldedExpr = topLevelHirPrintExpr(*pipeline.frontend.hirModule, 1);
     if (!require(identityExpr != nullptr,
                  "missing first print expression after optimization") ||
         !require(foldedExpr != nullptr,
@@ -315,8 +310,8 @@ bool checkSemanticRefreshContract() {
         return false;
     }
 
-    const AstNodeId identityId = identityExpr->node.id;
-    const AstNodeId foldedId = foldedExpr->node.id;
+    const AstNodeId identityId = identityExpr->node.astNodeId;
+    const AstNodeId foldedId = foldedExpr->node.astNodeId;
     const size_t foldedLine = foldedExpr->node.line;
 
     if (!require(identityId == pipeline.preIdentityExprId &&
@@ -325,12 +320,12 @@ bool checkSemanticRefreshContract() {
         return false;
     }
 
-    if (!require(std::holds_alternative<AstIdentifierExpr>(identityExpr->value),
+    if (!require(std::holds_alternative<HirBindingExpr>(identityExpr->value),
                  "identity rewrite should preserve the result node and collapse to an identifier")) {
         return false;
     }
 
-    const auto* literal = std::get_if<AstLiteralExpr>(&foldedExpr->value);
+    const auto* literal = std::get_if<HirLiteralExpr>(&foldedExpr->value);
     if (!require(literal != nullptr,
                  "constant fold should replace the expression with a literal")) {
         return false;
@@ -346,14 +341,12 @@ bool checkSemanticRefreshContract() {
         return false;
     }
 
-    auto identityType = pipeline.refreshed.nodeTypes.find(identityId);
-    auto foldedType = pipeline.refreshed.nodeTypes.find(foldedId);
-    if (!require(identityType != pipeline.refreshed.nodeTypes.end() &&
-                     identityType->second && identityType->second->kind == TypeKind::I32,
-                 "refreshed semantics should keep the preserved identity node typed as i32") ||
-        !require(foldedType != pipeline.refreshed.nodeTypes.end() &&
-                     foldedType->second && foldedType->second->kind == TypeKind::I32,
-                 "refreshed semantics should type the folded literal node as i32")) {
+    if (!require(identityExpr->node.type &&
+                     identityExpr->node.type->kind == TypeKind::I32,
+                 "optimized HIR should keep the preserved identity node typed as i32") ||
+        !require(foldedExpr->node.type &&
+                     foldedExpr->node.type->kind == TypeKind::I32,
+                 "optimized HIR should type the folded literal node as i32")) {
         return false;
     }
 
@@ -363,7 +356,7 @@ bool checkSemanticRefreshContract() {
     compiler.setGC(&gc);
     compiler.setStrictMode(true);
     if (!require(compiler.compile(kSource, chunk, "<frontend-regression>"),
-                 "compiler should lower successfully after semantic refresh")) {
+                 "compiler should lower successfully after semantic optimization")) {
         return false;
     }
 
@@ -376,7 +369,7 @@ bool checkSemanticRefreshContract() {
         return false;
     }
 
-    std::cout << "[PASS] semantic refresh contract\n";
+    std::cout << "[PASS] semantic optimization contract\n";
     return true;
 }
 
@@ -386,16 +379,21 @@ bool checkBooleanIdentityRefreshContract() {
         "print(yes == true)\n"
         "print(false != yes)\n";
 
-    SemanticPipelineResult pipeline;
+    OptimizedFrontendResult pipeline;
     std::string error;
-    if (!buildSemanticPipeline(kSource, pipeline, error)) {
-        std::cerr << "[FAIL] bool identity refresh setup failed: " << error
+    if (!buildOptimizedFrontend(kSource, pipeline, error)) {
+        std::cerr << "[FAIL] bool identity optimization setup failed: " << error
                   << '\n';
         return false;
     }
 
-    AstExpr* firstExpr = topLevelPrintExpr(pipeline.module, 0);
-    AstExpr* secondExpr = topLevelPrintExpr(pipeline.module, 1);
+    if (!require(pipeline.frontend.hirModule != nullptr,
+                 "frontend should lower the bool identity sample to HIR")) {
+        return false;
+    }
+
+    HirExpr* firstExpr = topLevelHirPrintExpr(*pipeline.frontend.hirModule, 0);
+    HirExpr* secondExpr = topLevelHirPrintExpr(*pipeline.frontend.hirModule, 1);
     if (!require(firstExpr != nullptr,
                  "missing first bool identity expression after optimization") ||
         !require(secondExpr != nullptr,
@@ -403,28 +401,24 @@ bool checkBooleanIdentityRefreshContract() {
         return false;
     }
 
-    if (!require(firstExpr->node.id == pipeline.preIdentityExprId &&
-                     secondExpr->node.id == pipeline.preFoldedExprId,
+    if (!require(firstExpr->node.astNodeId == pipeline.preIdentityExprId &&
+                     secondExpr->node.astNodeId == pipeline.preFoldedExprId,
                  "bool identity rewrites should preserve original node ids")) {
         return false;
     }
 
-    if (!require(std::holds_alternative<AstIdentifierExpr>(firstExpr->value) &&
-                     std::holds_alternative<AstIdentifierExpr>(secondExpr->value),
+    if (!require(std::holds_alternative<HirBindingExpr>(firstExpr->value) &&
+                     std::holds_alternative<HirBindingExpr>(secondExpr->value),
                  "bool identity rewrites should collapse to identifiers")) {
         return false;
     }
 
-    auto firstType = pipeline.refreshed.nodeTypes.find(firstExpr->node.id);
-    auto secondType = pipeline.refreshed.nodeTypes.find(secondExpr->node.id);
-    if (!require(firstType != pipeline.refreshed.nodeTypes.end() &&
-                     firstType->second &&
-                     firstType->second->kind == TypeKind::BOOL,
-                 "refreshed semantics should keep the first bool identity node typed as bool") ||
-        !require(secondType != pipeline.refreshed.nodeTypes.end() &&
-                     secondType->second &&
-                     secondType->second->kind == TypeKind::BOOL,
-                 "refreshed semantics should keep the second bool identity node typed as bool")) {
+    if (!require(firstExpr->node.type &&
+                     firstExpr->node.type->kind == TypeKind::BOOL,
+                 "optimized HIR should keep the first bool identity node typed as bool") ||
+        !require(secondExpr->node.type &&
+                     secondExpr->node.type->kind == TypeKind::BOOL,
+                 "optimized HIR should keep the second bool identity node typed as bool")) {
         return false;
     }
 
@@ -445,7 +439,7 @@ bool checkBooleanIdentityRefreshContract() {
         return false;
     }
 
-    std::cout << "[PASS] bool identity refresh contract\n";
+    std::cout << "[PASS] bool identity optimization contract\n";
     return true;
 }
 
@@ -455,26 +449,31 @@ bool checkSyntheticNotSpanRegression() {
         "print(yes == false)\n"
         "print(true)\n";
 
-    SemanticPipelineResult pipeline;
+    OptimizedFrontendResult pipeline;
     std::string error;
-    if (!buildSemanticPipeline(kSource, pipeline, error)) {
+    if (!buildOptimizedFrontend(kSource, pipeline, error)) {
         std::cerr << "[FAIL] synthetic not span setup failed: " << error
                   << '\n';
         return false;
     }
 
-    AstExpr* notExpr = topLevelPrintExpr(pipeline.module, 0);
+    if (!require(pipeline.frontend.hirModule != nullptr,
+                 "frontend should lower the synthetic not sample to HIR")) {
+        return false;
+    }
+
+    HirExpr* notExpr = topLevelHirPrintExpr(*pipeline.frontend.hirModule, 0);
     if (!require(notExpr != nullptr,
                  "missing synthesized not expression after optimization")) {
         return false;
     }
 
-    if (!require(notExpr->node.id == pipeline.preIdentityExprId,
+    if (!require(notExpr->node.astNodeId == pipeline.preIdentityExprId,
                  "synthesized not rewrite should preserve the original node id")) {
         return false;
     }
 
-    const auto* unary = std::get_if<AstUnaryExpr>(&notExpr->value);
+    const auto* unary = std::get_if<HirUnaryExpr>(&notExpr->value);
     if (!require(unary != nullptr && unary->operand != nullptr,
                  "bool equality false rewrite should synthesize a unary not expression")) {
         return false;
@@ -488,10 +487,9 @@ bool checkSyntheticNotSpanRegression() {
         return false;
     }
 
-    auto notType = pipeline.refreshed.nodeTypes.find(notExpr->node.id);
-    if (!require(notType != pipeline.refreshed.nodeTypes.end() &&
-                     notType->second && notType->second->kind == TypeKind::BOOL,
-                 "refreshed semantics should type the synthesized not node as bool")) {
+    if (!require(notExpr->node.type &&
+                     notExpr->node.type->kind == TypeKind::BOOL,
+                 "optimized HIR should type the synthesized not node as bool")) {
         return false;
     }
 
@@ -524,16 +522,21 @@ bool checkIntegerDoubleTildeRefreshContract() {
         "print(~~value())\n"
         "print(~~0i32)\n";
 
-    SemanticPipelineResult pipeline;
+    OptimizedFrontendResult pipeline;
     std::string error;
-    if (!buildSemanticPipeline(kSource, pipeline, error)) {
+    if (!buildOptimizedFrontend(kSource, pipeline, error)) {
         std::cerr << "[FAIL] integer double-tilde setup failed: " << error
                   << '\n';
         return false;
     }
 
-    AstExpr* firstExpr = topLevelPrintExpr(pipeline.module, 0);
-    AstExpr* secondExpr = topLevelPrintExpr(pipeline.module, 1);
+    if (!require(pipeline.frontend.hirModule != nullptr,
+                 "frontend should lower the integer double-tilde sample to HIR")) {
+        return false;
+    }
+
+    HirExpr* firstExpr = topLevelHirPrintExpr(*pipeline.frontend.hirModule, 0);
+    HirExpr* secondExpr = topLevelHirPrintExpr(*pipeline.frontend.hirModule, 1);
     if (!require(firstExpr != nullptr,
                  "missing first integer double-tilde expression after optimization") ||
         !require(secondExpr != nullptr,
@@ -541,29 +544,25 @@ bool checkIntegerDoubleTildeRefreshContract() {
         return false;
     }
 
-    if (!require(firstExpr->node.id == pipeline.preIdentityExprId &&
-                     secondExpr->node.id == pipeline.preFoldedExprId,
+    if (!require(firstExpr->node.astNodeId == pipeline.preIdentityExprId &&
+                     secondExpr->node.astNodeId == pipeline.preFoldedExprId,
                  "integer double-tilde rewrites should preserve original node ids")) {
         return false;
     }
 
-    if (!require(std::holds_alternative<AstCallExpr>(firstExpr->value),
+    if (!require(std::holds_alternative<HirCallExpr>(firstExpr->value),
                  "integer double-tilde should collapse to the original call expression") ||
-        !require(std::holds_alternative<AstLiteralExpr>(secondExpr->value),
+        !require(std::holds_alternative<HirLiteralExpr>(secondExpr->value),
                  "constant integer double-tilde should fold to a literal")) {
         return false;
     }
 
-    auto firstType = pipeline.refreshed.nodeTypes.find(firstExpr->node.id);
-    auto secondType = pipeline.refreshed.nodeTypes.find(secondExpr->node.id);
-    if (!require(firstType != pipeline.refreshed.nodeTypes.end() &&
-                     firstType->second &&
-                     firstType->second->kind == TypeKind::I32,
-                 "refreshed semantics should keep the first integer double-tilde node typed as i32") ||
-        !require(secondType != pipeline.refreshed.nodeTypes.end() &&
-                     secondType->second &&
-                     secondType->second->kind == TypeKind::I32,
-                 "refreshed semantics should keep the second integer double-tilde node typed as i32")) {
+    if (!require(firstExpr->node.type &&
+                     firstExpr->node.type->kind == TypeKind::I32,
+                 "optimized HIR should keep the first integer double-tilde node typed as i32") ||
+        !require(secondExpr->node.type &&
+                     secondExpr->node.type->kind == TypeKind::I32,
+                 "optimized HIR should keep the second integer double-tilde node typed as i32")) {
         return false;
     }
 
@@ -583,7 +582,7 @@ bool checkIntegerDoubleTildeRefreshContract() {
         return false;
     }
 
-    std::cout << "[PASS] integer double-tilde refresh contract\n";
+    std::cout << "[PASS] integer double-tilde optimization contract\n";
     return true;
 }
 
@@ -593,16 +592,21 @@ bool checkIntegerMultiplyZeroRefreshContract() {
         "print(value * 0i32)\n"
         "print(0i32 * value)\n";
 
-    SemanticPipelineResult pipeline;
+    OptimizedFrontendResult pipeline;
     std::string error;
-    if (!buildSemanticPipeline(kSource, pipeline, error)) {
+    if (!buildOptimizedFrontend(kSource, pipeline, error)) {
         std::cerr << "[FAIL] integer multiply-zero setup failed: " << error
                   << '\n';
         return false;
     }
 
-    AstExpr* firstExpr = topLevelPrintExpr(pipeline.module, 0);
-    AstExpr* secondExpr = topLevelPrintExpr(pipeline.module, 1);
+    if (!require(pipeline.frontend.hirModule != nullptr,
+                 "frontend should lower the multiply-zero sample to HIR")) {
+        return false;
+    }
+
+    HirExpr* firstExpr = topLevelHirPrintExpr(*pipeline.frontend.hirModule, 0);
+    HirExpr* secondExpr = topLevelHirPrintExpr(*pipeline.frontend.hirModule, 1);
     if (!require(firstExpr != nullptr,
                  "missing first integer multiply-zero expression after optimization") ||
         !require(secondExpr != nullptr,
@@ -610,29 +614,25 @@ bool checkIntegerMultiplyZeroRefreshContract() {
         return false;
     }
 
-    if (!require(firstExpr->node.id == pipeline.preIdentityExprId &&
-                     secondExpr->node.id == pipeline.preFoldedExprId,
+    if (!require(firstExpr->node.astNodeId == pipeline.preIdentityExprId &&
+                     secondExpr->node.astNodeId == pipeline.preFoldedExprId,
                  "integer multiply-zero rewrites should preserve original node ids")) {
         return false;
     }
 
-    const auto* firstLiteral = std::get_if<AstLiteralExpr>(&firstExpr->value);
-    const auto* secondLiteral = std::get_if<AstLiteralExpr>(&secondExpr->value);
+    const auto* firstLiteral = std::get_if<HirLiteralExpr>(&firstExpr->value);
+    const auto* secondLiteral = std::get_if<HirLiteralExpr>(&secondExpr->value);
     if (!require(firstLiteral != nullptr && secondLiteral != nullptr,
                  "integer multiply-zero rewrites should collapse to zero literals")) {
         return false;
     }
 
-    auto firstType = pipeline.refreshed.nodeTypes.find(firstExpr->node.id);
-    auto secondType = pipeline.refreshed.nodeTypes.find(secondExpr->node.id);
-    if (!require(firstType != pipeline.refreshed.nodeTypes.end() &&
-                     firstType->second &&
-                     firstType->second->kind == TypeKind::I32,
-                 "refreshed semantics should keep the first multiply-zero node typed as i32") ||
-        !require(secondType != pipeline.refreshed.nodeTypes.end() &&
-                     secondType->second &&
-                     secondType->second->kind == TypeKind::I32,
-                 "refreshed semantics should keep the second multiply-zero node typed as i32")) {
+    if (!require(firstExpr->node.type &&
+                     firstExpr->node.type->kind == TypeKind::I32,
+                 "optimized HIR should keep the first multiply-zero node typed as i32") ||
+        !require(secondExpr->node.type &&
+                     secondExpr->node.type->kind == TypeKind::I32,
+                 "optimized HIR should keep the second multiply-zero node typed as i32")) {
         return false;
     }
 
@@ -654,7 +654,7 @@ bool checkIntegerMultiplyZeroRefreshContract() {
         return false;
     }
 
-    std::cout << "[PASS] integer multiply-zero refresh contract\n";
+    std::cout << "[PASS] integer multiply-zero optimization contract\n";
     return true;
 }
 
@@ -1074,13 +1074,13 @@ bool checkNewlineOptimizationRegression(const std::filesystem::path& repoRoot) {
         return false;
     }
 
-    if (!checkStrictForcedAstHasNoAdd(
+    if (!checkStrictHirHasNoAdd(
             repoRoot / "tests/newline/sample_newline_operator_rhs.mog",
             "strict newline operator sample")) {
         return false;
     }
 
-    if (!checkStrictForcedAstHasNoAdd(
+    if (!checkStrictHirHasNoAdd(
             repoRoot / "tests/newline/sample_newline_call_suffix_folded_arg.mog",
             "strict newline folded call sample")) {
         return false;

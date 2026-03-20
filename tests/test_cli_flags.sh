@@ -61,7 +61,7 @@ if [[ $FRONTEND_TIMINGS_STATUS -ne 0 ]]; then
     echo "$FRONTEND_TIMINGS_OUTPUT"
     exit 1
 fi
-if ! grep -q "\\[frontend\\] parse=.* bind=.* check=.* optimize=.* rebind=.* recheck=.* hir=.* total=" <<< "$FRONTEND_TIMINGS_OUTPUT"; then
+if ! grep -q "\\[frontend\\] parse=.* bind=.* check=.* hir=.* hir-optimize=.* total=" <<< "$FRONTEND_TIMINGS_OUTPUT"; then
     echo "[FAIL] --frontend-timings output missing timing summary"
     echo "$FRONTEND_TIMINGS_OUTPUT"
     exit 1

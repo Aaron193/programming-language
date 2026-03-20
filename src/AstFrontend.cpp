@@ -7,12 +7,12 @@
 #include <string>
 #include <type_traits>
 
-#include "AstOptimizer.hpp"
 #include "AstParser.hpp"
 #include "AstToHirLowering.hpp"
 #include "AstBinder.hpp"
 #include "AstSymbolCollector.hpp"
 #include "AstTypeChecker.hpp"
+#include "HirOptimizer.hpp"
 #include "NativePackage.hpp"
 #include "SyntaxRules.hpp"
 
@@ -503,7 +503,7 @@ bool bindAndCheckFrontend(const AstFrontendResult& frontend,
 AstFrontendBuildStatus runSemanticPhases(AstFrontendResult& frontend,
                                          std::vector<TypeError>& outErrors) {
     if (frontend.mode == AstFrontendMode::StrictChecked) {
-        if (!bindAndCheckFrontend(frontend, outErrors, nullptr,
+        if (!bindAndCheckFrontend(frontend, outErrors, &frontend.bindings,
                                   &frontend.semanticModel,
                                   frontend.timings.initialBindMicros,
                                   frontend.timings.initialTypecheckMicros)) {
@@ -511,37 +511,18 @@ AstFrontendBuildStatus runSemanticPhases(AstFrontendResult& frontend,
         }
     } else {
         std::vector<TypeError> ignoredErrors;
-        bindAndCheckFrontend(frontend, ignoredErrors, nullptr,
+        bindAndCheckFrontend(frontend, ignoredErrors, &frontend.bindings,
                              &frontend.semanticModel,
                              frontend.timings.initialBindMicros,
                              frontend.timings.initialTypecheckMicros);
-    }
-
-    // The optimizer may read this semantic model while rewriting, but the
-    // model becomes stale as soon as the AST mutates.
-    frontend.timings.optimizationMicros +=
-        measureMicros(
-            [&]() { optimizeAst(frontend.module, frontend.semanticModel); });
-
-    // The refreshed model below is the only semantic state lowering is allowed
-    // to consume. No frontend code should rely on pre-optimization metadata
-    // after the AST has been rewritten.
-    frontend.semanticModel = AstSemanticModel{};
-    frontend.bindings = AstBindResult{};
-    outErrors.clear();
-    bindAndCheckFrontend(frontend, outErrors, &frontend.bindings,
-                         &frontend.semanticModel,
-                         frontend.timings.refreshBindMicros,
-                         frontend.timings.refreshTypecheckMicros);
-
-    if (frontend.mode == AstFrontendMode::StrictChecked && !outErrors.empty()) {
-        return AstFrontendBuildStatus::SemanticError;
     }
 
     frontend.hirModule = std::make_unique<HirModule>();
     frontend.timings.hirLowerMicros += measureMicros([&]() {
         lowerAstToHir(frontend, *frontend.hirModule);
     });
+    frontend.timings.hirOptimizeMicros +=
+        measureMicros([&]() { optimizeHir(*frontend.hirModule); });
 
     collectExportedSymbolTypes(frontend);
     outErrors.clear();

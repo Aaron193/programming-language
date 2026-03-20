@@ -114,7 +114,7 @@ Inspect frontend phase timings while compiling:
 ```
 
 The timing summary reports parse, symbol collection, import resolution, bind,
-type-check, optimize, rebind, recheck, and total frontend time.
+type-check, HIR lowering, HIR optimization, and total frontend time.
 
 Or start REPL:
 

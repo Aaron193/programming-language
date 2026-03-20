@@ -16,13 +16,11 @@
 
 enum class CompilerEmitterMode {
     Auto,
-    ForceAst,
     ForceHir,
 };
 
 class Compiler {
    private:
-    friend class AstBytecodeEmitter;
     friend class HirBytecodeEmitter;
 
     struct Local {

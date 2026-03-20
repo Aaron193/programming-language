@@ -43,10 +43,8 @@ struct AstFrontendResult {
         uint64_t importResolutionMicros = 0;
         uint64_t initialBindMicros = 0;
         uint64_t initialTypecheckMicros = 0;
-        uint64_t optimizationMicros = 0;
-        uint64_t refreshBindMicros = 0;
-        uint64_t refreshTypecheckMicros = 0;
         uint64_t hirLowerMicros = 0;
+        uint64_t hirOptimizeMicros = 0;
         uint64_t totalMicros = 0;
     };
 

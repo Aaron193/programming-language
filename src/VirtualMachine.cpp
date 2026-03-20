@@ -200,10 +200,8 @@ static void printFrontendTimings(const AstFrontendResult::Timings& timings) {
               << " imports=" << timings.importResolutionMicros << "us"
               << " bind=" << timings.initialBindMicros << "us"
               << " check=" << timings.initialTypecheckMicros << "us"
-              << " optimize=" << timings.optimizationMicros << "us"
-              << " rebind=" << timings.refreshBindMicros << "us"
-              << " recheck=" << timings.refreshTypecheckMicros << "us"
               << " hir=" << timings.hirLowerMicros << "us"
+              << " hir-optimize=" << timings.hirOptimizeMicros << "us"
               << " total=" << timings.totalMicros << "us" << std::endl;
 }
 

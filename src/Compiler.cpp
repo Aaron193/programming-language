@@ -7,7 +7,6 @@
 #include <utility>
 #include <vector>
 
-#include "AstBytecodeEmitter.hpp"
 #include "AstFrontend.hpp"
 #include "FrontendTypeUtils.hpp"
 #include "HirBytecodeEmitter.hpp"
@@ -38,9 +37,7 @@ bool reportAstFrontendFailure(AstFrontendBuildStatus status,
         }
         printDiagnosticPrefix(makePointSpan(1, 1));
         std::cerr << "AST frontend failed to parse source";
-        if (emitterMode == CompilerEmitterMode::ForceAst) {
-            std::cerr << " for forced AST emission";
-        } else if (emitterMode == CompilerEmitterMode::ForceHir) {
+        if (emitterMode == CompilerEmitterMode::ForceHir) {
             std::cerr << " for forced HIR emission";
         }
         std::cerr << "." << std::endl;
@@ -108,18 +105,13 @@ bool Compiler::compile(std::string_view source, Chunk& chunk,
     m_contexts.push_back(
         FunctionContext{{}, {}, 0, false, false, TypeInfo::makeAny()});
 
-    if (m_emitterMode != CompilerEmitterMode::ForceAst) {
-        if (astFrontend.hirModule == nullptr) {
-            errorAtLine(1, "Internal compiler error: missing HIR frontend result.");
-            return false;
-        }
-
-        HirBytecodeEmitter emitter(*this, *astFrontend.hirModule,
-                                   astFrontend.terminalLine);
-        return emitter.emitModule();
+    if (astFrontend.hirModule == nullptr) {
+        errorAtLine(1, "Internal compiler error: missing HIR frontend result.");
+        return false;
     }
 
-    AstBytecodeEmitter emitter(*this, astFrontend);
+    HirBytecodeEmitter emitter(*this, *astFrontend.hirModule,
+                               astFrontend.terminalLine);
     return emitter.emitModule();
 }
 

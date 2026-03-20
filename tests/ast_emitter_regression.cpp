@@ -177,7 +177,7 @@ int main(int argc, char** argv) {
         std::string firstCanonical;
         if (!compileWithMode(canonicalPath, CompilerEmitterMode::Auto, firstGc,
                              packagePaths, firstChunk, firstCanonical)) {
-            std::cerr << "AST compile failed for " << canonicalPath << '\n';
+            std::cerr << "Auto compile failed for " << canonicalPath << '\n';
             return 1;
         }
 
@@ -187,18 +187,7 @@ int main(int argc, char** argv) {
         if (!compileWithMode(canonicalPath, CompilerEmitterMode::Auto,
                              secondGc, packagePaths, secondChunk,
                              secondCanonical)) {
-            std::cerr << "Repeated AST compile failed for " << canonicalPath
-                      << '\n';
-            return 1;
-        }
-
-        GC forcedAstGc;
-        Chunk forcedAstChunk;
-        std::string forcedAstCanonical;
-        if (!compileWithMode(canonicalPath, CompilerEmitterMode::ForceAst,
-                             forcedAstGc, packagePaths, forcedAstChunk,
-                             forcedAstCanonical)) {
-            std::cerr << "Forced AST compile failed for " << canonicalPath
+            std::cerr << "Repeated auto compile failed for " << canonicalPath
                       << '\n';
             return 1;
         }
@@ -215,13 +204,11 @@ int main(int argc, char** argv) {
         }
 
         if (firstCanonical != secondCanonical ||
-            firstCanonical != forcedAstCanonical ||
             firstCanonical != forcedHirCanonical) {
-            std::cerr << "AST emitter regression mismatch: " << canonicalPath
+            std::cerr << "HIR emitter regression mismatch: " << canonicalPath
                       << "\n\n";
             std::cerr << "--- AUTO (1) ---\n" << firstCanonical;
             std::cerr << "--- AUTO (2) ---\n" << secondCanonical;
-            std::cerr << "--- FORCE_AST ---\n" << forcedAstCanonical;
             std::cerr << "--- FORCE_HIR ---\n" << forcedHirCanonical;
             return 1;
         }
@@ -229,7 +216,7 @@ int main(int argc, char** argv) {
         ++passed;
     }
 
-    std::cout << "[PASS] AST emitter regression corpus matched for " << passed
+    std::cout << "[PASS] HIR emitter regression corpus matched for " << passed
               << " file(s)." << std::endl;
     return 0;
 }
