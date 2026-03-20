@@ -198,9 +198,12 @@ static void printFrontendTimings(const AstFrontendResult::Timings& timings) {
     std::cerr << "[frontend] parse=" << timings.parseMicros << "us"
               << " symbols=" << timings.symbolCollectionMicros << "us"
               << " imports=" << timings.importResolutionMicros << "us"
-              << " analyze=" << timings.initialSemanticMicros << "us"
+              << " bind=" << timings.initialBindMicros << "us"
+              << " check=" << timings.initialTypecheckMicros << "us"
               << " optimize=" << timings.optimizationMicros << "us"
-              << " refresh=" << timings.semanticRefreshMicros << "us"
+              << " rebind=" << timings.refreshBindMicros << "us"
+              << " recheck=" << timings.refreshTypecheckMicros << "us"
+              << " hir=" << timings.hirLowerMicros << "us"
               << " total=" << timings.totalMicros << "us" << std::endl;
 }
 

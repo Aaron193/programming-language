@@ -3,11 +3,13 @@
 #include <string>
 #include <string_view>
 #include <cstdint>
+#include <memory>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 #include "Ast.hpp"
+#include "Hir.hpp"
 #include "AstSemanticAnalyzer.hpp"
 #include "SourceLocation.hpp"
 #include "TypeChecker.hpp"
@@ -39,9 +41,12 @@ struct AstFrontendResult {
         uint64_t parseMicros = 0;
         uint64_t symbolCollectionMicros = 0;
         uint64_t importResolutionMicros = 0;
-        uint64_t initialSemanticMicros = 0;
+        uint64_t initialBindMicros = 0;
+        uint64_t initialTypecheckMicros = 0;
         uint64_t optimizationMicros = 0;
-        uint64_t semanticRefreshMicros = 0;
+        uint64_t refreshBindMicros = 0;
+        uint64_t refreshTypecheckMicros = 0;
+        uint64_t hirLowerMicros = 0;
         uint64_t totalMicros = 0;
     };
 
@@ -50,7 +55,9 @@ struct AstFrontendResult {
     std::unordered_map<std::string, TypeRef> typeAliases;
     std::unordered_map<std::string, TypeRef> functionSignatures;
     std::unordered_map<AstNodeId, AstImportedModuleInterface> importedModules;
+    AstBindResult bindings;
     AstSemanticModel semanticModel;
+    std::unique_ptr<HirModule> hirModule;
     AstFrontendMode mode = AstFrontendMode::StrictChecked;
     size_t terminalLine = 1;
     SourcePosition terminalPosition = makeSourcePosition(0, 1, 1);

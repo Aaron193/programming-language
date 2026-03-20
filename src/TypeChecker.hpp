@@ -10,6 +10,9 @@
 #include "SourceLocation.hpp"
 #include "TypeInfo.hpp"
 
+struct AstBindingMetadata;
+using TypeCheckerMetadata = AstBindingMetadata;
+
 struct TypeError {
     size_t line = 0;
     size_t column = 1;
@@ -27,14 +30,6 @@ struct TypeError {
           column(spanValue.column()),
           span(std::move(spanValue)),
           message(std::move(messageValue)) {}
-};
-
-struct TypeCheckerMetadata {
-    std::unordered_map<std::string, std::unordered_map<std::string, TypeRef>>
-        classFieldTypes;
-    std::unordered_map<std::string, std::unordered_map<std::string, TypeRef>>
-        classMethodSignatures;
-    std::unordered_map<std::string, std::string> superclassOf;
 };
 
 class TypeChecker {

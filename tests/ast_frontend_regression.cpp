@@ -116,6 +116,27 @@ AstDestructuredImportStmt* topLevelDestructuredImport(AstModule& module) {
     return nullptr;
 }
 
+HirDestructuredImportStmt* topLevelHirDestructuredImport(HirModule& module) {
+    for (auto& item : module.items) {
+        if (!item) {
+            continue;
+        }
+
+        auto* stmtPtr = std::get_if<HirStmtPtr>(&item->value);
+        if (!stmtPtr || !*stmtPtr) {
+            continue;
+        }
+
+        auto* importStmt =
+            std::get_if<HirDestructuredImportStmt>(&(*stmtPtr)->value);
+        if (importStmt) {
+            return importStmt;
+        }
+    }
+
+    return nullptr;
+}
+
 bool buildSemanticPipeline(std::string_view source,
                            SemanticPipelineResult& outResult,
                            std::string& outError) {
@@ -799,6 +820,48 @@ bool checkTypedImportFrontendRegression(const std::filesystem::path& repoRoot) {
     if (!require(frontend.semanticModel.importedModules.count(
                      importStmt->initializer->node.id) == 1,
                  "typed import initializer should keep resolved import metadata")) {
+        return false;
+    }
+    if (!require(frontend.bindings.importedModules.count(
+                     importStmt->initializer->node.id) == 1,
+                 "typed import initializer should keep final binding import metadata")) {
+        return false;
+    }
+    if (!require(frontend.hirModule != nullptr,
+                 "typed import sample should lower to HIR")) {
+        return false;
+    }
+
+    HirDestructuredImportStmt* hirImportStmt =
+        topLevelHirDestructuredImport(*frontend.hirModule);
+    if (!require(hirImportStmt != nullptr,
+                 "typed import sample should contain a HIR destructured import")) {
+        return false;
+    }
+    if (!require(hirImportStmt->bindings.size() == 2,
+                 "typed import sample should contain two HIR bindings")) {
+        return false;
+    }
+
+    const auto* hirImportExpr =
+        std::get_if<HirImportExpr>(&hirImportStmt->initializer->value);
+    if (!require(hirImportExpr != nullptr,
+                 "typed import HIR initializer should stay an import expression")) {
+        return false;
+    }
+    if (!require(!hirImportExpr->importedModule.importTarget.canonicalId.empty(),
+                 "typed import HIR initializer should keep canonical import metadata")) {
+        return false;
+    }
+    if (!require(hirImportStmt->bindings[0].bindingType &&
+                     hirImportStmt->bindings[0].bindingType->toString() ==
+                         "function(i32, i32) -> i32",
+                 "typed import HIR function binding should keep the declared type")) {
+        return false;
+    }
+    if (!require(hirImportStmt->bindings[1].bindingType &&
+                     hirImportStmt->bindings[1].bindingType->toString() == "f64",
+                 "typed import HIR constant binding should keep the declared type")) {
         return false;
     }
     if (!require(frontend.semanticModel.exportedSymbolTypes.empty(),

@@ -1,5 +1,6 @@
 #include "TypeChecker.hpp"
 
+#include "AstBinder.hpp"
 #include "AstParser.hpp"
 #include "AstSemanticAnalyzer.hpp"
 #include "AstSymbolCollector.hpp"
@@ -25,7 +26,7 @@ bool TypeChecker::check(
             out.push_back(TypeError{error.span, error.message});
         }
         if (outMetadata) {
-            *outMetadata = TypeCheckerMetadata{};
+            *outMetadata = AstBindingMetadata{};
         }
         return false;
     }

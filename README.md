@@ -113,6 +113,9 @@ Inspect frontend phase timings while compiling:
 ./build/interpreter --frontend-timings path/to/program.mog
 ```
 
+The timing summary reports parse, symbol collection, import resolution, bind,
+type-check, optimize, rebind, recheck, and total frontend time.
+
 Or start REPL:
 
 ```bash
