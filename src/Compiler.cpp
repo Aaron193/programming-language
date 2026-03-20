@@ -10,6 +10,7 @@
 #include "AstBytecodeEmitter.hpp"
 #include "AstFrontend.hpp"
 #include "FrontendTypeUtils.hpp"
+#include "HirBytecodeEmitter.hpp"
 #include "StdLib.hpp"
 
 namespace {
@@ -39,6 +40,8 @@ bool reportAstFrontendFailure(AstFrontendBuildStatus status,
         std::cerr << "AST frontend failed to parse source";
         if (emitterMode == CompilerEmitterMode::ForceAst) {
             std::cerr << " for forced AST emission";
+        } else if (emitterMode == CompilerEmitterMode::ForceHir) {
+            std::cerr << " for forced HIR emission";
         }
         std::cerr << "." << std::endl;
         return true;
@@ -104,6 +107,17 @@ bool Compiler::compile(std::string_view source, Chunk& chunk,
     m_superclassOf = astFrontend.semanticModel.metadata.superclassOf;
     m_contexts.push_back(
         FunctionContext{{}, {}, 0, false, false, TypeInfo::makeAny()});
+
+    if (m_emitterMode != CompilerEmitterMode::ForceAst) {
+        if (astFrontend.hirModule == nullptr) {
+            errorAtLine(1, "Internal compiler error: missing HIR frontend result.");
+            return false;
+        }
+
+        HirBytecodeEmitter emitter(*this, *astFrontend.hirModule,
+                                   astFrontend.terminalLine);
+        return emitter.emitModule();
+    }
 
     AstBytecodeEmitter emitter(*this, astFrontend);
     return emitter.emitModule();

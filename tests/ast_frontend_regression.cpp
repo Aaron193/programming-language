@@ -244,9 +244,20 @@ bool checkCanonicalLoweringStable(const std::filesystem::path& path,
         return false;
     }
 
-    return require(autoDisassembly == forcedDisassembly,
+    GC forcedHirGc;
+    Chunk forcedHirChunk;
+    std::string forcedHirDisassembly;
+    if (!require(compileFileCanonical(path, CompilerEmitterMode::ForceHir,
+                                      forcedHirGc, forcedHirChunk,
+                                      forcedHirDisassembly),
+                 description + " should compile in forced HIR mode")) {
+        return false;
+    }
+
+    return require(autoDisassembly == forcedDisassembly &&
+                       autoDisassembly == forcedHirDisassembly,
                    description +
-                       " should lower identically in auto and forced AST modes");
+                       " should lower identically in auto, forced AST, and forced HIR modes");
 }
 
 bool checkStrictForcedAstHasNoAdd(const std::filesystem::path& path,
@@ -265,9 +276,21 @@ bool checkStrictForcedAstHasNoAdd(const std::filesystem::path& path,
         return false;
     }
 
-    return require(strictDisassembly.find("IADD") == std::string::npos &&
+    GC strictHirGc;
+    Chunk strictHirChunk;
+    std::string strictHirDisassembly;
+    if (!require(compileSourceCanonical(source, true, CompilerEmitterMode::ForceHir,
+                                        strictHirGc, strictHirChunk,
+                                        strictHirDisassembly),
+                 description + " should compile in strict forced HIR mode")) {
+        return false;
+    }
+
+    return require(strictDisassembly == strictHirDisassembly &&
+                       strictDisassembly.find("IADD") == std::string::npos &&
                        strictDisassembly.find("ADD") == std::string::npos,
-                   description + " should not emit addition opcodes");
+                   description +
+                       " should lower identically in strict AST/HIR modes without addition opcodes");
 }
 
 bool checkSemanticRefreshContract() {

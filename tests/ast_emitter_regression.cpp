@@ -203,13 +203,26 @@ int main(int argc, char** argv) {
             return 1;
         }
 
+        GC forcedHirGc;
+        Chunk forcedHirChunk;
+        std::string forcedHirCanonical;
+        if (!compileWithMode(canonicalPath, CompilerEmitterMode::ForceHir,
+                             forcedHirGc, packagePaths, forcedHirChunk,
+                             forcedHirCanonical)) {
+            std::cerr << "Forced HIR compile failed for " << canonicalPath
+                      << '\n';
+            return 1;
+        }
+
         if (firstCanonical != secondCanonical ||
-            firstCanonical != forcedAstCanonical) {
+            firstCanonical != forcedAstCanonical ||
+            firstCanonical != forcedHirCanonical) {
             std::cerr << "AST emitter regression mismatch: " << canonicalPath
                       << "\n\n";
             std::cerr << "--- AUTO (1) ---\n" << firstCanonical;
             std::cerr << "--- AUTO (2) ---\n" << secondCanonical;
             std::cerr << "--- FORCE_AST ---\n" << forcedAstCanonical;
+            std::cerr << "--- FORCE_HIR ---\n" << forcedHirCanonical;
             return 1;
         }
 

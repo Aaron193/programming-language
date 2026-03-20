@@ -4,6 +4,8 @@
 #include <utility>
 #include <variant>
 
+#include "FrontendTypeUtils.hpp"
+
 namespace {
 
 class AstToHirLowerer {
@@ -69,6 +71,17 @@ class AstToHirLowerer {
         return info;
     }
 
+    TypeRef resolveDeclaredType(const AstTypeExpr* typeExpr) const {
+        if (typeExpr == nullptr) {
+            return TypeInfo::makeAny();
+        }
+
+        TypeRef resolved = frontendResolveTypeExpr(
+            *typeExpr, FrontendTypeContext{m_frontend.classNames,
+                                           m_frontend.typeAliases});
+        return resolved ? resolved : TypeInfo::makeAny();
+    }
+
     TypeRef functionReturnType(const TypeRef& type) const {
         if (!type || type->kind != TypeKind::FUNCTION || !type->returnType) {
             return TypeInfo::makeAny();
@@ -98,8 +111,9 @@ class AstToHirLowerer {
         lowered->node = makeNodeInfo(stmt.node);
         lowered->isConst = stmt.isConst;
         lowered->name = stmt.name;
-        lowered->declaredType = stmt.omittedType ? TypeInfo::makeAny()
-                                                 : nodeType(stmt.node.id);
+        lowered->declaredType = stmt.omittedType
+                                    ? TypeInfo::makeAny()
+                                    : resolveDeclaredType(stmt.declaredType.get());
         lowered->initializer =
             stmt.initializer ? lowerExpr(*stmt.initializer) : nullptr;
         lowered->omittedType = stmt.omittedType;
@@ -249,7 +263,8 @@ class AstToHirLowerer {
                         loweredBinding.node = makeNodeInfo(binding.node);
                         loweredBinding.exportedName = binding.exportedName;
                         loweredBinding.localName = binding.localName;
-                        loweredBinding.expectedType = nodeType(binding.node.id);
+                        loweredBinding.expectedType =
+                            resolveDeclaredType(binding.expectedType.get());
                         loweredBinding.bindingType = nodeType(binding.node.id);
                         importStmt.bindings.push_back(std::move(loweredBinding));
                     }
@@ -282,7 +297,7 @@ class AstToHirLowerer {
                     forEach.isConst = value.isConst;
                     forEach.name = value.name;
                     forEach.declaredType =
-                        value.declaredType ? nodeType(stmt.node.id) : TypeInfo::makeAny();
+                        resolveDeclaredType(value.declaredType.get());
                     forEach.iterable =
                         value.iterable ? lowerExpr(*value.iterable) : nullptr;
                     forEach.body = value.body ? lowerStmt(*value.body) : nullptr;
