@@ -1,0 +1,69 @@
+{
+  "scopeName": "source.mog",
+  "name": "Mog",
+  "patterns": [
+    {
+      "name": "comment.line.double-slash.mog",
+      "match": "//.*$"
+    },
+    {
+      "name": "meta.preprocessor.strict.mog",
+      "match": "^#!strict\\b"
+    },
+    {
+      "name": "string.quoted.double.mog",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.mog",
+          "match": "\\\\."
+        }
+      ]
+    },
+    {
+      "name": "constant.numeric.mog",
+      "match": "\\b\\d+(?:\\.\\d+)?(?:usize|i8|i16|i32|i64|u|u8|u16|u32|u64|f32|f64)?\\b"
+    },
+    {
+      "name": "constant.language.boolean.mog",
+      "match": "\\b(?:true|false|null)\\b"
+    },
+    {
+      "name": "keyword.control.import.mog",
+      "match": "@import\\b"
+    },
+    {
+      "name": "storage.modifier.annotation.mog",
+      "match": "@operator\\b"
+    },
+    {
+      "name": "keyword.control.mog",
+      "match": "\\b(?:print|var|const|fn|type|struct|if|else|for|while|this|super|return|as)\\b"
+    },
+    {
+      "name": "storage.type.primitive.mog",
+      "match": "\\b(?:i8|i16|i32|i64|u8|u16|u32|u64|u|usize|f32|f64|bool|str|void|null|fn)\\b"
+    },
+    {
+      "name": "entity.name.type.mog",
+      "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
+    },
+    {
+      "name": "keyword.operator.mog",
+      "match": "(?:\\+\\+|--|&&|\\|\\||==|!=|<=|>=|<<=|>>=|<<|>>|=>|\\+=|-=|\\*=|/=|&=|\\|=|\\^=|[+\\-*/&|^~<>!=?:.])"
+    },
+    {
+      "name": "punctuation.separator.mog",
+      "match": "[,;]"
+    },
+    {
+      "name": "punctuation.section.group.begin.mog",
+      "match": "[\\[{(]"
+    },
+    {
+      "name": "punctuation.section.group.end.mog",
+      "match": "[\\]})]"
+    }
+  ]
+}

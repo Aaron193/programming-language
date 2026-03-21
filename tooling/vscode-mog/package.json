@@ -1,0 +1,55 @@
+{
+  "name": "vscode-mog",
+  "displayName": "Mog Language Support",
+  "description": "Syntax highlighting and diagnostics for Mog.",
+  "version": "0.0.1",
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:mog"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "mog",
+        "aliases": [
+          "Mog",
+          "mog"
+        ],
+        "extensions": [
+          ".mog"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "mog",
+        "scopeName": "source.mog",
+        "path": "./syntaxes/mog.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "mog",
+        "path": "./snippets/mog.code-snippets"
+      }
+    ],
+    "configuration": {
+      "title": "Mog",
+      "properties": {
+        "mog.serverPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the mog-lsp executable. Defaults to build outputs in the current workspace."
+        }
+      }
+    }
+  }
+}

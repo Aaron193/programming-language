@@ -1,0 +1,45 @@
+{
+  "Function": {
+    "prefix": "fn",
+    "body": [
+      "fn ${1:name}(${2:param i32}) ${3:void} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Declare a function"
+  },
+  "If": {
+    "prefix": "if",
+    "body": [
+      "if (${1:condition}) {",
+      "\t$0",
+      "}"
+    ],
+    "description": "If statement"
+  },
+  "For": {
+    "prefix": "for",
+    "body": [
+      "for (${1:var i i32 = 0}; ${2:i < count}; ${3:i++}) {",
+      "\t$0",
+      "}"
+    ],
+    "description": "For loop"
+  },
+  "Type": {
+    "prefix": "type",
+    "body": [
+      "type ${1:Name} struct {",
+      "\t${2:field} ${3:i32}",
+      "}"
+    ],
+    "description": "Declare a struct-backed type"
+  },
+  "Import": {
+    "prefix": "import",
+    "body": [
+      "const ${1:Module} = @import(\"${2:module}\")"
+    ],
+    "description": "Import a module"
+  }
+}
