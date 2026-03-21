@@ -901,6 +901,12 @@ class MogLspServer {
             return;
         }
 
+        if (*method == "textDocument/signatureHelp" && params != nullptr &&
+            id != nullptr) {
+            handleSignatureHelp(*id, *params);
+            return;
+        }
+
         if (*method == "textDocument/prepareRename" && params != nullptr &&
             id != nullptr) {
             handlePrepareRename(*id, *params);
@@ -1255,7 +1261,10 @@ class MogLspServer {
         JsonArray items;
         for (const auto& completion : completions) {
             if (memberContext && completion.kind != "field" &&
-                completion.kind != "method") {
+                completion.kind != "method" &&
+                completion.kind != "function" &&
+                completion.kind != "class" &&
+                completion.kind != "constant") {
                 continue;
             }
             if (!prefix.empty() && !startsWith(completion.label, prefix)) {
@@ -1276,6 +1285,56 @@ class MogLspServer {
         }
 
         sendResponse(id, JsonValue(std::move(items)));
+    }
+
+    void handleSignatureHelp(const JsonValue& id, const JsonObject& params) {
+        auto uri = getTextDocumentUri(params);
+        if (!uri.has_value()) {
+            sendResponse(id, JsonValue(nullptr));
+            return;
+        }
+
+        auto documentIt = m_documents.find(*uri);
+        if (documentIt == m_documents.end()) {
+            sendResponse(id, JsonValue(nullptr));
+            return;
+        }
+
+        const auto position = getPosition(params);
+        if (!position.has_value()) {
+            sendResponse(id, JsonValue(nullptr));
+            return;
+        }
+
+        const auto signatureHelp = findSignatureHelpForTooling(
+            documentIt->second.analysis, documentIt->second.text, *position);
+        if (!signatureHelp.has_value()) {
+            sendResponse(id, JsonValue(nullptr));
+            return;
+        }
+
+        JsonArray signatures;
+        for (const auto& signature : signatureHelp->signatures) {
+            JsonObject signatureObject;
+            signatureObject["label"] = JsonValue(signature.label);
+
+            JsonArray parameters;
+            for (const auto& parameter : signature.parameters) {
+                JsonObject parameterObject;
+                parameterObject["label"] = JsonValue(parameter.label);
+                parameters.push_back(JsonValue(std::move(parameterObject)));
+            }
+            signatureObject["parameters"] = JsonValue(std::move(parameters));
+            signatures.push_back(JsonValue(std::move(signatureObject)));
+        }
+
+        JsonObject result;
+        result["signatures"] = JsonValue(std::move(signatures));
+        result["activeSignature"] =
+            JsonValue(static_cast<double>(signatureHelp->activeSignature));
+        result["activeParameter"] =
+            JsonValue(static_cast<double>(signatureHelp->activeParameter));
+        sendResponse(id, JsonValue(std::move(result)));
     }
 
     void handlePrepareRename(const JsonValue& id, const JsonObject& params) {
@@ -1596,7 +1655,15 @@ class MogLspServer {
             {"renameProvider",
              JsonValue(JsonObject{{"prepareProvider", JsonValue(true)}})},
             {"completionProvider",
-             JsonValue(JsonObject{{"resolveProvider", JsonValue(false)}})},
+             JsonValue(JsonObject{{"resolveProvider", JsonValue(false)},
+                                  {"triggerCharacters",
+                                   JsonValue(JsonArray{
+                                       JsonValue(std::string("."))})}})},
+            {"signatureHelpProvider",
+             JsonValue(JsonObject{{"triggerCharacters",
+                                   JsonValue(JsonArray{
+                                       JsonValue(std::string("(")),
+                                       JsonValue(std::string(","))})}})},
         });
         sendResponse(*id, JsonValue(std::move(result)));
     }

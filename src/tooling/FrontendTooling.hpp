@@ -66,6 +66,21 @@ struct ToolingCompletionItem {
     std::string sortText;
 };
 
+struct ToolingSignatureParameter {
+    std::string label;
+};
+
+struct ToolingSignatureInformation {
+    std::string label;
+    std::vector<ToolingSignatureParameter> parameters;
+};
+
+struct ToolingSignatureHelp {
+    std::vector<ToolingSignatureInformation> signatures;
+    size_t activeSignature = 0;
+    size_t activeParameter = 0;
+};
+
 struct ToolingWorkspaceSymbol {
     std::string name;
     std::string kind;
@@ -129,6 +144,9 @@ std::optional<ToolingHover> findHoverForTooling(
     const ToolingDocumentAnalysis& analysis, const ToolingPosition& position);
 std::vector<ToolingCompletionItem> findCompletionsForTooling(
     const ToolingDocumentAnalysis& analysis, const ToolingPosition& position);
+std::optional<ToolingSignatureHelp> findSignatureHelpForTooling(
+    const ToolingDocumentAnalysis& analysis, std::string_view source,
+    const ToolingPosition& position);
 std::vector<ToolingWorkspaceSymbol> collectWorkspaceSymbolsForTooling(
     const ToolingDocumentAnalysis& analysis);
 std::optional<ToolingPrepareRename> prepareRenameForTooling(

@@ -121,6 +121,49 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
     member_path = Path(tmpdir) / "member_sample.mog"
     member_path.write_text(member_source, encoding="utf-8")
     member_uri = member_path.resolve().as_uri()
+    module_member_source = "\n".join([
+        "#!strict",
+        "const dep = @import(\"./dep.mog\")",
+        "print(dep.Ans)",
+        ""
+    ])
+    module_member_path = Path(tmpdir) / "module_member_sample.mog"
+    module_member_path.write_text(module_member_source, encoding="utf-8")
+    module_member_uri = module_member_path.resolve().as_uri()
+    type_context_source = "\n".join([
+        "#!strict",
+        "type LocalAlias i32",
+        "type LocalBox struct {}",
+        "fn use(value Loc) LocalA {",
+        "    return 1",
+        "}",
+        ""
+    ])
+    type_context_path = Path(tmpdir) / "type_context_sample.mog"
+    type_context_path.write_text(type_context_source, encoding="utf-8")
+    type_context_uri = type_context_path.resolve().as_uri()
+    signature_source = "\n".join([
+        "#!strict",
+        "fn Add(a i32, b i32) i32 {",
+        "    return a + b",
+        "}",
+        "const value i32 = Add(1, 2)",
+        ""
+    ])
+    signature_path = Path(tmpdir) / "signature_sample.mog"
+    signature_path.write_text(signature_source, encoding="utf-8")
+    signature_uri = signature_path.resolve().as_uri()
+    signature_fail_source = "\n".join([
+        "#!strict",
+        "fn Add(a i32, b i32) i32 {",
+        "    return a + b",
+        "}",
+        "const value i32 = Add(1,",
+        ""
+    ])
+    signature_fail_path = Path(tmpdir) / "signature_fail_sample.mog"
+    signature_fail_path.write_text(signature_fail_source, encoding="utf-8")
+    signature_fail_uri = signature_fail_path.resolve().as_uri()
     parse_fail_source = "\n".join([
         "#!strict",
         "fn broken(",
@@ -169,6 +212,13 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
             raise AssertionError("initialize response missing completionProvider")
         if completion_provider.get("resolveProvider") is not False:
             raise AssertionError("completionProvider should disable resolveProvider")
+        if completion_provider.get("triggerCharacters") != ["."]:
+            raise AssertionError(f"unexpected completion trigger characters: {completion_provider}")
+        signature_provider = caps.get("signatureHelpProvider")
+        if not isinstance(signature_provider, dict):
+            raise AssertionError("initialize response missing signatureHelpProvider")
+        if signature_provider.get("triggerCharacters") != ["(", ","]:
+            raise AssertionError(f"unexpected signatureHelpProvider payload: {signature_provider}")
 
         send_message(proc, {
             "jsonrpc": "2.0",
@@ -274,6 +324,76 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         )
         if member_diagnostics["params"]["diagnostics"]:
             raise AssertionError("expected member sample to stay diagnostics-free")
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": module_member_uri,
+                    "languageId": "mog",
+                    "version": 1,
+                    "text": module_member_source
+                }
+            }
+        })
+        read_until(
+            proc,
+            lambda msg: msg.get("method") == "textDocument/publishDiagnostics" and
+            msg.get("params", {}).get("uri") == module_member_uri,
+        )
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": type_context_uri,
+                    "languageId": "mog",
+                    "version": 1,
+                    "text": type_context_source
+                }
+            }
+        })
+        read_until(
+            proc,
+            lambda msg: msg.get("method") == "textDocument/publishDiagnostics" and
+            msg.get("params", {}).get("uri") == type_context_uri,
+        )
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": signature_uri,
+                    "languageId": "mog",
+                    "version": 1,
+                    "text": signature_source
+                }
+            }
+        })
+        signature_diagnostics = read_until(
+            proc,
+            lambda msg: msg.get("method") == "textDocument/publishDiagnostics" and
+            msg.get("params", {}).get("uri") == signature_uri,
+        )
+        if signature_diagnostics["params"]["diagnostics"]:
+            raise AssertionError("expected signature sample to stay diagnostics-free")
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": signature_fail_uri,
+                    "languageId": "mog",
+                    "version": 1,
+                    "text": signature_fail_source
+                }
+            }
+        })
+        read_until(
+            proc,
+            lambda msg: msg.get("method") == "textDocument/publishDiagnostics" and
+            msg.get("params", {}).get("uri") == signature_fail_uri,
+        )
 
         send_message(proc, {
             "jsonrpc": "2.0",
@@ -401,6 +521,48 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
 
         send_message(proc, {
             "jsonrpc": "2.0",
+            "id": 7.5,
+            "method": "textDocument/completion",
+            "params": {
+                "textDocument": {
+                    "uri": module_member_uri
+                },
+                "position": {
+                    "line": 2,
+                    "character": 13
+                }
+            }
+        })
+        module_completion = read_until(proc, lambda msg: msg.get("id") == 7.5)
+        module_labels = [item["label"] for item in module_completion["result"]]
+        if "Answer" not in module_labels:
+            raise AssertionError(f"expected exported member completion items: {module_completion['result']}")
+        if "print" in module_labels:
+            raise AssertionError(f"module member completions should exclude scope items: {module_completion['result']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 7.6,
+            "method": "textDocument/completion",
+            "params": {
+                "textDocument": {
+                    "uri": type_context_uri
+                },
+                "position": {
+                    "line": 3,
+                    "character": 16
+                }
+            }
+        })
+        type_completion = read_until(proc, lambda msg: msg.get("id") == 7.6)
+        type_labels = [item["label"] for item in type_completion["result"]]
+        if "LocalAlias" not in type_labels or "LocalBox" not in type_labels:
+            raise AssertionError(f"expected type-context completion items: {type_completion['result']}")
+        if "value" in type_labels:
+            raise AssertionError(f"type-context completions should exclude value bindings: {type_completion['result']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
             "id": 8,
             "method": "textDocument/hover",
             "params": {
@@ -492,6 +654,44 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         parse_labels = [item["label"] for item in parse_completion["result"]]
         if "fn" not in parse_labels or "while" not in parse_labels:
             raise AssertionError(f"expected keyword completions on parse failure: {parse_completion['result']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 11.5,
+            "method": "textDocument/signatureHelp",
+            "params": {
+                "textDocument": {
+                    "uri": signature_uri
+                },
+                "position": {
+                    "line": 4,
+                    "character": 27
+                }
+            }
+        })
+        signature_help = read_until(proc, lambda msg: msg.get("id") == 11.5)
+        if signature_help["result"]["activeParameter"] != 1:
+            raise AssertionError(f"unexpected direct signature help payload: {signature_help['result']}")
+        if signature_help["result"]["signatures"][0]["label"] != "function(i32, i32) -> i32":
+            raise AssertionError(f"unexpected direct signature label: {signature_help['result']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 11.6,
+            "method": "textDocument/signatureHelp",
+            "params": {
+                "textDocument": {
+                    "uri": signature_fail_uri
+                },
+                "position": {
+                    "line": 4,
+                    "character": 25
+                }
+            }
+        })
+        parse_signature_help = read_until(proc, lambda msg: msg.get("id") == 11.6)
+        if parse_signature_help["result"]["activeParameter"] != 1:
+            raise AssertionError(f"unexpected parse-fail signature help payload: {parse_signature_help['result']}")
 
         send_message(proc, {
             "jsonrpc": "2.0",

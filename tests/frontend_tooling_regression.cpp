@@ -560,6 +560,196 @@ bool testCompletions() {
         return false;
     }
 
+    const std::string moduleMemberSource =
+        "#!strict\n"
+        "const math = @import(\"./modules/math.mog\")\n"
+        "print(math.Ad)\n";
+    options.sourcePath = "tests/sample_import_basic.mog";
+    ToolingDocumentAnalysis moduleMemberAnalysis =
+        analyzeDocumentForTooling(moduleMemberSource, options);
+    if (!require(moduleMemberAnalysis.status == AstFrontendBuildStatus::Success,
+                 "module member completion sample should succeed")) {
+        return false;
+    }
+
+    const auto moduleMemberCompletions =
+        findCompletionsForTooling(moduleMemberAnalysis, ToolingPosition{2, 13});
+    const auto* addCompletion = findCompletion(moduleMemberCompletions, "Add");
+    const auto* piCompletion = findCompletion(moduleMemberCompletions, "PI");
+    if (!require(addCompletion != nullptr &&
+                     addCompletion->kind == "function" &&
+                     piCompletion != nullptr &&
+                     piCompletion->kind == "constant",
+                 "module member completions should expose exported functions and constants")) {
+        return false;
+    }
+    if (!require(findCompletion(moduleMemberCompletions, "print") == nullptr,
+                 "module member completions should not mix in scope items")) {
+        return false;
+    }
+
+    const std::string importExportSource =
+        "#!strict\n"
+        "const { Add, PI } = @import(\"./modules/math.mog\")\n";
+    options.sourcePath = "tests/sample_import_named.mog";
+    ToolingDocumentAnalysis importExportAnalysis =
+        analyzeDocumentForTooling(importExportSource, options);
+    if (!require((importExportAnalysis.status == AstFrontendBuildStatus::Success ||
+                  importExportAnalysis.status ==
+                      AstFrontendBuildStatus::SemanticError) &&
+                     importExportAnalysis.hasBindings,
+                 "destructured import completion sample should preserve parse-time bindings")) {
+        return false;
+    }
+
+    const auto importExportCompletions =
+        findCompletionsForTooling(importExportAnalysis, ToolingPosition{1, 15});
+    if (!require(findCompletion(importExportCompletions, "PI") != nullptr,
+                 "destructured import completions should expose remaining exports")) {
+        return false;
+    }
+    if (!require(findCompletion(importExportCompletions, "Add") == nullptr,
+                 "destructured import completions should exclude already imported exports")) {
+        return false;
+    }
+
+    const std::string typeContextSource =
+        "#!strict\n"
+        "type LocalAlias i32\n"
+        "type LocalBox struct {}\n"
+        "fn use(value Loc) LocalA {\n"
+        "    return 1\n"
+        "}\n";
+    options.sourcePath = "tooling_completion_type_context_regression.mog";
+    ToolingDocumentAnalysis typeContextAnalysis =
+        analyzeDocumentForTooling(typeContextSource, options);
+    if (!require(typeContextAnalysis.status == AstFrontendBuildStatus::SemanticError,
+                 "type-context completion sample should preserve parse data on semantic errors")) {
+        return false;
+    }
+
+    const auto typeContextCompletions =
+        findCompletionsForTooling(typeContextAnalysis, ToolingPosition{3, 16});
+    if (!require(findCompletion(typeContextCompletions, "LocalAlias") != nullptr &&
+                     findCompletion(typeContextCompletions, "LocalBox") != nullptr &&
+                     findCompletion(typeContextCompletions, "i32") != nullptr,
+                 "type-context completions should include aliases, classes, and built-in types")) {
+        return false;
+    }
+    if (!require(findCompletion(typeContextCompletions, "value") == nullptr &&
+                     findCompletion(typeContextCompletions, "use") == nullptr,
+                 "type-context completions should exclude value bindings")) {
+        return false;
+    }
+
+    const std::string importedTypeContextSource =
+        "#!strict\n"
+        "const { Counter } = @import(\"./modules/class_mod.mog\")\n"
+        "fn make() void {\n"
+        "    var value Cou = Counter()\n"
+        "}\n";
+    options.sourcePath = "tests/sample_import_class.mog";
+    ToolingDocumentAnalysis importedTypeContextAnalysis =
+        analyzeDocumentForTooling(importedTypeContextSource, options);
+    if (!require(importedTypeContextAnalysis.status ==
+                     AstFrontendBuildStatus::SemanticError,
+                 "imported type-name completion sample should preserve parse data")) {
+        return false;
+    }
+
+    const auto importedTypeCompletions = findCompletionsForTooling(
+        importedTypeContextAnalysis, ToolingPosition{3, 16});
+    if (!require(findCompletion(importedTypeCompletions, "Counter") != nullptr,
+                 "type-context completions should include imported class bindings")) {
+        return false;
+    }
+
+    const auto normalCompletions =
+        findCompletionsForTooling(typeContextAnalysis, ToolingPosition{4, 4});
+    if (!require(findCompletion(normalCompletions, "LocalAlias") == nullptr &&
+                     findCompletion(normalCompletions, "i32") == nullptr,
+                 "ordinary completions should exclude type-only names")) {
+        return false;
+    }
+
+    return true;
+}
+
+bool testSignatureHelp() {
+    ToolingAnalyzeOptions options;
+    options.strictMode = true;
+
+    const std::string directSource =
+        "#!strict\n"
+        "fn Add(a i32, b i32) i32 {\n"
+        "    return a + b\n"
+        "}\n"
+        "const value i32 = Add(1, 2)\n";
+    options.sourcePath = "tooling_signature_help_direct_regression.mog";
+    ToolingDocumentAnalysis directAnalysis =
+        analyzeDocumentForTooling(directSource, options);
+    if (!require(directAnalysis.status == AstFrontendBuildStatus::Success,
+                 "direct signature help sample should succeed")) {
+        return false;
+    }
+
+    const auto directHelp = findSignatureHelpForTooling(
+        directAnalysis, directSource, ToolingPosition{4, 27});
+    if (!require(directHelp.has_value() &&
+                     directHelp->activeParameter == 1 &&
+                     !directHelp->signatures.empty() &&
+                     directHelp->signatures.front().label ==
+                         "function(i32, i32) -> i32",
+                 "direct calls should expose signature help and active parameter")) {
+        return false;
+    }
+
+    const std::string moduleSource =
+        "#!strict\n"
+        "const math = @import(\"./modules/math.mog\")\n"
+        "const value i32 = math.Add(1, 2)\n";
+    options.sourcePath = "tests/sample_import_basic.mog";
+    ToolingDocumentAnalysis moduleAnalysis =
+        analyzeDocumentForTooling(moduleSource, options);
+    if (!require(moduleAnalysis.status == AstFrontendBuildStatus::Success,
+                 "module-member signature help sample should succeed")) {
+        return false;
+    }
+
+    const auto moduleHelp = findSignatureHelpForTooling(
+        moduleAnalysis, moduleSource, ToolingPosition{2, 31});
+    if (!require(moduleHelp.has_value() &&
+                     moduleHelp->activeParameter == 1 &&
+                     !moduleHelp->signatures.empty() &&
+                     moduleHelp->signatures.front().label ==
+                         "function(i32, i32) -> i32",
+                 "module export calls should expose signature help")) {
+        return false;
+    }
+
+    const std::string parseFailSource =
+        "#!strict\n"
+        "fn Add(a i32, b i32) i32 {\n"
+        "    return a + b\n"
+        "}\n"
+        "const value i32 = Add(1,\n";
+    options.sourcePath = "tooling_signature_help_parse_fail_regression.mog";
+    ToolingDocumentAnalysis parseFailAnalysis =
+        analyzeDocumentForTooling(parseFailSource, options);
+    if (!require(parseFailAnalysis.status == AstFrontendBuildStatus::ParseFailed,
+                 "parse-failed signature help sample should fail parsing")) {
+        return false;
+    }
+
+    const auto parseFailHelp = findSignatureHelpForTooling(
+        parseFailAnalysis, parseFailSource, ToolingPosition{4, 25});
+    if (!require(parseFailHelp.has_value() &&
+                     parseFailHelp->activeParameter == 1 &&
+                     !parseFailHelp->signatures.empty(),
+                 "signature help should recover across unterminated calls")) {
+        return false;
+    }
+
     return true;
 }
 
@@ -832,6 +1022,10 @@ int main() {
     }
 
     if (!testCompletions()) {
+        return 1;
+    }
+
+    if (!testSignatureHelp()) {
         return 1;
     }
 
