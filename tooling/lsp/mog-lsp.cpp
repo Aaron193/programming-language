@@ -1138,6 +1138,20 @@ class MogLspServer {
             return;
         }
 
+        const auto typeDeclarationReferences =
+            findTypeDeclarationReferencesForTooling(documentIt->second.analysis,
+                                                    *position);
+        if (typeDeclarationReferences.size() > 1) {
+            JsonArray items;
+            items.reserve(typeDeclarationReferences.size());
+            for (const auto& reference : typeDeclarationReferences) {
+                items.push_back(makeLocation(pathToFileUri(reference.path),
+                                             reference.selectionRange));
+            }
+            sendResponse(id, JsonValue(std::move(items)));
+            return;
+        }
+
         const auto definition =
             findDefinitionForTooling(documentIt->second.analysis, *position);
         if (!definition.has_value()) {

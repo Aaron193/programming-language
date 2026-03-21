@@ -138,6 +138,8 @@ ToolingDocumentAnalysis analyzeDocumentForTooling(
     std::string_view source, const ToolingAnalyzeOptions& options);
 std::optional<ToolingLocation> findDefinitionForTooling(
     const ToolingDocumentAnalysis& analysis, const ToolingPosition& position);
+std::vector<ToolingLocation> findTypeDeclarationReferencesForTooling(
+    const ToolingDocumentAnalysis& analysis, const ToolingPosition& position);
 std::vector<ToolingLocation> findReferencesForTooling(
     const ToolingDocumentAnalysis& analysis, const ToolingPosition& position);
 std::optional<ToolingHover> findHoverForTooling(

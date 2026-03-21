@@ -2101,6 +2101,358 @@ std::optional<TypeNameTarget> findTypeNameTarget(const AstModule& module,
     return std::nullopt;
 }
 
+std::optional<SymbolTarget> resolveTypeDeclarationTarget(
+    const ToolingDocumentAnalysis& analysis, const ToolingPosition& position) {
+    if (!analysis.hasParse) {
+        return std::nullopt;
+    }
+
+    const SourcePosition sourcePosition =
+        sourcePositionFromToolingPosition(position);
+    std::unordered_map<AstNodeId, DeclarationSite> declarationSites;
+    collectDeclarationSites(analysis.frontend.module, declarationSites);
+    for (const auto& [nodeId, declaration] : declarationSites) {
+        if ((declaration.kind != "class" && declaration.kind != "type") ||
+            !containsPosition(declaration.selectionRange, sourcePosition)) {
+            continue;
+        }
+        return SymbolTarget{nodeId, declaration.selectionRange};
+    }
+
+    return std::nullopt;
+}
+
+void collectTypeReferenceSitesInTypeExpr(
+    const AstTypeExpr& typeExpr, std::string_view typeName,
+    std::vector<SourceSpan>& outSites);
+void collectTypeReferenceSitesInExpr(const AstExpr& expr,
+                                     std::string_view typeName,
+                                     std::vector<SourceSpan>& outSites);
+void collectTypeReferenceSitesInStmt(const AstStmt& stmt,
+                                     std::string_view typeName,
+                                     std::vector<SourceSpan>& outSites);
+
+void collectTypeReferenceSitesInItem(const AstItem& item,
+                                     std::string_view typeName,
+                                     std::vector<SourceSpan>& outSites) {
+    std::visit(
+        [&](const auto& value) {
+            using T = std::decay_t<decltype(value)>;
+
+            if constexpr (std::is_same_v<T, AstFunctionDecl>) {
+                for (const auto& param : value.params) {
+                    if (param.type) {
+                        collectTypeReferenceSitesInTypeExpr(*param.type, typeName,
+                                                            outSites);
+                    }
+                }
+                if (value.returnType) {
+                    collectTypeReferenceSitesInTypeExpr(*value.returnType, typeName,
+                                                        outSites);
+                }
+                if (value.body) {
+                    collectTypeReferenceSitesInStmt(*value.body, typeName, outSites);
+                }
+            } else if constexpr (std::is_same_v<T, AstClassDecl>) {
+                for (const auto& field : value.fields) {
+                    if (field.type) {
+                        collectTypeReferenceSitesInTypeExpr(*field.type, typeName,
+                                                            outSites);
+                    }
+                }
+                for (const auto& method : value.methods) {
+                    for (const auto& param : method.params) {
+                        if (param.type) {
+                            collectTypeReferenceSitesInTypeExpr(*param.type, typeName,
+                                                                outSites);
+                        }
+                    }
+                    if (method.returnType) {
+                        collectTypeReferenceSitesInTypeExpr(*method.returnType,
+                                                            typeName, outSites);
+                    }
+                    if (method.body) {
+                        collectTypeReferenceSitesInStmt(*method.body, typeName,
+                                                        outSites);
+                    }
+                }
+            } else if constexpr (std::is_same_v<T, AstTypeAliasDecl>) {
+                if (value.aliasedType) {
+                    collectTypeReferenceSitesInTypeExpr(*value.aliasedType, typeName,
+                                                        outSites);
+                }
+            } else if constexpr (std::is_same_v<T, AstStmtPtr>) {
+                if (value) {
+                    collectTypeReferenceSitesInStmt(*value, typeName, outSites);
+                }
+            }
+        },
+        item.value);
+}
+
+void collectTypeReferenceSitesInTypeExpr(
+    const AstTypeExpr& typeExpr, std::string_view typeName,
+    std::vector<SourceSpan>& outSites) {
+    for (const auto& param : typeExpr.paramTypes) {
+        if (param) {
+            collectTypeReferenceSitesInTypeExpr(*param, typeName, outSites);
+        }
+    }
+    if (typeExpr.returnType) {
+        collectTypeReferenceSitesInTypeExpr(*typeExpr.returnType, typeName,
+                                            outSites);
+    }
+    if (typeExpr.elementType) {
+        collectTypeReferenceSitesInTypeExpr(*typeExpr.elementType, typeName,
+                                            outSites);
+    }
+    if (typeExpr.keyType) {
+        collectTypeReferenceSitesInTypeExpr(*typeExpr.keyType, typeName, outSites);
+    }
+    if (typeExpr.valueType) {
+        collectTypeReferenceSitesInTypeExpr(*typeExpr.valueType, typeName,
+                                            outSites);
+    }
+    if (typeExpr.innerType) {
+        collectTypeReferenceSitesInTypeExpr(*typeExpr.innerType, typeName,
+                                            outSites);
+    }
+
+    if (typeExpr.kind == AstTypeKind::NAMED &&
+        tokenText(typeExpr.token) == typeName) {
+        outSites.push_back(typeExpr.token.span());
+    }
+}
+
+void collectTypeReferenceSitesInStmt(const AstStmt& stmt,
+                                     std::string_view typeName,
+                                     std::vector<SourceSpan>& outSites) {
+    std::visit(
+        [&](const auto& value) {
+            using T = std::decay_t<decltype(value)>;
+
+            if constexpr (std::is_same_v<T, AstBlockStmt>) {
+                for (const auto& item : value.items) {
+                    if (item) {
+                        collectTypeReferenceSitesInItem(*item, typeName, outSites);
+                    }
+                }
+            } else if constexpr (std::is_same_v<T, AstExprStmt>) {
+                collectTypeReferenceSitesInExpr(*value.expression, typeName,
+                                                outSites);
+            } else if constexpr (std::is_same_v<T, AstPrintStmt>) {
+                collectTypeReferenceSitesInExpr(*value.expression, typeName,
+                                                outSites);
+            } else if constexpr (std::is_same_v<T, AstReturnStmt>) {
+                if (value.value) {
+                    collectTypeReferenceSitesInExpr(*value.value, typeName,
+                                                    outSites);
+                }
+            } else if constexpr (std::is_same_v<T, AstIfStmt>) {
+                collectTypeReferenceSitesInExpr(*value.condition, typeName,
+                                                outSites);
+                collectTypeReferenceSitesInStmt(*value.thenBranch, typeName,
+                                                outSites);
+                if (value.elseBranch) {
+                    collectTypeReferenceSitesInStmt(*value.elseBranch, typeName,
+                                                    outSites);
+                }
+            } else if constexpr (std::is_same_v<T, AstWhileStmt>) {
+                collectTypeReferenceSitesInExpr(*value.condition, typeName,
+                                                outSites);
+                collectTypeReferenceSitesInStmt(*value.body, typeName, outSites);
+            } else if constexpr (std::is_same_v<T, AstVarDeclStmt>) {
+                if (value.declaredType) {
+                    collectTypeReferenceSitesInTypeExpr(*value.declaredType,
+                                                        typeName, outSites);
+                }
+                if (value.initializer) {
+                    collectTypeReferenceSitesInExpr(*value.initializer, typeName,
+                                                    outSites);
+                }
+            } else if constexpr (std::is_same_v<T, AstDestructuredImportStmt>) {
+                for (const auto& binding : value.bindings) {
+                    if (binding.expectedType) {
+                        collectTypeReferenceSitesInTypeExpr(*binding.expectedType,
+                                                            typeName, outSites);
+                    }
+                }
+                if (value.initializer) {
+                    collectTypeReferenceSitesInExpr(*value.initializer, typeName,
+                                                    outSites);
+                }
+            } else if constexpr (std::is_same_v<T, AstForStmt>) {
+                if (const auto* initDecl =
+                        std::get_if<std::unique_ptr<AstVarDeclStmt>>(
+                            &value.initializer)) {
+                    if (*initDecl && (*initDecl)->declaredType) {
+                        collectTypeReferenceSitesInTypeExpr(
+                            *(*initDecl)->declaredType, typeName, outSites);
+                    }
+                    if (*initDecl && (*initDecl)->initializer) {
+                        collectTypeReferenceSitesInExpr(*(*initDecl)->initializer,
+                                                        typeName, outSites);
+                    }
+                } else if (const auto* initExpr =
+                               std::get_if<AstExprPtr>(&value.initializer)) {
+                    if (*initExpr) {
+                        collectTypeReferenceSitesInExpr(**initExpr, typeName,
+                                                        outSites);
+                    }
+                }
+                if (value.condition) {
+                    collectTypeReferenceSitesInExpr(*value.condition, typeName,
+                                                    outSites);
+                }
+                if (value.increment) {
+                    collectTypeReferenceSitesInExpr(*value.increment, typeName,
+                                                    outSites);
+                }
+                collectTypeReferenceSitesInStmt(*value.body, typeName, outSites);
+            } else if constexpr (std::is_same_v<T, AstForEachStmt>) {
+                if (value.declaredType) {
+                    collectTypeReferenceSitesInTypeExpr(*value.declaredType,
+                                                        typeName, outSites);
+                }
+                collectTypeReferenceSitesInExpr(*value.iterable, typeName,
+                                                outSites);
+                collectTypeReferenceSitesInStmt(*value.body, typeName, outSites);
+            }
+        },
+        stmt.value);
+}
+
+void collectTypeReferenceSitesInExpr(const AstExpr& expr,
+                                     std::string_view typeName,
+                                     std::vector<SourceSpan>& outSites) {
+    std::visit(
+        [&](const auto& value) {
+            using T = std::decay_t<decltype(value)>;
+
+            if constexpr (std::is_same_v<T, AstGroupingExpr>) {
+                collectTypeReferenceSitesInExpr(*value.expression, typeName,
+                                                outSites);
+            } else if constexpr (std::is_same_v<T, AstUnaryExpr> ||
+                                 std::is_same_v<T, AstUpdateExpr>) {
+                collectTypeReferenceSitesInExpr(*value.operand, typeName, outSites);
+            } else if constexpr (std::is_same_v<T, AstBinaryExpr>) {
+                collectTypeReferenceSitesInExpr(*value.left, typeName, outSites);
+                collectTypeReferenceSitesInExpr(*value.right, typeName, outSites);
+            } else if constexpr (std::is_same_v<T, AstAssignmentExpr>) {
+                collectTypeReferenceSitesInExpr(*value.target, typeName, outSites);
+                collectTypeReferenceSitesInExpr(*value.value, typeName, outSites);
+            } else if constexpr (std::is_same_v<T, AstCallExpr>) {
+                collectTypeReferenceSitesInExpr(*value.callee, typeName, outSites);
+                for (const auto& argument : value.arguments) {
+                    if (argument) {
+                        collectTypeReferenceSitesInExpr(*argument, typeName,
+                                                        outSites);
+                    }
+                }
+            } else if constexpr (std::is_same_v<T, AstMemberExpr>) {
+                collectTypeReferenceSitesInExpr(*value.object, typeName, outSites);
+            } else if constexpr (std::is_same_v<T, AstIndexExpr>) {
+                collectTypeReferenceSitesInExpr(*value.object, typeName, outSites);
+                collectTypeReferenceSitesInExpr(*value.index, typeName, outSites);
+            } else if constexpr (std::is_same_v<T, AstCastExpr>) {
+                if (value.targetType) {
+                    collectTypeReferenceSitesInTypeExpr(*value.targetType, typeName,
+                                                        outSites);
+                }
+                collectTypeReferenceSitesInExpr(*value.expression, typeName,
+                                                outSites);
+            } else if constexpr (std::is_same_v<T, AstFunctionExpr>) {
+                for (const auto& param : value.params) {
+                    if (param.type) {
+                        collectTypeReferenceSitesInTypeExpr(*param.type, typeName,
+                                                            outSites);
+                    }
+                }
+                if (value.returnType) {
+                    collectTypeReferenceSitesInTypeExpr(*value.returnType, typeName,
+                                                        outSites);
+                }
+                if (value.expressionBody) {
+                    collectTypeReferenceSitesInExpr(*value.expressionBody, typeName,
+                                                    outSites);
+                }
+                if (value.blockBody) {
+                    collectTypeReferenceSitesInStmt(*value.blockBody, typeName,
+                                                    outSites);
+                }
+            } else if constexpr (std::is_same_v<T, AstArrayLiteralExpr>) {
+                for (const auto& element : value.elements) {
+                    if (element) {
+                        collectTypeReferenceSitesInExpr(*element, typeName,
+                                                        outSites);
+                    }
+                }
+            } else if constexpr (std::is_same_v<T, AstDictLiteralExpr>) {
+                for (const auto& entry : value.entries) {
+                    if (entry.key) {
+                        collectTypeReferenceSitesInExpr(*entry.key, typeName,
+                                                        outSites);
+                    }
+                    if (entry.value) {
+                        collectTypeReferenceSitesInExpr(*entry.value, typeName,
+                                                        outSites);
+                    }
+                }
+            }
+        },
+        expr.value);
+}
+
+void collectTypeReferenceSitesInModule(const AstModule& module,
+                                       std::string_view typeName,
+                                       std::vector<SourceSpan>& outSites) {
+    for (const auto& item : module.items) {
+        if (item) {
+            collectTypeReferenceSitesInItem(*item, typeName, outSites);
+        }
+    }
+}
+
+std::vector<ToolingLocation> findTypeReferencesForTarget(
+    const ToolingDocumentAnalysis& analysis, const SymbolTarget& target) {
+    std::vector<ToolingLocation> results;
+
+    std::unordered_map<AstNodeId, DeclarationSite> declarationSites;
+    collectDeclarationSites(analysis.frontend.module, declarationSites);
+    const auto declarationIt = declarationSites.find(target.declarationNodeId);
+    if (declarationIt == declarationSites.end() ||
+        (declarationIt->second.kind != "class" &&
+         declarationIt->second.kind != "type")) {
+        return results;
+    }
+
+    results.push_back(ToolingLocation{
+        analysis.sourcePath,
+        toolingRangeFromSourceSpan(declarationIt->second.range),
+        toolingRangeFromSourceSpan(declarationIt->second.selectionRange),
+    });
+
+    std::vector<SourceSpan> referenceSites;
+    collectTypeReferenceSitesInModule(analysis.frontend.module,
+                                      declarationIt->second.name, referenceSites);
+    std::sort(referenceSites.begin(), referenceSites.end(),
+              [](const SourceSpan& lhs, const SourceSpan& rhs) {
+                  if (lhs.start.line != rhs.start.line) {
+                      return lhs.start.line < rhs.start.line;
+                  }
+                  return lhs.start.column < rhs.start.column;
+              });
+    for (const auto& referenceSite : referenceSites) {
+        results.push_back(ToolingLocation{
+            analysis.sourcePath,
+            toolingRangeFromSourceSpan(referenceSite),
+            toolingRangeFromSourceSpan(referenceSite),
+        });
+    }
+
+    return results;
+}
+
 bool exprHasTypeContextAtPosition(const AstExpr& expr,
                                   const SourcePosition& position);
 bool stmtHasTypeContextAtPosition(const AstStmt& stmt,
@@ -3318,61 +3670,77 @@ std::optional<ToolingLocation> findDefinitionForTooling(
     return std::nullopt;
 }
 
+std::vector<ToolingLocation> findTypeDeclarationReferencesForTooling(
+    const ToolingDocumentAnalysis& analysis, const ToolingPosition& position) {
+    const auto target = resolveTypeDeclarationTarget(analysis, position);
+    if (!target.has_value()) {
+        return {};
+    }
+
+    return findTypeReferencesForTarget(analysis, *target);
+}
+
 std::vector<ToolingLocation> findReferencesForTooling(
     const ToolingDocumentAnalysis& analysis, const ToolingPosition& position) {
     std::vector<ToolingLocation> results;
     const auto target = resolveSymbolTarget(analysis, position);
-    if (!target.has_value()) {
-        return results;
-    }
-
-    std::unordered_map<AstNodeId, DeclarationSite> declarationSites;
-    collectDeclarationSites(analysis.frontend.module, declarationSites);
-    const auto declarationIt = declarationSites.find(target->declarationNodeId);
-    if (declarationIt == declarationSites.end()) {
-        return results;
-    }
-
-    results.push_back(ToolingLocation{
-        analysis.sourcePath,
-        toolingRangeFromSourceSpan(declarationIt->second.range),
-        toolingRangeFromSourceSpan(declarationIt->second.selectionRange),
-    });
-
-    std::unordered_map<AstNodeId, SourceSpan> referenceSites;
-    collectReferenceSites(analysis.frontend.module, referenceSites);
-
-    std::vector<ToolingLocation> usageLocations;
-    for (const auto& [nodeId, binding] : analysis.frontend.bindings.references) {
-        if (binding.declarationNodeId != target->declarationNodeId) {
-            continue;
+    if (target.has_value()) {
+        std::unordered_map<AstNodeId, DeclarationSite> declarationSites;
+        collectDeclarationSites(analysis.frontend.module, declarationSites);
+        const auto declarationIt = declarationSites.find(target->declarationNodeId);
+        if (declarationIt == declarationSites.end()) {
+            return results;
         }
 
-        const auto referenceIt = referenceSites.find(nodeId);
-        if (referenceIt == referenceSites.end()) {
-            continue;
-        }
-
-        usageLocations.push_back(ToolingLocation{
+        results.push_back(ToolingLocation{
             analysis.sourcePath,
-            toolingRangeFromSourceSpan(referenceIt->second),
-            toolingRangeFromSourceSpan(referenceIt->second),
+            toolingRangeFromSourceSpan(declarationIt->second.range),
+            toolingRangeFromSourceSpan(declarationIt->second.selectionRange),
         });
+
+        std::unordered_map<AstNodeId, SourceSpan> referenceSites;
+        collectReferenceSites(analysis.frontend.module, referenceSites);
+
+        std::vector<ToolingLocation> usageLocations;
+        for (const auto& [nodeId, binding] : analysis.frontend.bindings.references) {
+            if (binding.declarationNodeId != target->declarationNodeId) {
+                continue;
+            }
+
+            const auto referenceIt = referenceSites.find(nodeId);
+            if (referenceIt == referenceSites.end()) {
+                continue;
+            }
+
+            usageLocations.push_back(ToolingLocation{
+                analysis.sourcePath,
+                toolingRangeFromSourceSpan(referenceIt->second),
+                toolingRangeFromSourceSpan(referenceIt->second),
+            });
+        }
+
+        std::sort(usageLocations.begin(), usageLocations.end(),
+                  [](const ToolingLocation& lhs, const ToolingLocation& rhs) {
+                      if (lhs.path != rhs.path) {
+                          return lhs.path < rhs.path;
+                      }
+                      if (lhs.selectionRange.start.line !=
+                          rhs.selectionRange.start.line) {
+                          return lhs.selectionRange.start.line <
+                                 rhs.selectionRange.start.line;
+                      }
+                      return lhs.selectionRange.start.character <
+                             rhs.selectionRange.start.character;
+                  });
+        results.insert(results.end(), usageLocations.begin(), usageLocations.end());
+        return results;
     }
 
-    std::sort(usageLocations.begin(), usageLocations.end(),
-              [](const ToolingLocation& lhs, const ToolingLocation& rhs) {
-                  if (lhs.path != rhs.path) {
-                      return lhs.path < rhs.path;
-                  }
-                  if (lhs.selectionRange.start.line != rhs.selectionRange.start.line) {
-                      return lhs.selectionRange.start.line <
-                             rhs.selectionRange.start.line;
-                  }
-                  return lhs.selectionRange.start.character <
-                         rhs.selectionRange.start.character;
-              });
-    results.insert(results.end(), usageLocations.begin(), usageLocations.end());
+    const auto typeTarget = resolveTypeSymbolTarget(analysis, position);
+    if (typeTarget.has_value()) {
+        return findTypeReferencesForTarget(analysis, *typeTarget);
+    }
+
     return results;
 }
 

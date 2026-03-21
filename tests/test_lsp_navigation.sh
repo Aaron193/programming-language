@@ -695,6 +695,37 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
 
         send_message(proc, {
             "jsonrpc": "2.0",
+            "id": 9.6,
+            "method": "textDocument/definition",
+            "params": {
+                "textDocument": {
+                    "uri": type_definition_uri
+                },
+                "position": {
+                    "line": 1,
+                    "character": 6
+                }
+            }
+        })
+        type_declaration_definition = read_until(proc, lambda msg: msg.get("id") == 9.6)
+        type_declaration_result = type_declaration_definition["result"]
+        if not isinstance(type_declaration_result, list):
+            raise AssertionError(
+                f"type declaration definition should return a location list: {type_declaration_result}")
+        if len(type_declaration_result) != 2:
+            raise AssertionError(
+                f"type declaration definition should include declaration and references: {type_declaration_result}")
+        if type_declaration_result[0]["uri"] != type_definition_uri or \
+                type_declaration_result[0]["range"]["start"]["line"] != 1:
+            raise AssertionError(
+                f"type declaration definition should start at the declaration: {type_declaration_result}")
+        if type_declaration_result[1]["uri"] != type_definition_uri or \
+                type_declaration_result[1]["range"]["start"]["line"] != 4:
+            raise AssertionError(
+                f"type declaration definition should include type references: {type_declaration_result}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
             "id": 10,
             "method": "textDocument/definition",
             "params": {
