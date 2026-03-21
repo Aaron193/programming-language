@@ -66,6 +66,33 @@ struct ToolingCompletionItem {
     std::string sortText;
 };
 
+struct ToolingWorkspaceSymbol {
+    std::string name;
+    std::string kind;
+    std::string detail;
+    std::string path;
+    ToolingRange range;
+    ToolingRange selectionRange;
+};
+
+struct ToolingTextEdit {
+    std::string path;
+    ToolingRange range;
+    std::string newText;
+};
+
+struct ToolingPrepareRename {
+    ToolingRange range;
+    std::string placeholder;
+    std::string symbolKind;
+    std::string strategy;
+    AstNodeId declarationNodeId = 0;
+    std::string sourcePath;
+    std::string exportedName;
+    std::string resolvedPath;
+    bool importHasAlias = false;
+};
+
 struct ToolingAnalyzeOptions {
     std::string sourcePath;
     std::vector<std::string> packageSearchPaths;
@@ -102,3 +129,15 @@ std::optional<ToolingHover> findHoverForTooling(
     const ToolingDocumentAnalysis& analysis, const ToolingPosition& position);
 std::vector<ToolingCompletionItem> findCompletionsForTooling(
     const ToolingDocumentAnalysis& analysis, const ToolingPosition& position);
+std::vector<ToolingWorkspaceSymbol> collectWorkspaceSymbolsForTooling(
+    const ToolingDocumentAnalysis& analysis);
+std::optional<ToolingPrepareRename> prepareRenameForTooling(
+    const ToolingDocumentAnalysis& analysis, const ToolingPosition& position);
+std::optional<std::string> validateRenameForTooling(
+    const ToolingPrepareRename& target, std::string_view newName);
+std::vector<ToolingTextEdit> findRenameEditsForTooling(
+    const ToolingDocumentAnalysis& analysis, const ToolingPrepareRename& target,
+    std::string_view newName);
+std::vector<ToolingTextEdit> findImportRenameEditsForTooling(
+    const ToolingDocumentAnalysis& analysis, const ToolingPrepareRename& target,
+    std::string_view newName);

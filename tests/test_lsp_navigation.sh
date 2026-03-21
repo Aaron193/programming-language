@@ -52,6 +52,11 @@ def read_until(proc, predicate):
             return message
 
 
+def changes_for_uri(workspace_edit, uri):
+    changes = workspace_edit.get("changes", {})
+    return changes.get(uri, [])
+
+
 source = "\n".join([
     "#!strict",
     "fn add(x i32) i32 {",
@@ -90,6 +95,28 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
     import_path = Path(tmpdir) / "import_sample.mog"
     import_path.write_text(import_source, encoding="utf-8")
     import_uri = import_path.resolve().as_uri()
+    alias_import_source = "\n".join([
+        "#!strict",
+        "const { Answer as Alias } = @import(\"./dep.mog\")",
+        "print(Alias)",
+        ""
+    ])
+    alias_import_path = Path(tmpdir) / "alias_import_sample.mog"
+    alias_import_path.write_text(alias_import_source, encoding="utf-8")
+    alias_import_uri = alias_import_path.resolve().as_uri()
+    member_source = "\n".join([
+        "#!strict",
+        "type Box struct {",
+        "    value i32",
+        "}",
+        "fn read(box Box) i32 {",
+        "    return box.value",
+        "}",
+        ""
+    ])
+    member_path = Path(tmpdir) / "member_sample.mog"
+    member_path.write_text(member_source, encoding="utf-8")
+    member_uri = member_path.resolve().as_uri()
     parse_fail_source = "\n".join([
         "#!strict",
         "fn broken(",
@@ -121,12 +148,18 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         caps = initialize["result"]["capabilities"]
         if caps.get("documentSymbolProvider") is not True:
             raise AssertionError("initialize response missing documentSymbolProvider")
+        if caps.get("workspaceSymbolProvider") is not True:
+            raise AssertionError("initialize response missing workspaceSymbolProvider")
         if caps.get("definitionProvider") is not True:
             raise AssertionError("initialize response missing definitionProvider")
         if caps.get("referencesProvider") is not True:
             raise AssertionError("initialize response missing referencesProvider")
         if caps.get("hoverProvider") is not True:
             raise AssertionError("initialize response missing hoverProvider")
+        rename_provider = caps.get("renameProvider")
+        if not isinstance(rename_provider, dict) or \
+                rename_provider.get("prepareProvider") is not True:
+            raise AssertionError("initialize response missing renameProvider.prepareProvider")
         completion_provider = caps.get("completionProvider")
         if not isinstance(completion_provider, dict):
             raise AssertionError("initialize response missing completionProvider")
@@ -163,6 +196,25 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
             "method": "textDocument/didOpen",
             "params": {
                 "textDocument": {
+                    "uri": module_uri,
+                    "languageId": "mog",
+                    "version": 1,
+                    "text": module_source
+                }
+            }
+        })
+        module_diagnostics = read_until(
+            proc,
+            lambda msg: msg.get("method") == "textDocument/publishDiagnostics" and
+            msg.get("params", {}).get("uri") == module_uri,
+        )
+        if module_diagnostics["params"]["diagnostics"]:
+            raise AssertionError("expected dependency module to stay diagnostics-free")
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
                     "uri": import_uri,
                     "languageId": "mog",
                     "version": 1,
@@ -178,6 +230,46 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         )
         if import_diagnostics["params"]["diagnostics"]:
             raise AssertionError("expected import sample to stay diagnostics-free")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": alias_import_uri,
+                    "languageId": "mog",
+                    "version": 1,
+                    "text": alias_import_source
+                }
+            }
+        })
+        alias_import_diagnostics = read_until(
+            proc,
+            lambda msg: msg.get("method") == "textDocument/publishDiagnostics" and
+            msg.get("params", {}).get("uri") == alias_import_uri,
+        )
+        if alias_import_diagnostics["params"]["diagnostics"]:
+            raise AssertionError("expected aliased import sample to stay diagnostics-free")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": member_uri,
+                    "languageId": "mog",
+                    "version": 1,
+                    "text": member_source
+                }
+            }
+        })
+        member_diagnostics = read_until(
+            proc,
+            lambda msg: msg.get("method") == "textDocument/publishDiagnostics" and
+            msg.get("params", {}).get("uri") == member_uri,
+        )
+        if member_diagnostics["params"]["diagnostics"]:
+            raise AssertionError("expected member sample to stay diagnostics-free")
 
         send_message(proc, {
             "jsonrpc": "2.0",
@@ -338,10 +430,177 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         send_message(proc, {
             "jsonrpc": "2.0",
             "id": 9,
+            "method": "workspace/symbol",
+            "params": {
+                "query": "Answer"
+            }
+        })
+        workspace_symbols = read_until(proc, lambda msg: msg.get("id") == 9)
+        workspace_names = [item["name"] for item in workspace_symbols["result"]]
+        if workspace_names != ["Answer"]:
+            raise AssertionError(f"unexpected workspace symbols: {workspace_symbols['result']}")
+        if workspace_symbols["result"][0]["location"]["uri"] != module_uri:
+            raise AssertionError("workspace symbol should resolve to the defining module")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 10,
+            "method": "textDocument/prepareRename",
+            "params": {
+                "textDocument": {
+                    "uri": uri
+                },
+                "position": {
+                    "line": 7,
+                    "character": 6
+                }
+            }
+        })
+        prepare_local = read_until(proc, lambda msg: msg.get("id") == 10)
+        local_range = prepare_local["result"]["range"]
+        if local_range["start"]["line"] != 7 or local_range["start"]["character"] != 6:
+            raise AssertionError(f"unexpected prepareRename range: {prepare_local['result']}")
+        if prepare_local["result"].get("placeholder") != "Value":
+            raise AssertionError(f"unexpected prepareRename placeholder: {prepare_local['result']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 11,
+            "method": "textDocument/prepareRename",
+            "params": {
+                "textDocument": {
+                    "uri": member_uri
+                },
+                "position": {
+                    "line": 5,
+                    "character": 15
+                }
+            }
+        })
+        prepare_member = read_until(proc, lambda msg: msg.get("id") == 11)
+        if prepare_member["result"] is not None:
+            raise AssertionError("prepareRename should reject member access")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 12,
+            "method": "textDocument/rename",
+            "params": {
+                "textDocument": {
+                    "uri": uri
+                },
+                "position": {
+                    "line": 7,
+                    "character": 6
+                },
+                "newName": "Result"
+            }
+        })
+        local_rename = read_until(proc, lambda msg: msg.get("id") == 12)
+        local_changes = changes_for_uri(local_rename["result"], uri)
+        if len(local_changes) != 2:
+            raise AssertionError(f"unexpected same-file rename edits: {local_rename['result']}")
+        if not any(edit["newText"] == "Result" and edit["range"]["start"]["line"] == 5
+                   for edit in local_changes):
+            raise AssertionError(f"expected declaration rename edit: {local_changes}")
+        if not any(edit["newText"] == "Result" and edit["range"]["start"]["line"] == 7
+                   for edit in local_changes):
+            raise AssertionError(f"expected usage rename edit: {local_changes}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 13,
+            "method": "textDocument/rename",
+            "params": {
+                "textDocument": {
+                    "uri": import_uri
+                },
+                "position": {
+                    "line": 3,
+                    "character": 7
+                },
+                "newName": "LocalAnswer"
+            }
+        })
+        import_local_rename = read_until(proc, lambda msg: msg.get("id") == 13)
+        import_local_changes = changes_for_uri(import_local_rename["result"], import_uri)
+        if len(import_local_changes) != 2:
+            raise AssertionError(f"unexpected importer-local rename edits: {import_local_rename['result']}")
+        if not any(edit["newText"] == "Answer as LocalAnswer" and
+                   edit["range"]["start"]["line"] == 1 and
+                   edit["range"]["start"]["character"] == 8
+                   for edit in import_local_changes):
+            raise AssertionError(f"expected importer alias insertion edit: {import_local_changes}")
+        if not any(edit["newText"] == "LocalAnswer" and
+                   edit["range"]["start"]["line"] == 3 and
+                   edit["range"]["start"]["character"] == 6
+                   for edit in import_local_changes):
+            raise AssertionError(f"expected importer usage rename edit: {import_local_changes}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 14,
+            "method": "textDocument/rename",
+            "params": {
+                "textDocument": {
+                    "uri": module_uri
+                },
+                "position": {
+                    "line": 4,
+                    "character": 6
+                },
+                "newName": "FinalAnswer"
+            }
+        })
+        exported_rename = read_until(proc, lambda msg: msg.get("id") == 14)
+        module_changes = changes_for_uri(exported_rename["result"], module_uri)
+        importer_changes = changes_for_uri(exported_rename["result"], import_uri)
+        alias_changes = changes_for_uri(exported_rename["result"], alias_import_uri)
+        if len(module_changes) != 1 or len(importer_changes) != 2 or len(alias_changes) != 1:
+            raise AssertionError(f"unexpected project-wide rename edits: {exported_rename['result']}")
+        if module_changes[0]["newText"] != "FinalAnswer":
+            raise AssertionError(f"unexpected defining-module rename edit: {module_changes}")
+        if not any(edit["newText"] == "FinalAnswer" and
+                   edit["range"]["start"]["line"] == 1 and
+                   edit["range"]["start"]["character"] == 8
+                   for edit in importer_changes):
+            raise AssertionError(f"expected importer binding export rename: {importer_changes}")
+        if not any(edit["newText"] == "FinalAnswer" and
+                   edit["range"]["start"]["line"] == 3 and
+                   edit["range"]["start"]["character"] == 6
+                   for edit in importer_changes):
+            raise AssertionError(f"expected importer usage rename: {importer_changes}")
+        if alias_changes[0]["newText"] != "FinalAnswer" or \
+                alias_changes[0]["range"]["start"]["line"] != 1 or \
+                alias_changes[0]["range"]["start"]["character"] != 8:
+            raise AssertionError(f"expected aliased importer to rewrite only the export name: {alias_changes}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 15,
+            "method": "textDocument/rename",
+            "params": {
+                "textDocument": {
+                    "uri": module_uri
+                },
+                "position": {
+                    "line": 4,
+                    "character": 6
+                },
+                "newName": "answer"
+            }
+        })
+        invalid_exported_rename = read_until(proc, lambda msg: msg.get("id") == 15)
+        if invalid_exported_rename.get("error", {}).get("code") != -32602:
+            raise AssertionError(f"expected invalid exported rename error: {invalid_exported_rename}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 16,
             "method": "shutdown",
             "params": {}
         })
-        read_until(proc, lambda msg: msg.get("id") == 9)
+        read_until(proc, lambda msg: msg.get("id") == 16)
         send_message(proc, {
             "jsonrpc": "2.0",
             "method": "exit",

@@ -1,4 +1,7 @@
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <string_view>
 #include <string>
 
 #include "tooling/FrontendTooling.hpp"
@@ -21,6 +24,43 @@ const ToolingCompletionItem* findCompletion(
         }
     }
     return nullptr;
+}
+
+const ToolingTextEdit* findEdit(const std::vector<ToolingTextEdit>& edits,
+                                const std::string& path, size_t line,
+                                size_t character) {
+    for (const auto& edit : edits) {
+        if (edit.path == path && edit.range.start.line == line &&
+            edit.range.start.character == character) {
+            return &edit;
+        }
+    }
+    return nullptr;
+}
+
+bool writeFile(const std::filesystem::path& path, std::string_view text) {
+    std::ofstream output(path);
+    if (!output) {
+        return false;
+    }
+
+    output << text;
+    return output.good();
+}
+
+std::optional<std::string> readFileText(const std::filesystem::path& path) {
+    std::ifstream input(path);
+    if (!input) {
+        return std::nullopt;
+    }
+
+    std::string text((std::istreambuf_iterator<char>(input)),
+                     std::istreambuf_iterator<char>());
+    if (!input.good() && !input.eof()) {
+        return std::nullopt;
+    }
+
+    return text;
 }
 
 bool testStrictDirectiveDetection() {
@@ -469,6 +509,251 @@ bool testCompletions() {
     return true;
 }
 
+bool testWorkspaceSymbolsAndRename() {
+    ToolingAnalyzeOptions options;
+    options.strictMode = true;
+
+    const std::string localSource =
+        "#!strict\n"
+        "fn add(x i32) i32 {\n"
+        "    var local i32 = x\n"
+        "    return local + local\n"
+        "}\n";
+    options.sourcePath = "tooling_rename_local_regression.mog";
+    ToolingDocumentAnalysis localAnalysis =
+        analyzeDocumentForTooling(localSource, options);
+    if (!require(localAnalysis.status == AstFrontendBuildStatus::Success,
+                 "local rename sample should succeed")) {
+        return false;
+    }
+
+    const auto localTarget =
+        prepareRenameForTooling(localAnalysis, ToolingPosition{3, 11});
+    if (!require(localTarget.has_value() &&
+                     localTarget->strategy == "same-file",
+                 "local variable rename should stay same-file")) {
+        return false;
+    }
+
+    if (!require(!validateRenameForTooling(*localTarget, "renamedLocal").has_value(),
+                 "local rename should accept valid identifiers")) {
+        return false;
+    }
+
+    if (!require(validateRenameForTooling(*localTarget, "bad-name").has_value(),
+                 "rename should reject invalid identifiers")) {
+        return false;
+    }
+
+    const auto localEdits =
+        findRenameEditsForTooling(localAnalysis, *localTarget, "renamedLocal");
+    if (!require(localEdits.size() == 3,
+                 "local rename should edit the declaration and both uses")) {
+        return false;
+    }
+
+    if (!require(findEdit(localEdits, options.sourcePath, 2, 8) != nullptr &&
+                     findEdit(localEdits, options.sourcePath, 3, 11) != nullptr &&
+                     findEdit(localEdits, options.sourcePath, 3, 19) != nullptr,
+                 "local rename should target only the bound local identifier spans")) {
+        return false;
+    }
+
+    const std::string memberSource =
+        "#!strict\n"
+        "type Box struct {\n"
+        "    value i32\n"
+        "}\n"
+        "fn read(box Box) i32 {\n"
+        "    return box.value\n"
+        "}\n";
+    options.sourcePath = "tooling_prepare_rename_member_regression.mog";
+    ToolingDocumentAnalysis memberAnalysis =
+        analyzeDocumentForTooling(memberSource, options);
+    if (!require(!prepareRenameForTooling(memberAnalysis, ToolingPosition{5, 15})
+                      .has_value(),
+                 "prepare rename should reject unsupported member access")) {
+        return false;
+    }
+
+    const std::filesystem::path tempRoot =
+        std::filesystem::temp_directory_path() / "mog_tooling_rename_regression";
+    std::error_code ec;
+    std::filesystem::create_directories(tempRoot, ec);
+    if (!require(!ec,
+                 "rename regression should create its temporary workspace")) {
+        return false;
+    }
+
+    const std::filesystem::path depPath = tempRoot / "dep.mog";
+    const std::filesystem::path importerPath = tempRoot / "importer.mog";
+    const std::filesystem::path aliasPath = tempRoot / "alias_importer.mog";
+
+    if (!require(writeFile(depPath,
+                           "#!strict\n"
+                           "fn Get() i32 {\n"
+                           "    return 42\n"
+                           "}\n"
+                           "const Answer i32 = 42\n"
+                           "const privateValue i32 = 1\n"),
+                 "rename regression should write the dependency module") ||
+        !require(writeFile(importerPath,
+                           "#!strict\n"
+                           "const { Answer, Get } = @import(\"./dep.mog\")\n"
+                           "print(Get())\n"
+                           "print(Answer)\n"),
+                 "rename regression should write the importer module") ||
+        !require(writeFile(aliasPath,
+                           "#!strict\n"
+                           "const { Answer as Alias } = @import(\"./dep.mog\")\n"
+                           "print(Alias)\n"),
+                 "rename regression should write the aliased importer module")) {
+        return false;
+    }
+
+    options.sourcePath = depPath.string();
+    const auto depSource = readFileText(depPath);
+    ToolingDocumentAnalysis depAnalysis =
+        analyzeDocumentForTooling(depSource.value_or(""), options);
+    if (!require(depAnalysis.status == AstFrontendBuildStatus::Success,
+                 "dependency rename sample should succeed")) {
+        return false;
+    }
+
+    const auto depSymbols = collectWorkspaceSymbolsForTooling(depAnalysis);
+    if (!require(depSymbols.size() == 3,
+                 "workspace symbols should expose top-level declarations only")) {
+        return false;
+    }
+
+    options.sourcePath = importerPath.string();
+    const auto importerSource = readFileText(importerPath);
+    ToolingDocumentAnalysis importerAnalysis =
+        analyzeDocumentForTooling(importerSource.value_or(""), options);
+    if (!require(importerAnalysis.status == AstFrontendBuildStatus::Success,
+                 "importer rename sample should succeed")) {
+        return false;
+    }
+
+    if (!require(collectWorkspaceSymbolsForTooling(importerAnalysis).empty(),
+                 "workspace symbols should exclude destructured import bindings")) {
+        return false;
+    }
+
+    options.sourcePath = aliasPath.string();
+    const auto aliasSource = readFileText(aliasPath);
+    ToolingDocumentAnalysis aliasAnalysis =
+        analyzeDocumentForTooling(aliasSource.value_or(""), options);
+    if (!require(aliasAnalysis.status == AstFrontendBuildStatus::Success,
+                 "aliased importer rename sample should succeed")) {
+        return false;
+    }
+
+    const auto importLocalTarget =
+        prepareRenameForTooling(importerAnalysis, ToolingPosition{3, 6});
+    if (!require(importLocalTarget.has_value() &&
+                     importLocalTarget->strategy == "import-local" &&
+                     !importLocalTarget->importHasAlias,
+                 "unaliased imported binding rename should stay importer-local")) {
+        return false;
+    }
+
+    const auto importLocalEdits = findRenameEditsForTooling(
+        importerAnalysis, *importLocalTarget, "LocalAnswer");
+    if (!require(importLocalEdits.size() == 2,
+                 "unaliased imported binding rename should edit the import and usage")) {
+        return false;
+    }
+
+    const auto* importBindingEdit =
+        findEdit(importLocalEdits, importerPath.string(), 1, 8);
+    if (!require(importBindingEdit != nullptr &&
+                     importBindingEdit->newText == "Answer as LocalAnswer",
+                 "unaliased import rename should insert a local alias")) {
+        return false;
+    }
+
+    const auto* importUseEdit =
+        findEdit(importLocalEdits, importerPath.string(), 3, 6);
+    if (!require(importUseEdit != nullptr &&
+                     importUseEdit->newText == "LocalAnswer",
+                 "unaliased import rename should update same-file uses")) {
+        return false;
+    }
+
+    const auto importAliasTarget =
+        prepareRenameForTooling(aliasAnalysis, ToolingPosition{2, 6});
+    if (!require(importAliasTarget.has_value() &&
+                     importAliasTarget->strategy == "import-local" &&
+                     importAliasTarget->importHasAlias,
+                 "aliased imported binding rename should keep alias-local semantics")) {
+        return false;
+    }
+
+    const auto importAliasEdits = findRenameEditsForTooling(
+        aliasAnalysis, *importAliasTarget, "LocalAlias");
+    if (!require(importAliasEdits.size() == 2,
+                 "aliased import rename should update the alias declaration and usage")) {
+        return false;
+    }
+
+    if (!require(findEdit(importAliasEdits, aliasPath.string(), 1, 18) != nullptr &&
+                     findEdit(importAliasEdits, aliasPath.string(), 2, 6) != nullptr,
+                 "aliased import rename should target the alias spans only")) {
+        return false;
+    }
+
+    const auto exportedTarget =
+        prepareRenameForTooling(depAnalysis, ToolingPosition{4, 6});
+    if (!require(exportedTarget.has_value() &&
+                     exportedTarget->strategy == "exported",
+                 "public top-level rename should be marked as exported")) {
+        return false;
+    }
+
+    if (!require(validateRenameForTooling(*exportedTarget, "answer").has_value(),
+                 "exported rename should reject non-public replacement names")) {
+        return false;
+    }
+
+    const auto exportedSameFileEdits = findRenameEditsForTooling(
+        depAnalysis, *exportedTarget, "FinalAnswer");
+    if (!require(exportedSameFileEdits.size() == 1,
+                 "exported declaration rename should edit the defining declaration")) {
+        return false;
+    }
+
+    const auto importerExportEdits = findImportRenameEditsForTooling(
+        importerAnalysis, *exportedTarget, "FinalAnswer");
+    if (!require(importerExportEdits.size() == 2,
+                 "exported rename should update unaliased importer bindings and uses")) {
+        return false;
+    }
+
+    if (!require(findEdit(importerExportEdits, importerPath.string(), 1, 8) != nullptr &&
+                     findEdit(importerExportEdits, importerPath.string(), 3, 6) != nullptr,
+                 "exported rename should update the imported binding and its uses")) {
+        return false;
+    }
+
+    const auto aliasExportEdits = findImportRenameEditsForTooling(
+        aliasAnalysis, *exportedTarget, "FinalAnswer");
+    if (!require(aliasExportEdits.size() == 1,
+                 "exported rename should leave aliased importer uses unchanged")) {
+        return false;
+    }
+
+    const auto* aliasExportEdit =
+        findEdit(aliasExportEdits, aliasPath.string(), 1, 8);
+    if (!require(aliasExportEdit != nullptr &&
+                     aliasExportEdit->newText == "FinalAnswer",
+                 "exported rename should still rewrite the imported exported name")) {
+        return false;
+    }
+
+    return true;
+}
+
 }  // namespace
 
 int main() {
@@ -493,6 +778,10 @@ int main() {
     }
 
     if (!testCompletions()) {
+        return 1;
+    }
+
+    if (!testWorkspaceSymbolsAndRename()) {
         return 1;
     }
 

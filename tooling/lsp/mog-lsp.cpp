@@ -1,13 +1,16 @@
+#include <algorithm>
 #include <cctype>
 #include <cerrno>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -582,6 +585,90 @@ std::string decodeUriPath(std::string_view uri) {
     return path;
 }
 
+std::string canonicalizePath(const std::string& path) {
+    if (path.empty()) {
+        return path;
+    }
+
+    std::error_code ec;
+    const std::filesystem::path fsPath(path);
+    const std::filesystem::path canonical =
+        std::filesystem::weakly_canonical(fsPath, ec);
+    if (!ec) {
+        return canonical.string();
+    }
+
+    const std::filesystem::path absolute = std::filesystem::absolute(fsPath, ec);
+    if (!ec) {
+        return absolute.string();
+    }
+
+    return path;
+}
+
+std::optional<std::string> readFileText(const std::string& path) {
+    std::ifstream input(path);
+    if (!input) {
+        return std::nullopt;
+    }
+
+    std::ostringstream buffer;
+    buffer << input.rdbuf();
+    if (!input.good() && !input.eof()) {
+        return std::nullopt;
+    }
+
+    return buffer.str();
+}
+
+std::string lowerCase(std::string_view text) {
+    std::string lowered;
+    lowered.reserve(text.size());
+    for (const unsigned char ch : text) {
+        lowered.push_back(
+            static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+    }
+    return lowered;
+}
+
+bool startsWith(std::string_view text, std::string_view prefix) {
+    return text.size() >= prefix.size() &&
+           text.substr(0, prefix.size()) == prefix;
+}
+
+bool pathWithinRoot(const std::string& path, const std::string& root) {
+    if (root.empty()) {
+        return false;
+    }
+
+    if (path == root) {
+        return true;
+    }
+
+    if (!startsWith(path, root)) {
+        return false;
+    }
+
+    const char boundary = path[root.size()];
+    return boundary == '/' || boundary == '\\';
+}
+
+bool isHiddenOrBuildDirectory(const std::filesystem::path& path) {
+    for (const auto& component : path) {
+        const std::string name = component.string();
+        if (name.empty() || name == ".") {
+            continue;
+        }
+        if (name == "build") {
+            return true;
+        }
+        if (!name.empty() && name.front() == '.') {
+            return true;
+        }
+    }
+    return false;
+}
+
 JsonValue makePosition(const ToolingPosition& position) {
     return JsonValue(JsonObject{
         {"line", JsonValue(static_cast<double>(position.line))},
@@ -669,11 +756,6 @@ size_t completionPrefixStart(std::string_view text,
     return offset;
 }
 
-bool startsWith(std::string_view text, std::string_view prefix) {
-    return text.size() >= prefix.size() &&
-           text.substr(0, prefix.size()) == prefix;
-}
-
 bool isMemberCompletionContext(std::string_view text,
                                const ToolingPosition& position) {
     const size_t prefixStart = completionPrefixStart(text, position);
@@ -721,6 +803,7 @@ class MogLspServer {
     std::unordered_map<std::string, DocumentState> m_documents;
     AstFrontendModuleGraphCache m_cache;
     std::vector<std::string> m_packageSearchPaths;
+    std::vector<std::string> m_workspaceRoots;
     bool m_shutdownRequested = false;
     bool m_exitRequested = false;
 
@@ -742,7 +825,7 @@ class MogLspServer {
         }
 
         if (*method == "initialize") {
-            sendInitializeResponse(id);
+            handleInitialize(id, params);
             return;
         }
 
@@ -789,6 +872,11 @@ class MogLspServer {
             return;
         }
 
+        if (*method == "workspace/symbol" && params != nullptr && id != nullptr) {
+            handleWorkspaceSymbol(*id, *params);
+            return;
+        }
+
         if (*method == "textDocument/definition" && params != nullptr &&
             id != nullptr) {
             handleDefinition(*id, *params);
@@ -810,6 +898,17 @@ class MogLspServer {
         if (*method == "textDocument/completion" && params != nullptr &&
             id != nullptr) {
             handleCompletion(*id, *params);
+            return;
+        }
+
+        if (*method == "textDocument/prepareRename" && params != nullptr &&
+            id != nullptr) {
+            handlePrepareRename(*id, *params);
+            return;
+        }
+
+        if (*method == "textDocument/rename" && params != nullptr && id != nullptr) {
+            handleRename(*id, *params);
             return;
         }
 
@@ -836,7 +935,7 @@ class MogLspServer {
 
         DocumentState document;
         document.uri = *uri;
-        document.path = decodeUriPath(*uri);
+        document.path = canonicalizePath(decodeUriPath(*uri));
         document.text = *text;
         document.version = getIntegerValue(documentObject->get(), "version").value_or(0);
         const std::string key = document.uri;
@@ -920,6 +1019,98 @@ class MogLspServer {
 
         sendResponse(id,
                      makeDocumentSymbolsResponse(documentIt->second.analysis));
+    }
+
+    void handleInitialize(const JsonValue* id, const JsonObject* params) {
+        m_workspaceRoots.clear();
+        if (params != nullptr) {
+            configureWorkspaceRoots(*params);
+        }
+        sendInitializeResponse(id);
+    }
+
+    void handleWorkspaceSymbol(const JsonValue& id, const JsonObject& params) {
+        const std::string query =
+            getStringValue(params, "query").value_or(std::string());
+
+        struct RankedSymbol {
+            int rank = 0;
+            ToolingWorkspaceSymbol symbol;
+            std::string displayPath;
+        };
+
+        std::vector<RankedSymbol> ranked;
+        const std::string loweredQuery = lowerCase(query);
+        for (const auto& path : collectWorkspaceFiles()) {
+            const auto analysis = analyzeWorkspaceDocument(path);
+            if (!analysis.has_value()) {
+                continue;
+            }
+
+            for (const auto& symbol : collectWorkspaceSymbolsForTooling(*analysis)) {
+                const std::string loweredName = lowerCase(symbol.name);
+                const std::string loweredPath = lowerCase(symbol.path);
+                int rank = 5;
+                if (!loweredQuery.empty()) {
+                    if (loweredName == loweredQuery) {
+                        rank = 0;
+                    } else if (startsWith(loweredName, loweredQuery)) {
+                        rank = 1;
+                    } else if (loweredName.find(loweredQuery) != std::string::npos) {
+                        rank = 2;
+                    } else if (startsWith(loweredPath, loweredQuery)) {
+                        rank = 3;
+                    } else if (loweredPath.find(loweredQuery) != std::string::npos) {
+                        rank = 4;
+                    } else {
+                        continue;
+                    }
+                }
+
+                ranked.push_back(RankedSymbol{
+                    rank,
+                    symbol,
+                    relativeWorkspacePath(symbol.path),
+                });
+            }
+        }
+
+        std::sort(ranked.begin(), ranked.end(),
+                  [](const RankedSymbol& lhs, const RankedSymbol& rhs) {
+                      if (lhs.rank != rhs.rank) {
+                          return lhs.rank < rhs.rank;
+                      }
+                      if (lhs.symbol.name != rhs.symbol.name) {
+                          return lhs.symbol.name < rhs.symbol.name;
+                      }
+                      if (lhs.displayPath != rhs.displayPath) {
+                          return lhs.displayPath < rhs.displayPath;
+                      }
+                      if (lhs.symbol.selectionRange.start.line !=
+                          rhs.symbol.selectionRange.start.line) {
+                          return lhs.symbol.selectionRange.start.line <
+                                 rhs.symbol.selectionRange.start.line;
+                      }
+                      return lhs.symbol.selectionRange.start.character <
+                             rhs.symbol.selectionRange.start.character;
+                  });
+
+        JsonArray items;
+        const size_t limit = std::min<size_t>(ranked.size(), 200);
+        items.reserve(limit);
+        for (size_t index = 0; index < limit; ++index) {
+            JsonObject item;
+            item["name"] = JsonValue(ranked[index].symbol.name);
+            item["kind"] =
+                JsonValue(symbolKindForToolingKind(ranked[index].symbol.kind));
+            item["location"] = makeLocation(
+                pathToFileUri(ranked[index].symbol.path),
+                ranked[index].symbol.selectionRange);
+            item["containerName"] = JsonValue(ranked[index].displayPath);
+            items.push_back(JsonValue(std::move(item)));
+        }
+
+        sendResponse(id, JsonValue(std::move(items)));
     }
 
     void handleDefinition(const JsonValue& id, const JsonObject& params) {
@@ -1085,6 +1276,95 @@ class MogLspServer {
         sendResponse(id, JsonValue(std::move(items)));
     }
 
+    void handlePrepareRename(const JsonValue& id, const JsonObject& params) {
+        auto uri = getTextDocumentUri(params);
+        if (!uri.has_value()) {
+            sendResponse(id, JsonValue(nullptr));
+            return;
+        }
+
+        auto documentIt = m_documents.find(*uri);
+        if (documentIt == m_documents.end()) {
+            sendResponse(id, JsonValue(nullptr));
+            return;
+        }
+
+        const auto position = getPosition(params);
+        if (!position.has_value()) {
+            sendResponse(id, JsonValue(nullptr));
+            return;
+        }
+
+        const auto target =
+            prepareRenameForTooling(documentIt->second.analysis, *position);
+        if (!target.has_value()) {
+            sendResponse(id, JsonValue(nullptr));
+            return;
+        }
+
+        JsonObject result;
+        result["range"] = makeRange(target->range);
+        result["placeholder"] = JsonValue(target->placeholder);
+        sendResponse(id, JsonValue(std::move(result)));
+    }
+
+    void handleRename(const JsonValue& id, const JsonObject& params) {
+        auto uri = getTextDocumentUri(params);
+        if (!uri.has_value()) {
+            sendResponse(id, JsonValue(nullptr));
+            return;
+        }
+
+        auto documentIt = m_documents.find(*uri);
+        if (documentIt == m_documents.end()) {
+            sendResponse(id, JsonValue(nullptr));
+            return;
+        }
+
+        const auto position = getPosition(params);
+        if (!position.has_value()) {
+            sendResponse(id, JsonValue(nullptr));
+            return;
+        }
+
+        const std::string newName =
+            getStringValue(params, "newName").value_or(std::string());
+        const auto target =
+            prepareRenameForTooling(documentIt->second.analysis, *position);
+        if (!target.has_value()) {
+            sendResponse(id, JsonValue(nullptr));
+            return;
+        }
+
+        if (const auto validation = validateRenameForTooling(*target, newName);
+            validation.has_value()) {
+            sendErrorResponse(id, -32602, *validation);
+            return;
+        }
+
+        std::vector<ToolingTextEdit> edits =
+            findRenameEditsForTooling(documentIt->second.analysis, *target, newName);
+        if (target->strategy == "exported") {
+            const std::string sourcePath = target->sourcePath;
+            for (const auto& path : collectWorkspaceFiles()) {
+                if (path == sourcePath) {
+                    continue;
+                }
+
+                const auto analysis = analyzeWorkspaceDocument(path);
+                if (!analysis.has_value()) {
+                    continue;
+                }
+
+                auto importerEdits =
+                    findImportRenameEditsForTooling(*analysis, *target, newName);
+                edits.insert(edits.end(), importerEdits.begin(), importerEdits.end());
+            }
+        }
+
+        sendResponse(id, makeWorkspaceEditResponse(edits));
+    }
+
     std::optional<std::string> getTextDocumentUri(const JsonObject& params) const {
         const JsonValue* documentValue = getObjectValue(params, "textDocument");
         if (documentValue == nullptr) {
@@ -1133,6 +1413,160 @@ class MogLspServer {
         };
     }
 
+    void configureWorkspaceRoots(const JsonObject& params) {
+        std::unordered_set<std::string> seen;
+
+        if (const JsonValue* foldersValue = getObjectValue(params, "workspaceFolders")) {
+            if (const auto folders = asArray(*foldersValue); folders.has_value()) {
+                for (const auto& folderValue : folders->get()) {
+                    const auto folder = asObject(folderValue);
+                    if (!folder.has_value()) {
+                        continue;
+                    }
+
+                    const auto uri = getStringValue(folder->get(), "uri");
+                    if (!uri.has_value()) {
+                        continue;
+                    }
+
+                    const std::string path =
+                        canonicalizePath(decodeUriPath(*uri));
+                    if (seen.insert(path).second) {
+                        m_workspaceRoots.push_back(path);
+                    }
+                }
+            }
+        }
+
+        if (m_workspaceRoots.empty()) {
+            if (const auto rootUri = getStringValue(params, "rootUri");
+                rootUri.has_value()) {
+                const std::string path =
+                    canonicalizePath(decodeUriPath(*rootUri));
+                if (seen.insert(path).second) {
+                    m_workspaceRoots.push_back(path);
+                }
+            } else if (const auto rootPath = getStringValue(params, "rootPath");
+                       rootPath.has_value()) {
+                const std::string path = canonicalizePath(*rootPath);
+                if (seen.insert(path).second) {
+                    m_workspaceRoots.push_back(path);
+                }
+            }
+        }
+    }
+
+    const DocumentState* findOpenDocumentByPath(const std::string& path) const {
+        for (const auto& [uri, document] : m_documents) {
+            (void)uri;
+            if (document.path == path) {
+                return &document;
+            }
+        }
+        return nullptr;
+    }
+
+    std::optional<ToolingDocumentAnalysis> analyzeWorkspaceDocument(
+        const std::string& path) {
+        if (const DocumentState* openDocument = findOpenDocumentByPath(path)) {
+            ToolingAnalyzeOptions options;
+            options.sourcePath = openDocument->path;
+            options.packageSearchPaths = m_packageSearchPaths;
+            options.moduleGraphCache = &m_cache;
+            options.strictMode =
+                toolingSourceStartsWithStrictDirective(openDocument->text);
+            return analyzeDocumentForTooling(openDocument->text, options);
+        }
+
+        const auto text = readFileText(path);
+        if (!text.has_value()) {
+            return std::nullopt;
+        }
+
+        ToolingAnalyzeOptions options;
+        options.sourcePath = path;
+        options.packageSearchPaths = m_packageSearchPaths;
+        options.moduleGraphCache = &m_cache;
+        options.strictMode = toolingSourceStartsWithStrictDirective(*text);
+        return analyzeDocumentForTooling(*text, options);
+    }
+
+    std::vector<std::string> collectWorkspaceFiles() const {
+        std::vector<std::string> files;
+        std::unordered_set<std::string> seen;
+
+        auto addFile = [&](const std::string& rawPath) {
+            const std::string path = canonicalizePath(rawPath);
+            if (!path.empty() && seen.insert(path).second) {
+                files.push_back(path);
+            }
+        };
+
+        for (const auto& root : m_workspaceRoots) {
+            std::error_code ec;
+            if (std::filesystem::is_regular_file(root, ec)) {
+                if (std::filesystem::path(root).extension() == ".mog") {
+                    addFile(root);
+                }
+                continue;
+            }
+
+            std::filesystem::recursive_directory_iterator iterator(
+                root, std::filesystem::directory_options::skip_permission_denied,
+                ec);
+            std::filesystem::recursive_directory_iterator end;
+            while (!ec && iterator != end) {
+                const std::filesystem::path path = iterator->path();
+                if (iterator->is_directory(ec)) {
+                    if (!ec &&
+                        isHiddenOrBuildDirectory(path.lexically_relative(root))) {
+                        iterator.disable_recursion_pending();
+                    }
+                    iterator.increment(ec);
+                    continue;
+                }
+
+                if (!ec && iterator->is_regular_file(ec) &&
+                    path.extension() == ".mog") {
+                    addFile(path.string());
+                }
+                iterator.increment(ec);
+            }
+        }
+
+        for (const auto& [uri, document] : m_documents) {
+            (void)uri;
+            if (std::filesystem::path(document.path).extension() != ".mog") {
+                continue;
+            }
+
+            for (const auto& root : m_workspaceRoots) {
+                if (pathWithinRoot(document.path, root)) {
+                    addFile(document.path);
+                    break;
+                }
+            }
+        }
+
+        return files;
+    }
+
+    std::string relativeWorkspacePath(const std::string& path) const {
+        for (const auto& root : m_workspaceRoots) {
+            if (!pathWithinRoot(path, root)) {
+                continue;
+            }
+
+            std::error_code ec;
+            const std::filesystem::path relative =
+                std::filesystem::path(path).lexically_relative(root);
+            if (!ec && !relative.empty()) {
+                return relative.string();
+            }
+        }
+        return path;
+    }
+
     void analyzeAndPublish(DocumentState& document) {
         ToolingAnalyzeOptions options;
         options.sourcePath = document.path;
@@ -1153,9 +1587,12 @@ class MogLspServer {
         result["capabilities"] = JsonValue(JsonObject{
             {"textDocumentSync", JsonValue(1.0)},
             {"documentSymbolProvider", JsonValue(true)},
+            {"workspaceSymbolProvider", JsonValue(true)},
             {"definitionProvider", JsonValue(true)},
             {"referencesProvider", JsonValue(true)},
             {"hoverProvider", JsonValue(true)},
+            {"renameProvider",
+             JsonValue(JsonObject{{"prepareProvider", JsonValue(true)}})},
             {"completionProvider",
              JsonValue(JsonObject{{"resolveProvider", JsonValue(false)}})},
         });
@@ -1221,11 +1658,53 @@ class MogLspServer {
         return JsonValue(std::move(items));
     }
 
+    JsonValue makeWorkspaceEditResponse(
+        const std::vector<ToolingTextEdit>& edits) const {
+        JsonObject changes;
+        std::unordered_map<std::string, size_t> uriIndexes;
+
+        for (const auto& edit : edits) {
+            const std::string uri = pathToFileUri(edit.path);
+            auto uriIt = uriIndexes.find(uri);
+            if (uriIt == uriIndexes.end()) {
+                uriIt = uriIndexes.emplace(uri, uriIndexes.size()).first;
+                changes[uri] = JsonValue(JsonArray{});
+            }
+
+            auto* editArray = std::get_if<JsonArray>(&changes[uri].value);
+            if (editArray == nullptr) {
+                continue;
+            }
+
+            JsonObject item;
+            item["range"] = makeRange(edit.range);
+            item["newText"] = JsonValue(edit.newText);
+            editArray->push_back(JsonValue(std::move(item)));
+        }
+
+        JsonObject result;
+        result["changes"] = JsonValue(std::move(changes));
+        return JsonValue(std::move(result));
+    }
+
     void sendResponse(const JsonValue& id, const JsonValue& result) {
         JsonObject payload;
         payload["jsonrpc"] = JsonValue(std::string("2.0"));
         payload["id"] = id;
         payload["result"] = result;
+        writeMessage(std::cout, serializeJson(JsonValue(std::move(payload))));
+    }
+
+    void sendErrorResponse(const JsonValue& id, int code,
+                           const std::string& message) {
+        JsonObject error;
+        error["code"] = JsonValue(static_cast<double>(code));
+        error["message"] = JsonValue(message);
+
+        JsonObject payload;
+        payload["jsonrpc"] = JsonValue(std::string("2.0"));
+        payload["id"] = id;
+        payload["error"] = JsonValue(std::move(error));
         writeMessage(std::cout, serializeJson(JsonValue(std::move(payload))));
     }
 

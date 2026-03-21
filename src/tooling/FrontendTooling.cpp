@@ -13,6 +13,7 @@
 #include "AstBinder.hpp"
 #include "FrontendDiagnostic.hpp"
 #include "NativePackage.hpp"
+#include "Scanner.hpp"
 #include "SyntaxRules.hpp"
 #include "TypeInfo.hpp"
 
@@ -29,6 +30,8 @@ struct DeclarationSite {
 struct ImportBindingSite {
     std::string exportedName;
     ImportTarget importTarget;
+    SourceSpan exportedSelectionRange;
+    std::optional<SourceSpan> localSelectionRange;
 };
 
 struct SymbolTarget {
@@ -210,6 +213,42 @@ void collectDocumentSymbols(
                                                 name.span()));
             }
         }
+    }
+}
+
+void collectTopLevelDeclarationSites(
+    const AstModule& module, std::unordered_map<AstNodeId, DeclarationSite>& outSites) {
+    for (const auto& item : module.items) {
+        if (!item) {
+            continue;
+        }
+
+        std::visit(
+            [&](const auto& value) {
+                using T = std::decay_t<decltype(value)>;
+
+                if constexpr (std::is_same_v<T, AstFunctionDecl>) {
+                    outSites[value.node.id] = functionDeclarationSite(value);
+                } else if constexpr (std::is_same_v<T, AstClassDecl>) {
+                    outSites[value.node.id] = classDeclarationSite(value);
+                } else if constexpr (std::is_same_v<T, AstTypeAliasDecl>) {
+                    outSites[value.node.id] = typeAliasDeclarationSite(value);
+                } else if constexpr (std::is_same_v<T, AstStmtPtr>) {
+                    if (!value) {
+                        return;
+                    }
+
+                    const auto* varDecl = std::get_if<AstVarDeclStmt>(&value->value);
+                    if (varDecl == nullptr) {
+                        return;
+                    }
+
+                    outSites[value->node.id] =
+                        variableDeclarationSite(value->node, varDecl->name,
+                                                varDecl->isConst);
+                }
+            },
+            item->value);
     }
 }
 
@@ -695,6 +734,11 @@ void collectStmtImportBindingSites(
                     outSites[binding.node.id] = ImportBindingSite{
                         tokenText(binding.exportedName),
                         importedModule->importTarget,
+                        binding.exportedName.span(),
+                        binding.localName.has_value()
+                            ? std::optional<SourceSpan>(
+                                  binding.localName->span())
+                            : std::nullopt,
                     };
                 }
             } else if constexpr (std::is_same_v<T, AstForStmt>) {
@@ -1622,6 +1666,71 @@ std::optional<SymbolTarget> resolveSymbolTarget(
                         identifierExpr->name.span()};
 }
 
+bool isValidRenameIdentifierText(std::string_view text) {
+    if (text.empty()) {
+        return false;
+    }
+
+    const std::string owned(text);
+    Scanner scanner(owned);
+    const Token first = scanner.nextToken();
+    if (first.type() != TokenType::IDENTIFIER) {
+        return false;
+    }
+
+    return scanner.nextToken().type() == TokenType::END_OF_FILE;
+}
+
+void sortToolingTextEdits(std::vector<ToolingTextEdit>& edits) {
+    std::sort(edits.begin(), edits.end(),
+              [](const ToolingTextEdit& lhs, const ToolingTextEdit& rhs) {
+                  if (lhs.path != rhs.path) {
+                      return lhs.path < rhs.path;
+                  }
+                  if (lhs.range.start.line != rhs.range.start.line) {
+                      return lhs.range.start.line < rhs.range.start.line;
+                  }
+                  if (lhs.range.start.character != rhs.range.start.character) {
+                      return lhs.range.start.character <
+                             rhs.range.start.character;
+                  }
+                  if (lhs.range.end.line != rhs.range.end.line) {
+                      return lhs.range.end.line < rhs.range.end.line;
+                  }
+                  return lhs.range.end.character < rhs.range.end.character;
+              });
+}
+
+void appendReferenceRenameEdits(
+    const ToolingDocumentAnalysis& analysis, AstNodeId declarationNodeId,
+    std::string_view newName, std::vector<ToolingTextEdit>& outEdits) {
+    std::unordered_map<AstNodeId, SourceSpan> referenceSites;
+    collectReferenceSites(analysis.frontend.module, referenceSites);
+
+    for (const auto& [nodeId, binding] : analysis.frontend.bindings.references) {
+        if (binding.declarationNodeId != declarationNodeId) {
+            continue;
+        }
+
+        const auto referenceIt = referenceSites.find(nodeId);
+        if (referenceIt == referenceSites.end()) {
+            continue;
+        }
+
+        outEdits.push_back(ToolingTextEdit{
+            analysis.sourcePath,
+            toolingRangeFromSourceSpan(referenceIt->second),
+            std::string(newName),
+        });
+    }
+}
+
+bool isTopLevelRenameCandidate(const AstModule& module, AstNodeId nodeId) {
+    std::unordered_map<AstNodeId, DeclarationSite> topLevelDeclarations;
+    collectTopLevelDeclarationSites(module, topLevelDeclarations);
+    return topLevelDeclarations.find(nodeId) != topLevelDeclarations.end();
+}
+
 }  // namespace
 
 bool toolingSourceStartsWithStrictDirective(std::string_view source) {
@@ -1832,4 +1941,198 @@ std::optional<ToolingHover> findHoverForTooling(
 std::vector<ToolingCompletionItem> findCompletionsForTooling(
     const ToolingDocumentAnalysis& analysis, const ToolingPosition& position) {
     return CompletionCollector(analysis, position).collect();
+}
+
+std::vector<ToolingWorkspaceSymbol> collectWorkspaceSymbolsForTooling(
+    const ToolingDocumentAnalysis& analysis) {
+    std::vector<ToolingWorkspaceSymbol> symbols;
+    if (!analysis.hasParse) {
+        return symbols;
+    }
+
+    std::unordered_map<AstNodeId, DeclarationSite> topLevelDeclarations;
+    collectTopLevelDeclarationSites(analysis.frontend.module, topLevelDeclarations);
+    symbols.reserve(topLevelDeclarations.size());
+    for (const auto& [nodeId, declaration] : topLevelDeclarations) {
+        (void)nodeId;
+        symbols.push_back(ToolingWorkspaceSymbol{
+            declaration.name,
+            declaration.kind,
+            hoverDetailForDeclaration(analysis, declaration),
+            analysis.sourcePath,
+            toolingRangeFromSourceSpan(declaration.range),
+            toolingRangeFromSourceSpan(declaration.selectionRange),
+        });
+    }
+
+    std::sort(symbols.begin(), symbols.end(),
+              [](const ToolingWorkspaceSymbol& lhs,
+                 const ToolingWorkspaceSymbol& rhs) {
+                  if (lhs.name != rhs.name) {
+                      return lhs.name < rhs.name;
+                  }
+                  if (lhs.path != rhs.path) {
+                      return lhs.path < rhs.path;
+                  }
+                  if (lhs.selectionRange.start.line != rhs.selectionRange.start.line) {
+                      return lhs.selectionRange.start.line <
+                             rhs.selectionRange.start.line;
+                  }
+                  return lhs.selectionRange.start.character <
+                         rhs.selectionRange.start.character;
+              });
+    return symbols;
+}
+
+std::optional<ToolingPrepareRename> prepareRenameForTooling(
+    const ToolingDocumentAnalysis& analysis, const ToolingPosition& position) {
+    const auto target = resolveSymbolTarget(analysis, position);
+    if (!target.has_value()) {
+        return std::nullopt;
+    }
+
+    std::unordered_map<AstNodeId, DeclarationSite> declarationSites;
+    collectDeclarationSites(analysis.frontend.module, declarationSites);
+    const auto declarationIt = declarationSites.find(target->declarationNodeId);
+    if (declarationIt == declarationSites.end()) {
+        return std::nullopt;
+    }
+
+    ToolingPrepareRename result;
+    result.range = toolingRangeFromSourceSpan(target->occurrenceSpan);
+    result.placeholder = declarationIt->second.name;
+    result.symbolKind = declarationIt->second.kind;
+    result.declarationNodeId = target->declarationNodeId;
+    result.sourcePath = analysis.sourcePath;
+
+    std::unordered_map<AstNodeId, ImportBindingSite> importBindingSites;
+    collectImportBindingSites(analysis.frontend.module,
+                              analysis.frontend.bindings.importedModules,
+                              importBindingSites);
+    const auto importIt = importBindingSites.find(target->declarationNodeId);
+    if (importIt != importBindingSites.end()) {
+        result.strategy = "import-local";
+        result.exportedName = importIt->second.exportedName;
+        result.resolvedPath = importIt->second.importTarget.resolvedPath;
+        result.importHasAlias = importIt->second.localSelectionRange.has_value();
+        return result;
+    }
+
+    if (isTopLevelRenameCandidate(analysis.frontend.module,
+                                  target->declarationNodeId) &&
+        isPublicSymbolName(declarationIt->second.name)) {
+        result.strategy = "exported";
+        result.exportedName = declarationIt->second.name;
+        result.resolvedPath = analysis.sourcePath;
+        return result;
+    }
+
+    result.strategy = "same-file";
+    return result;
+}
+
+std::optional<std::string> validateRenameForTooling(
+    const ToolingPrepareRename& target, std::string_view newName) {
+    if (!isValidRenameIdentifierText(newName)) {
+        return std::string("rename requires a valid identifier");
+    }
+
+    if (target.strategy == "exported" && !isPublicSymbolName(newName)) {
+        return std::string("exported symbols must keep a public identifier");
+    }
+
+    return std::nullopt;
+}
+
+std::vector<ToolingTextEdit> findRenameEditsForTooling(
+    const ToolingDocumentAnalysis& analysis, const ToolingPrepareRename& target,
+    std::string_view newName) {
+    std::vector<ToolingTextEdit> edits;
+    if (!analysis.hasParse || !analysis.hasBindings ||
+        target.sourcePath != analysis.sourcePath ||
+        validateRenameForTooling(target, newName).has_value()) {
+        return edits;
+    }
+
+    std::unordered_map<AstNodeId, DeclarationSite> declarationSites;
+    collectDeclarationSites(analysis.frontend.module, declarationSites);
+    const auto declarationIt = declarationSites.find(target.declarationNodeId);
+    if (declarationIt == declarationSites.end()) {
+        return edits;
+    }
+
+    if (target.strategy == "same-file" || target.strategy == "exported") {
+        edits.push_back(ToolingTextEdit{
+            analysis.sourcePath,
+            toolingRangeFromSourceSpan(declarationIt->second.selectionRange),
+            std::string(newName),
+        });
+        appendReferenceRenameEdits(analysis, target.declarationNodeId, newName,
+                                   edits);
+        sortToolingTextEdits(edits);
+        return edits;
+    }
+
+    if (target.strategy != "import-local") {
+        return edits;
+    }
+
+    std::unordered_map<AstNodeId, ImportBindingSite> importBindingSites;
+    collectImportBindingSites(analysis.frontend.module,
+                              analysis.frontend.bindings.importedModules,
+                              importBindingSites);
+    const auto importIt = importBindingSites.find(target.declarationNodeId);
+    if (importIt == importBindingSites.end()) {
+        return edits;
+    }
+
+    edits.push_back(ToolingTextEdit{
+        analysis.sourcePath,
+        toolingRangeFromSourceSpan(importIt->second.localSelectionRange.value_or(
+            importIt->second.exportedSelectionRange)),
+        importIt->second.localSelectionRange.has_value()
+            ? std::string(newName)
+            : importIt->second.exportedName + " as " + std::string(newName),
+    });
+    appendReferenceRenameEdits(analysis, target.declarationNodeId, newName,
+                               edits);
+    sortToolingTextEdits(edits);
+    return edits;
+}
+
+std::vector<ToolingTextEdit> findImportRenameEditsForTooling(
+    const ToolingDocumentAnalysis& analysis, const ToolingPrepareRename& target,
+    std::string_view newName) {
+    std::vector<ToolingTextEdit> edits;
+    if (!analysis.hasParse || !analysis.hasBindings || target.strategy != "exported" ||
+        target.resolvedPath.empty() ||
+        validateRenameForTooling(target, newName).has_value()) {
+        return edits;
+    }
+
+    std::unordered_map<AstNodeId, ImportBindingSite> importBindingSites;
+    collectImportBindingSites(analysis.frontend.module,
+                              analysis.frontend.bindings.importedModules,
+                              importBindingSites);
+
+    for (const auto& [nodeId, importSite] : importBindingSites) {
+        if (importSite.importTarget.kind != ImportTargetKind::SOURCE_MODULE ||
+            importSite.importTarget.resolvedPath != target.resolvedPath ||
+            importSite.exportedName != target.exportedName) {
+            continue;
+        }
+
+        edits.push_back(ToolingTextEdit{
+            analysis.sourcePath,
+            toolingRangeFromSourceSpan(importSite.exportedSelectionRange),
+            std::string(newName),
+        });
+
+        if (!importSite.localSelectionRange.has_value()) {
+            appendReferenceRenameEdits(analysis, nodeId, newName, edits);
+        }
+    }
+
+    sortToolingTextEdits(edits);
+    return edits;
 }
