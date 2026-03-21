@@ -52,6 +52,13 @@ struct ToolingLocation {
     ToolingRange selectionRange;
 };
 
+struct ToolingHover {
+    ToolingRange range;
+    std::string name;
+    std::string kind;
+    std::string detail;
+};
+
 struct ToolingAnalyzeOptions {
     std::string sourcePath;
     std::vector<std::string> packageSearchPaths;
@@ -62,6 +69,7 @@ struct ToolingAnalyzeOptions {
 struct ToolingDocumentAnalysis {
     AstFrontendBuildStatus status = AstFrontendBuildStatus::ParseFailed;
     std::string sourcePath;
+    std::vector<std::string> packageSearchPaths;
     bool strictMode = false;
     bool hasFrontend = false;
     bool hasParse = false;
@@ -80,4 +88,8 @@ SourceSpan sourceSpanFromToolingRange(const ToolingRange& range);
 ToolingDocumentAnalysis analyzeDocumentForTooling(
     std::string_view source, const ToolingAnalyzeOptions& options);
 std::optional<ToolingLocation> findDefinitionForTooling(
+    const ToolingDocumentAnalysis& analysis, const ToolingPosition& position);
+std::vector<ToolingLocation> findReferencesForTooling(
+    const ToolingDocumentAnalysis& analysis, const ToolingPosition& position);
+std::optional<ToolingHover> findHoverForTooling(
     const ToolingDocumentAnalysis& analysis, const ToolingPosition& position);

@@ -198,13 +198,19 @@ bool testDefinitionLookup() {
     const auto importDefinition =
         findDefinitionForTooling(importAnalysis, ToolingPosition{3, 7});
     if (!require(importDefinition.has_value(),
-                 "imported binding use should resolve to the local import declaration")) {
+                 "imported binding use should resolve to the imported module declaration")) {
         return false;
     }
 
-    if (!require(importDefinition->selectionRange.start.line == 1 &&
-                     importDefinition->selectionRange.start.character == 8,
-                 "import definition should point at the import binding name")) {
+    if (!require(importDefinition->path.find("frontend_identity_module.mog") !=
+                     std::string::npos,
+                 "import definition should resolve to the imported module path")) {
+        return false;
+    }
+
+    if (!require(importDefinition->selectionRange.start.line == 5 &&
+                     importDefinition->selectionRange.start.character == 6,
+                 "import definition should point at the exported binding name")) {
         return false;
     }
 
@@ -229,6 +235,98 @@ bool testDefinitionLookup() {
     return true;
 }
 
+bool testReferencesAndHover() {
+    ToolingAnalyzeOptions options;
+    options.sourcePath = "tooling_references_hover_regression.mog";
+    options.strictMode = true;
+
+    const std::string source =
+        "#!strict\n"
+        "fn add(x i32) i32 {\n"
+        "    var local i32 = x\n"
+        "    return local + local\n"
+        "}\n"
+        "const Value i32 = add(1)\n"
+        "print(Value)\n";
+
+    ToolingDocumentAnalysis analysis =
+        analyzeDocumentForTooling(source, options);
+    if (!require(analysis.status == AstFrontendBuildStatus::Success,
+                 "reference and hover sample should succeed")) {
+        return false;
+    }
+
+    const auto references =
+        findReferencesForTooling(analysis, ToolingPosition{6, 6});
+    if (!require(references.size() == 2,
+                 "top-level binding should return declaration and one usage")) {
+        return false;
+    }
+
+    if (!require(references[0].selectionRange.start.line == 5 &&
+                     references[0].selectionRange.start.character == 6,
+                 "references should start with the declaration site")) {
+        return false;
+    }
+
+    if (!require(references[1].selectionRange.start.line == 6 &&
+                     references[1].selectionRange.start.character == 6,
+                 "references should include same-file usages")) {
+        return false;
+    }
+
+    const auto hover = findHoverForTooling(analysis, ToolingPosition{6, 6});
+    if (!require(hover.has_value(), "hover should be available for bound identifiers")) {
+        return false;
+    }
+
+    if (!require(hover->kind == "constant" &&
+                     hover->detail == "const Value: i32",
+                 "hover should include kind and formatted type detail")) {
+        return false;
+    }
+
+    const std::string importSource =
+        "#!strict\n"
+        "const { Answer, Get } = @import(\"./modules/frontend_identity_module.mog\")\n"
+        "print(Get())\n"
+        "print(Answer)\n";
+    options.sourcePath = "tests/sample_import_frontend_identity.mog";
+    ToolingDocumentAnalysis importAnalysis =
+        analyzeDocumentForTooling(importSource, options);
+    const auto importHover =
+        findHoverForTooling(importAnalysis, ToolingPosition{3, 7});
+    if (!require(importHover.has_value(),
+                 "hover should be available for imported bindings")) {
+        return false;
+    }
+
+    if (!require(importHover->kind == "import" &&
+                     importHover->detail == "import Answer: i32",
+                 "import hover should preserve imported type information")) {
+        return false;
+    }
+
+    const std::string memberSource =
+        "#!strict\n"
+        "type Box struct {\n"
+        "    value i32\n"
+        "}\n"
+        "fn read(box Box) i32 {\n"
+        "    return box.value\n"
+        "}\n";
+    options.sourcePath = "tooling_member_hover_regression.mog";
+    ToolingDocumentAnalysis memberAnalysis =
+        analyzeDocumentForTooling(memberSource, options);
+    const auto memberHover = findHoverForTooling(memberAnalysis, ToolingPosition{5, 15});
+    if (!require(!memberHover.has_value(),
+                 "member access hover should remain unsupported in this slice")) {
+        return false;
+    }
+
+    return true;
+}
+
 }  // namespace
 
 int main() {
@@ -245,6 +343,10 @@ int main() {
     }
 
     if (!testDefinitionLookup()) {
+        return 1;
+    }
+
+    if (!testReferencesAndHover()) {
         return 1;
     }
 

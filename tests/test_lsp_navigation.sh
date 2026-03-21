@@ -65,9 +65,31 @@ source = "\n".join([
 ])
 
 with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
+    module_source = "\n".join([
+        "#!strict",
+        "fn Get() i32 {",
+        "    return 42",
+        "}",
+        "const Answer i32 = 42",
+        ""
+    ])
+    module_path = Path(tmpdir) / "dep.mog"
+    module_path.write_text(module_source, encoding="utf-8")
+    module_uri = module_path.resolve().as_uri()
+
     source_path = Path(tmpdir) / "sample.mog"
     source_path.write_text(source, encoding="utf-8")
     uri = source_path.resolve().as_uri()
+    import_source = "\n".join([
+        "#!strict",
+        "const { Answer, Get } = @import(\"./dep.mog\")",
+        "print(Get())",
+        "print(Answer)",
+        ""
+    ])
+    import_path = Path(tmpdir) / "import_sample.mog"
+    import_path.write_text(import_source, encoding="utf-8")
+    import_uri = import_path.resolve().as_uri()
 
     proc = subprocess.Popen(
         [lsp_bin],
@@ -93,6 +115,10 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
             raise AssertionError("initialize response missing documentSymbolProvider")
         if caps.get("definitionProvider") is not True:
             raise AssertionError("initialize response missing definitionProvider")
+        if caps.get("referencesProvider") is not True:
+            raise AssertionError("initialize response missing referencesProvider")
+        if caps.get("hoverProvider") is not True:
+            raise AssertionError("initialize response missing hoverProvider")
 
         send_message(proc, {
             "jsonrpc": "2.0",
@@ -111,14 +137,34 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
                 }
             }
         })
-
         diagnostics = read_until(
             proc,
-            lambda msg: msg.get("method") == "textDocument/publishDiagnostics",
+            lambda msg: msg.get("method") == "textDocument/publishDiagnostics" and
+            msg.get("params", {}).get("uri") == uri,
         )
         published = diagnostics["params"]["diagnostics"]
         if not published:
             raise AssertionError("expected diagnostics for the broken sample")
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": import_uri,
+                    "languageId": "mog",
+                    "version": 1,
+                    "text": import_source
+                }
+            }
+        })
+
+        import_diagnostics = read_until(
+            proc,
+            lambda msg: msg.get("method") == "textDocument/publishDiagnostics" and
+            msg.get("params", {}).get("uri") == import_uri,
+        )
+        if import_diagnostics["params"]["diagnostics"]:
+            raise AssertionError("expected import sample to stay diagnostics-free")
 
         send_message(proc, {
             "jsonrpc": "2.0",
@@ -160,10 +206,76 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         send_message(proc, {
             "jsonrpc": "2.0",
             "id": 4,
+            "method": "textDocument/references",
+            "params": {
+                "textDocument": {
+                    "uri": uri
+                },
+                "position": {
+                    "line": 7,
+                    "character": 6
+                },
+                "context": {
+                    "includeDeclaration": True
+                }
+            }
+        })
+        references = read_until(proc, lambda msg: msg.get("id") == 4)
+        if len(references["result"]) != 2:
+            raise AssertionError(f"unexpected references result: {references['result']}")
+        if references["result"][0]["range"]["start"]["line"] != 5:
+            raise AssertionError("references should include the declaration first")
+        if references["result"][1]["range"]["start"]["line"] != 7:
+            raise AssertionError("references should include the usage site")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "textDocument/hover",
+            "params": {
+                "textDocument": {
+                    "uri": uri
+                },
+                "position": {
+                    "line": 7,
+                    "character": 6
+                }
+            }
+        })
+        hover = read_until(proc, lambda msg: msg.get("id") == 5)
+        hover_value = hover["result"]["contents"]["value"]
+        if hover_value != "const Value: i32":
+            raise AssertionError(f"unexpected hover payload: {hover['result']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "textDocument/definition",
+            "params": {
+                "textDocument": {
+                    "uri": import_uri
+                },
+                "position": {
+                    "line": 3,
+                    "character": 7
+                }
+            }
+        })
+        cross_definition = read_until(proc, lambda msg: msg.get("id") == 6)
+        cross_result = cross_definition["result"]
+        if cross_result["uri"] != module_uri:
+            raise AssertionError("import definition should jump to the imported module")
+        if cross_result["range"]["start"]["line"] != 4 or \
+                cross_result["range"]["start"]["character"] != 6:
+            raise AssertionError(f"unexpected cross-file definition range: {cross_result['range']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 7,
             "method": "shutdown",
             "params": {}
         })
-        read_until(proc, lambda msg: msg.get("id") == 4)
+        read_until(proc, lambda msg: msg.get("id") == 7)
         send_message(proc, {
             "jsonrpc": "2.0",
             "method": "exit",

@@ -381,6 +381,17 @@ std::optional<int> getIntegerValue(const JsonObject& object, const char* key) {
     return std::nullopt;
 }
 
+std::optional<bool> getBooleanValue(const JsonObject& object, const char* key) {
+    const JsonValue* value = getObjectValue(object, key);
+    if (value == nullptr) {
+        return std::nullopt;
+    }
+    if (const auto* boolean = std::get_if<bool>(&value->value)) {
+        return *boolean;
+    }
+    return std::nullopt;
+}
+
 std::string jsonEscape(std::string_view text) {
     std::string escaped;
     escaped.reserve(text.size() + 8);
@@ -740,6 +751,18 @@ class MogLspServer {
             return;
         }
 
+        if (*method == "textDocument/references" && params != nullptr &&
+            id != nullptr) {
+            handleReferences(*id, *params);
+            return;
+        }
+
+        if (*method == "textDocument/hover" && params != nullptr &&
+            id != nullptr) {
+            handleHover(*id, *params);
+            return;
+        }
+
         if (id != nullptr) {
             sendResponse(*id, JsonValue(nullptr));
         }
@@ -862,33 +885,99 @@ class MogLspServer {
             return;
         }
 
-        const JsonValue* positionValue = getObjectValue(params, "position");
-        if (positionValue == nullptr) {
-            sendResponse(id, JsonValue(nullptr));
-            return;
-        }
-        const auto positionObject = asObject(*positionValue);
-        if (!positionObject.has_value()) {
+        const auto position = getPosition(params);
+        if (!position.has_value()) {
             sendResponse(id, JsonValue(nullptr));
             return;
         }
 
-        const ToolingPosition position{
-            static_cast<size_t>(
-                getIntegerValue(positionObject->get(), "line").value_or(0)),
-            static_cast<size_t>(getIntegerValue(positionObject->get(),
-                                                "character")
-                                    .value_or(0)),
-        };
         const auto definition =
-            findDefinitionForTooling(documentIt->second.analysis, position);
+            findDefinitionForTooling(documentIt->second.analysis, *position);
         if (!definition.has_value()) {
             sendResponse(id, JsonValue(nullptr));
             return;
         }
 
-        sendResponse(id, makeLocation(pathToFileUri(documentIt->second.path),
+        sendResponse(id, makeLocation(pathToFileUri(definition->path),
                                       definition->selectionRange));
+    }
+
+    void handleReferences(const JsonValue& id, const JsonObject& params) {
+        auto uri = getTextDocumentUri(params);
+        if (!uri.has_value()) {
+            sendResponse(id, JsonValue(JsonArray{}));
+            return;
+        }
+
+        auto documentIt = m_documents.find(*uri);
+        if (documentIt == m_documents.end()) {
+            sendResponse(id, JsonValue(JsonArray{}));
+            return;
+        }
+
+        const auto position = getPosition(params);
+        if (!position.has_value()) {
+            sendResponse(id, JsonValue(JsonArray{}));
+            return;
+        }
+
+        bool includeDeclaration = true;
+        if (const JsonValue* contextValue = getObjectValue(params, "context")) {
+            if (const auto context = asObject(*contextValue); context.has_value()) {
+                includeDeclaration = getBooleanValue(
+                                         context->get(), "includeDeclaration")
+                                         .value_or(true);
+            }
+        }
+
+        auto references =
+            findReferencesForTooling(documentIt->second.analysis, *position);
+        if (!includeDeclaration && !references.empty()) {
+            references.erase(references.begin());
+        }
+
+        JsonArray items;
+        items.reserve(references.size());
+        for (const auto& reference : references) {
+            items.push_back(
+                makeLocation(pathToFileUri(reference.path), reference.selectionRange));
+        }
+        sendResponse(id, JsonValue(std::move(items)));
+    }
+
+    void handleHover(const JsonValue& id, const JsonObject& params) {
+        auto uri = getTextDocumentUri(params);
+        if (!uri.has_value()) {
+            sendResponse(id, JsonValue(nullptr));
+            return;
+        }
+
+        auto documentIt = m_documents.find(*uri);
+        if (documentIt == m_documents.end()) {
+            sendResponse(id, JsonValue(nullptr));
+            return;
+        }
+
+        const auto position = getPosition(params);
+        if (!position.has_value()) {
+            sendResponse(id, JsonValue(nullptr));
+            return;
+        }
+
+        const auto hover = findHoverForTooling(documentIt->second.analysis, *position);
+        if (!hover.has_value()) {
+            sendResponse(id, JsonValue(nullptr));
+            return;
+        }
+
+        JsonObject contents;
+        contents["kind"] = JsonValue(std::string("plaintext"));
+        contents["value"] = JsonValue(hover->detail);
+
+        JsonObject result;
+        result["contents"] = JsonValue(std::move(contents));
+        result["range"] = makeRange(hover->range);
+        sendResponse(id, JsonValue(std::move(result)));
     }
 
     std::optional<std::string> getTextDocumentUri(const JsonObject& params) const {
@@ -919,6 +1008,26 @@ class MogLspServer {
         return getIntegerValue(document->get(), "version");
     }
 
+    std::optional<ToolingPosition> getPosition(const JsonObject& params) const {
+        const JsonValue* positionValue = getObjectValue(params, "position");
+        if (positionValue == nullptr) {
+            return std::nullopt;
+        }
+
+        const auto positionObject = asObject(*positionValue);
+        if (!positionObject.has_value()) {
+            return std::nullopt;
+        }
+
+        return ToolingPosition{
+            static_cast<size_t>(
+                getIntegerValue(positionObject->get(), "line").value_or(0)),
+            static_cast<size_t>(getIntegerValue(positionObject->get(),
+                                                "character")
+                                    .value_or(0)),
+        };
+    }
+
     void analyzeAndPublish(DocumentState& document) {
         ToolingAnalyzeOptions options;
         options.sourcePath = document.path;
@@ -940,6 +1049,8 @@ class MogLspServer {
             {"textDocumentSync", JsonValue(1.0)},
             {"documentSymbolProvider", JsonValue(true)},
             {"definitionProvider", JsonValue(true)},
+            {"referencesProvider", JsonValue(true)},
+            {"hoverProvider", JsonValue(true)},
         });
         sendResponse(*id, JsonValue(std::move(result)));
     }
