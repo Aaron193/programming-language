@@ -636,6 +636,50 @@ JsonValue makeRelatedInformation(const std::string& uri,
     return JsonValue(std::move(items));
 }
 
+bool isCompletionIdentifierChar(char ch) {
+    return std::isalnum(static_cast<unsigned char>(ch)) != 0 || ch == '_' ||
+           ch == '@';
+}
+
+size_t offsetForPosition(std::string_view text, const ToolingPosition& position) {
+    size_t offset = 0;
+    size_t line = 0;
+    while (offset < text.size() && line < position.line) {
+        if (text[offset++] == '\n') {
+            ++line;
+        }
+    }
+
+    size_t character = 0;
+    while (offset < text.size() && character < position.character &&
+           text[offset] != '\n') {
+        ++offset;
+        ++character;
+    }
+
+    return offset;
+}
+
+size_t completionPrefixStart(std::string_view text,
+                             const ToolingPosition& position) {
+    size_t offset = offsetForPosition(text, position);
+    while (offset > 0 && isCompletionIdentifierChar(text[offset - 1])) {
+        --offset;
+    }
+    return offset;
+}
+
+bool startsWith(std::string_view text, std::string_view prefix) {
+    return text.size() >= prefix.size() &&
+           text.substr(0, prefix.size()) == prefix;
+}
+
+bool isMemberCompletionContext(std::string_view text,
+                               const ToolingPosition& position) {
+    const size_t prefixStart = completionPrefixStart(text, position);
+    return prefixStart > 0 && text[prefixStart - 1] == '.';
+}
+
 struct DocumentState {
     std::string uri;
     std::string path;
@@ -760,6 +804,12 @@ class MogLspServer {
         if (*method == "textDocument/hover" && params != nullptr &&
             id != nullptr) {
             handleHover(*id, *params);
+            return;
+        }
+
+        if (*method == "textDocument/completion" && params != nullptr &&
+            id != nullptr) {
+            handleCompletion(*id, *params);
             return;
         }
 
@@ -980,6 +1030,61 @@ class MogLspServer {
         sendResponse(id, JsonValue(std::move(result)));
     }
 
+    void handleCompletion(const JsonValue& id, const JsonObject& params) {
+        auto uri = getTextDocumentUri(params);
+        if (!uri.has_value()) {
+            sendResponse(id, JsonValue(JsonArray{}));
+            return;
+        }
+
+        auto documentIt = m_documents.find(*uri);
+        if (documentIt == m_documents.end()) {
+            sendResponse(id, JsonValue(JsonArray{}));
+            return;
+        }
+
+        const auto position = getPosition(params);
+        if (!position.has_value()) {
+            sendResponse(id, JsonValue(JsonArray{}));
+            return;
+        }
+
+        if (isMemberCompletionContext(documentIt->second.text, *position)) {
+            sendResponse(id, JsonValue(JsonArray{}));
+            return;
+        }
+
+        const size_t prefixStart =
+            completionPrefixStart(documentIt->second.text, *position);
+        const size_t prefixEnd =
+            offsetForPosition(documentIt->second.text, *position);
+        const std::string prefix = documentIt->second.text.substr(
+            prefixStart, prefixEnd - prefixStart);
+
+        const auto completions =
+            findCompletionsForTooling(documentIt->second.analysis, *position);
+        JsonArray items;
+        for (const auto& completion : completions) {
+            if (!prefix.empty() && !startsWith(completion.label, prefix)) {
+                continue;
+            }
+
+            JsonObject item;
+            item["label"] = JsonValue(completion.label);
+            item["kind"] =
+                JsonValue(completionKindForToolingKind(completion.kind));
+            if (!completion.detail.empty()) {
+                item["detail"] = JsonValue(completion.detail);
+            }
+            if (!completion.sortText.empty()) {
+                item["sortText"] = JsonValue(completion.sortText);
+            }
+            items.push_back(JsonValue(std::move(item)));
+        }
+
+        sendResponse(id, JsonValue(std::move(items)));
+    }
+
     std::optional<std::string> getTextDocumentUri(const JsonObject& params) const {
         const JsonValue* documentValue = getObjectValue(params, "textDocument");
         if (documentValue == nullptr) {
@@ -1051,6 +1156,8 @@ class MogLspServer {
             {"definitionProvider", JsonValue(true)},
             {"referencesProvider", JsonValue(true)},
             {"hoverProvider", JsonValue(true)},
+            {"completionProvider",
+             JsonValue(JsonObject{{"resolveProvider", JsonValue(false)}})},
         });
         sendResponse(*id, JsonValue(std::move(result)));
     }
@@ -1072,6 +1179,28 @@ class MogLspServer {
             return 26.0;
         }
         return 13.0;
+    }
+
+    double completionKindForToolingKind(std::string_view kind) const {
+        if (kind == "class") {
+            return 7.0;
+        }
+        if (kind == "function") {
+            return 3.0;
+        }
+        if (kind == "constant") {
+            return 21.0;
+        }
+        if (kind == "import") {
+            return 9.0;
+        }
+        if (kind == "keyword") {
+            return 14.0;
+        }
+        if (kind == "type") {
+            return 22.0;
+        }
+        return 6.0;
     }
 
     JsonValue makeDocumentSymbolsResponse(

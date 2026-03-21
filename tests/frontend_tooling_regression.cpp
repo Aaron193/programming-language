@@ -13,6 +13,16 @@ bool require(bool condition, const std::string& message) {
     return true;
 }
 
+const ToolingCompletionItem* findCompletion(
+    const std::vector<ToolingCompletionItem>& items, const std::string& label) {
+    for (const auto& item : items) {
+        if (item.label == label) {
+            return &item;
+        }
+    }
+    return nullptr;
+}
+
 bool testStrictDirectiveDetection() {
     if (!require(toolingSourceStartsWithStrictDirective("#!strict\nprint(1)\n"),
                  "strict directive should be detected at file start")) {
@@ -327,6 +337,138 @@ bool testReferencesAndHover() {
     return true;
 }
 
+bool testCompletions() {
+    ToolingAnalyzeOptions options;
+    options.strictMode = true;
+
+    const std::string topLevelSource =
+        "#!strict\n"
+        "fn Helper() i32 {\n"
+        "    return 1\n"
+        "}\n"
+        "\n"
+        "const Later i32 = 2\n";
+    options.sourcePath = "tooling_completion_top_level_regression.mog";
+    ToolingDocumentAnalysis topLevelAnalysis =
+        analyzeDocumentForTooling(topLevelSource, options);
+    if (!require(topLevelAnalysis.status == AstFrontendBuildStatus::Success,
+                 "top-level completion sample should succeed")) {
+        return false;
+    }
+
+    const auto beforeLater =
+        findCompletionsForTooling(topLevelAnalysis, ToolingPosition{4, 0});
+    if (!require(findCompletion(beforeLater, "Helper") != nullptr,
+                 "top-level functions should be visible before later declarations")) {
+        return false;
+    }
+    if (!require(findCompletion(beforeLater, "Later") == nullptr,
+                 "top-level const bindings should stay hidden before declaration")) {
+        return false;
+    }
+
+    const auto afterLater =
+        findCompletionsForTooling(topLevelAnalysis, ToolingPosition{6, 0});
+    if (!require(findCompletion(afterLater, "Later") != nullptr,
+                 "top-level const bindings should appear after declaration")) {
+        return false;
+    }
+
+    const std::string localSource =
+        "#!strict\n"
+        "const Outer i32 = 1\n"
+        "fn use(Value i32) i32 {\n"
+        "    var local i32 = Value\n"
+        "    {\n"
+        "        const Value i32 = local\n"
+        "\n"
+        "    }\n"
+        "\n"
+        "}\n";
+    options.sourcePath = "tooling_completion_local_regression.mog";
+    ToolingDocumentAnalysis localAnalysis =
+        analyzeDocumentForTooling(localSource, options);
+    if (!require(localAnalysis.status == AstFrontendBuildStatus::Success,
+                 "local completion sample should succeed")) {
+        return false;
+    }
+
+    const auto innerScope =
+        findCompletionsForTooling(localAnalysis, ToolingPosition{6, 8});
+    const auto* innerValue = findCompletion(innerScope, "Value");
+    if (!require(innerValue != nullptr && innerValue->kind == "constant",
+                 "inner block completions should prefer the nearest shadowing binding")) {
+        return false;
+    }
+    if (!require(findCompletion(innerScope, "local") != nullptr,
+                 "inner block completions should include visible outer locals")) {
+        return false;
+    }
+
+    const auto outerScope =
+        findCompletionsForTooling(localAnalysis, ToolingPosition{8, 4});
+    const auto* outerValue = findCompletion(outerScope, "Value");
+    if (!require(outerValue != nullptr && outerValue->kind == "parameter",
+                 "after leaving the block, completions should restore the parameter binding")) {
+        return false;
+    }
+
+    const std::string importSemanticErrorSource =
+        "#!strict\n"
+        "const { Answer, Get } = @import(\"./modules/frontend_identity_module.mog\")\n"
+        "fn use(x i32) i32 {\n"
+        "    var local i32 = x\n"
+        "    return local\n"
+        "}\n"
+        "var broken i32 = \"oops\"\n";
+    options.sourcePath = "tests/sample_import_frontend_identity.mog";
+    ToolingDocumentAnalysis importAnalysis =
+        analyzeDocumentForTooling(importSemanticErrorSource, options);
+    if (!require(importAnalysis.status == AstFrontendBuildStatus::SemanticError &&
+                     importAnalysis.hasBindings,
+                 "semantic-error completion sample should preserve bindings")) {
+        return false;
+    }
+
+    const auto importCompletions =
+        findCompletionsForTooling(importAnalysis, ToolingPosition{4, 10});
+    if (!require(findCompletion(importCompletions, "Answer") != nullptr &&
+                     findCompletion(importCompletions, "Get") != nullptr,
+                 "imported bindings should appear in local completions")) {
+        return false;
+    }
+    if (!require(findCompletion(importCompletions, "x") != nullptr &&
+                     findCompletion(importCompletions, "local") != nullptr,
+                 "local scope completions should survive semantic errors")) {
+        return false;
+    }
+
+    const std::string parseFailSource =
+        "#!strict\n"
+        "fn broken(\n";
+    options.sourcePath = "tooling_completion_parse_fail_regression.mog";
+    ToolingDocumentAnalysis parseFailAnalysis =
+        analyzeDocumentForTooling(parseFailSource, options);
+    if (!require(parseFailAnalysis.status == AstFrontendBuildStatus::ParseFailed,
+                 "parse-fail completion sample should fail parsing")) {
+        return false;
+    }
+
+    const auto parseFailCompletions =
+        findCompletionsForTooling(parseFailAnalysis, ToolingPosition{1, 10});
+    if (!require(findCompletion(parseFailCompletions, "fn") != nullptr &&
+                     findCompletion(parseFailCompletions, "while") != nullptr,
+                 "parse-failed completions should still include keywords")) {
+        return false;
+    }
+    if (!require(findCompletion(parseFailCompletions, "broken") == nullptr,
+                 "parse-failed completions should not invent local bindings")) {
+        return false;
+    }
+
+    return true;
+}
+
 }  // namespace
 
 int main() {
@@ -347,6 +489,10 @@ int main() {
     }
 
     if (!testReferencesAndHover()) {
+        return 1;
+    }
+
+    if (!testCompletions()) {
         return 1;
     }
 

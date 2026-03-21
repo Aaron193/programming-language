@@ -90,6 +90,14 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
     import_path = Path(tmpdir) / "import_sample.mog"
     import_path.write_text(import_source, encoding="utf-8")
     import_uri = import_path.resolve().as_uri()
+    parse_fail_source = "\n".join([
+        "#!strict",
+        "fn broken(",
+        ""
+    ])
+    parse_fail_path = Path(tmpdir) / "parse_fail.mog"
+    parse_fail_path.write_text(parse_fail_source, encoding="utf-8")
+    parse_fail_uri = parse_fail_path.resolve().as_uri()
 
     proc = subprocess.Popen(
         [lsp_bin],
@@ -119,6 +127,11 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
             raise AssertionError("initialize response missing referencesProvider")
         if caps.get("hoverProvider") is not True:
             raise AssertionError("initialize response missing hoverProvider")
+        completion_provider = caps.get("completionProvider")
+        if not isinstance(completion_provider, dict):
+            raise AssertionError("initialize response missing completionProvider")
+        if completion_provider.get("resolveProvider") is not False:
+            raise AssertionError("completionProvider should disable resolveProvider")
 
         send_message(proc, {
             "jsonrpc": "2.0",
@@ -250,6 +263,28 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         send_message(proc, {
             "jsonrpc": "2.0",
             "id": 6,
+            "method": "textDocument/completion",
+            "params": {
+                "textDocument": {
+                    "uri": uri
+                },
+                "position": {
+                    "line": 3,
+                    "character": 16
+                }
+            }
+        })
+        completion = read_until(proc, lambda msg: msg.get("id") == 6)
+        labels = [item["label"] for item in completion["result"]]
+        if "local" not in labels:
+            raise AssertionError(f"expected local completion item: {completion['result']}")
+        local_item = next(item for item in completion["result"] if item["label"] == "local")
+        if local_item.get("detail") != "var local: i32":
+            raise AssertionError(f"unexpected local completion detail: {local_item}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 7,
             "method": "textDocument/definition",
             "params": {
                 "textDocument": {
@@ -261,7 +296,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
                 }
             }
         })
-        cross_definition = read_until(proc, lambda msg: msg.get("id") == 6)
+        cross_definition = read_until(proc, lambda msg: msg.get("id") == 7)
         cross_result = cross_definition["result"]
         if cross_result["uri"] != module_uri:
             raise AssertionError("import definition should jump to the imported module")
@@ -271,11 +306,42 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
 
         send_message(proc, {
             "jsonrpc": "2.0",
-            "id": 7,
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": parse_fail_uri,
+                    "languageId": "mog",
+                    "version": 1,
+                    "text": parse_fail_source
+                }
+            }
+        })
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 8,
+            "method": "textDocument/completion",
+            "params": {
+                "textDocument": {
+                    "uri": parse_fail_uri
+                },
+                "position": {
+                    "line": 1,
+                    "character": 10
+                }
+            }
+        })
+        parse_completion = read_until(proc, lambda msg: msg.get("id") == 8)
+        parse_labels = [item["label"] for item in parse_completion["result"]]
+        if "fn" not in parse_labels or "while" not in parse_labels:
+            raise AssertionError(f"expected keyword completions on parse failure: {parse_completion['result']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 9,
             "method": "shutdown",
             "params": {}
         })
-        read_until(proc, lambda msg: msg.get("id") == 7)
+        read_until(proc, lambda msg: msg.get("id") == 9)
         send_message(proc, {
             "jsonrpc": "2.0",
             "method": "exit",

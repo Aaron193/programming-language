@@ -59,6 +59,13 @@ struct ToolingHover {
     std::string detail;
 };
 
+struct ToolingCompletionItem {
+    std::string label;
+    std::string kind;
+    std::string detail;
+    std::string sortText;
+};
+
 struct ToolingAnalyzeOptions {
     std::string sourcePath;
     std::vector<std::string> packageSearchPaths;
@@ -92,4 +99,6 @@ std::optional<ToolingLocation> findDefinitionForTooling(
 std::vector<ToolingLocation> findReferencesForTooling(
     const ToolingDocumentAnalysis& analysis, const ToolingPosition& position);
 std::optional<ToolingHover> findHoverForTooling(
+    const ToolingDocumentAnalysis& analysis, const ToolingPosition& position);
+std::vector<ToolingCompletionItem> findCompletionsForTooling(
     const ToolingDocumentAnalysis& analysis, const ToolingPosition& position);

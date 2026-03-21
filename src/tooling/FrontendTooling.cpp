@@ -6,6 +6,7 @@
 #include <sstream>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 #include "Ast.hpp"
@@ -35,7 +36,89 @@ struct SymbolTarget {
     SourceSpan occurrenceSpan;
 };
 
+bool positionLess(const SourcePosition& lhs, const SourcePosition& rhs) {
+    if (lhs.line != rhs.line) {
+        return lhs.line < rhs.line;
+    }
+    return lhs.column < rhs.column;
+}
+
+bool positionLessOrEqual(const SourcePosition& lhs, const SourcePosition& rhs) {
+    return !positionLess(rhs, lhs);
+}
+
 std::string tokenText(const Token& token) { return tokenLexeme(token); }
+
+DeclarationSite makeDeclarationSite(AstNodeId nodeId, const Token& name,
+                                    std::string kind,
+                                    const SourceSpan& range) {
+    return DeclarationSite{nodeId, tokenText(name), std::move(kind), range,
+                           name.span()};
+}
+
+DeclarationSite functionDeclarationSite(const AstFunctionDecl& decl) {
+    return makeDeclarationSite(decl.node.id, decl.name, "function",
+                               decl.node.span);
+}
+
+DeclarationSite classDeclarationSite(const AstClassDecl& decl) {
+    return makeDeclarationSite(decl.node.id, decl.name, "class", decl.node.span);
+}
+
+DeclarationSite typeAliasDeclarationSite(const AstTypeAliasDecl& decl) {
+    return makeDeclarationSite(decl.node.id, decl.name, "type", decl.node.span);
+}
+
+DeclarationSite parameterDeclarationSite(const AstParameter& param) {
+    return makeDeclarationSite(param.node.id, param.name, "parameter",
+                               param.node.span);
+}
+
+DeclarationSite variableDeclarationSite(const AstNodeInfo& node, const Token& name,
+                                        bool isConst) {
+    return makeDeclarationSite(node.id, name,
+                               isConst ? "constant" : "variable", node.span);
+}
+
+DeclarationSite importBindingDeclarationSite(const AstImportBinding& binding) {
+    const Token& name = binding.localName.has_value() ? *binding.localName
+                                                      : binding.exportedName;
+    return makeDeclarationSite(binding.node.id, name, "import", binding.node.span);
+}
+
+bool itemContainsPosition(const AstItem& item, const SourcePosition& position) {
+    auto spanContainsPosition = [&](const SourceSpan& span) {
+        return !positionLess(position, span.start) &&
+               !positionLess(span.end, position);
+    };
+
+    bool contains = spanContainsPosition(item.node.span);
+    std::visit(
+        [&](const auto& value) {
+            using T = std::decay_t<decltype(value)>;
+
+            if constexpr (std::is_same_v<T, AstFunctionDecl>) {
+                contains = contains ||
+                           (value.body &&
+                            spanContainsPosition(value.body->node.span));
+            } else if constexpr (std::is_same_v<T, AstClassDecl>) {
+                if (contains) {
+                    return;
+                }
+                for (const auto& method : value.methods) {
+                    if (method.body &&
+                        spanContainsPosition(method.body->node.span)) {
+                        contains = true;
+                        return;
+                    }
+                }
+            } else if constexpr (std::is_same_v<T, AstStmtPtr>) {
+                contains = value && spanContainsPosition(value->node.span);
+            }
+        },
+        item.value);
+    return contains;
+}
 
 ToolingDiagnostic toolingDiagnosticFromFrontend(
     const FrontendDiagnostic& diagnostic) {
@@ -765,6 +848,537 @@ std::string hoverDetailForDeclaration(const ToolingDocumentAnalysis& analysis,
     return "var " + declaration.name + ": " + typeText;
 }
 
+std::string completionSortText(int group, const std::string& label) {
+    return std::to_string(group) + "-" + label;
+}
+
+const std::vector<ToolingCompletionItem>& keywordCompletionItems() {
+    static const std::vector<ToolingCompletionItem> items = {
+        {"@import", "keyword", "import module", completionSortText(1, "@import")},
+        {"as", "keyword", "cast operator", completionSortText(1, "as")},
+        {"bool", "type", "built-in type", completionSortText(1, "bool")},
+        {"const", "keyword", "binding declaration", completionSortText(1, "const")},
+        {"else", "keyword", "control flow", completionSortText(1, "else")},
+        {"f32", "type", "built-in type", completionSortText(1, "f32")},
+        {"f64", "type", "built-in type", completionSortText(1, "f64")},
+        {"false", "keyword", "boolean literal", completionSortText(1, "false")},
+        {"fn", "keyword", "function declaration", completionSortText(1, "fn")},
+        {"for", "keyword", "loop", completionSortText(1, "for")},
+        {"i16", "type", "built-in type", completionSortText(1, "i16")},
+        {"i32", "type", "built-in type", completionSortText(1, "i32")},
+        {"i64", "type", "built-in type", completionSortText(1, "i64")},
+        {"i8", "type", "built-in type", completionSortText(1, "i8")},
+        {"if", "keyword", "control flow", completionSortText(1, "if")},
+        {"null", "keyword", "null literal", completionSortText(1, "null")},
+        {"print", "keyword", "debug print", completionSortText(1, "print")},
+        {"return", "keyword", "function return", completionSortText(1, "return")},
+        {"str", "type", "built-in type", completionSortText(1, "str")},
+        {"struct", "keyword", "type declaration", completionSortText(1, "struct")},
+        {"super", "keyword", "super receiver", completionSortText(1, "super")},
+        {"this", "keyword", "instance receiver", completionSortText(1, "this")},
+        {"true", "keyword", "boolean literal", completionSortText(1, "true")},
+        {"type", "keyword", "type alias declaration", completionSortText(1, "type")},
+        {"u16", "type", "built-in type", completionSortText(1, "u16")},
+        {"u32", "type", "built-in type", completionSortText(1, "u32")},
+        {"u64", "type", "built-in type", completionSortText(1, "u64")},
+        {"u8", "type", "built-in type", completionSortText(1, "u8")},
+        {"usize", "type", "built-in type", completionSortText(1, "usize")},
+        {"var", "keyword", "binding declaration", completionSortText(1, "var")},
+        {"void", "type", "built-in type", completionSortText(1, "void")},
+        {"while", "keyword", "loop", completionSortText(1, "while")},
+    };
+    return items;
+}
+
+ToolingCompletionItem completionItemForDeclaration(
+    const ToolingDocumentAnalysis& analysis, const DeclarationSite& declaration) {
+    return ToolingCompletionItem{declaration.name,
+                                 declaration.kind,
+                                 hoverDetailForDeclaration(analysis, declaration),
+                                 completionSortText(0, declaration.name)};
+}
+
+class CompletionCollector {
+   public:
+    CompletionCollector(const ToolingDocumentAnalysis& analysis,
+                        const ToolingPosition& position)
+        : m_analysis(analysis),
+          m_position(sourcePositionFromToolingPosition(position)) {}
+
+    std::vector<ToolingCompletionItem> collect() {
+        m_scopes.emplace_back();
+        if (m_analysis.hasParse) {
+            predeclareTopLevel(m_analysis.frontend.module);
+            descendItems(m_analysis.frontend.module.items);
+        }
+        if (!m_captured) {
+            captureVisible();
+        }
+        return m_results;
+    }
+
+   private:
+    const ToolingDocumentAnalysis& m_analysis;
+    SourcePosition m_position;
+    std::vector<std::unordered_map<std::string, DeclarationSite>> m_scopes;
+    std::vector<ToolingCompletionItem> m_results;
+    bool m_captured = false;
+
+    void beginScope() { m_scopes.emplace_back(); }
+
+    void endScope() {
+        if (m_scopes.size() > 1) {
+            m_scopes.pop_back();
+        }
+    }
+
+    void defineBinding(const DeclarationSite& declaration) {
+        m_scopes.back()[declaration.name] = declaration;
+    }
+
+    void predeclareTopLevel(const AstModule& module) {
+        for (const auto& item : module.items) {
+            if (!item) {
+                continue;
+            }
+
+            std::visit(
+                [&](const auto& value) {
+                    using T = std::decay_t<decltype(value)>;
+
+                    if constexpr (std::is_same_v<T, AstFunctionDecl>) {
+                        defineBinding(functionDeclarationSite(value));
+                    } else if constexpr (std::is_same_v<T, AstClassDecl>) {
+                        defineBinding(classDeclarationSite(value));
+                    } else if constexpr (std::is_same_v<T, AstTypeAliasDecl>) {
+                        defineBinding(typeAliasDeclarationSite(value));
+                    }
+                },
+                item->value);
+        }
+    }
+
+    std::vector<ToolingCompletionItem> snapshotVisible() const {
+        std::unordered_set<std::string> seen;
+        std::vector<ToolingCompletionItem> items;
+
+        for (auto scopeIt = m_scopes.rbegin(); scopeIt != m_scopes.rend();
+             ++scopeIt) {
+            std::vector<DeclarationSite> declarations;
+            declarations.reserve(scopeIt->size());
+            for (const auto& entry : *scopeIt) {
+                declarations.push_back(entry.second);
+            }
+            std::sort(declarations.begin(), declarations.end(),
+                      [](const DeclarationSite& lhs, const DeclarationSite& rhs) {
+                          return lhs.name < rhs.name;
+                      });
+
+            for (const auto& declaration : declarations) {
+                if (!seen.insert(declaration.name).second) {
+                    continue;
+                }
+                items.push_back(
+                    completionItemForDeclaration(m_analysis, declaration));
+            }
+        }
+
+        for (const auto& keyword : keywordCompletionItems()) {
+            if (seen.insert(keyword.label).second) {
+                items.push_back(keyword);
+            }
+        }
+
+        return items;
+    }
+
+    void captureVisible() {
+        if (m_captured) {
+            return;
+        }
+        m_results = snapshotVisible();
+        m_captured = true;
+    }
+
+    void descendItems(const std::vector<AstItemPtr>& items) {
+        for (const auto& item : items) {
+            if (!item) {
+                continue;
+            }
+
+            if (positionLess(m_position, item->node.span.start)) {
+                captureVisible();
+                return;
+            }
+
+            if (itemContainsPosition(*item, m_position)) {
+                descendItem(*item);
+                if (!m_captured) {
+                    captureVisible();
+                }
+                return;
+            }
+
+            declareCompletedItem(*item);
+        }
+
+        captureVisible();
+    }
+
+    void descendFunctionBody(const AstStmt& body) {
+        if (const auto* block = std::get_if<AstBlockStmt>(&body.value)) {
+            descendItems(block->items);
+            return;
+        }
+
+        descendStmt(body);
+    }
+
+    void descendItem(const AstItem& item) {
+        std::visit(
+            [&](const auto& value) {
+                using T = std::decay_t<decltype(value)>;
+
+                if constexpr (std::is_same_v<T, AstFunctionDecl>) {
+                    if (!value.body) {
+                        return;
+                    }
+
+                    defineBinding(functionDeclarationSite(value));
+                    beginScope();
+                    for (const auto& param : value.params) {
+                        defineBinding(parameterDeclarationSite(param));
+                    }
+                    if (containsPosition(value.body->node.span, m_position)) {
+                        descendFunctionBody(*value.body);
+                    }
+                    if (!m_captured) {
+                        captureVisible();
+                    }
+                    endScope();
+                } else if constexpr (std::is_same_v<T, AstClassDecl>) {
+                    defineBinding(classDeclarationSite(value));
+                    for (const auto& method : value.methods) {
+                        if (!method.body ||
+                            !containsPosition(method.body->node.span, m_position)) {
+                            continue;
+                        }
+
+                        beginScope();
+                        for (const auto& param : method.params) {
+                            defineBinding(parameterDeclarationSite(param));
+                        }
+                        descendFunctionBody(*method.body);
+                        if (!m_captured) {
+                            captureVisible();
+                        }
+                        endScope();
+                        return;
+                    }
+                } else if constexpr (std::is_same_v<T, AstTypeAliasDecl>) {
+                    defineBinding(typeAliasDeclarationSite(value));
+                } else if constexpr (std::is_same_v<T, AstStmtPtr>) {
+                    if (value) {
+                        descendStmt(*value);
+                    }
+                }
+            },
+            item.value);
+    }
+
+    void declareCompletedItem(const AstItem& item) {
+        std::visit(
+            [&](const auto& value) {
+                using T = std::decay_t<decltype(value)>;
+
+                if constexpr (std::is_same_v<T, AstFunctionDecl>) {
+                    defineBinding(functionDeclarationSite(value));
+                } else if constexpr (std::is_same_v<T, AstClassDecl>) {
+                    defineBinding(classDeclarationSite(value));
+                } else if constexpr (std::is_same_v<T, AstTypeAliasDecl>) {
+                    defineBinding(typeAliasDeclarationSite(value));
+                } else if constexpr (std::is_same_v<T, AstStmtPtr>) {
+                    if (value) {
+                        declareCompletedStmt(*value);
+                    }
+                }
+            },
+            item.value);
+    }
+
+    void declareCompletedStmt(const AstStmt& stmt) {
+        std::visit(
+            [&](const auto& value) {
+                using T = std::decay_t<decltype(value)>;
+
+                if constexpr (std::is_same_v<T, AstVarDeclStmt>) {
+                    defineBinding(variableDeclarationSite(stmt.node, value.name,
+                                                          value.isConst));
+                } else if constexpr (std::is_same_v<T, AstDestructuredImportStmt>) {
+                    for (const auto& binding : value.bindings) {
+                        defineBinding(importBindingDeclarationSite(binding));
+                    }
+                }
+            },
+            stmt.value);
+    }
+
+    void descendStmt(const AstStmt& stmt) {
+        std::visit(
+            [&](const auto& value) {
+                using T = std::decay_t<decltype(value)>;
+
+                if constexpr (std::is_same_v<T, AstBlockStmt>) {
+                    beginScope();
+                    descendItems(value.items);
+                    if (!m_captured) {
+                        captureVisible();
+                    }
+                    endScope();
+                } else if constexpr (std::is_same_v<T, AstExprStmt>) {
+                    if (value.expression &&
+                        containsPosition(value.expression->node.span, m_position)) {
+                        descendExpr(*value.expression);
+                    }
+                } else if constexpr (std::is_same_v<T, AstPrintStmt>) {
+                    if (value.expression &&
+                        containsPosition(value.expression->node.span, m_position)) {
+                        descendExpr(*value.expression);
+                    }
+                } else if constexpr (std::is_same_v<T, AstReturnStmt>) {
+                    if (value.value &&
+                        containsPosition(value.value->node.span, m_position)) {
+                        descendExpr(*value.value);
+                    }
+                } else if constexpr (std::is_same_v<T, AstIfStmt>) {
+                    if (value.condition &&
+                        containsPosition(value.condition->node.span, m_position)) {
+                        descendExpr(*value.condition);
+                        return;
+                    }
+                    if (value.thenBranch &&
+                        containsPosition(value.thenBranch->node.span, m_position)) {
+                        descendStmt(*value.thenBranch);
+                        return;
+                    }
+                    if (value.elseBranch &&
+                        containsPosition(value.elseBranch->node.span, m_position)) {
+                        descendStmt(*value.elseBranch);
+                    }
+                } else if constexpr (std::is_same_v<T, AstWhileStmt>) {
+                    if (value.condition &&
+                        containsPosition(value.condition->node.span, m_position)) {
+                        descendExpr(*value.condition);
+                        return;
+                    }
+                    if (value.body &&
+                        containsPosition(value.body->node.span, m_position)) {
+                        descendStmt(*value.body);
+                    }
+                } else if constexpr (std::is_same_v<T, AstVarDeclStmt>) {
+                    if (value.initializer &&
+                        containsPosition(value.initializer->node.span, m_position)) {
+                        descendExpr(*value.initializer);
+                    }
+                } else if constexpr (std::is_same_v<T,
+                                                    AstDestructuredImportStmt>) {
+                    if (value.initializer &&
+                        containsPosition(value.initializer->node.span, m_position)) {
+                        descendExpr(*value.initializer);
+                    }
+                } else if constexpr (std::is_same_v<T, AstForStmt>) {
+                    beginScope();
+
+                    bool initializerContainsPosition = false;
+                    if (const auto* initDecl =
+                            std::get_if<std::unique_ptr<AstVarDeclStmt>>(
+                                &value.initializer)) {
+                        if (*initDecl && (*initDecl)->initializer &&
+                            containsPosition((*initDecl)->initializer->node.span,
+                                             m_position)) {
+                            initializerContainsPosition = true;
+                            descendExpr(*(*initDecl)->initializer);
+                        } else if (*initDecl &&
+                                   positionLessOrEqual(
+                                       (*initDecl)->name.span().end, m_position)) {
+                            defineBinding(variableDeclarationSite(
+                                (*initDecl)->node, (*initDecl)->name,
+                                (*initDecl)->isConst));
+                        }
+                    } else if (const auto* initExpr =
+                                   std::get_if<AstExprPtr>(&value.initializer)) {
+                        if (*initExpr &&
+                            containsPosition((*initExpr)->node.span, m_position)) {
+                            initializerContainsPosition = true;
+                            descendExpr(**initExpr);
+                        }
+                    }
+
+                    if (!initializerContainsPosition && value.condition &&
+                        containsPosition(value.condition->node.span, m_position)) {
+                        descendExpr(*value.condition);
+                        endScope();
+                        return;
+                    }
+                    if (!initializerContainsPosition && value.increment &&
+                        containsPosition(value.increment->node.span, m_position)) {
+                        descendExpr(*value.increment);
+                        endScope();
+                        return;
+                    }
+                    if (!initializerContainsPosition && value.body &&
+                        containsPosition(value.body->node.span, m_position)) {
+                        descendStmt(*value.body);
+                    }
+
+                    if (!m_captured) {
+                        captureVisible();
+                    }
+                    endScope();
+                } else if constexpr (std::is_same_v<T, AstForEachStmt>) {
+                    beginScope();
+                    if (value.iterable &&
+                        containsPosition(value.iterable->node.span, m_position)) {
+                        descendExpr(*value.iterable);
+                        endScope();
+                        return;
+                    }
+
+                    if (positionLessOrEqual(value.name.span().end, m_position)) {
+                        defineBinding(variableDeclarationSite(stmt.node, value.name,
+                                                              value.isConst));
+                    }
+
+                    if (value.body &&
+                        containsPosition(value.body->node.span, m_position)) {
+                        descendStmt(*value.body);
+                    }
+
+                    if (!m_captured) {
+                        captureVisible();
+                    }
+                    endScope();
+                }
+            },
+            stmt.value);
+    }
+
+    void descendExpr(const AstExpr& expr) {
+        std::visit(
+            [&](const auto& value) {
+                using T = std::decay_t<decltype(value)>;
+
+                if constexpr (std::is_same_v<T, AstGroupingExpr>) {
+                    if (value.expression &&
+                        containsPosition(value.expression->node.span, m_position)) {
+                        descendExpr(*value.expression);
+                    }
+                } else if constexpr (std::is_same_v<T, AstUnaryExpr> ||
+                                     std::is_same_v<T, AstUpdateExpr>) {
+                    if (value.operand &&
+                        containsPosition(value.operand->node.span, m_position)) {
+                        descendExpr(*value.operand);
+                    }
+                } else if constexpr (std::is_same_v<T, AstBinaryExpr>) {
+                    if (value.left &&
+                        containsPosition(value.left->node.span, m_position)) {
+                        descendExpr(*value.left);
+                        return;
+                    }
+                    if (value.right &&
+                        containsPosition(value.right->node.span, m_position)) {
+                        descendExpr(*value.right);
+                    }
+                } else if constexpr (std::is_same_v<T, AstAssignmentExpr>) {
+                    if (value.target &&
+                        containsPosition(value.target->node.span, m_position)) {
+                        descendExpr(*value.target);
+                        return;
+                    }
+                    if (value.value &&
+                        containsPosition(value.value->node.span, m_position)) {
+                        descendExpr(*value.value);
+                    }
+                } else if constexpr (std::is_same_v<T, AstCallExpr>) {
+                    if (value.callee &&
+                        containsPosition(value.callee->node.span, m_position)) {
+                        descendExpr(*value.callee);
+                        return;
+                    }
+                    for (const auto& argument : value.arguments) {
+                        if (argument &&
+                            containsPosition(argument->node.span, m_position)) {
+                            descendExpr(*argument);
+                            return;
+                        }
+                    }
+                } else if constexpr (std::is_same_v<T, AstMemberExpr>) {
+                    if (value.object &&
+                        containsPosition(value.object->node.span, m_position)) {
+                        descendExpr(*value.object);
+                    }
+                } else if constexpr (std::is_same_v<T, AstIndexExpr>) {
+                    if (value.object &&
+                        containsPosition(value.object->node.span, m_position)) {
+                        descendExpr(*value.object);
+                        return;
+                    }
+                    if (value.index &&
+                        containsPosition(value.index->node.span, m_position)) {
+                        descendExpr(*value.index);
+                    }
+                } else if constexpr (std::is_same_v<T, AstCastExpr>) {
+                    if (value.expression &&
+                        containsPosition(value.expression->node.span, m_position)) {
+                        descendExpr(*value.expression);
+                    }
+                } else if constexpr (std::is_same_v<T, AstFunctionExpr>) {
+                    beginScope();
+                    for (const auto& param : value.params) {
+                        defineBinding(parameterDeclarationSite(param));
+                    }
+
+                    if (value.expressionBody &&
+                        containsPosition(value.expressionBody->node.span,
+                                         m_position)) {
+                        descendExpr(*value.expressionBody);
+                    } else if (value.blockBody &&
+                               containsPosition(value.blockBody->node.span,
+                                                m_position)) {
+                        descendFunctionBody(*value.blockBody);
+                    }
+
+                    if (!m_captured) {
+                        captureVisible();
+                    }
+                    endScope();
+                } else if constexpr (std::is_same_v<T, AstArrayLiteralExpr>) {
+                    for (const auto& element : value.elements) {
+                        if (element &&
+                            containsPosition(element->node.span, m_position)) {
+                            descendExpr(*element);
+                            return;
+                        }
+                    }
+                } else if constexpr (std::is_same_v<T, AstDictLiteralExpr>) {
+                    for (const auto& entry : value.entries) {
+                        if (entry.key &&
+                            containsPosition(entry.key->node.span, m_position)) {
+                            descendExpr(*entry.key);
+                            return;
+                        }
+                        if (entry.value &&
+                            containsPosition(entry.value->node.span, m_position)) {
+                            descendExpr(*entry.value);
+                            return;
+                        }
+                    }
+                }
+            },
+            expr.value);
+    }
+};
+
 const AstExpr* findDefinitionTargetExpr(const AstExpr& expr,
                                         const SourcePosition& position) {
     if (!containsPosition(expr.node.span, position)) {
@@ -1213,4 +1827,9 @@ std::optional<ToolingHover> findHoverForTooling(
         declarationIt->second.kind,
         hoverDetailForDeclaration(analysis, declarationIt->second),
     };
+}
+
+std::vector<ToolingCompletionItem> findCompletionsForTooling(
+    const ToolingDocumentAnalysis& analysis, const ToolingPosition& position) {
+    return CompletionCollector(analysis, position).collect();
 }
