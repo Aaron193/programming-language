@@ -1240,10 +1240,8 @@ class MogLspServer {
             return;
         }
 
-        if (isMemberCompletionContext(documentIt->second.text, *position)) {
-            sendResponse(id, JsonValue(JsonArray{}));
-            return;
-        }
+        const bool memberContext =
+            isMemberCompletionContext(documentIt->second.text, *position);
 
         const size_t prefixStart =
             completionPrefixStart(documentIt->second.text, *position);
@@ -1256,6 +1254,10 @@ class MogLspServer {
             findCompletionsForTooling(documentIt->second.analysis, *position);
         JsonArray items;
         for (const auto& completion : completions) {
+            if (memberContext && completion.kind != "field" &&
+                completion.kind != "method") {
+                continue;
+            }
             if (!prefix.empty() && !startsWith(completion.label, prefix)) {
                 continue;
             }
@@ -1619,8 +1621,14 @@ class MogLspServer {
     }
 
     double completionKindForToolingKind(std::string_view kind) const {
+        if (kind == "method") {
+            return 2.0;
+        }
         if (kind == "class") {
             return 7.0;
+        }
+        if (kind == "field") {
+            return 5.0;
         }
         if (kind == "function") {
             return 3.0;

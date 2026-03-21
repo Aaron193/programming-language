@@ -108,9 +108,13 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         "#!strict",
         "type Box struct {",
         "    value i32",
+        "",
+        "    fn get() i32 {",
+        "        return this.value",
+        "    }",
         "}",
         "fn read(box Box) i32 {",
-        "    return box.value",
+        "    return box.value + box.get()",
         "}",
         ""
     ])
@@ -377,6 +381,68 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         send_message(proc, {
             "jsonrpc": "2.0",
             "id": 7,
+            "method": "textDocument/completion",
+            "params": {
+                "textDocument": {
+                    "uri": member_uri
+                },
+                "position": {
+                    "line": 9,
+                    "character": 15
+                }
+            }
+        })
+        member_completion = read_until(proc, lambda msg: msg.get("id") == 7)
+        member_labels = [item["label"] for item in member_completion["result"]]
+        if "value" not in member_labels or "get" not in member_labels:
+            raise AssertionError(f"expected member completion items: {member_completion['result']}")
+        if "box" in member_labels or "return" in member_labels:
+            raise AssertionError(f"member completion should exclude scope items: {member_completion['result']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 8,
+            "method": "textDocument/hover",
+            "params": {
+                "textDocument": {
+                    "uri": member_uri
+                },
+                "position": {
+                    "line": 9,
+                    "character": 16
+                }
+            }
+        })
+        member_hover = read_until(proc, lambda msg: msg.get("id") == 8)
+        member_hover_value = member_hover["result"]["contents"]["value"]
+        if member_hover_value != "field value: i32":
+            raise AssertionError(f"unexpected member hover payload: {member_hover['result']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 9,
+            "method": "textDocument/definition",
+            "params": {
+                "textDocument": {
+                    "uri": member_uri
+                },
+                "position": {
+                    "line": 9,
+                    "character": 28
+                }
+            }
+        })
+        member_definition = read_until(proc, lambda msg: msg.get("id") == 9)
+        member_result = member_definition["result"]
+        if member_result["uri"] != member_uri:
+            raise AssertionError("member definition should stay in the same module")
+        if member_result["range"]["start"]["line"] != 4 or \
+                member_result["range"]["start"]["character"] != 7:
+            raise AssertionError(f"unexpected member definition range: {member_result['range']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 10,
             "method": "textDocument/definition",
             "params": {
                 "textDocument": {
@@ -388,7 +454,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
                 }
             }
         })
-        cross_definition = read_until(proc, lambda msg: msg.get("id") == 7)
+        cross_definition = read_until(proc, lambda msg: msg.get("id") == 10)
         cross_result = cross_definition["result"]
         if cross_result["uri"] != module_uri:
             raise AssertionError("import definition should jump to the imported module")
@@ -410,7 +476,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         })
         send_message(proc, {
             "jsonrpc": "2.0",
-            "id": 8,
+            "id": 11,
             "method": "textDocument/completion",
             "params": {
                 "textDocument": {
@@ -422,20 +488,20 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
                 }
             }
         })
-        parse_completion = read_until(proc, lambda msg: msg.get("id") == 8)
+        parse_completion = read_until(proc, lambda msg: msg.get("id") == 11)
         parse_labels = [item["label"] for item in parse_completion["result"]]
         if "fn" not in parse_labels or "while" not in parse_labels:
             raise AssertionError(f"expected keyword completions on parse failure: {parse_completion['result']}")
 
         send_message(proc, {
             "jsonrpc": "2.0",
-            "id": 9,
+            "id": 12,
             "method": "workspace/symbol",
             "params": {
                 "query": "Answer"
             }
         })
-        workspace_symbols = read_until(proc, lambda msg: msg.get("id") == 9)
+        workspace_symbols = read_until(proc, lambda msg: msg.get("id") == 12)
         workspace_names = [item["name"] for item in workspace_symbols["result"]]
         if workspace_names != ["Answer"]:
             raise AssertionError(f"unexpected workspace symbols: {workspace_symbols['result']}")
@@ -444,7 +510,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
 
         send_message(proc, {
             "jsonrpc": "2.0",
-            "id": 10,
+            "id": 13,
             "method": "textDocument/prepareRename",
             "params": {
                 "textDocument": {
@@ -456,7 +522,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
                 }
             }
         })
-        prepare_local = read_until(proc, lambda msg: msg.get("id") == 10)
+        prepare_local = read_until(proc, lambda msg: msg.get("id") == 13)
         local_range = prepare_local["result"]["range"]
         if local_range["start"]["line"] != 7 or local_range["start"]["character"] != 6:
             raise AssertionError(f"unexpected prepareRename range: {prepare_local['result']}")
@@ -465,25 +531,25 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
 
         send_message(proc, {
             "jsonrpc": "2.0",
-            "id": 11,
+            "id": 14,
             "method": "textDocument/prepareRename",
             "params": {
                 "textDocument": {
                     "uri": member_uri
                 },
                 "position": {
-                    "line": 5,
-                    "character": 15
+                    "line": 9,
+                    "character": 16
                 }
             }
         })
-        prepare_member = read_until(proc, lambda msg: msg.get("id") == 11)
+        prepare_member = read_until(proc, lambda msg: msg.get("id") == 14)
         if prepare_member["result"] is not None:
             raise AssertionError("prepareRename should reject member access")
 
         send_message(proc, {
             "jsonrpc": "2.0",
-            "id": 12,
+            "id": 15,
             "method": "textDocument/rename",
             "params": {
                 "textDocument": {
@@ -496,7 +562,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
                 "newName": "Result"
             }
         })
-        local_rename = read_until(proc, lambda msg: msg.get("id") == 12)
+        local_rename = read_until(proc, lambda msg: msg.get("id") == 15)
         local_changes = changes_for_uri(local_rename["result"], uri)
         if len(local_changes) != 2:
             raise AssertionError(f"unexpected same-file rename edits: {local_rename['result']}")
@@ -509,7 +575,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
 
         send_message(proc, {
             "jsonrpc": "2.0",
-            "id": 13,
+            "id": 16,
             "method": "textDocument/rename",
             "params": {
                 "textDocument": {
@@ -522,7 +588,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
                 "newName": "LocalAnswer"
             }
         })
-        import_local_rename = read_until(proc, lambda msg: msg.get("id") == 13)
+        import_local_rename = read_until(proc, lambda msg: msg.get("id") == 16)
         import_local_changes = changes_for_uri(import_local_rename["result"], import_uri)
         if len(import_local_changes) != 2:
             raise AssertionError(f"unexpected importer-local rename edits: {import_local_rename['result']}")
@@ -539,7 +605,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
 
         send_message(proc, {
             "jsonrpc": "2.0",
-            "id": 14,
+            "id": 17,
             "method": "textDocument/rename",
             "params": {
                 "textDocument": {
@@ -552,7 +618,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
                 "newName": "FinalAnswer"
             }
         })
-        exported_rename = read_until(proc, lambda msg: msg.get("id") == 14)
+        exported_rename = read_until(proc, lambda msg: msg.get("id") == 17)
         module_changes = changes_for_uri(exported_rename["result"], module_uri)
         importer_changes = changes_for_uri(exported_rename["result"], import_uri)
         alias_changes = changes_for_uri(exported_rename["result"], alias_import_uri)
@@ -577,7 +643,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
 
         send_message(proc, {
             "jsonrpc": "2.0",
-            "id": 15,
+            "id": 18,
             "method": "textDocument/rename",
             "params": {
                 "textDocument": {
@@ -590,17 +656,17 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
                 "newName": "answer"
             }
         })
-        invalid_exported_rename = read_until(proc, lambda msg: msg.get("id") == 15)
+        invalid_exported_rename = read_until(proc, lambda msg: msg.get("id") == 18)
         if invalid_exported_rename.get("error", {}).get("code") != -32602:
             raise AssertionError(f"expected invalid exported rename error: {invalid_exported_rename}")
 
         send_message(proc, {
             "jsonrpc": "2.0",
-            "id": 16,
+            "id": 19,
             "method": "shutdown",
             "params": {}
         })
-        read_until(proc, lambda msg: msg.get("id") == 16)
+        read_until(proc, lambda msg: msg.get("id") == 19)
         send_message(proc, {
             "jsonrpc": "2.0",
             "method": "exit",

@@ -277,8 +277,14 @@ bool testDefinitionLookup() {
         analyzeDocumentForTooling(memberSource, options);
     const auto memberDefinition =
         findDefinitionForTooling(memberAnalysis, ToolingPosition{5, 15});
-    if (!require(!memberDefinition.has_value(),
-                 "member access should remain unsupported for definition lookup")) {
+    if (!require(memberDefinition.has_value(),
+                 "member access should resolve to the same-module field declaration")) {
+        return false;
+    }
+
+    if (!require(memberDefinition->selectionRange.start.line == 2 &&
+                     memberDefinition->selectionRange.start.character == 4,
+                 "member definition should point at the field name")) {
         return false;
     }
 
@@ -369,8 +375,14 @@ bool testReferencesAndHover() {
     ToolingDocumentAnalysis memberAnalysis =
         analyzeDocumentForTooling(memberSource, options);
     const auto memberHover = findHoverForTooling(memberAnalysis, ToolingPosition{5, 15});
-    if (!require(!memberHover.has_value(),
-                 "member access hover should remain unsupported in this slice")) {
+    if (!require(memberHover.has_value(),
+                 "member access hover should be available for same-module fields")) {
+        return false;
+    }
+
+    if (!require(memberHover->kind == "field" &&
+                     memberHover->detail == "field value: i32",
+                 "member hover should preserve field kind and type detail")) {
         return false;
     }
 
@@ -503,6 +515,48 @@ bool testCompletions() {
     }
     if (!require(findCompletion(parseFailCompletions, "broken") == nullptr,
                  "parse-failed completions should not invent local bindings")) {
+        return false;
+    }
+
+    const std::string memberSource =
+        "#!strict\n"
+        "type Box struct {\n"
+        "    value i32\n"
+        "\n"
+        "    fn get() i32 {\n"
+        "        return this.value\n"
+        "    }\n"
+        "}\n"
+        "fn read(box Box) i32 {\n"
+        "    return box.value + box.get()\n"
+        "}\n";
+    options.sourcePath = "tooling_completion_member_regression.mog";
+    ToolingDocumentAnalysis memberAnalysis =
+        analyzeDocumentForTooling(memberSource, options);
+    if (!require(memberAnalysis.status == AstFrontendBuildStatus::Success,
+                 "member completion sample should succeed")) {
+        return false;
+    }
+
+    const auto memberCompletions =
+        findCompletionsForTooling(memberAnalysis, ToolingPosition{9, 18});
+    const auto* valueCompletion = findCompletion(memberCompletions, "value");
+    const auto* getCompletion = findCompletion(memberCompletions, "get");
+    if (!require(valueCompletion != nullptr &&
+                     valueCompletion->kind == "field" &&
+                     valueCompletion->detail == "field value: i32",
+                 "member completions should expose field members")) {
+        return false;
+    }
+    if (!require(getCompletion != nullptr &&
+                     getCompletion->kind == "method" &&
+                     getCompletion->detail == "method get: function() -> i32",
+                 "member completions should expose method members")) {
+        return false;
+    }
+    if (!require(findCompletion(memberCompletions, "box") == nullptr &&
+                     findCompletion(memberCompletions, "return") == nullptr,
+                 "member completions should not mix in scope or keyword items")) {
         return false;
     }
 

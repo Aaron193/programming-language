@@ -72,6 +72,16 @@ DeclarationSite typeAliasDeclarationSite(const AstTypeAliasDecl& decl) {
     return makeDeclarationSite(decl.node.id, decl.name, "type", decl.node.span);
 }
 
+DeclarationSite fieldDeclarationSite(const AstFieldDecl& field) {
+    return makeDeclarationSite(field.node.id, field.name, "field",
+                               field.node.span);
+}
+
+DeclarationSite methodDeclarationSite(const AstMethodDecl& method) {
+    return makeDeclarationSite(method.node.id, method.name, "method",
+                               method.node.span);
+}
+
 DeclarationSite parameterDeclarationSite(const AstParameter& param) {
     return makeDeclarationSite(param.node.id, param.name, "parameter",
                                param.node.span);
@@ -250,6 +260,106 @@ void collectTopLevelDeclarationSites(
             },
             item->value);
     }
+}
+
+const AstClassDecl* findClassDeclaration(const AstModule& module,
+                                         std::string_view className) {
+    for (const auto& item : module.items) {
+        if (!item) {
+            continue;
+        }
+
+        const auto* classDecl = std::get_if<AstClassDecl>(&item->value);
+        if (classDecl != nullptr && tokenText(classDecl->name) == className) {
+            return classDecl;
+        }
+    }
+
+    return nullptr;
+}
+
+std::optional<DeclarationSite> findClassMemberDeclarationSite(
+    const ToolingDocumentAnalysis& analysis, std::string_view className,
+    std::string_view memberName) {
+    std::string current(className);
+    std::unordered_set<std::string> visited;
+
+    while (!current.empty() && visited.insert(current).second) {
+        const AstClassDecl* classDecl =
+            findClassDeclaration(analysis.frontend.module, current);
+        if (classDecl == nullptr) {
+            break;
+        }
+
+        for (const auto& field : classDecl->fields) {
+            if (tokenText(field.name) == memberName) {
+                return fieldDeclarationSite(field);
+            }
+        }
+
+        for (const auto& method : classDecl->methods) {
+            if (tokenText(method.name) == memberName) {
+                return methodDeclarationSite(method);
+            }
+        }
+
+        const auto superIt =
+            analysis.frontend.bindings.metadata.superclassOf.find(current);
+        if (superIt == analysis.frontend.bindings.metadata.superclassOf.end()) {
+            break;
+        }
+
+        current = superIt->second;
+    }
+
+    return std::nullopt;
+}
+
+std::vector<DeclarationSite> collectClassMemberDeclarationSites(
+    const ToolingDocumentAnalysis& analysis, std::string_view className) {
+    std::string current(className);
+    std::unordered_set<std::string> visited;
+    std::unordered_set<std::string> seenMembers;
+    std::vector<DeclarationSite> members;
+
+    while (!current.empty() && visited.insert(current).second) {
+        const AstClassDecl* classDecl =
+            findClassDeclaration(analysis.frontend.module, current);
+        if (classDecl == nullptr) {
+            break;
+        }
+
+        for (const auto& field : classDecl->fields) {
+            const std::string name = tokenText(field.name);
+            if (seenMembers.insert(name).second) {
+                members.push_back(fieldDeclarationSite(field));
+            }
+        }
+
+        for (const auto& method : classDecl->methods) {
+            const std::string name = tokenText(method.name);
+            if (seenMembers.insert(name).second) {
+                members.push_back(methodDeclarationSite(method));
+            }
+        }
+
+        const auto superIt =
+            analysis.frontend.bindings.metadata.superclassOf.find(current);
+        if (superIt == analysis.frontend.bindings.metadata.superclassOf.end()) {
+            break;
+        }
+
+        current = superIt->second;
+    }
+
+    std::sort(members.begin(), members.end(),
+              [](const DeclarationSite& lhs, const DeclarationSite& rhs) {
+                  if (lhs.name != rhs.name) {
+                      return lhs.name < rhs.name;
+                  }
+                  return lhs.kind < rhs.kind;
+              });
+    return members;
 }
 
 bool containsPosition(const SourceSpan& span, const SourcePosition& position) {
@@ -837,6 +947,11 @@ std::optional<ToolingDocumentAnalysis> analyzeSourceModuleForTooling(
     return analyzeDocumentForTooling(*text, options);
 }
 
+struct MemberAccessResolution {
+    DeclarationSite declaration;
+    SourceSpan occurrenceSpan;
+};
+
 std::optional<TypeRef> declarationTypeForTooling(
     const ToolingDocumentAnalysis& analysis, const DeclarationSite& declaration) {
     const auto nodeTypeIt =
@@ -879,6 +994,12 @@ std::string hoverDetailForDeclaration(const ToolingDocumentAnalysis& analysis,
     }
     if (declaration.kind == "class") {
         return "class " + declaration.name;
+    }
+    if (declaration.kind == "field") {
+        return "field " + declaration.name + ": " + typeText;
+    }
+    if (declaration.kind == "method") {
+        return "method " + declaration.name + ": " + typeText;
     }
     if (declaration.kind == "parameter") {
         return "parameter " + declaration.name + ": " + typeText;
@@ -1423,6 +1544,293 @@ class CompletionCollector {
     }
 };
 
+struct MemberExprTarget {
+    const AstExpr* expr = nullptr;
+    const AstMemberExpr* memberExpr = nullptr;
+};
+
+std::optional<MemberExprTarget> findMemberAccessTargetExpr(
+    const AstExpr& expr, const SourcePosition& position);
+std::optional<MemberExprTarget> findMemberAccessTargetStmt(
+    const AstStmt& stmt, const SourcePosition& position);
+
+std::optional<MemberExprTarget> findMemberAccessTargetItem(
+    const AstItem& item, const SourcePosition& position) {
+    std::optional<MemberExprTarget> best;
+    std::visit(
+        [&](const auto& value) {
+            using T = std::decay_t<decltype(value)>;
+
+            if constexpr (std::is_same_v<T, AstFunctionDecl>) {
+                if (value.body) {
+                    best = findMemberAccessTargetStmt(*value.body, position);
+                }
+            } else if constexpr (std::is_same_v<T, AstClassDecl>) {
+                for (const auto& method : value.methods) {
+                    if (!method.body) {
+                        continue;
+                    }
+
+                    best = findMemberAccessTargetStmt(*method.body, position);
+                    if (best.has_value()) {
+                        break;
+                    }
+                }
+            } else if constexpr (std::is_same_v<T, AstStmtPtr>) {
+                if (value) {
+                    best = findMemberAccessTargetStmt(*value, position);
+                }
+            }
+        },
+        item.value);
+    return best;
+}
+
+std::optional<MemberExprTarget> findMemberAccessTargetStmt(
+    const AstStmt& stmt, const SourcePosition& position) {
+    std::optional<MemberExprTarget> best;
+    std::visit(
+        [&](const auto& value) {
+            using T = std::decay_t<decltype(value)>;
+
+            if constexpr (std::is_same_v<T, AstBlockStmt>) {
+                for (const auto& item : value.items) {
+                    if (!item) {
+                        continue;
+                    }
+                    best = findMemberAccessTargetItem(*item, position);
+                    if (best.has_value()) {
+                        break;
+                    }
+                }
+            } else if constexpr (std::is_same_v<T, AstExprStmt>) {
+                best = findMemberAccessTargetExpr(*value.expression, position);
+            } else if constexpr (std::is_same_v<T, AstPrintStmt>) {
+                best = findMemberAccessTargetExpr(*value.expression, position);
+            } else if constexpr (std::is_same_v<T, AstReturnStmt>) {
+                if (value.value) {
+                    best = findMemberAccessTargetExpr(*value.value, position);
+                }
+            } else if constexpr (std::is_same_v<T, AstIfStmt>) {
+                best = findMemberAccessTargetExpr(*value.condition, position);
+                if (!best.has_value()) {
+                    best = findMemberAccessTargetStmt(*value.thenBranch, position);
+                }
+                if (!best.has_value() && value.elseBranch) {
+                    best =
+                        findMemberAccessTargetStmt(*value.elseBranch, position);
+                }
+            } else if constexpr (std::is_same_v<T, AstWhileStmt>) {
+                best = findMemberAccessTargetExpr(*value.condition, position);
+                if (!best.has_value()) {
+                    best = findMemberAccessTargetStmt(*value.body, position);
+                }
+            } else if constexpr (std::is_same_v<T, AstVarDeclStmt>) {
+                if (value.initializer) {
+                    best =
+                        findMemberAccessTargetExpr(*value.initializer, position);
+                }
+            } else if constexpr (std::is_same_v<T, AstDestructuredImportStmt>) {
+                if (value.initializer) {
+                    best =
+                        findMemberAccessTargetExpr(*value.initializer, position);
+                }
+            } else if constexpr (std::is_same_v<T, AstForStmt>) {
+                if (const auto* initDecl =
+                        std::get_if<std::unique_ptr<AstVarDeclStmt>>(
+                            &value.initializer)) {
+                    if (*initDecl && (*initDecl)->initializer) {
+                        best = findMemberAccessTargetExpr(
+                            *(*initDecl)->initializer, position);
+                    }
+                } else if (const auto* initExpr =
+                               std::get_if<AstExprPtr>(&value.initializer)) {
+                    if (*initExpr) {
+                        best = findMemberAccessTargetExpr(**initExpr, position);
+                    }
+                }
+                if (!best.has_value() && value.condition) {
+                    best = findMemberAccessTargetExpr(*value.condition, position);
+                }
+                if (!best.has_value() && value.increment) {
+                    best = findMemberAccessTargetExpr(*value.increment, position);
+                }
+                if (!best.has_value()) {
+                    best = findMemberAccessTargetStmt(*value.body, position);
+                }
+            } else if constexpr (std::is_same_v<T, AstForEachStmt>) {
+                best = findMemberAccessTargetExpr(*value.iterable, position);
+                if (!best.has_value()) {
+                    best = findMemberAccessTargetStmt(*value.body, position);
+                }
+            }
+        },
+        stmt.value);
+    return best;
+}
+
+std::optional<MemberExprTarget> findMemberAccessTargetExpr(
+    const AstExpr& expr, const SourcePosition& position) {
+    if (!containsPosition(expr.node.span, position)) {
+        return std::nullopt;
+    }
+
+    std::optional<MemberExprTarget> best;
+    std::visit(
+        [&](const auto& value) {
+            using T = std::decay_t<decltype(value)>;
+
+            if constexpr (std::is_same_v<T, AstGroupingExpr>) {
+                best = findMemberAccessTargetExpr(*value.expression, position);
+            } else if constexpr (std::is_same_v<T, AstUnaryExpr> ||
+                                 std::is_same_v<T, AstUpdateExpr>) {
+                best = findMemberAccessTargetExpr(*value.operand, position);
+            } else if constexpr (std::is_same_v<T, AstBinaryExpr>) {
+                best = findMemberAccessTargetExpr(*value.left, position);
+                if (!best.has_value()) {
+                    best = findMemberAccessTargetExpr(*value.right, position);
+                }
+            } else if constexpr (std::is_same_v<T, AstAssignmentExpr>) {
+                best = findMemberAccessTargetExpr(*value.target, position);
+                if (!best.has_value()) {
+                    best = findMemberAccessTargetExpr(*value.value, position);
+                }
+            } else if constexpr (std::is_same_v<T, AstCallExpr>) {
+                best = findMemberAccessTargetExpr(*value.callee, position);
+                if (!best.has_value()) {
+                    for (const auto& argument : value.arguments) {
+                        best = findMemberAccessTargetExpr(*argument, position);
+                        if (best.has_value()) {
+                            break;
+                        }
+                    }
+                }
+            } else if constexpr (std::is_same_v<T, AstMemberExpr>) {
+                if (containsPosition(value.member.span(), position)) {
+                    best = MemberExprTarget{&expr, &value};
+                } else {
+                    best = findMemberAccessTargetExpr(*value.object, position);
+                }
+            } else if constexpr (std::is_same_v<T, AstIndexExpr>) {
+                best = findMemberAccessTargetExpr(*value.object, position);
+                if (!best.has_value()) {
+                    best = findMemberAccessTargetExpr(*value.index, position);
+                }
+            } else if constexpr (std::is_same_v<T, AstCastExpr>) {
+                best = findMemberAccessTargetExpr(*value.expression, position);
+            } else if constexpr (std::is_same_v<T, AstFunctionExpr>) {
+                if (value.expressionBody) {
+                    best = findMemberAccessTargetExpr(*value.expressionBody,
+                                                      position);
+                }
+                if (!best.has_value() && value.blockBody) {
+                    best =
+                        findMemberAccessTargetStmt(*value.blockBody, position);
+                }
+            } else if constexpr (std::is_same_v<T, AstArrayLiteralExpr>) {
+                for (const auto& element : value.elements) {
+                    best = findMemberAccessTargetExpr(*element, position);
+                    if (best.has_value()) {
+                        break;
+                    }
+                }
+            } else if constexpr (std::is_same_v<T, AstDictLiteralExpr>) {
+                for (const auto& entry : value.entries) {
+                    best = findMemberAccessTargetExpr(*entry.key, position);
+                    if (!best.has_value()) {
+                        best =
+                            findMemberAccessTargetExpr(*entry.value, position);
+                    }
+                    if (best.has_value()) {
+                        break;
+                    }
+                }
+            }
+        },
+        expr.value);
+
+    return best;
+}
+
+std::optional<MemberExprTarget> findMemberAccessTarget(
+    const AstModule& module, const SourcePosition& position) {
+    for (const auto& item : module.items) {
+        if (!item) {
+            continue;
+        }
+
+        const auto best = findMemberAccessTargetItem(*item, position);
+        if (best.has_value()) {
+            return best;
+        }
+    }
+
+    return std::nullopt;
+}
+
+std::optional<MemberAccessResolution> resolveMemberAccessForTooling(
+    const ToolingDocumentAnalysis& analysis, const ToolingPosition& position) {
+    if (!analysis.hasParse || !analysis.hasSemantics) {
+        return std::nullopt;
+    }
+
+    const SourcePosition sourcePosition =
+        sourcePositionFromToolingPosition(position);
+    const auto target =
+        findMemberAccessTarget(analysis.frontend.module, sourcePosition);
+    if (!target.has_value() || target->memberExpr == nullptr ||
+        target->memberExpr->object == nullptr) {
+        return std::nullopt;
+    }
+
+    const auto objectTypeIt = analysis.frontend.semanticModel.nodeTypes.find(
+        target->memberExpr->object->node.id);
+    if (objectTypeIt == analysis.frontend.semanticModel.nodeTypes.end() ||
+        !objectTypeIt->second || objectTypeIt->second->kind != TypeKind::CLASS) {
+        return std::nullopt;
+    }
+
+    const auto declaration = findClassMemberDeclarationSite(
+        analysis, objectTypeIt->second->className,
+        tokenText(target->memberExpr->member));
+    if (!declaration.has_value()) {
+        return std::nullopt;
+    }
+
+    return MemberAccessResolution{*declaration, target->memberExpr->member.span()};
+}
+
+std::optional<std::vector<ToolingCompletionItem>> findMemberCompletionsForTooling(
+    const ToolingDocumentAnalysis& analysis, const ToolingPosition& position) {
+    const auto memberAccess = resolveMemberAccessForTooling(analysis, position);
+    if (!memberAccess.has_value()) {
+        return std::nullopt;
+    }
+
+    const auto sourcePosition = sourcePositionFromToolingPosition(position);
+    const auto target =
+        findMemberAccessTarget(analysis.frontend.module, sourcePosition);
+    if (!target.has_value() || target->memberExpr == nullptr ||
+        target->memberExpr->object == nullptr) {
+        return std::vector<ToolingCompletionItem>{};
+    }
+
+    const auto objectTypeIt = analysis.frontend.semanticModel.nodeTypes.find(
+        target->memberExpr->object->node.id);
+    if (objectTypeIt == analysis.frontend.semanticModel.nodeTypes.end() ||
+        !objectTypeIt->second || objectTypeIt->second->kind != TypeKind::CLASS) {
+        return std::vector<ToolingCompletionItem>{};
+    }
+
+    std::vector<ToolingCompletionItem> items;
+    for (const auto& member : collectClassMemberDeclarationSites(
+             analysis, objectTypeIt->second->className)) {
+        items.push_back(completionItemForDeclaration(analysis, member));
+    }
+
+    return items;
+}
+
 const AstExpr* findDefinitionTargetExpr(const AstExpr& expr,
                                         const SourcePosition& position) {
     if (!containsPosition(expr.node.span, position)) {
@@ -1812,6 +2220,15 @@ ToolingDocumentAnalysis analyzeDocumentForTooling(
 
 std::optional<ToolingLocation> findDefinitionForTooling(
     const ToolingDocumentAnalysis& analysis, const ToolingPosition& position) {
+    const auto memberAccess = resolveMemberAccessForTooling(analysis, position);
+    if (memberAccess.has_value()) {
+        return ToolingLocation{
+            analysis.sourcePath,
+            toolingRangeFromSourceSpan(memberAccess->declaration.range),
+            toolingRangeFromSourceSpan(memberAccess->declaration.selectionRange),
+        };
+    }
+
     const auto target = resolveSymbolTarget(analysis, position);
     if (!target.has_value()) {
         return std::nullopt;
@@ -1918,6 +2335,16 @@ std::vector<ToolingLocation> findReferencesForTooling(
 
 std::optional<ToolingHover> findHoverForTooling(
     const ToolingDocumentAnalysis& analysis, const ToolingPosition& position) {
+    const auto memberAccess = resolveMemberAccessForTooling(analysis, position);
+    if (memberAccess.has_value()) {
+        return ToolingHover{
+            toolingRangeFromSourceSpan(memberAccess->occurrenceSpan),
+            memberAccess->declaration.name,
+            memberAccess->declaration.kind,
+            hoverDetailForDeclaration(analysis, memberAccess->declaration),
+        };
+    }
+
     const auto target = resolveSymbolTarget(analysis, position);
     if (!target.has_value()) {
         return std::nullopt;
@@ -1940,6 +2367,12 @@ std::optional<ToolingHover> findHoverForTooling(
 
 std::vector<ToolingCompletionItem> findCompletionsForTooling(
     const ToolingDocumentAnalysis& analysis, const ToolingPosition& position) {
+    const auto memberCompletions =
+        findMemberCompletionsForTooling(analysis, position);
+    if (memberCompletions.has_value()) {
+        return *memberCompletions;
+    }
+
     return CompletionCollector(analysis, position).collect();
 }
 
