@@ -4649,12 +4649,11 @@ std::vector<ToolingCompletionItem> findCompletionsForTooling(
     const ToolingDocumentAnalysis& analysis, std::string_view source,
     const ToolingPosition& position) {
     auto items = findCompletionsForToolingImpl(analysis, position);
-    if (!isMemberCompletionContextForTooling(source, position) ||
-        std::any_of(items.begin(), items.end(), [](const ToolingCompletionItem& item) {
-            return item.kind == "field" || item.kind == "method" ||
-                   item.kind == "function" || item.kind == "class" ||
-                   item.kind == "constant";
-        })) {
+    if (!isMemberCompletionContextForTooling(source, position)) {
+        return items;
+    }
+
+    if (findMemberCompletionsForTooling(analysis, position).has_value()) {
         return items;
     }
 

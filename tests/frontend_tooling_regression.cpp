@@ -648,6 +648,61 @@ bool testCompletions() {
         return false;
     }
 
+    const std::string incompleteMemberBeforeCallSource =
+        "#!strict\n"
+        "type Pipe struct {}\n"
+        "type GameState struct {\n"
+        "    birdY f64\n"
+        "    birdVelocity f64\n"
+        "    pipes Array<Pipe>\n"
+        "    spawnTimer f64\n"
+        "    spawnIndex i32\n"
+        "    score i32\n"
+        "    running bool\n"
+        "    dead bool\n"
+        "}\n"
+        "fn seedInitialPipes(state GameState) void {}\n"
+        "fn resetGame() GameState {\n"
+        "    var state GameState = GameState()\n"
+        "    var pipes Array<Pipe> = []\n"
+        "\n"
+        "    state.birdY = 220.0\n"
+        "    state.birdVelocity = 0.0\n"
+        "    state.pipes = pipes\n"
+        "    state.spawnTimer = 0.0\n"
+        "    state.spawnIndex = 0\n"
+        "    state.score = 0\n"
+        "    state.running = true\n"
+        "    state.dead = false\n"
+        "\n"
+        "    state.\n"
+        "    seedInitialPipes(state)\n"
+        "    return state\n"
+        "}\n";
+    options.sourcePath =
+        "tooling_completion_member_before_call_regression.mog";
+    ToolingDocumentAnalysis incompleteMemberBeforeCallAnalysis =
+        analyzeDocumentForTooling(incompleteMemberBeforeCallSource, options);
+
+    const auto incompleteMemberBeforeCallCompletions = findCompletionsForTooling(
+        incompleteMemberBeforeCallAnalysis, incompleteMemberBeforeCallSource,
+        ToolingPosition{26, 10});
+    if (!require(findCompletion(incompleteMemberBeforeCallCompletions, "birdY") !=
+                     nullptr &&
+                     findCompletion(incompleteMemberBeforeCallCompletions,
+                                    "dead") != nullptr,
+                 "member completions before a following call should expose fields")) {
+        return false;
+    }
+    if (!require(
+            findCompletion(incompleteMemberBeforeCallCompletions,
+                           "seedInitialPipes") == nullptr &&
+                findCompletion(incompleteMemberBeforeCallCompletions, "state") ==
+                    nullptr,
+            "member completions before a following call should not fall back to scope items")) {
+        return false;
+    }
+
     const std::string moduleMemberSource =
         "#!strict\n"
         "const math = @import(\"./modules/math.mog\")\n"
