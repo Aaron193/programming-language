@@ -673,6 +673,41 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
 
         send_message(proc, {
             "jsonrpc": "2.0",
+            "id": 9.25,
+            "method": "textDocument/definition",
+            "params": {
+                "textDocument": {
+                    "uri": member_uri
+                },
+                "position": {
+                    "line": 2,
+                    "character": 5
+                }
+            }
+        })
+        field_declaration_definition = read_until(proc, lambda msg: msg.get("id") == 9.25)
+        field_declaration_result = field_declaration_definition["result"]
+        if not isinstance(field_declaration_result, list):
+            raise AssertionError(
+                f"field declaration definition should return a location list: {field_declaration_result}")
+        if len(field_declaration_result) != 3:
+            raise AssertionError(
+                f"field declaration definition should include declaration and references: {field_declaration_result}")
+        if field_declaration_result[0]["uri"] != member_uri or \
+                field_declaration_result[0]["range"]["start"]["line"] != 2:
+            raise AssertionError(
+                f"field declaration definition should start at the declaration: {field_declaration_result}")
+        if field_declaration_result[1]["uri"] != member_uri or \
+                field_declaration_result[1]["range"]["start"]["line"] != 5:
+            raise AssertionError(
+                f"field declaration definition should include this.field usage: {field_declaration_result}")
+        if field_declaration_result[2]["uri"] != member_uri or \
+                field_declaration_result[2]["range"]["start"]["line"] != 9:
+            raise AssertionError(
+                f"field declaration definition should include object.field usage: {field_declaration_result}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
             "id": 9.5,
             "method": "textDocument/definition",
             "params": {

@@ -1138,6 +1138,20 @@ class MogLspServer {
             return;
         }
 
+        const auto fieldDeclarationReferences =
+            findFieldDeclarationReferencesForTooling(documentIt->second.analysis,
+                                                     *position);
+        if (fieldDeclarationReferences.size() > 1) {
+            JsonArray items;
+            items.reserve(fieldDeclarationReferences.size());
+            for (const auto& reference : fieldDeclarationReferences) {
+                items.push_back(makeLocation(pathToFileUri(reference.path),
+                                             reference.selectionRange));
+            }
+            sendResponse(id, JsonValue(std::move(items)));
+            return;
+        }
+
         const auto typeDeclarationReferences =
             findTypeDeclarationReferencesForTooling(documentIt->second.analysis,
                                                     *position);
