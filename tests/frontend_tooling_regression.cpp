@@ -313,6 +313,34 @@ bool testDefinitionLookup() {
         return false;
     }
 
+    const std::string typeUseSource =
+        "#!strict\n"
+        "type Pipe struct {\n"
+        "    x f64\n"
+        "}\n"
+        "fn makePipe(x f64) Pipe {\n"
+        "    return makePipe(x)\n"
+        "}\n";
+    options.sourcePath = "tooling_type_definition_regression.mog";
+    ToolingDocumentAnalysis typeUseAnalysis =
+        analyzeDocumentForTooling(typeUseSource, options);
+    if (!require(typeUseAnalysis.hasParse,
+                 "type annotation definition sample should preserve parse data")) {
+        return false;
+    }
+    const auto typeUseDefinition =
+        findDefinitionForTooling(typeUseAnalysis, ToolingPosition{4, 20});
+    if (!require(typeUseDefinition.has_value(),
+                 "type annotations should resolve to the same-module type declaration")) {
+        return false;
+    }
+
+    if (!require(typeUseDefinition->selectionRange.start.line == 1 &&
+                     typeUseDefinition->selectionRange.start.character == 5,
+                 "type definition should point at the declared type name")) {
+        return false;
+    }
+
     return true;
 }
 

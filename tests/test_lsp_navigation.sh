@@ -122,6 +122,19 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
     member_path = Path(tmpdir) / "member_sample.mog"
     member_path.write_text(member_source, encoding="utf-8")
     member_uri = member_path.resolve().as_uri()
+    type_definition_source = "\n".join([
+        "#!strict",
+        "type Pipe struct {",
+        "    x f64",
+        "}",
+        "fn makePipe(x f64) Pipe {",
+        "    return makePipe(x)",
+        "}",
+        ""
+    ])
+    type_definition_path = Path(tmpdir) / "type_definition_sample.mog"
+    type_definition_path.write_text(type_definition_source, encoding="utf-8")
+    type_definition_uri = type_definition_path.resolve().as_uri()
     module_member_source = "\n".join([
         "#!strict",
         "const dep = @import(\"./dep.mog\")",
@@ -325,6 +338,25 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         )
         if member_diagnostics["params"]["diagnostics"]:
             raise AssertionError("expected member sample to stay diagnostics-free")
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": type_definition_uri,
+                    "languageId": "mog",
+                    "version": 1,
+                    "text": type_definition_source
+                }
+            }
+        })
+        type_definition_diagnostics = read_until(
+            proc,
+            lambda msg: msg.get("method") == "textDocument/publishDiagnostics" and
+            msg.get("params", {}).get("uri") == type_definition_uri,
+        )
+        if type_definition_diagnostics["params"]["diagnostics"]:
+            raise AssertionError("expected type definition sample to stay diagnostics-free")
         send_message(proc, {
             "jsonrpc": "2.0",
             "method": "textDocument/didOpen",
@@ -638,6 +670,28 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         if member_result["range"]["start"]["line"] != 4 or \
                 member_result["range"]["start"]["character"] != 7:
             raise AssertionError(f"unexpected member definition range: {member_result['range']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 9.5,
+            "method": "textDocument/definition",
+            "params": {
+                "textDocument": {
+                    "uri": type_definition_uri
+                },
+                "position": {
+                    "line": 4,
+                    "character": 20
+                }
+            }
+        })
+        type_definition = read_until(proc, lambda msg: msg.get("id") == 9.5)
+        type_result = type_definition["result"]
+        if type_result["uri"] != type_definition_uri:
+            raise AssertionError("type definition should stay in the same module")
+        if type_result["range"]["start"]["line"] != 1 or \
+                type_result["range"]["start"]["character"] != 5:
+            raise AssertionError(f"unexpected type definition range: {type_result['range']}")
 
         send_message(proc, {
             "jsonrpc": "2.0",
