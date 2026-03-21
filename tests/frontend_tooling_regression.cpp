@@ -186,6 +186,31 @@ bool testDiagnosticsAndSymbols() {
         return false;
     }
 
+    const std::string importSource =
+        "#!strict\n"
+        "const {Answer as FinalAnswer: i32} = @import(\"./dep.mog\")\n";
+    ToolingDocumentAnalysis importAnalysis =
+        analyzeDocumentForTooling(importSource, options);
+    if (!require(importAnalysis.documentSymbols.size() == 1,
+                 "destructured import should appear as a document symbol")) {
+        return false;
+    }
+
+    const ToolingDocumentSymbol& importSymbol = importAnalysis.documentSymbols[0];
+    const bool startsInside =
+        (importSymbol.range.start.line < importSymbol.selectionRange.start.line) ||
+        (importSymbol.range.start.line == importSymbol.selectionRange.start.line &&
+         importSymbol.range.start.character <=
+             importSymbol.selectionRange.start.character);
+    const bool endsInside =
+        (importSymbol.selectionRange.end.line < importSymbol.range.end.line) ||
+        (importSymbol.selectionRange.end.line == importSymbol.range.end.line &&
+         importSymbol.selectionRange.end.character <= importSymbol.range.end.character);
+    if (!require(startsInside && endsInside,
+                 "document symbol selectionRange should be contained in range")) {
+        return false;
+    }
+
     return true;
 }
 

@@ -50,6 +50,13 @@ bool positionLessOrEqual(const SourcePosition& lhs, const SourcePosition& rhs) {
     return !positionLess(rhs, lhs);
 }
 
+SourceSpan enclosingSpan(const SourceSpan& lhs, const SourceSpan& rhs) {
+    const SourcePosition start =
+        positionLess(lhs.start, rhs.start) ? lhs.start : rhs.start;
+    const SourcePosition end = positionLess(lhs.end, rhs.end) ? rhs.end : lhs.end;
+    return SourceSpan{start, end};
+}
+
 std::string tokenText(const Token& token) { return tokenLexeme(token); }
 
 DeclarationSite makeDeclarationSite(AstNodeId nodeId, const Token& name,
@@ -160,10 +167,11 @@ ToolingDiagnostic toolingDiagnosticFromFrontend(
 ToolingDocumentSymbol makeSymbol(std::string name, std::string kind,
                                  std::string detail, const SourceSpan& range,
                                  const SourceSpan& selectionRange) {
+    const SourceSpan fullRange = enclosingSpan(range, selectionRange);
     return ToolingDocumentSymbol{std::move(name),
                                  std::move(kind),
                                  std::move(detail),
-                                 toolingRangeFromSourceSpan(range),
+                                 toolingRangeFromSourceSpan(fullRange),
                                  toolingRangeFromSourceSpan(selectionRange)};
 }
 
