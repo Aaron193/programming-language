@@ -2,6 +2,7 @@
 
 #include <string>
 #include <string_view>
+#include <optional>
 #include <vector>
 
 #include "AstFrontend.hpp"
@@ -45,6 +46,12 @@ struct ToolingDocumentSymbol {
     ToolingRange selectionRange;
 };
 
+struct ToolingLocation {
+    std::string path;
+    ToolingRange range;
+    ToolingRange selectionRange;
+};
+
 struct ToolingAnalyzeOptions {
     std::string sourcePath;
     std::vector<std::string> packageSearchPaths;
@@ -54,8 +61,12 @@ struct ToolingAnalyzeOptions {
 
 struct ToolingDocumentAnalysis {
     AstFrontendBuildStatus status = AstFrontendBuildStatus::ParseFailed;
+    std::string sourcePath;
     bool strictMode = false;
     bool hasFrontend = false;
+    bool hasParse = false;
+    bool hasBindings = false;
+    bool hasSemantics = false;
     std::vector<ToolingDiagnostic> diagnostics;
     std::vector<ToolingDocumentSymbol> documentSymbols;
     AstFrontendResult frontend;
@@ -68,3 +79,5 @@ SourcePosition sourcePositionFromToolingPosition(const ToolingPosition& position
 SourceSpan sourceSpanFromToolingRange(const ToolingRange& range);
 ToolingDocumentAnalysis analyzeDocumentForTooling(
     std::string_view source, const ToolingAnalyzeOptions& options);
+std::optional<ToolingLocation> findDefinitionForTooling(
+    const ToolingDocumentAnalysis& analysis, const ToolingPosition& position);

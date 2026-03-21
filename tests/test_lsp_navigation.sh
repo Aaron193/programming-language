@@ -1,0 +1,182 @@
+#!/bin/bash
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+LSP_BIN="$PROJECT_ROOT/build/mog-lsp"
+
+if [[ ! -x "$LSP_BIN" ]]; then
+    echo "LSP binary not found at $LSP_BIN"
+    echo "Build first with: $PROJECT_ROOT/build.sh"
+    exit 1
+fi
+
+python3 - "$LSP_BIN" <<'PY'
+import json
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+lsp_bin = sys.argv[1]
+
+
+def send_message(proc, payload):
+    body = json.dumps(payload).encode("utf-8")
+    header = f"Content-Length: {len(body)}\r\n\r\n".encode("utf-8")
+    proc.stdin.write(header + body)
+    proc.stdin.flush()
+
+
+def read_message(proc):
+    headers = {}
+    while True:
+        line = proc.stdout.readline()
+        if not line:
+            raise RuntimeError("unexpected EOF from mog-lsp")
+        if line == b"\r\n":
+            break
+        decoded = line.decode("utf-8").strip()
+        key, value = decoded.split(":", 1)
+        headers[key.lower()] = value.strip()
+
+    content_length = int(headers["content-length"])
+    body = proc.stdout.read(content_length)
+    return json.loads(body.decode("utf-8"))
+
+
+def read_until(proc, predicate):
+    while True:
+        message = read_message(proc)
+        if predicate(message):
+            return message
+
+
+source = "\n".join([
+    "#!strict",
+    "fn add(x i32) i32 {",
+    "    var local i32 = x",
+    "    return local",
+    "}",
+    "const Value i32 = add(1)",
+    "var broken i32 = \"oops\"",
+    "print(Value)",
+    ""
+])
+
+with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
+    source_path = Path(tmpdir) / "sample.mog"
+    source_path.write_text(source, encoding="utf-8")
+    uri = source_path.resolve().as_uri()
+
+    proc = subprocess.Popen(
+        [lsp_bin],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    try:
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "processId": None,
+                "rootUri": Path(tmpdir).resolve().as_uri(),
+                "capabilities": {}
+            }
+        })
+        initialize = read_until(proc, lambda msg: msg.get("id") == 1)
+        caps = initialize["result"]["capabilities"]
+        if caps.get("documentSymbolProvider") is not True:
+            raise AssertionError("initialize response missing documentSymbolProvider")
+        if caps.get("definitionProvider") is not True:
+            raise AssertionError("initialize response missing definitionProvider")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "method": "initialized",
+            "params": {}
+        })
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": uri,
+                    "languageId": "mog",
+                    "version": 1,
+                    "text": source
+                }
+            }
+        })
+
+        diagnostics = read_until(
+            proc,
+            lambda msg: msg.get("method") == "textDocument/publishDiagnostics",
+        )
+        published = diagnostics["params"]["diagnostics"]
+        if not published:
+            raise AssertionError("expected diagnostics for the broken sample")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "textDocument/documentSymbol",
+            "params": {
+                "textDocument": {
+                    "uri": uri
+                }
+            }
+        })
+        document_symbols = read_until(proc, lambda msg: msg.get("id") == 2)
+        names = [item["name"] for item in document_symbols["result"]]
+        if names != ["add", "Value", "broken"]:
+            raise AssertionError(f"unexpected document symbols: {names}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "textDocument/definition",
+            "params": {
+                "textDocument": {
+                    "uri": uri
+                },
+                "position": {
+                    "line": 7,
+                    "character": 6
+                }
+            }
+        })
+        definition = read_until(proc, lambda msg: msg.get("id") == 3)
+        result = definition["result"]
+        if result["uri"] != uri:
+            raise AssertionError("definition should stay within the same file")
+        if result["range"]["start"]["line"] != 5 or \
+                result["range"]["start"]["character"] != 6:
+            raise AssertionError(f"unexpected definition range: {result['range']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "shutdown",
+            "params": {}
+        })
+        read_until(proc, lambda msg: msg.get("id") == 4)
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "method": "exit",
+            "params": {}
+        })
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=5)
+
+print("[PASS] mog-lsp navigation regression")
+PY

@@ -630,6 +630,7 @@ struct DocumentState {
     std::string path;
     std::string text;
     int version = 0;
+    ToolingDocumentAnalysis analysis;
 };
 
 class MogLspServer {
@@ -727,6 +728,18 @@ class MogLspServer {
             return;
         }
 
+        if (*method == "textDocument/documentSymbol" && params != nullptr &&
+            id != nullptr) {
+            handleDocumentSymbol(*id, *params);
+            return;
+        }
+
+        if (*method == "textDocument/definition" && params != nullptr &&
+            id != nullptr) {
+            handleDefinition(*id, *params);
+            return;
+        }
+
         if (id != nullptr) {
             sendResponse(*id, JsonValue(nullptr));
         }
@@ -753,8 +766,9 @@ class MogLspServer {
         document.path = decodeUriPath(*uri);
         document.text = *text;
         document.version = getIntegerValue(documentObject->get(), "version").value_or(0);
-        m_documents[document.uri] = document;
-        analyzeAndPublish(m_documents[document.uri]);
+        const std::string key = document.uri;
+        m_documents[key] = std::move(document);
+        analyzeAndPublish(m_documents[key]);
     }
 
     void handleDidChange(const JsonObject& params) {
@@ -818,6 +832,65 @@ class MogLspServer {
         sendPublishDiagnostics(*uri, {});
     }
 
+    void handleDocumentSymbol(const JsonValue& id, const JsonObject& params) {
+        auto uri = getTextDocumentUri(params);
+        if (!uri.has_value()) {
+            sendResponse(id, JsonValue(JsonArray{}));
+            return;
+        }
+
+        auto documentIt = m_documents.find(*uri);
+        if (documentIt == m_documents.end()) {
+            sendResponse(id, JsonValue(JsonArray{}));
+            return;
+        }
+
+        sendResponse(id,
+                     makeDocumentSymbolsResponse(documentIt->second.analysis));
+    }
+
+    void handleDefinition(const JsonValue& id, const JsonObject& params) {
+        auto uri = getTextDocumentUri(params);
+        if (!uri.has_value()) {
+            sendResponse(id, JsonValue(nullptr));
+            return;
+        }
+
+        auto documentIt = m_documents.find(*uri);
+        if (documentIt == m_documents.end()) {
+            sendResponse(id, JsonValue(nullptr));
+            return;
+        }
+
+        const JsonValue* positionValue = getObjectValue(params, "position");
+        if (positionValue == nullptr) {
+            sendResponse(id, JsonValue(nullptr));
+            return;
+        }
+        const auto positionObject = asObject(*positionValue);
+        if (!positionObject.has_value()) {
+            sendResponse(id, JsonValue(nullptr));
+            return;
+        }
+
+        const ToolingPosition position{
+            static_cast<size_t>(
+                getIntegerValue(positionObject->get(), "line").value_or(0)),
+            static_cast<size_t>(getIntegerValue(positionObject->get(),
+                                                "character")
+                                    .value_or(0)),
+        };
+        const auto definition =
+            findDefinitionForTooling(documentIt->second.analysis, position);
+        if (!definition.has_value()) {
+            sendResponse(id, JsonValue(nullptr));
+            return;
+        }
+
+        sendResponse(id, makeLocation(pathToFileUri(documentIt->second.path),
+                                      definition->selectionRange));
+    }
+
     std::optional<std::string> getTextDocumentUri(const JsonObject& params) const {
         const JsonValue* documentValue = getObjectValue(params, "textDocument");
         if (documentValue == nullptr) {
@@ -846,16 +919,15 @@ class MogLspServer {
         return getIntegerValue(document->get(), "version");
     }
 
-    void analyzeAndPublish(const DocumentState& document) {
+    void analyzeAndPublish(DocumentState& document) {
         ToolingAnalyzeOptions options;
         options.sourcePath = document.path;
         options.packageSearchPaths = m_packageSearchPaths;
         options.moduleGraphCache = &m_cache;
         options.strictMode = toolingSourceStartsWithStrictDirective(document.text);
 
-        ToolingDocumentAnalysis analysis =
-            analyzeDocumentForTooling(document.text, options);
-        sendPublishDiagnostics(document.uri, analysis.diagnostics);
+        document.analysis = analyzeDocumentForTooling(document.text, options);
+        sendPublishDiagnostics(document.uri, document.analysis.diagnostics);
     }
 
     void sendInitializeResponse(const JsonValue* id) {
@@ -866,8 +938,47 @@ class MogLspServer {
         JsonObject result;
         result["capabilities"] = JsonValue(JsonObject{
             {"textDocumentSync", JsonValue(1.0)},
+            {"documentSymbolProvider", JsonValue(true)},
+            {"definitionProvider", JsonValue(true)},
         });
         sendResponse(*id, JsonValue(std::move(result)));
+    }
+
+    double symbolKindForToolingKind(std::string_view kind) const {
+        if (kind == "class") {
+            return 5.0;
+        }
+        if (kind == "function") {
+            return 12.0;
+        }
+        if (kind == "constant") {
+            return 14.0;
+        }
+        if (kind == "import") {
+            return 2.0;
+        }
+        if (kind == "type") {
+            return 26.0;
+        }
+        return 13.0;
+    }
+
+    JsonValue makeDocumentSymbolsResponse(
+        const ToolingDocumentAnalysis& analysis) const {
+        JsonArray items;
+        items.reserve(analysis.documentSymbols.size());
+        for (const auto& symbol : analysis.documentSymbols) {
+            JsonObject item;
+            item["name"] = JsonValue(symbol.name);
+            item["kind"] = JsonValue(symbolKindForToolingKind(symbol.kind));
+            item["range"] = makeRange(symbol.range);
+            item["selectionRange"] = makeRange(symbol.selectionRange);
+            if (!symbol.detail.empty()) {
+                item["detail"] = JsonValue(symbol.detail);
+            }
+            items.push_back(JsonValue(std::move(item)));
+        }
+        return JsonValue(std::move(items));
     }
 
     void sendResponse(const JsonValue& id, const JsonValue& result) {

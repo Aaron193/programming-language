@@ -18,5 +18,6 @@ bash "$SCRIPT_DIR/test_ast_optimizer.sh" &&
 bash "$SCRIPT_DIR/test_ast_emitter_regression.sh" &&
 bash "$SCRIPT_DIR/test_newline_syntax.sh" &&
 bash "$SCRIPT_DIR/test_compile_recovery.sh" &&
+bash "$SCRIPT_DIR/test_lsp_navigation.sh" &&
 bash "$SCRIPT_DIR/test_frontend_benchmark.sh" &&
 "$REGRESSION_BIN"
