@@ -1257,7 +1257,8 @@ class MogLspServer {
             prefixStart, prefixEnd - prefixStart);
 
         const auto completions =
-            findCompletionsForTooling(documentIt->second.analysis, *position);
+            findCompletionsForTooling(documentIt->second.analysis,
+                                      documentIt->second.text, *position);
         JsonArray items;
         for (const auto& completion : completions) {
             if (memberContext && completion.kind != "field" &&

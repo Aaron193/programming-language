@@ -13,6 +13,7 @@ fi
 
 python3 - "$LSP_BIN" <<'PY'
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -518,6 +519,42 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
             raise AssertionError(f"expected member completion items: {member_completion['result']}")
         if "box" in member_labels or "return" in member_labels:
             raise AssertionError(f"member completion should exclude scope items: {member_completion['result']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 7.25,
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": "file://" + os.path.abspath("tests/lsp_member_incomplete.mog"),
+                    "languageId": "mog",
+                    "version": 1,
+                    "text": member_source.replace("box.value + box.get()", "box.")
+                }
+            }
+        })
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 7.3,
+            "method": "textDocument/completion",
+            "params": {
+                "textDocument": {
+                    "uri": "file://" + os.path.abspath("tests/lsp_member_incomplete.mog")
+                },
+                "position": {
+                    "line": 9,
+                    "character": 15
+                }
+            }
+        })
+        incomplete_member_completion = read_until(proc, lambda msg: msg.get("id") == 7.3)
+        incomplete_member_labels = [item["label"] for item in incomplete_member_completion["result"]]
+        if "value" not in incomplete_member_labels or "get" not in incomplete_member_labels:
+            raise AssertionError(
+                f"expected incomplete member completion items: {incomplete_member_completion['result']}")
+        if "box" in incomplete_member_labels or "return" in incomplete_member_labels:
+            raise AssertionError(
+                f"incomplete member completion should exclude scope items: {incomplete_member_completion['result']}")
 
         send_message(proc, {
             "jsonrpc": "2.0",

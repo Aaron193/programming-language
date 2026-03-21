@@ -2376,7 +2376,7 @@ std::optional<MemberExprTarget> findMemberAccessTarget(
 
 std::optional<MemberAccessResolution> resolveMemberAccessForTooling(
     const ToolingDocumentAnalysis& analysis, const ToolingPosition& position) {
-    if (!analysis.hasParse || !analysis.hasSemantics) {
+    if (!analysis.hasParse) {
         return std::nullopt;
     }
 
@@ -2460,11 +2460,6 @@ std::optional<std::vector<ToolingCompletionItem>> findMemberCompletionsForToolin
             items.push_back(completionItemForExportedSymbol(name, type));
         }
         return items;
-    }
-
-    const auto memberAccess = resolveMemberAccessForTooling(analysis, position);
-    if (!memberAccess.has_value()) {
-        return std::nullopt;
     }
 
     const auto objectTypeIt = analysis.frontend.semanticModel.nodeTypes.find(
@@ -3478,7 +3473,62 @@ std::string repairedSignatureHelpSource(std::string_view source,
     return repaired;
 }
 
-std::vector<ToolingCompletionItem> findCompletionsForTooling(
+size_t completionPrefixStartForTooling(std::string_view text,
+                                       const ToolingPosition& position) {
+    size_t offset = 0;
+    size_t line = 0;
+    while (offset < text.size() && line < position.line) {
+        if (text[offset++] == '\n') {
+            ++line;
+        }
+    }
+
+    size_t character = 0;
+    while (offset < text.size() && character < position.character &&
+           text[offset] != '\n') {
+        ++offset;
+        ++character;
+    }
+
+    while (offset > 0 &&
+           ((text[offset - 1] >= 'a' && text[offset - 1] <= 'z') ||
+            (text[offset - 1] >= 'A' && text[offset - 1] <= 'Z') ||
+            (text[offset - 1] >= '0' && text[offset - 1] <= '9') ||
+            text[offset - 1] == '_')) {
+        --offset;
+    }
+    return offset;
+}
+
+bool isMemberCompletionContextForTooling(std::string_view source,
+                                         const ToolingPosition& position) {
+    const size_t prefixStart = completionPrefixStartForTooling(source, position);
+    return prefixStart > 0 && source[prefixStart - 1] == '.';
+}
+
+std::string repairedCompletionSource(std::string_view source,
+                                     const ToolingPosition& position) {
+    std::string repaired(source);
+    size_t offset = 0;
+    size_t line = 0;
+    while (offset < repaired.size() && line < position.line) {
+        if (repaired[offset++] == '\n') {
+            ++line;
+        }
+    }
+
+    size_t character = 0;
+    while (offset < repaired.size() && character < position.character &&
+           repaired[offset] != '\n') {
+        ++offset;
+        ++character;
+    }
+
+    repaired.insert(offset, "__mog_completion__");
+    return repairedSignatureHelpSource(repaired, position);
+}
+
+std::vector<ToolingCompletionItem> findCompletionsForToolingImpl(
     const ToolingDocumentAnalysis& analysis, const ToolingPosition& position) {
     const auto memberCompletions =
         findMemberCompletionsForTooling(analysis, position);
@@ -3505,6 +3555,44 @@ std::vector<ToolingCompletionItem> findCompletionsForTooling(
                                }),
                 items.end());
     return items;
+}
+
+std::vector<ToolingCompletionItem> findCompletionsForTooling(
+    const ToolingDocumentAnalysis& analysis, const ToolingPosition& position) {
+    return findCompletionsForToolingImpl(analysis, position);
+}
+
+std::vector<ToolingCompletionItem> findCompletionsForTooling(
+    const ToolingDocumentAnalysis& analysis, std::string_view source,
+    const ToolingPosition& position) {
+    auto items = findCompletionsForToolingImpl(analysis, position);
+    if (!isMemberCompletionContextForTooling(source, position) ||
+        std::any_of(items.begin(), items.end(), [](const ToolingCompletionItem& item) {
+            return item.kind == "field" || item.kind == "method" ||
+                   item.kind == "function" || item.kind == "class" ||
+                   item.kind == "constant";
+        })) {
+        return items;
+    }
+
+    ToolingAnalyzeOptions options;
+    options.sourcePath = analysis.sourcePath;
+    options.packageSearchPaths = analysis.packageSearchPaths;
+    options.strictMode = analysis.strictMode;
+    const std::string repairedSource =
+        repairedCompletionSource(source, position);
+    const auto repairedAnalysis =
+        analyzeDocumentForTooling(repairedSource, options);
+    if (!repairedAnalysis.hasParse) {
+        return items;
+    }
+
+    const auto repairedItems =
+        findCompletionsForToolingImpl(repairedAnalysis, position);
+    if (repairedItems.empty()) {
+        return items;
+    }
+    return repairedItems;
 }
 
 std::optional<ToolingSignatureHelp> findSignatureHelpForToolingImpl(

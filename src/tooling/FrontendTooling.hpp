@@ -144,6 +144,9 @@ std::optional<ToolingHover> findHoverForTooling(
     const ToolingDocumentAnalysis& analysis, const ToolingPosition& position);
 std::vector<ToolingCompletionItem> findCompletionsForTooling(
     const ToolingDocumentAnalysis& analysis, const ToolingPosition& position);
+std::vector<ToolingCompletionItem> findCompletionsForTooling(
+    const ToolingDocumentAnalysis& analysis, std::string_view source,
+    const ToolingPosition& position);
 std::optional<ToolingSignatureHelp> findSignatureHelpForTooling(
     const ToolingDocumentAnalysis& analysis, std::string_view source,
     const ToolingPosition& position);

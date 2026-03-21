@@ -585,6 +585,41 @@ bool testCompletions() {
         return false;
     }
 
+    const std::string incompleteMemberSource =
+        "#!strict\n"
+        "type Box struct {\n"
+        "    value i32\n"
+        "\n"
+        "    fn get() i32 {\n"
+        "        return this.value\n"
+        "    }\n"
+        "}\n"
+        "fn read(box Box) i32 {\n"
+        "    return box.\n"
+        "}\n";
+    options.sourcePath = "tooling_completion_member_incomplete_regression.mog";
+    ToolingDocumentAnalysis incompleteMemberAnalysis =
+        analyzeDocumentForTooling(incompleteMemberSource, options);
+
+    const auto incompleteMemberCompletions = findCompletionsForTooling(
+        incompleteMemberAnalysis, incompleteMemberSource, ToolingPosition{9, 15});
+    const auto* incompleteValueCompletion =
+        findCompletion(incompleteMemberCompletions, "value");
+    const auto* incompleteGetCompletion =
+        findCompletion(incompleteMemberCompletions, "get");
+    if (!require(incompleteValueCompletion != nullptr &&
+                     incompleteValueCompletion->kind == "field" &&
+                     incompleteGetCompletion != nullptr &&
+                     incompleteGetCompletion->kind == "method",
+                 "incomplete member completions should use the receiver type")) {
+        return false;
+    }
+    if (!require(findCompletion(incompleteMemberCompletions, "box") == nullptr &&
+                     findCompletion(incompleteMemberCompletions, "return") == nullptr,
+                 "incomplete member completions should stay locked to receiver members")) {
+        return false;
+    }
+
     const std::string moduleMemberSource =
         "#!strict\n"
         "const math = @import(\"./modules/math.mog\")\n"
