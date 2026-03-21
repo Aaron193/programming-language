@@ -884,7 +884,7 @@ class AstTypeCheckerImpl {
     }
 
     ExprInfo analyzeExpr(const AstExpr& expr,
-                         const TypeRef& expectedFunctionLiteralType = nullptr) {
+                         const TypeRef& expectedType = nullptr) {
         ExprInfo result;
 
         std::visit(
@@ -1169,7 +1169,6 @@ class AstTypeCheckerImpl {
                     }
                 } else if constexpr (std::is_same_v<T, AstAssignmentExpr>) {
                     ExprInfo lhs = analyzeExpr(*value.target);
-                    ExprInfo rhs = analyzeExpr(*value.value);
                     const TokenType assignmentType = value.op.type();
                     const SourceSpan opSpan = value.op.span();
                     const size_t line = value.op.line();
@@ -1196,6 +1195,7 @@ class AstTypeCheckerImpl {
                             result = ExprInfo{TypeInfo::makeAny(), false, false,
                                               lhs.name, line};
                         } else if (assignmentType == TokenType::EQUAL) {
+                            ExprInfo rhs = analyzeExpr(*value.value, targetType);
                             if (!isAssignableType(rhs.type, targetType)) {
                                 addError(opSpan,
                                          "Type error: cannot assign '" +
@@ -1206,77 +1206,87 @@ class AstTypeCheckerImpl {
                             }
                             result = ExprInfo{targetType, false, false, lhs.name,
                                               line};
-                        } else if (targetType->isAny() || rhs.type->isAny()) {
-                            result = ExprInfo{targetType, false, false, lhs.name,
-                                              line};
-                        } else if (isArithmeticCompoundAssignment(
-                                       assignmentType)) {
-                            if (!(targetType->isNumeric() &&
-                                  rhs.type->isNumeric())) {
-                                addError(opSpan,
-                                         "Type error: compound assignment "
-                                         "requires numeric operands.");
-                                result = ExprInfo{TypeInfo::makeAny(), false,
-                                                  false, lhs.name, line};
-                            } else {
-                                TypeRef promoted =
-                                    numericPromotion(targetType, rhs.type);
-                                if (!promoted ||
-                                    !isAssignableType(promoted, targetType)) {
-                                    addError(opSpan,
-                                             "Type error: result of compound "
-                                             "assignment is not assignable to '" +
-                                                 targetType->toString() + "'.");
-                                }
-                                result = ExprInfo{targetType, false, false,
-                                                  lhs.name, line};
-                            }
-                        } else if (assignmentType == TokenType::SHIFT_LEFT_EQUAL ||
-                                   assignmentType ==
-                                       TokenType::SHIFT_RIGHT_EQUAL) {
-                            if (!(targetType->isInteger() &&
-                                  rhs.type->isInteger())) {
-                                addError(opSpan,
-                                         "Type error: shift operators require "
-                                         "integer operands.");
-                                result = ExprInfo{TypeInfo::makeAny(), false,
-                                                  false, lhs.name, line};
-                            } else {
-                                result = ExprInfo{targetType, false, false,
-                                                  lhs.name, line};
-                            }
-                        } else if (isBitwiseCompoundAssignment(assignmentType)) {
-                            if (!(targetType->isInteger() &&
-                                  rhs.type->isInteger())) {
-                                addError(opSpan,
-                                         "Type error: bitwise operators require "
-                                         "integer operands.");
-                                result = ExprInfo{TypeInfo::makeAny(), false,
-                                                  false, lhs.name, line};
-                            } else {
-                                TypeRef resultType =
-                                    bitwiseIntegerResultType(targetType, rhs.type);
-                                if (!resultType ||
-                                    !isAssignableType(resultType, targetType)) {
-                                    addError(opSpan,
-                                             "Type error: result of compound "
-                                             "assignment is not assignable to '" +
-                                                 targetType->toString() + "'.");
-                                }
-                                result = ExprInfo{targetType, false, false,
-                                                  lhs.name, line};
-                            }
                         } else {
+                            ExprInfo rhs = analyzeExpr(*value.value);
+                            if (targetType->isAny() || rhs.type->isAny()) {
                             result = ExprInfo{targetType, false, false, lhs.name,
                                               line};
+                            } else if (isArithmeticCompoundAssignment(
+                                           assignmentType)) {
+                                if (!(targetType->isNumeric() &&
+                                      rhs.type->isNumeric())) {
+                                    addError(opSpan,
+                                             "Type error: compound assignment "
+                                             "requires numeric operands.");
+                                    result = ExprInfo{TypeInfo::makeAny(), false,
+                                                      false, lhs.name, line};
+                                } else {
+                                    TypeRef promoted =
+                                        numericPromotion(targetType, rhs.type);
+                                    if (!promoted ||
+                                        !isAssignableType(promoted, targetType)) {
+                                        addError(opSpan,
+                                                 "Type error: result of compound "
+                                                 "assignment is not assignable to '" +
+                                                     targetType->toString() + "'.");
+                                    }
+                                    result = ExprInfo{targetType, false, false,
+                                                      lhs.name, line};
+                                }
+                            } else if (assignmentType == TokenType::SHIFT_LEFT_EQUAL ||
+                                       assignmentType ==
+                                           TokenType::SHIFT_RIGHT_EQUAL) {
+                                if (!(targetType->isInteger() &&
+                                      rhs.type->isInteger())) {
+                                    addError(opSpan,
+                                             "Type error: shift operators require "
+                                             "integer operands.");
+                                    result = ExprInfo{TypeInfo::makeAny(), false,
+                                                      false, lhs.name, line};
+                                } else {
+                                    result = ExprInfo{targetType, false, false,
+                                                      lhs.name, line};
+                                }
+                            } else if (isBitwiseCompoundAssignment(assignmentType)) {
+                                if (!(targetType->isInteger() &&
+                                      rhs.type->isInteger())) {
+                                    addError(opSpan,
+                                             "Type error: bitwise operators require "
+                                             "integer operands.");
+                                    result = ExprInfo{TypeInfo::makeAny(), false,
+                                                      false, lhs.name, line};
+                                } else {
+                                    TypeRef resultType = bitwiseIntegerResultType(
+                                        targetType, rhs.type);
+                                    if (!resultType ||
+                                        !isAssignableType(resultType, targetType)) {
+                                        addError(opSpan,
+                                                 "Type error: result of compound "
+                                                 "assignment is not assignable to '" +
+                                                     targetType->toString() + "'.");
+                                    }
+                                    result = ExprInfo{targetType, false, false,
+                                                      lhs.name, line};
+                                }
+                            } else {
+                                result = ExprInfo{targetType, false, false,
+                                                  lhs.name, line};
+                            }
                         }
                     }
                 } else if constexpr (std::is_same_v<T, AstCallExpr>) {
                     ExprInfo callee = analyzeExpr(*value.callee);
                     std::vector<ExprInfo> args;
                     args.reserve(value.arguments.size());
-                    for (const auto& arg : value.arguments) {
-                        args.push_back(analyzeExpr(*arg));
+                    for (size_t index = 0; index < value.arguments.size();
+                         ++index) {
+                        TypeRef expectedArgType = nullptr;
+                        if (callee.type && callee.type->kind == TypeKind::FUNCTION &&
+                            index < callee.type->paramTypes.size()) {
+                            expectedArgType = callee.type->paramTypes[index];
+                        }
+                        args.push_back(
+                            analyzeExpr(*value.arguments[index], expectedArgType));
                     }
 
                     if (callee.type && callee.type->isOptional()) {
@@ -1452,7 +1462,7 @@ class AstTypeCheckerImpl {
                 } else if constexpr (std::is_same_v<T, AstFunctionExpr>) {
                     ResolvedCallableSignature signature = resolveCallableSignature(
                         "<closure>", value.params, value.returnType.get(),
-                        expectedFunctionLiteralType, false, true,
+                        expectedType, false, true,
                         !value.expressionBody, expr.node.span);
 
                     m_functionContexts.push_back(FunctionCtx{signature.returnType});
@@ -1542,10 +1552,14 @@ class AstTypeCheckerImpl {
                         elementType = merged;
                     }
 
-                    result = ExprInfo{
-                        TypeInfo::makeArray(elementType ? elementType
-                                                        : TypeInfo::makeAny()),
-                        false, false, "", expr.node.line};
+                    TypeRef arrayType = TypeInfo::makeArray(
+                        elementType ? elementType : TypeInfo::makeAny());
+                    if (value.elements.empty() && expectedType &&
+                        expectedType->kind == TypeKind::ARRAY) {
+                        arrayType = expectedType;
+                    }
+                    result =
+                        ExprInfo{arrayType, false, false, "", expr.node.line};
                 } else if constexpr (std::is_same_v<T, AstDictLiteralExpr>) {
                     TypeRef keyType = nullptr;
                     TypeRef valueType = nullptr;
@@ -1588,11 +1602,16 @@ class AstTypeCheckerImpl {
                         }
                     }
 
-                    result = ExprInfo{
+                    TypeRef dictType =
                         TypeInfo::makeDict(keyType ? keyType : TypeInfo::makeAny(),
                                            valueType ? valueType
-                                                     : TypeInfo::makeAny()),
-                        false, false, "", expr.node.line};
+                                                     : TypeInfo::makeAny());
+                    if (value.entries.empty() && expectedType &&
+                        expectedType->kind == TypeKind::DICT) {
+                        dictType = expectedType;
+                    }
+                    result =
+                        ExprInfo{dictType, false, false, "", expr.node.line};
                 }
             },
             expr.value);
@@ -1625,16 +1644,11 @@ class AstTypeCheckerImpl {
             }
         }
 
-        TypeRef expectedFunctionType = nullptr;
-        if (!omittedType && declaredType && declaredType->kind == TypeKind::FUNCTION &&
-            stmt.initializer &&
-            std::holds_alternative<AstFunctionExpr>(stmt.initializer->value)) {
-            expectedFunctionType = declaredType;
-        }
+        TypeRef expectedInitializerType = omittedType ? nullptr : declaredType;
 
         ExprInfo initializer = stmt.initializer
                                    ? analyzeExpr(*stmt.initializer,
-                                                 expectedFunctionType)
+                                                 expectedInitializerType)
                                    : ExprInfo{};
 
         if (!omittedType && !isAssignableType(initializer.type, declaredType)) {
@@ -1729,9 +1743,9 @@ class AstTypeCheckerImpl {
             return;
         }
 
-        ExprInfo value = analyzeExpr(*stmt.value);
         if (!m_functionContexts.empty()) {
             TypeRef expected = m_functionContexts.back().returnType;
+            ExprInfo value = analyzeExpr(*stmt.value, expected);
             if (expected && !isAssignableType(value.type, expected)) {
                 addError(stmt.value->node,
                          "Type error: cannot return '" +

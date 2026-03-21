@@ -1,3 +1,4 @@
+#!strict
 const window = @import("mog:window")
 var WINDOW_WIDTH i64 = 800i64
 var WINDOW_HEIGHT i64 = 600i64

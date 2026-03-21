@@ -1,3 +1,4 @@
 - add AST layer in compiler to allow for compile time optimizations and transformations (remove dead code, inline functions, constant expressions, etc.)
 - rework import system (@import('')) when it comes to standard library/packages vs user code vs external dependencies (need clear way to distinguish based off import statement)
 - compile time decorators using '@' ???
+- #!strict mode should just be default and doesn't make sense to opt-in. just remove #!strict and make it the default. no non-strict feature should exist. this is a typed language not a toy python kiddie language
