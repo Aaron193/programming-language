@@ -505,8 +505,10 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
             }
         })
         hover = read_until(proc, lambda msg: msg.get("id") == 5)
+        if hover["result"]["contents"]["kind"] != "markdown":
+            raise AssertionError(f"unexpected hover markup kind: {hover['result']}")
         hover_value = hover["result"]["contents"]["value"]
-        if hover_value != "const Value: i32":
+        if hover_value != "```mog\nconst Value i32\n```":
             raise AssertionError(f"unexpected hover payload: {hover['result']}")
 
         send_message(proc, {
@@ -528,7 +530,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         if "local" not in labels:
             raise AssertionError(f"expected local completion item: {completion['result']}")
         local_item = next(item for item in completion["result"] if item["label"] == "local")
-        if local_item.get("detail") != "var local: i32":
+        if local_item.get("detail") != "var local i32":
             raise AssertionError(f"unexpected local completion detail: {local_item}")
 
         send_message(proc, {
@@ -646,7 +648,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         })
         member_hover = read_until(proc, lambda msg: msg.get("id") == 8)
         member_hover_value = member_hover["result"]["contents"]["value"]
-        if member_hover_value != "field value: i32":
+        if member_hover_value != "```mog\n(property) value i32\n```":
             raise AssertionError(f"unexpected member hover payload: {member_hover['result']}")
 
         send_message(proc, {
@@ -829,7 +831,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         signature_help = read_until(proc, lambda msg: msg.get("id") == 11.5)
         if signature_help["result"]["activeParameter"] != 1:
             raise AssertionError(f"unexpected direct signature help payload: {signature_help['result']}")
-        if signature_help["result"]["signatures"][0]["label"] != "function(i32, i32) -> i32":
+        if signature_help["result"]["signatures"][0]["label"] != "fn Add(a i32, b i32) i32":
             raise AssertionError(f"unexpected direct signature label: {signature_help['result']}")
 
         send_message(proc, {

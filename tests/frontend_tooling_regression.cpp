@@ -390,7 +390,7 @@ bool testReferencesAndHover() {
     }
 
     if (!require(hover->kind == "constant" &&
-                     hover->detail == "const Value: i32",
+                     hover->detail == "const Value i32",
                  "hover should include kind and formatted type detail")) {
         return false;
     }
@@ -411,8 +411,21 @@ bool testReferencesAndHover() {
     }
 
     if (!require(importHover->kind == "import" &&
-                     importHover->detail == "import Answer: i32",
+                     importHover->detail == "const Answer i32",
                  "import hover should preserve imported type information")) {
+        return false;
+    }
+
+    const auto importedFunctionHover =
+        findHoverForTooling(importAnalysis, ToolingPosition{2, 7});
+    if (!require(importedFunctionHover.has_value(),
+                 "hover should be available for imported functions")) {
+        return false;
+    }
+
+    if (!require(importedFunctionHover->kind == "import" &&
+                     importedFunctionHover->detail == "(function) fn Get() i32",
+                 "imported source functions should preserve Mog declaration syntax")) {
         return false;
     }
 
@@ -434,8 +447,29 @@ bool testReferencesAndHover() {
     }
 
     if (!require(memberHover->kind == "field" &&
-                     memberHover->detail == "field value: i32",
+                     memberHover->detail == "(property) value i32",
                  "member hover should preserve field kind and type detail")) {
+        return false;
+    }
+
+    const std::string parameterSource =
+        "#!strict\n"
+        "fn tick(dt f64) void {\n"
+        "    print(dt)\n"
+        "}\n";
+    options.sourcePath = "tooling_parameter_hover_regression.mog";
+    ToolingDocumentAnalysis parameterAnalysis =
+        analyzeDocumentForTooling(parameterSource, options);
+    const auto parameterHover =
+        findHoverForTooling(parameterAnalysis, ToolingPosition{2, 10});
+    if (!require(parameterHover.has_value(),
+                 "hover should be available for parameters")) {
+        return false;
+    }
+
+    if (!require(parameterHover->kind == "parameter" &&
+                     parameterHover->detail == "(parameter) dt f64",
+                 "parameter hover should include a parenthesized role label")) {
         return false;
     }
 
@@ -597,13 +631,13 @@ bool testCompletions() {
     const auto* getCompletion = findCompletion(memberCompletions, "get");
     if (!require(valueCompletion != nullptr &&
                      valueCompletion->kind == "field" &&
-                     valueCompletion->detail == "field value: i32",
+                     valueCompletion->detail == "value i32",
                  "member completions should expose field members")) {
         return false;
     }
     if (!require(getCompletion != nullptr &&
                      getCompletion->kind == "method" &&
-                     getCompletion->detail == "method get: function() -> i32",
+                     getCompletion->detail == "fn get() i32",
                  "member completions should expose method members")) {
         return false;
     }
@@ -842,8 +876,16 @@ bool testSignatureHelp() {
                      directHelp->activeParameter == 1 &&
                      !directHelp->signatures.empty() &&
                      directHelp->signatures.front().label ==
-                         "function(i32, i32) -> i32",
+                         "fn Add(a i32, b i32) i32",
                  "direct calls should expose signature help and active parameter")) {
+        return false;
+    }
+    if (!require(directHelp->signatures.front().parameters.size() == 2 &&
+                     directHelp->signatures.front().parameters[0].label ==
+                         "a i32" &&
+                     directHelp->signatures.front().parameters[1].label ==
+                         "b i32",
+                 "signature help should preserve parameter labels in Mog syntax")) {
         return false;
     }
 
@@ -865,7 +907,7 @@ bool testSignatureHelp() {
                      moduleHelp->activeParameter == 1 &&
                      !moduleHelp->signatures.empty() &&
                      moduleHelp->signatures.front().label ==
-                         "function(i32, i32) -> i32",
+                         "fn Add(a i32, b i32) i32",
                  "module export calls should expose signature help")) {
         return false;
     }

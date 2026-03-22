@@ -1246,8 +1246,9 @@ class MogLspServer {
         }
 
         JsonObject contents;
-        contents["kind"] = JsonValue(std::string("plaintext"));
-        contents["value"] = JsonValue(hover->detail);
+        contents["kind"] = JsonValue(std::string("markdown"));
+        contents["value"] =
+            JsonValue(std::string("```mog\n") + hover->detail + "\n```");
 
         JsonObject result;
         result["contents"] = JsonValue(std::move(contents));

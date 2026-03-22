@@ -1006,39 +1006,312 @@ std::optional<TypeRef> declarationTypeForTooling(
     return std::nullopt;
 }
 
-std::string hoverDetailForDeclaration(const ToolingDocumentAnalysis& analysis,
-                                      const DeclarationSite& declaration) {
+std::string mogTypeText(const TypeRef& type) {
+    if (!type) {
+        return "any";
+    }
+
+    switch (type->kind) {
+        case TypeKind::I8:
+            return "i8";
+        case TypeKind::I16:
+            return "i16";
+        case TypeKind::I32:
+            return "i32";
+        case TypeKind::I64:
+            return "i64";
+        case TypeKind::U8:
+            return "u8";
+        case TypeKind::U16:
+            return "u16";
+        case TypeKind::U32:
+            return "u32";
+        case TypeKind::U64:
+            return "u64";
+        case TypeKind::USIZE:
+            return "usize";
+        case TypeKind::F32:
+            return "f32";
+        case TypeKind::F64:
+            return "f64";
+        case TypeKind::BOOL:
+            return "bool";
+        case TypeKind::STR:
+            return "str";
+        case TypeKind::NULL_TYPE:
+            return "null";
+        case TypeKind::VOID:
+            return "void";
+        case TypeKind::ANY:
+            return "any";
+        case TypeKind::CLASS:
+            return type->className.empty() ? std::string("any")
+                                           : type->className;
+        case TypeKind::NATIVE_HANDLE:
+            return "handle<" + type->nativeHandlePackageId + ":" +
+                   type->nativeHandleTypeName + ">";
+        case TypeKind::FUNCTION: {
+            std::string result = "fn(";
+            for (size_t index = 0; index < type->paramTypes.size(); ++index) {
+                if (index > 0) {
+                    result += ", ";
+                }
+                result += mogTypeText(type->paramTypes[index]);
+            }
+            result += ") ";
+            result += mogTypeText(type->returnType);
+            return result;
+        }
+        case TypeKind::ARRAY:
+            return "Array<" + mogTypeText(type->elementType) + ">";
+        case TypeKind::DICT:
+            return "Dict<" + mogTypeText(type->keyType) + ", " +
+                   mogTypeText(type->valueType) + ">";
+        case TypeKind::SET:
+            return "Set<" + mogTypeText(type->elementType) + ">";
+        case TypeKind::OPTIONAL:
+            return mogTypeText(type->innerType) + "?";
+    }
+
+    return "any";
+}
+
+const AstFunctionDecl* findFunctionDeclarationByNodeId(const AstModule& module,
+                                                       AstNodeId nodeId) {
+    for (const auto& item : module.items) {
+        if (!item) {
+            continue;
+        }
+
+        const auto* function = std::get_if<AstFunctionDecl>(&item->value);
+        if (function != nullptr && function->node.id == nodeId) {
+            return function;
+        }
+    }
+
+    return nullptr;
+}
+
+const AstMethodDecl* findMethodDeclarationByNodeId(const AstModule& module,
+                                                   AstNodeId nodeId) {
+    for (const auto& item : module.items) {
+        if (!item) {
+            continue;
+        }
+
+        const auto* classDecl = std::get_if<AstClassDecl>(&item->value);
+        if (classDecl == nullptr) {
+            continue;
+        }
+
+        for (const auto& method : classDecl->methods) {
+            if (method.node.id == nodeId) {
+                return &method;
+            }
+        }
+    }
+
+    return nullptr;
+}
+
+std::vector<std::string> mogParameterLabels(
+    const std::vector<AstParameter>* params, const TypeRef& callableType) {
+    std::vector<std::string> labels;
+    const size_t paramCount = params != nullptr ? params->size()
+                                                : callableType
+                                                          ? callableType->paramTypes.size()
+                                                          : 0;
+    labels.reserve(paramCount);
+    for (size_t index = 0; index < paramCount; ++index) {
+        const std::string typeText =
+            callableType && index < callableType->paramTypes.size()
+                ? mogTypeText(callableType->paramTypes[index])
+                : std::string("any");
+        if (params != nullptr && index < params->size()) {
+            labels.push_back(tokenText((*params)[index].name) + " " + typeText);
+        } else {
+            labels.push_back(typeText);
+        }
+    }
+    return labels;
+}
+
+std::string mogFunctionSignature(std::string_view name,
+                                 const std::vector<std::string>& parameterLabels,
+                                 const TypeRef& callableType) {
+    std::string result = "fn ";
+    result += name;
+    result += "(";
+    for (size_t index = 0; index < parameterLabels.size(); ++index) {
+        if (index > 0) {
+            result += ", ";
+        }
+        result += parameterLabels[index];
+    }
+    result += ") ";
+    result += callableType ? mogTypeText(callableType->returnType)
+                           : std::string("any");
+    return result;
+}
+
+struct ToolingCallablePresentation {
+    std::string label;
+    std::vector<ToolingSignatureParameter> parameters;
+};
+
+ToolingCallablePresentation callablePresentationFromType(
+    std::string_view name, const TypeRef& callableType) {
+    ToolingCallablePresentation info;
+    const auto parameterLabels = mogParameterLabels(nullptr, callableType);
+    info.label = mogFunctionSignature(name, parameterLabels, callableType);
+    info.parameters.reserve(parameterLabels.size());
+    for (const auto& parameterLabel : parameterLabels) {
+        info.parameters.push_back(ToolingSignatureParameter{parameterLabel});
+    }
+    return info;
+}
+
+ToolingCallablePresentation callablePresentationFromParameters(
+    std::string_view name, const std::vector<AstParameter>& params,
+    const TypeRef& callableType) {
+    ToolingCallablePresentation info;
+    const auto parameterLabels = mogParameterLabels(&params, callableType);
+    info.label = mogFunctionSignature(name, parameterLabels, callableType);
+    info.parameters.reserve(parameterLabels.size());
+    for (const auto& parameterLabel : parameterLabels) {
+        info.parameters.push_back(ToolingSignatureParameter{parameterLabel});
+    }
+    return info;
+}
+
+ToolingCallablePresentation callablePresentationForDeclaration(
+    const ToolingDocumentAnalysis& analysis, const DeclarationSite& declaration,
+    std::string_view displayName) {
     const auto declarationType = declarationTypeForTooling(analysis, declaration);
-    const std::string typeText =
-        declarationType.has_value() && *declarationType
-            ? (*declarationType)->toString()
-            : std::string("any");
+    const TypeRef type = declarationType.has_value() ? *declarationType : nullptr;
 
     if (declaration.kind == "function") {
-        return "fn " + declaration.name + ": " + typeText;
+        if (const auto* functionDecl =
+                findFunctionDeclarationByNodeId(analysis.frontend.module,
+                                                declaration.nodeId);
+            functionDecl != nullptr) {
+            return callablePresentationFromParameters(displayName,
+                                                      functionDecl->params, type);
+        }
+    }
+
+    if (declaration.kind == "method") {
+        if (const auto* methodDecl =
+                findMethodDeclarationByNodeId(analysis.frontend.module,
+                                              declaration.nodeId);
+            methodDecl != nullptr) {
+            return callablePresentationFromParameters(displayName,
+                                                      methodDecl->params, type);
+        }
+    }
+
+    return callablePresentationFromType(displayName, type);
+}
+
+std::optional<std::string> importedDeclarationDetailForTooling(
+    const ToolingDocumentAnalysis& analysis, const DeclarationSite& declaration);
+
+std::string hoverRoleDetail(std::string_view role, const std::string& detail) {
+    return "(" + std::string(role) + ") " + detail;
+}
+
+std::string declarationDetailForDeclaration(
+    const ToolingDocumentAnalysis& analysis, const DeclarationSite& declaration) {
+    if (declaration.kind == "import") {
+        if (const auto importedDetail =
+                importedDeclarationDetailForTooling(analysis, declaration);
+            importedDetail.has_value()) {
+            return *importedDetail;
+        }
+    }
+
+    const auto declarationType = declarationTypeForTooling(analysis, declaration);
+    const TypeRef type = declarationType.has_value() ? *declarationType : nullptr;
+    const std::string typeText = mogTypeText(type);
+
+    if (declaration.kind == "function") {
+        return callablePresentationForDeclaration(analysis, declaration,
+                                                  declaration.name)
+            .label;
     }
     if (declaration.kind == "type") {
-        return "type " + declaration.name + " = " + typeText;
+        return "type " + declaration.name + " " + typeText;
     }
     if (declaration.kind == "class") {
-        return "class " + declaration.name;
+        return "type " + declaration.name + " struct";
     }
     if (declaration.kind == "field") {
-        return "field " + declaration.name + ": " + typeText;
+        return declaration.name + " " + typeText;
     }
     if (declaration.kind == "method") {
-        return "method " + declaration.name + ": " + typeText;
+        return callablePresentationForDeclaration(analysis, declaration,
+                                                  declaration.name)
+            .label;
     }
     if (declaration.kind == "parameter") {
-        return "parameter " + declaration.name + ": " + typeText;
+        return declaration.name + " " + typeText;
     }
     if (declaration.kind == "constant") {
-        return "const " + declaration.name + ": " + typeText;
+        return "const " + declaration.name + " " + typeText;
     }
-    if (declaration.kind == "import") {
-        return "import " + declaration.name + ": " + typeText;
+    return "var " + declaration.name + " " + typeText;
+}
+
+std::string hoverDetailForDeclaration(const ToolingDocumentAnalysis& analysis,
+                                      const DeclarationSite& declaration) {
+    const std::string detail =
+        declarationDetailForDeclaration(analysis, declaration);
+    if (declaration.kind == "function") {
+        return hoverRoleDetail("function", detail);
     }
-    return "var " + declaration.name + ": " + typeText;
+    if (declaration.kind == "field") {
+        return hoverRoleDetail("property", detail);
+    }
+    if (declaration.kind == "method") {
+        return hoverRoleDetail("method", detail);
+    }
+    if (declaration.kind == "parameter") {
+        return hoverRoleDetail("parameter", detail);
+    }
+    return detail;
+}
+
+std::optional<std::string> importedDeclarationDetailForTooling(
+    const ToolingDocumentAnalysis& analysis, const DeclarationSite& declaration) {
+    std::unordered_map<AstNodeId, ImportBindingSite> importBindingSites;
+    collectImportBindingSites(analysis.frontend.module,
+                              analysis.frontend.bindings.importedModules,
+                              importBindingSites);
+    const auto importIt = importBindingSites.find(declaration.nodeId);
+    if (importIt == importBindingSites.end() ||
+        importIt->second.importTarget.kind != ImportTargetKind::SOURCE_MODULE ||
+        importIt->second.importTarget.resolvedPath.empty()) {
+        return std::nullopt;
+    }
+
+    const auto importedAnalysis = analyzeSourceModuleForTooling(
+        importIt->second.importTarget.resolvedPath, analysis);
+    if (!importedAnalysis.has_value() || !importedAnalysis->hasParse) {
+        return std::nullopt;
+    }
+
+    std::unordered_map<std::string, DeclarationSite> exportedDeclarations;
+    collectExportedDeclarationSites(importedAnalysis->frontend.module,
+                                    exportedDeclarations);
+    const auto exportedIt =
+        exportedDeclarations.find(importIt->second.exportedName);
+    if (exportedIt == exportedDeclarations.end()) {
+        return std::nullopt;
+    }
+
+    DeclarationSite importedDeclaration = exportedIt->second;
+    importedDeclaration.name = declaration.name;
+    return hoverDetailForDeclaration(*importedAnalysis, importedDeclaration);
 }
 
 std::string completionSortText(int group, const std::string& label) {
@@ -1087,29 +1360,29 @@ ToolingCompletionItem completionItemForDeclaration(
     const ToolingDocumentAnalysis& analysis, const DeclarationSite& declaration) {
     return ToolingCompletionItem{declaration.name,
                                  declaration.kind,
-                                 hoverDetailForDeclaration(analysis, declaration),
+                                 declarationDetailForDeclaration(analysis, declaration),
                                  completionSortText(0, declaration.name)};
 }
 
 ToolingCompletionItem completionItemForExportedSymbol(std::string_view name,
                                                       const TypeRef& type) {
-    const std::string typeText = type ? type->toString() : std::string("any");
     if (type && type->kind == TypeKind::FUNCTION) {
         return ToolingCompletionItem{std::string(name),
                                      "function",
-                                     "fn " + std::string(name) + ": " + typeText,
+                                     callablePresentationFromType(name, type).label,
                                      completionSortText(0, std::string(name))};
     }
     if (type && type->kind == TypeKind::CLASS) {
         return ToolingCompletionItem{std::string(name),
                                      "class",
-                                     "class " + std::string(name),
+                                     "type " + std::string(name) + " struct",
                                      completionSortText(0, std::string(name))};
     }
 
     return ToolingCompletionItem{std::string(name),
                                  "constant",
-                                 "export " + std::string(name) + ": " + typeText,
+                                 "const " + std::string(name) + " " +
+                                     mogTypeText(type),
                                  completionSortText(0, std::string(name))};
 }
 
@@ -4504,21 +4777,159 @@ std::optional<TypeRef> resolveCallableTypeForTooling(const ToolingDocumentAnalys
     return std::nullopt;
 }
 
-ToolingSignatureInformation signatureInformationForCallableType(
-    const TypeRef& callableType) {
-    ToolingSignatureInformation info;
-    info.label = callableType ? callableType->toString() : std::string("function");
-    if (!callableType) {
-        return info;
+std::optional<ToolingSignatureInformation> signatureInformationForDeclaration(
+    const ToolingDocumentAnalysis& analysis, const DeclarationSite& declaration,
+    std::string_view displayName) {
+    const auto declarationType = declarationTypeForTooling(analysis, declaration);
+    if (!declarationType.has_value() || !*declarationType ||
+        (*declarationType)->kind != TypeKind::FUNCTION) {
+        return std::nullopt;
     }
 
-    info.parameters.reserve(callableType->paramTypes.size());
-    for (const auto& parameterType : callableType->paramTypes) {
-        info.parameters.push_back(ToolingSignatureParameter{
-            parameterType ? parameterType->toString() : std::string("any"),
-        });
-    }
+    const auto presentation =
+        callablePresentationForDeclaration(analysis, declaration, displayName);
+    ToolingSignatureInformation info;
+    info.label = presentation.label;
+    info.parameters = presentation.parameters;
     return info;
+}
+
+std::optional<ToolingSignatureInformation> sourceImportedSignatureInformationForTooling(
+    const ToolingDocumentAnalysis& analysis, const ImportTarget& importTarget,
+    std::string_view exportedName, std::string_view displayName) {
+    if (importTarget.kind == ImportTargetKind::SOURCE_MODULE &&
+        !importTarget.resolvedPath.empty()) {
+        const auto importedAnalysis = analyzeSourceModuleForTooling(
+            importTarget.resolvedPath, analysis);
+        if (importedAnalysis.has_value() && importedAnalysis->hasParse) {
+            std::unordered_map<std::string, DeclarationSite> exportedDeclarations;
+            collectExportedDeclarationSites(importedAnalysis->frontend.module,
+                                           exportedDeclarations);
+            const auto exportedIt = exportedDeclarations.find(std::string(exportedName));
+            if (exportedIt != exportedDeclarations.end()) {
+                DeclarationSite declaration = exportedIt->second;
+                declaration.name = std::string(displayName);
+                return signatureInformationForDeclaration(*importedAnalysis,
+                                                         declaration,
+                                                         displayName);
+            }
+        }
+    }
+
+    return std::nullopt;
+}
+
+std::optional<ToolingSignatureInformation> importedSignatureInformationForTooling(
+    const ToolingDocumentAnalysis& analysis, const AstImportedModuleInterface& importedModule,
+    std::string_view exportedName, std::string_view displayName) {
+    if (const auto sourceInfo = sourceImportedSignatureInformationForTooling(
+            analysis, importedModule.importTarget, exportedName, displayName);
+        sourceInfo.has_value()) {
+        return sourceInfo;
+    }
+
+    const auto exportIt = importedModule.exportTypes.find(std::string(exportedName));
+    if (exportIt == importedModule.exportTypes.end() || !exportIt->second ||
+        exportIt->second->kind != TypeKind::FUNCTION) {
+        return std::nullopt;
+    }
+
+    const auto presentation =
+        callablePresentationFromType(displayName, exportIt->second);
+    ToolingSignatureInformation info;
+    info.label = presentation.label;
+    info.parameters = presentation.parameters;
+    return info;
+}
+
+ToolingSignatureInformation signatureInformationForCallableType(
+    std::string_view name, const TypeRef& callableType) {
+    const auto presentation = callablePresentationFromType(name, callableType);
+    ToolingSignatureInformation info;
+    info.label = presentation.label;
+    info.parameters = presentation.parameters;
+    return info;
+}
+
+std::string callableDisplayNameForExpr(const AstExpr& callee) {
+    if (const auto* identifier = std::get_if<AstIdentifierExpr>(&callee.value)) {
+        return tokenText(identifier->name);
+    }
+    if (const auto* member = std::get_if<AstMemberExpr>(&callee.value)) {
+        return tokenText(member->member);
+    }
+    return "<call>";
+}
+
+std::optional<ToolingSignatureInformation> signatureInformationForCallable(
+    const ToolingDocumentAnalysis& analysis, const AstExpr& callee,
+    const TypeRef& callableType) {
+    if (const auto* identifier = std::get_if<AstIdentifierExpr>(&callee.value)) {
+        const auto referenceIt =
+            analysis.frontend.bindings.references.find(callee.node.id);
+        if (referenceIt != analysis.frontend.bindings.references.end()) {
+            std::unordered_map<AstNodeId, DeclarationSite> declarationSites;
+            collectDeclarationSites(analysis.frontend.module, declarationSites);
+            const auto declarationIt =
+                declarationSites.find(referenceIt->second.declarationNodeId);
+            if (declarationIt != declarationSites.end()) {
+                if (declarationIt->second.kind == "import") {
+                    std::unordered_map<AstNodeId, ImportBindingSite> importBindingSites;
+                    collectImportBindingSites(analysis.frontend.module,
+                                              analysis.frontend.bindings.importedModules,
+                                              importBindingSites);
+                    const auto importIt =
+                        importBindingSites.find(declarationIt->second.nodeId);
+                    if (importIt != importBindingSites.end()) {
+                        if (const auto info = sourceImportedSignatureInformationForTooling(
+                                analysis, importIt->second.importTarget,
+                                importIt->second.exportedName,
+                                declarationIt->second.name);
+                            info.has_value()) {
+                            return info;
+                        }
+                    }
+                }
+
+                if (const auto info = signatureInformationForDeclaration(
+                        analysis, declarationIt->second,
+                        tokenText(identifier->name));
+                    info.has_value()) {
+                    return info;
+                }
+            }
+        }
+    } else if (const auto* member = std::get_if<AstMemberExpr>(&callee.value)) {
+        if (const auto* importedModule =
+                resolveImportedModuleForExpr(analysis, *member->object);
+            importedModule != nullptr) {
+            if (const auto info = importedSignatureInformationForTooling(
+                    analysis, *importedModule, tokenText(member->member),
+                    tokenText(member->member));
+                info.has_value()) {
+                return info;
+            }
+        }
+
+        const auto objectTypeIt = analysis.frontend.semanticModel.nodeTypes.find(
+            member->object->node.id);
+        if (objectTypeIt != analysis.frontend.semanticModel.nodeTypes.end() &&
+            objectTypeIt->second && objectTypeIt->second->kind == TypeKind::CLASS) {
+            const auto declaration = findClassMemberDeclarationSite(
+                analysis, objectTypeIt->second->className,
+                tokenText(member->member));
+            if (declaration.has_value()) {
+                if (const auto info = signatureInformationForDeclaration(
+                        analysis, *declaration, tokenText(member->member));
+                    info.has_value()) {
+                    return info;
+                }
+            }
+        }
+    }
+
+    return signatureInformationForCallableType(callableDisplayNameForExpr(callee),
+                                              callableType);
 }
 
 std::string repairedSignatureHelpSource(std::string_view source,
@@ -4711,7 +5122,13 @@ std::optional<ToolingSignatureHelp> findSignatureHelpForToolingImpl(
     help.activeSignature = 0;
     help.activeParameter = activeParameterForCall(source, *callTarget->callExpr,
                                                   position);
-    help.signatures.push_back(signatureInformationForCallableType(*callableType));
+    const auto signature =
+        signatureInformationForCallable(analysis, *callTarget->callExpr->callee,
+                                        *callableType);
+    if (!signature.has_value()) {
+        return std::nullopt;
+    }
+    help.signatures.push_back(*signature);
     if (!help.signatures.empty() &&
         help.activeParameter >= help.signatures.front().parameters.size() &&
         !help.signatures.front().parameters.empty()) {
