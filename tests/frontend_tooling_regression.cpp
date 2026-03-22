@@ -38,6 +38,29 @@ const ToolingTextEdit* findEdit(const std::vector<ToolingTextEdit>& edits,
     return nullptr;
 }
 
+const ToolingSemanticToken* findSemanticToken(
+    const std::vector<ToolingSemanticToken>& tokens, size_t line,
+    size_t character, const std::string& kind) {
+    for (const auto& token : tokens) {
+        if (token.range.start.line == line &&
+            token.range.start.character == character &&
+            token.kind == kind) {
+            return &token;
+        }
+    }
+    return nullptr;
+}
+
+bool tokenHasModifier(const ToolingSemanticToken& token,
+                      const std::string& modifier) {
+    for (const auto& item : token.modifiers) {
+        if (item == modifier) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool writeFile(const std::filesystem::path& path, std::string_view text) {
     std::ofstream output(path);
     if (!output) {
@@ -470,6 +493,152 @@ bool testReferencesAndHover() {
     if (!require(parameterHover->kind == "parameter" &&
                      parameterHover->detail == "(parameter) dt f64",
                  "parameter hover should include a parenthesized role label")) {
+        return false;
+    }
+
+    return true;
+}
+
+bool testSemanticTokens() {
+    ToolingAnalyzeOptions options;
+    options.sourcePath = "tooling_semantic_tokens_regression.mog";
+    options.strictMode = true;
+
+    const std::string source =
+        "#!strict\n"
+        "type Pipe struct {\n"
+        "    value f64\n"
+        "\n"
+        "    fn push(pipe Pipe) Pipe {\n"
+        "        var next Pipe = pipe\n"
+        "        return next\n"
+        "    }\n"
+        "}\n"
+        "fn mix(pipe Pipe) Pipe {\n"
+        "    const pushed Pipe = pipe.push(pipe)\n"
+        "    return pushed\n"
+        "}\n";
+
+    ToolingDocumentAnalysis analysis =
+        analyzeDocumentForTooling(source, options);
+    if (!require(analysis.status == AstFrontendBuildStatus::Success,
+                 "semantic token sample should succeed")) {
+        return false;
+    }
+
+    const auto tokens = findSemanticTokensForTooling(analysis);
+
+    const auto* pipeDecl = findSemanticToken(tokens, 1, 5, "type");
+    if (!require(pipeDecl != nullptr && tokenHasModifier(*pipeDecl, "declaration"),
+                 "type declarations should emit declaration semantic tokens")) {
+        return false;
+    }
+
+    if (!require(findSemanticToken(tokens, 2, 4, "property") != nullptr,
+                 "field declarations should emit property semantic tokens")) {
+        return false;
+    }
+
+    if (!require(findSemanticToken(tokens, 2, 10, "type") != nullptr,
+                 "built-in types should emit type semantic tokens")) {
+        return false;
+    }
+
+    const auto* methodDecl = findSemanticToken(tokens, 4, 7, "method");
+    if (!require(methodDecl != nullptr &&
+                     tokenHasModifier(*methodDecl, "declaration"),
+                 "method declarations should emit method declaration tokens")) {
+        return false;
+    }
+
+    if (!require(findSemanticToken(tokens, 4, 12, "parameter") != nullptr,
+                 "parameters should emit parameter semantic tokens")) {
+        return false;
+    }
+
+    const auto* localDecl = findSemanticToken(tokens, 5, 12, "variable");
+    if (!require(localDecl != nullptr &&
+                     tokenHasModifier(*localDecl, "declaration") &&
+                     !tokenHasModifier(*localDecl, "readonly"),
+                 "mutable locals should emit variable declaration tokens")) {
+        return false;
+    }
+
+    if (!require(findSemanticToken(tokens, 5, 24, "parameter") != nullptr,
+                 "parameter uses should keep the parameter semantic token kind")) {
+        return false;
+    }
+
+    const auto* functionDecl = findSemanticToken(tokens, 9, 3, "function");
+    if (!require(functionDecl != nullptr &&
+                     tokenHasModifier(*functionDecl, "declaration"),
+                 "free function declarations should emit function declaration tokens")) {
+        return false;
+    }
+
+    const auto* constDecl = findSemanticToken(tokens, 10, 10, "variable");
+    if (!require(constDecl != nullptr &&
+                     tokenHasModifier(*constDecl, "declaration") &&
+                     tokenHasModifier(*constDecl, "readonly"),
+                 "const declarations should emit readonly variable tokens")) {
+        return false;
+    }
+
+    if (!require(findSemanticToken(tokens, 10, 17, "type") != nullptr,
+                 "custom type references should emit type semantic tokens")) {
+        return false;
+    }
+
+    if (!require(findSemanticToken(tokens, 10, 24, "parameter") != nullptr,
+                 "receiver variables should retain their semantic token kind")) {
+        return false;
+    }
+
+    if (!require(findSemanticToken(tokens, 10, 29, "method") != nullptr,
+                 "member calls should emit method semantic tokens")) {
+        return false;
+    }
+
+    const std::string importSource =
+        "#!strict\n"
+        "const { Answer, Get } = @import(\"./modules/frontend_identity_module.mog\")\n"
+        "const value i32 = Get()\n"
+        "print(Answer)\n";
+    options.sourcePath = "tests/sample_import_frontend_identity.mog";
+    ToolingDocumentAnalysis importAnalysis =
+        analyzeDocumentForTooling(importSource, options);
+    if (!require(importAnalysis.status == AstFrontendBuildStatus::Success,
+                 "import semantic token sample should succeed")) {
+        return false;
+    }
+
+    const auto importTokens = findSemanticTokensForTooling(importAnalysis);
+    const auto* importedAnswerDecl =
+        findSemanticToken(importTokens, 1, 8, "variable");
+    if (!require(importedAnswerDecl != nullptr &&
+                     tokenHasModifier(*importedAnswerDecl, "declaration") &&
+                     tokenHasModifier(*importedAnswerDecl, "readonly"),
+                 "imported constants should emit readonly variable declaration tokens")) {
+        return false;
+    }
+
+    const auto* importedGetDecl = findSemanticToken(importTokens, 1, 16, "function");
+    if (!require(importedGetDecl != nullptr &&
+                     tokenHasModifier(*importedGetDecl, "declaration"),
+                 "imported functions should emit function declaration tokens")) {
+        return false;
+    }
+
+    if (!require(findSemanticToken(importTokens, 2, 18, "function") != nullptr,
+                 "imported function uses should stay classified as functions")) {
+        return false;
+    }
+
+    const auto* importedAnswerUse =
+        findSemanticToken(importTokens, 3, 6, "variable");
+    if (!require(importedAnswerUse != nullptr &&
+                     tokenHasModifier(*importedAnswerUse, "readonly"),
+                 "imported constant uses should stay readonly variables")) {
         return false;
     }
 
@@ -1203,6 +1372,10 @@ int main() {
     }
 
     if (!testReferencesAndHover()) {
+        return 1;
+    }
+
+    if (!testSemanticTokens()) {
         return 1;
     }
 

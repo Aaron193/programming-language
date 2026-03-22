@@ -66,6 +66,12 @@ struct ToolingCompletionItem {
     std::string sortText;
 };
 
+struct ToolingSemanticToken {
+    ToolingRange range;
+    std::string kind;
+    std::vector<std::string> modifiers;
+};
+
 struct ToolingSignatureParameter {
     std::string label;
 };
@@ -146,6 +152,8 @@ std::vector<ToolingLocation> findReferencesForTooling(
     const ToolingDocumentAnalysis& analysis, const ToolingPosition& position);
 std::optional<ToolingHover> findHoverForTooling(
     const ToolingDocumentAnalysis& analysis, const ToolingPosition& position);
+std::vector<ToolingSemanticToken> findSemanticTokensForTooling(
+    const ToolingDocumentAnalysis& analysis);
 std::vector<ToolingCompletionItem> findCompletionsForTooling(
     const ToolingDocumentAnalysis& analysis, const ToolingPosition& position);
 std::vector<ToolingCompletionItem> findCompletionsForTooling(

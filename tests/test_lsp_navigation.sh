@@ -53,6 +53,47 @@ def read_until(proc, predicate):
             return message
 
 
+def decode_semantic_tokens(payload, token_types, token_modifiers):
+    data = payload.get("data", [])
+    tokens = []
+    line = 0
+    character = 0
+    for index in range(0, len(data), 5):
+        delta_line = int(data[index])
+        delta_start = int(data[index + 1])
+        length = int(data[index + 2])
+        token_type = token_types[int(data[index + 3])]
+        modifier_mask = int(data[index + 4])
+        if index == 0:
+            line = delta_line
+            character = delta_start
+        else:
+            line += delta_line
+            character = delta_start if delta_line else character + delta_start
+
+        modifiers = []
+        for modifier_index, modifier in enumerate(token_modifiers):
+            if modifier_mask & (1 << modifier_index):
+                modifiers.append(modifier)
+
+        tokens.append({
+            "line": line,
+            "character": character,
+            "length": length,
+            "type": token_type,
+            "modifiers": modifiers,
+        })
+    return tokens
+
+
+def find_semantic_token(tokens, line, character, token_type):
+    for token in tokens:
+        if token["line"] == line and token["character"] == character and \
+                token["type"] == token_type:
+            return token
+    return None
+
+
 def changes_for_uri(workspace_edit, uri):
     changes = workspace_edit.get("changes", {})
     return changes.get(uri, [])
@@ -233,6 +274,19 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
             raise AssertionError("initialize response missing signatureHelpProvider")
         if signature_provider.get("triggerCharacters") != ["(", ","]:
             raise AssertionError(f"unexpected signatureHelpProvider payload: {signature_provider}")
+        semantic_provider = caps.get("semanticTokensProvider")
+        if not isinstance(semantic_provider, dict):
+            raise AssertionError("initialize response missing semanticTokensProvider")
+        if semantic_provider.get("full") is not True:
+            raise AssertionError(f"semantic tokens should support full requests: {semantic_provider}")
+        semantic_legend = semantic_provider.get("legend")
+        if not isinstance(semantic_legend, dict):
+            raise AssertionError(f"semantic tokens should include a legend: {semantic_provider}")
+        if semantic_legend.get("tokenTypes") != [
+                "type", "function", "method", "property", "parameter", "variable"]:
+            raise AssertionError(f"unexpected semantic token types: {semantic_legend}")
+        if semantic_legend.get("tokenModifiers") != ["declaration", "readonly"]:
+            raise AssertionError(f"unexpected semantic token modifiers: {semantic_legend}")
 
         send_message(proc, {
             "jsonrpc": "2.0",
@@ -510,6 +564,88 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         hover_value = hover["result"]["contents"]["value"]
         if hover_value != "```mog\nconst Value i32\n```":
             raise AssertionError(f"unexpected hover payload: {hover['result']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 5.25,
+            "method": "textDocument/semanticTokens/full",
+            "params": {
+                "textDocument": {
+                    "uri": uri
+                }
+            }
+        })
+        semantic_tokens = read_until(proc, lambda msg: msg.get("id") == 5.25)
+        main_tokens = decode_semantic_tokens(
+            semantic_tokens["result"],
+            semantic_legend["tokenTypes"],
+            semantic_legend["tokenModifiers"],
+        )
+        add_decl = find_semantic_token(main_tokens, 1, 3, "function")
+        if add_decl is None or "declaration" not in add_decl["modifiers"]:
+            raise AssertionError(f"expected function declaration semantic token: {main_tokens}")
+        if find_semantic_token(main_tokens, 1, 7, "parameter") is None:
+            raise AssertionError(f"expected parameter semantic token: {main_tokens}")
+        value_decl = find_semantic_token(main_tokens, 5, 6, "variable")
+        if value_decl is None or "declaration" not in value_decl["modifiers"] or \
+                "readonly" not in value_decl["modifiers"]:
+            raise AssertionError(f"expected readonly const declaration semantic token: {main_tokens}")
+        if find_semantic_token(main_tokens, 5, 18, "function") is None:
+            raise AssertionError(f"expected free-function call semantic token: {main_tokens}")
+        value_use = find_semantic_token(main_tokens, 7, 6, "variable")
+        if value_use is None or "readonly" not in value_use["modifiers"]:
+            raise AssertionError(f"expected readonly const use semantic token: {main_tokens}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 5.5,
+            "method": "textDocument/semanticTokens/full",
+            "params": {
+                "textDocument": {
+                    "uri": member_uri
+                }
+            }
+        })
+        member_semantic_tokens = read_until(proc, lambda msg: msg.get("id") == 5.5)
+        member_tokens = decode_semantic_tokens(
+            member_semantic_tokens["result"],
+            semantic_legend["tokenTypes"],
+            semantic_legend["tokenModifiers"],
+        )
+        property_decl = find_semantic_token(member_tokens, 2, 4, "property")
+        if property_decl is None or "declaration" not in property_decl["modifiers"]:
+            raise AssertionError(f"expected property declaration semantic token: {member_tokens}")
+        method_decl = find_semantic_token(member_tokens, 4, 7, "method")
+        if method_decl is None or "declaration" not in method_decl["modifiers"]:
+            raise AssertionError(f"expected method declaration semantic token: {member_tokens}")
+        if find_semantic_token(member_tokens, 9, 15, "property") is None:
+            raise AssertionError(f"expected property access semantic token: {member_tokens}")
+        if find_semantic_token(member_tokens, 9, 27, "method") is None:
+            raise AssertionError(f"expected method call semantic token: {member_tokens}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 5.75,
+            "method": "textDocument/semanticTokens/full",
+            "params": {
+                "textDocument": {
+                    "uri": type_definition_uri
+                }
+            }
+        })
+        type_semantic_tokens = read_until(proc, lambda msg: msg.get("id") == 5.75)
+        type_tokens = decode_semantic_tokens(
+            type_semantic_tokens["result"],
+            semantic_legend["tokenTypes"],
+            semantic_legend["tokenModifiers"],
+        )
+        pipe_decl = find_semantic_token(type_tokens, 1, 5, "type")
+        if pipe_decl is None or "declaration" not in pipe_decl["modifiers"]:
+            raise AssertionError(f"expected type declaration semantic token: {type_tokens}")
+        if find_semantic_token(type_tokens, 2, 6, "type") is None:
+            raise AssertionError(f"expected built-in type semantic token: {type_tokens}")
+        if find_semantic_token(type_tokens, 4, 19, "type") is None:
+            raise AssertionError(f"expected custom type reference semantic token: {type_tokens}")
 
         send_message(proc, {
             "jsonrpc": "2.0",

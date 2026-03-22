@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <iostream>
 #include <optional>
 #include <sstream>
@@ -690,6 +691,15 @@ JsonValue makeLocation(const std::string& uri, const ToolingRange& range) {
     });
 }
 
+JsonValue makeStringArray(std::initializer_list<std::string_view> values) {
+    JsonArray items;
+    items.reserve(values.size());
+    for (const auto value : values) {
+        items.push_back(JsonValue(std::string(value)));
+    }
+    return JsonValue(std::move(items));
+}
+
 JsonValue makeRelatedInformation(const std::string& uri,
                                  const ToolingDiagnostic& diagnostic) {
     JsonArray items;
@@ -898,6 +908,12 @@ class MogLspServer {
         if (*method == "textDocument/completion" && params != nullptr &&
             id != nullptr) {
             handleCompletion(*id, *params);
+            return;
+        }
+
+        if (*method == "textDocument/semanticTokens/full" && params != nullptr &&
+            id != nullptr) {
+            handleSemanticTokensFull(*id, *params);
             return;
         }
 
@@ -1317,6 +1333,24 @@ class MogLspServer {
         sendResponse(id, JsonValue(std::move(items)));
     }
 
+    void handleSemanticTokensFull(const JsonValue& id, const JsonObject& params) {
+        auto uri = getTextDocumentUri(params);
+        if (!uri.has_value()) {
+            sendResponse(id, makeSemanticTokensResponse({}));
+            return;
+        }
+
+        const auto documentIt = m_documents.find(*uri);
+        if (documentIt == m_documents.end()) {
+            sendResponse(id, makeSemanticTokensResponse({}));
+            return;
+        }
+
+        sendResponse(id, makeSemanticTokensResponse(
+                             findSemanticTokensForTooling(
+                                 documentIt->second.analysis)));
+    }
+
     void handleSignatureHelp(const JsonValue& id, const JsonObject& params) {
         auto uri = getTextDocumentUri(params);
         if (!uri.has_value()) {
@@ -1682,6 +1716,15 @@ class MogLspServer {
             {"definitionProvider", JsonValue(true)},
             {"referencesProvider", JsonValue(true)},
             {"hoverProvider", JsonValue(true)},
+            {"semanticTokensProvider",
+             JsonValue(JsonObject{
+                 {"legend",
+                  JsonValue(JsonObject{
+                      {"tokenTypes", semanticTokenTypesLegend()},
+                      {"tokenModifiers", semanticTokenModifiersLegend()},
+                  })},
+                 {"full", JsonValue(true)},
+             })},
             {"renameProvider",
              JsonValue(JsonObject{{"prepareProvider", JsonValue(true)}})},
             {"completionProvider",
@@ -1743,6 +1786,91 @@ class MogLspServer {
             return 22.0;
         }
         return 6.0;
+    }
+
+    JsonValue semanticTokenTypesLegend() const {
+        return makeStringArray({"type", "function", "method", "property",
+                                "parameter", "variable"});
+    }
+
+    JsonValue semanticTokenModifiersLegend() const {
+        return makeStringArray({"declaration", "readonly"});
+    }
+
+    double semanticTokenTypeIndex(std::string_view kind) const {
+        if (kind == "type") {
+            return 0.0;
+        }
+        if (kind == "function") {
+            return 1.0;
+        }
+        if (kind == "method") {
+            return 2.0;
+        }
+        if (kind == "property") {
+            return 3.0;
+        }
+        if (kind == "parameter") {
+            return 4.0;
+        }
+        return 5.0;
+    }
+
+    double semanticTokenModifierMask(
+        const std::vector<std::string>& modifiers) const {
+        size_t mask = 0;
+        for (const auto& modifier : modifiers) {
+            if (modifier == "declaration") {
+                mask |= 1u << 0u;
+            } else if (modifier == "readonly") {
+                mask |= 1u << 1u;
+            }
+        }
+        return static_cast<double>(mask);
+    }
+
+    JsonValue makeSemanticTokensResponse(
+        const std::vector<ToolingSemanticToken>& tokens) const {
+        JsonArray data;
+        data.reserve(tokens.size() * 5);
+
+        size_t previousLine = 0;
+        size_t previousCharacter = 0;
+        bool hasPrevious = false;
+        for (const auto& token : tokens) {
+            if (token.range.start.line != token.range.end.line) {
+                continue;
+            }
+
+            size_t length = 0;
+            if (token.range.end.character >= token.range.start.character) {
+                length = token.range.end.character - token.range.start.character + 1;
+            }
+            if (length == 0) {
+                continue;
+            }
+
+            const size_t deltaLine =
+                hasPrevious ? token.range.start.line - previousLine
+                            : token.range.start.line;
+            const size_t deltaStart =
+                (!hasPrevious || deltaLine != 0)
+                    ? token.range.start.character
+                    : token.range.start.character - previousCharacter;
+            data.push_back(JsonValue(static_cast<double>(deltaLine)));
+            data.push_back(JsonValue(static_cast<double>(deltaStart)));
+            data.push_back(JsonValue(static_cast<double>(length)));
+            data.push_back(JsonValue(semanticTokenTypeIndex(token.kind)));
+            data.push_back(
+                JsonValue(semanticTokenModifierMask(token.modifiers)));
+            previousLine = token.range.start.line;
+            previousCharacter = token.range.start.character;
+            hasPrevious = true;
+        }
+
+        JsonObject result;
+        result["data"] = JsonValue(std::move(data));
+        return JsonValue(std::move(result));
     }
 
     JsonValue makeDocumentSymbolsResponse(

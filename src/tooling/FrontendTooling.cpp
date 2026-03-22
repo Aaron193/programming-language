@@ -4101,6 +4101,652 @@ void sortToolingTextEdits(std::vector<ToolingTextEdit>& edits) {
               });
 }
 
+struct ImportBindingResolution {
+    std::string exportedName;
+    const AstImportedModuleInterface* importedModule = nullptr;
+};
+
+void collectImportBindingResolutionsInStmt(
+    const AstStmt& stmt,
+    const std::unordered_map<AstNodeId, AstImportedModuleInterface>& importedModules,
+    std::unordered_map<AstNodeId, ImportBindingResolution>& outBindings);
+
+void collectImportBindingResolutionsInItem(
+    const AstItem& item,
+    const std::unordered_map<AstNodeId, AstImportedModuleInterface>& importedModules,
+    std::unordered_map<AstNodeId, ImportBindingResolution>& outBindings) {
+    std::visit(
+        [&](const auto& value) {
+            using T = std::decay_t<decltype(value)>;
+
+            if constexpr (std::is_same_v<T, AstFunctionDecl>) {
+                if (value.body) {
+                    collectImportBindingResolutionsInStmt(*value.body,
+                                                         importedModules,
+                                                         outBindings);
+                }
+            } else if constexpr (std::is_same_v<T, AstClassDecl>) {
+                for (const auto& method : value.methods) {
+                    if (method.body) {
+                        collectImportBindingResolutionsInStmt(*method.body,
+                                                             importedModules,
+                                                             outBindings);
+                    }
+                }
+            } else if constexpr (std::is_same_v<T, AstStmtPtr>) {
+                if (value) {
+                    collectImportBindingResolutionsInStmt(*value,
+                                                         importedModules,
+                                                         outBindings);
+                }
+            }
+        },
+        item.value);
+}
+
+void collectImportBindingResolutionsInStmt(
+    const AstStmt& stmt,
+    const std::unordered_map<AstNodeId, AstImportedModuleInterface>& importedModules,
+    std::unordered_map<AstNodeId, ImportBindingResolution>& outBindings) {
+    std::visit(
+        [&](const auto& value) {
+            using T = std::decay_t<decltype(value)>;
+
+            if constexpr (std::is_same_v<T, AstBlockStmt>) {
+                for (const auto& item : value.items) {
+                    if (item) {
+                        collectImportBindingResolutionsInItem(*item,
+                                                             importedModules,
+                                                             outBindings);
+                    }
+                }
+            } else if constexpr (std::is_same_v<T, AstIfStmt>) {
+                collectImportBindingResolutionsInStmt(*value.thenBranch,
+                                                     importedModules,
+                                                     outBindings);
+                if (value.elseBranch) {
+                    collectImportBindingResolutionsInStmt(*value.elseBranch,
+                                                         importedModules,
+                                                         outBindings);
+                }
+            } else if constexpr (std::is_same_v<T, AstWhileStmt>) {
+                collectImportBindingResolutionsInStmt(*value.body,
+                                                     importedModules,
+                                                     outBindings);
+            } else if constexpr (std::is_same_v<T, AstDestructuredImportStmt>) {
+                if (!value.initializer || !isImportExpr(*value.initializer)) {
+                    return;
+                }
+
+                const auto importIt = importedModules.find(value.initializer->node.id);
+                if (importIt == importedModules.end()) {
+                    return;
+                }
+
+                for (const auto& binding : value.bindings) {
+                    outBindings[binding.node.id] = ImportBindingResolution{
+                        tokenText(binding.exportedName), &importIt->second};
+                }
+            } else if constexpr (std::is_same_v<T, AstForStmt>) {
+                collectImportBindingResolutionsInStmt(*value.body,
+                                                     importedModules,
+                                                     outBindings);
+            } else if constexpr (std::is_same_v<T, AstForEachStmt>) {
+                collectImportBindingResolutionsInStmt(*value.body,
+                                                     importedModules,
+                                                     outBindings);
+            }
+        },
+        stmt.value);
+}
+
+std::unordered_map<AstNodeId, ImportBindingResolution>
+collectImportBindingResolutions(
+    const AstModule& module,
+    const std::unordered_map<AstNodeId, AstImportedModuleInterface>& importedModules) {
+    std::unordered_map<AstNodeId, ImportBindingResolution> bindings;
+    for (const auto& item : module.items) {
+        if (item) {
+            collectImportBindingResolutionsInItem(*item, importedModules, bindings);
+        }
+    }
+    return bindings;
+}
+
+struct SemanticTokenInfo {
+    std::string kind;
+    bool readonly = false;
+};
+
+ToolingSemanticToken makeSemanticToken(const SourceSpan& span, std::string kind,
+                                       bool declaration, bool readonly) {
+    ToolingSemanticToken token;
+    token.range = toolingRangeFromSourceSpan(span);
+    token.kind = std::move(kind);
+    if (declaration) {
+        token.modifiers.push_back("declaration");
+    }
+    if (readonly) {
+        token.modifiers.push_back("readonly");
+    }
+    return token;
+}
+
+SemanticTokenInfo semanticTokenInfoForType(const TypeRef& type) {
+    if (type && type->kind == TypeKind::FUNCTION) {
+        return SemanticTokenInfo{"function", false};
+    }
+    if (type && type->kind == TypeKind::CLASS) {
+        return SemanticTokenInfo{"type", false};
+    }
+    return SemanticTokenInfo{"variable", true};
+}
+
+class SemanticTokenCollector {
+   public:
+    explicit SemanticTokenCollector(const ToolingDocumentAnalysis& analysis)
+        : m_analysis(analysis),
+          m_importBindingResolutions(collectImportBindingResolutions(
+              analysis.frontend.module, analysis.frontend.bindings.importedModules)) {
+        collectDeclarationSites(m_analysis.frontend.module, m_declarationSites);
+    }
+
+    std::vector<ToolingSemanticToken> collect() {
+        if (!m_analysis.hasParse) {
+            return {};
+        }
+
+        for (const auto& item : m_analysis.frontend.module.items) {
+            if (item) {
+                collectItem(*item);
+            }
+        }
+
+        std::sort(m_tokens.begin(), m_tokens.end(),
+                  [](const ToolingSemanticToken& lhs,
+                     const ToolingSemanticToken& rhs) {
+                      if (lhs.range.start.line != rhs.range.start.line) {
+                          return lhs.range.start.line < rhs.range.start.line;
+                      }
+                      if (lhs.range.start.character != rhs.range.start.character) {
+                          return lhs.range.start.character <
+                                 rhs.range.start.character;
+                      }
+                      if (lhs.range.end.line != rhs.range.end.line) {
+                          return lhs.range.end.line < rhs.range.end.line;
+                      }
+                      if (lhs.range.end.character != rhs.range.end.character) {
+                          return lhs.range.end.character <
+                                 rhs.range.end.character;
+                      }
+                      return lhs.kind < rhs.kind;
+                  });
+        m_tokens.erase(std::unique(m_tokens.begin(), m_tokens.end(),
+                                   [](const ToolingSemanticToken& lhs,
+                                      const ToolingSemanticToken& rhs) {
+                                       return lhs.range.start.line ==
+                                                  rhs.range.start.line &&
+                                              lhs.range.start.character ==
+                                                  rhs.range.start.character &&
+                                              lhs.range.end.line ==
+                                                  rhs.range.end.line &&
+                                              lhs.range.end.character ==
+                                                  rhs.range.end.character &&
+                                              lhs.kind == rhs.kind &&
+                                              lhs.modifiers == rhs.modifiers;
+                                   }),
+                       m_tokens.end());
+        return m_tokens;
+    }
+
+   private:
+    const ToolingDocumentAnalysis& m_analysis;
+    std::unordered_map<AstNodeId, DeclarationSite> m_declarationSites;
+    std::unordered_map<AstNodeId, ImportBindingResolution> m_importBindingResolutions;
+    std::unordered_map<std::string, std::optional<ToolingDocumentAnalysis>>
+        m_importAnalysisCache;
+    std::vector<ToolingSemanticToken> m_tokens;
+
+    void emit(const SourceSpan& span, const SemanticTokenInfo& info,
+              bool declaration = false) {
+        if (info.kind.empty()) {
+            return;
+        }
+        m_tokens.push_back(
+            makeSemanticToken(span, info.kind, declaration, info.readonly));
+    }
+
+    const ToolingDocumentAnalysis* importedAnalysis(
+        const AstImportedModuleInterface& importedModule) {
+        if (importedModule.importTarget.kind != ImportTargetKind::SOURCE_MODULE ||
+            importedModule.importTarget.resolvedPath.empty()) {
+            return nullptr;
+        }
+
+        const std::string& path = importedModule.importTarget.resolvedPath;
+        auto cacheIt = m_importAnalysisCache.find(path);
+        if (cacheIt == m_importAnalysisCache.end()) {
+            cacheIt = m_importAnalysisCache
+                          .emplace(path,
+                                   analyzeSourceModuleForTooling(path, m_analysis))
+                          .first;
+        }
+        return cacheIt->second.has_value() ? &cacheIt->second.value() : nullptr;
+    }
+
+    std::optional<DeclarationSite> importedDeclarationSite(
+        const AstImportedModuleInterface& importedModule,
+        std::string_view exportedName) {
+        const ToolingDocumentAnalysis* imported = importedAnalysis(importedModule);
+        if (imported == nullptr || !imported->hasParse) {
+            return std::nullopt;
+        }
+
+        std::unordered_map<std::string, DeclarationSite> exportedDeclarations;
+        collectExportedDeclarationSites(imported->frontend.module,
+                                        exportedDeclarations);
+        const auto exportedIt = exportedDeclarations.find(std::string(exportedName));
+        if (exportedIt == exportedDeclarations.end()) {
+            return std::nullopt;
+        }
+        return exportedIt->second;
+    }
+
+    SemanticTokenInfo semanticInfoForDeclaration(
+        const DeclarationSite& declaration) {
+        if (declaration.kind == "function") {
+            return SemanticTokenInfo{"function", false};
+        }
+        if (declaration.kind == "method") {
+            return SemanticTokenInfo{"method", false};
+        }
+        if (declaration.kind == "field") {
+            return SemanticTokenInfo{"property", false};
+        }
+        if (declaration.kind == "parameter") {
+            return SemanticTokenInfo{"parameter", false};
+        }
+        if (declaration.kind == "class" || declaration.kind == "type") {
+            return SemanticTokenInfo{"type", false};
+        }
+        if (declaration.kind == "constant") {
+            return SemanticTokenInfo{"variable", true};
+        }
+        if (declaration.kind == "variable") {
+            return SemanticTokenInfo{"variable", false};
+        }
+        if (declaration.kind == "import") {
+            const auto importIt = m_importBindingResolutions.find(declaration.nodeId);
+            if (importIt == m_importBindingResolutions.end() ||
+                importIt->second.importedModule == nullptr) {
+                return SemanticTokenInfo{"variable", true};
+            }
+
+            if (const auto importedDeclaration = importedDeclarationSite(
+                    *importIt->second.importedModule, importIt->second.exportedName);
+                importedDeclaration.has_value()) {
+                const auto importedInfo =
+                    semanticInfoForDeclaration(*importedDeclaration);
+                if (importedInfo.kind == "variable") {
+                    return SemanticTokenInfo{importedInfo.kind, true};
+                }
+                return importedInfo;
+            }
+
+            const auto exportIt = importIt->second.importedModule->exportTypes.find(
+                importIt->second.exportedName);
+            if (exportIt != importIt->second.importedModule->exportTypes.end()) {
+                return semanticTokenInfoForType(exportIt->second);
+            }
+            return SemanticTokenInfo{"variable", true};
+        }
+        return SemanticTokenInfo{"variable", false};
+    }
+
+    std::optional<SemanticTokenInfo> semanticInfoForIdentifierBinding(
+        const AstIdentifierExpr& identifier, AstNodeId exprNodeId) {
+        const auto bindingIt =
+            m_analysis.frontend.bindings.references.find(exprNodeId);
+        if (bindingIt == m_analysis.frontend.bindings.references.end() ||
+            bindingIt->second.declarationNodeId == 0) {
+            return std::nullopt;
+        }
+
+        const auto declarationIt =
+            m_declarationSites.find(bindingIt->second.declarationNodeId);
+        if (declarationIt != m_declarationSites.end()) {
+            return semanticInfoForDeclaration(declarationIt->second);
+        }
+
+        switch (bindingIt->second.kind) {
+            case AstBindingKind::Function:
+                return SemanticTokenInfo{"function", false};
+            case AstBindingKind::Class:
+                return SemanticTokenInfo{"type", false};
+            case AstBindingKind::Variable:
+                return SemanticTokenInfo{"variable", bindingIt->second.isConst};
+            case AstBindingKind::ThisValue:
+            case AstBindingKind::SuperValue:
+                break;
+        }
+
+        (void)identifier;
+        return std::nullopt;
+    }
+
+    std::optional<SemanticTokenInfo> semanticInfoForMember(
+        const AstMemberExpr& memberExpr) {
+        if (memberExpr.object) {
+            if (const auto* importedModule =
+                    resolveImportedModuleForExpr(m_analysis, *memberExpr.object);
+                importedModule != nullptr) {
+                if (const auto importedDeclaration = importedDeclarationSite(
+                        *importedModule, tokenText(memberExpr.member));
+                    importedDeclaration.has_value()) {
+                    return semanticInfoForDeclaration(*importedDeclaration);
+                }
+
+                const auto exportIt =
+                    importedModule->exportTypes.find(tokenText(memberExpr.member));
+                if (exportIt != importedModule->exportTypes.end()) {
+                    return semanticTokenInfoForType(exportIt->second);
+                }
+                return std::nullopt;
+            }
+        }
+
+        const auto objectTypeIt = m_analysis.frontend.semanticModel.nodeTypes.find(
+            memberExpr.object->node.id);
+        if (objectTypeIt == m_analysis.frontend.semanticModel.nodeTypes.end() ||
+            !objectTypeIt->second ||
+            objectTypeIt->second->kind != TypeKind::CLASS) {
+            return std::nullopt;
+        }
+
+        const auto declaration = findClassMemberDeclarationSite(
+            m_analysis, objectTypeIt->second->className,
+            tokenText(memberExpr.member));
+        if (!declaration.has_value()) {
+            return std::nullopt;
+        }
+        return semanticInfoForDeclaration(*declaration);
+    }
+
+    void collectTypeExpr(const AstTypeExpr& typeExpr) {
+        for (const auto& param : typeExpr.paramTypes) {
+            if (param) {
+                collectTypeExpr(*param);
+            }
+        }
+        if (typeExpr.returnType) {
+            collectTypeExpr(*typeExpr.returnType);
+        }
+        if (typeExpr.elementType) {
+            collectTypeExpr(*typeExpr.elementType);
+        }
+        if (typeExpr.keyType) {
+            collectTypeExpr(*typeExpr.keyType);
+        }
+        if (typeExpr.valueType) {
+            collectTypeExpr(*typeExpr.valueType);
+        }
+        if (typeExpr.innerType) {
+            collectTypeExpr(*typeExpr.innerType);
+        }
+
+        if (typeExpr.kind == AstTypeKind::NAMED) {
+            emit(typeExpr.token.span(), SemanticTokenInfo{"type", false});
+        }
+    }
+
+    void collectParameter(const AstParameter& param) {
+        emit(param.name.span(), SemanticTokenInfo{"parameter", false}, true);
+        if (param.type) {
+            collectTypeExpr(*param.type);
+        }
+    }
+
+    void collectItem(const AstItem& item) {
+        std::visit(
+            [&](const auto& value) {
+                using T = std::decay_t<decltype(value)>;
+
+                if constexpr (std::is_same_v<T, AstFunctionDecl>) {
+                    emit(value.name.span(),
+                         SemanticTokenInfo{"function", false}, true);
+                    for (const auto& param : value.params) {
+                        collectParameter(param);
+                    }
+                    if (value.returnType) {
+                        collectTypeExpr(*value.returnType);
+                    }
+                    if (value.body) {
+                        collectStmt(*value.body);
+                    }
+                } else if constexpr (std::is_same_v<T, AstClassDecl>) {
+                    emit(value.name.span(), SemanticTokenInfo{"type", false}, true);
+                    if (value.superclass) {
+                        emit(value.superclass->span(),
+                             SemanticTokenInfo{"type", false});
+                    }
+                    for (const auto& field : value.fields) {
+                        emit(field.name.span(),
+                             SemanticTokenInfo{"property", false}, true);
+                        if (field.type) {
+                            collectTypeExpr(*field.type);
+                        }
+                    }
+                    for (const auto& method : value.methods) {
+                        emit(method.name.span(),
+                             SemanticTokenInfo{"method", false}, true);
+                        for (const auto& param : method.params) {
+                            collectParameter(param);
+                        }
+                        if (method.returnType) {
+                            collectTypeExpr(*method.returnType);
+                        }
+                        if (method.body) {
+                            collectStmt(*method.body);
+                        }
+                    }
+                } else if constexpr (std::is_same_v<T, AstTypeAliasDecl>) {
+                    emit(value.name.span(), SemanticTokenInfo{"type", false}, true);
+                    if (value.aliasedType) {
+                        collectTypeExpr(*value.aliasedType);
+                    }
+                } else if constexpr (std::is_same_v<T, AstStmtPtr>) {
+                    if (value) {
+                        collectStmt(*value);
+                    }
+                }
+            },
+            item.value);
+    }
+
+    void collectStmt(const AstStmt& stmt) {
+        std::visit(
+            [&](const auto& value) {
+                using T = std::decay_t<decltype(value)>;
+
+                if constexpr (std::is_same_v<T, AstBlockStmt>) {
+                    for (const auto& item : value.items) {
+                        if (item) {
+                            collectItem(*item);
+                        }
+                    }
+                } else if constexpr (std::is_same_v<T, AstExprStmt>) {
+                    collectExpr(*value.expression);
+                } else if constexpr (std::is_same_v<T, AstPrintStmt>) {
+                    collectExpr(*value.expression);
+                } else if constexpr (std::is_same_v<T, AstReturnStmt>) {
+                    if (value.value) {
+                        collectExpr(*value.value);
+                    }
+                } else if constexpr (std::is_same_v<T, AstIfStmt>) {
+                    collectExpr(*value.condition);
+                    collectStmt(*value.thenBranch);
+                    if (value.elseBranch) {
+                        collectStmt(*value.elseBranch);
+                    }
+                } else if constexpr (std::is_same_v<T, AstWhileStmt>) {
+                    collectExpr(*value.condition);
+                    collectStmt(*value.body);
+                } else if constexpr (std::is_same_v<T, AstVarDeclStmt>) {
+                    emit(value.name.span(),
+                         SemanticTokenInfo{"variable", value.isConst}, true);
+                    if (value.declaredType) {
+                        collectTypeExpr(*value.declaredType);
+                    }
+                    if (value.initializer) {
+                        collectExpr(*value.initializer);
+                    }
+                } else if constexpr (std::is_same_v<T, AstDestructuredImportStmt>) {
+                    for (const auto& binding : value.bindings) {
+                        const Token& name = binding.localName.has_value()
+                                                ? *binding.localName
+                                                : binding.exportedName;
+                        SemanticTokenInfo info{"variable", true};
+                        const auto resolutionIt =
+                            m_importBindingResolutions.find(binding.node.id);
+                        if (resolutionIt != m_importBindingResolutions.end() &&
+                            resolutionIt->second.importedModule != nullptr) {
+                            const DeclarationSite importDeclaration{
+                                binding.node.id, tokenText(name), "import",
+                                binding.node.span, name.span()};
+                            info = semanticInfoForDeclaration(importDeclaration);
+                        }
+                        emit(name.span(), info, true);
+                        if (binding.expectedType) {
+                            collectTypeExpr(*binding.expectedType);
+                        }
+                    }
+                    if (value.initializer) {
+                        collectExpr(*value.initializer);
+                    }
+                } else if constexpr (std::is_same_v<T, AstForStmt>) {
+                    if (const auto* initDecl =
+                            std::get_if<std::unique_ptr<AstVarDeclStmt>>(
+                                &value.initializer)) {
+                        if (*initDecl) {
+                            emit((*initDecl)->name.span(),
+                                 SemanticTokenInfo{"variable",
+                                                   (*initDecl)->isConst},
+                                 true);
+                            if ((*initDecl)->declaredType) {
+                                collectTypeExpr(*(*initDecl)->declaredType);
+                            }
+                            if ((*initDecl)->initializer) {
+                                collectExpr(*(*initDecl)->initializer);
+                            }
+                        }
+                    } else if (const auto* initExpr =
+                                   std::get_if<AstExprPtr>(&value.initializer)) {
+                        if (*initExpr) {
+                            collectExpr(**initExpr);
+                        }
+                    }
+                    if (value.condition) {
+                        collectExpr(*value.condition);
+                    }
+                    if (value.increment) {
+                        collectExpr(*value.increment);
+                    }
+                    collectStmt(*value.body);
+                } else if constexpr (std::is_same_v<T, AstForEachStmt>) {
+                    emit(value.name.span(),
+                         SemanticTokenInfo{"variable", value.isConst}, true);
+                    if (value.declaredType) {
+                        collectTypeExpr(*value.declaredType);
+                    }
+                    collectExpr(*value.iterable);
+                    collectStmt(*value.body);
+                }
+            },
+            stmt.value);
+    }
+
+    void collectExpr(const AstExpr& expr) {
+        std::visit(
+            [&](const auto& value) {
+                using T = std::decay_t<decltype(value)>;
+
+                if constexpr (std::is_same_v<T, AstLiteralExpr> ||
+                              std::is_same_v<T, AstImportExpr> ||
+                              std::is_same_v<T, AstThisExpr> ||
+                              std::is_same_v<T, AstSuperExpr>) {
+                    return;
+                } else if constexpr (std::is_same_v<T, AstIdentifierExpr>) {
+                    const auto info =
+                        semanticInfoForIdentifierBinding(value, expr.node.id);
+                    if (info.has_value()) {
+                        emit(value.name.span(), *info);
+                    }
+                } else if constexpr (std::is_same_v<T, AstGroupingExpr>) {
+                    collectExpr(*value.expression);
+                } else if constexpr (std::is_same_v<T, AstUnaryExpr> ||
+                                     std::is_same_v<T, AstUpdateExpr>) {
+                    collectExpr(*value.operand);
+                } else if constexpr (std::is_same_v<T, AstBinaryExpr>) {
+                    collectExpr(*value.left);
+                    collectExpr(*value.right);
+                } else if constexpr (std::is_same_v<T, AstAssignmentExpr>) {
+                    collectExpr(*value.target);
+                    collectExpr(*value.value);
+                } else if constexpr (std::is_same_v<T, AstCallExpr>) {
+                    collectExpr(*value.callee);
+                    for (const auto& argument : value.arguments) {
+                        if (argument) {
+                            collectExpr(*argument);
+                        }
+                    }
+                } else if constexpr (std::is_same_v<T, AstMemberExpr>) {
+                    collectExpr(*value.object);
+                    const auto info = semanticInfoForMember(value);
+                    if (info.has_value()) {
+                        emit(value.member.span(), *info);
+                    }
+                } else if constexpr (std::is_same_v<T, AstIndexExpr>) {
+                    collectExpr(*value.object);
+                    collectExpr(*value.index);
+                } else if constexpr (std::is_same_v<T, AstCastExpr>) {
+                    collectExpr(*value.expression);
+                    if (value.targetType) {
+                        collectTypeExpr(*value.targetType);
+                    }
+                } else if constexpr (std::is_same_v<T, AstFunctionExpr>) {
+                    for (const auto& param : value.params) {
+                        collectParameter(param);
+                    }
+                    if (value.returnType) {
+                        collectTypeExpr(*value.returnType);
+                    }
+                    if (value.expressionBody) {
+                        collectExpr(*value.expressionBody);
+                    }
+                    if (value.blockBody) {
+                        collectStmt(*value.blockBody);
+                    }
+                } else if constexpr (std::is_same_v<T, AstArrayLiteralExpr>) {
+                    for (const auto& element : value.elements) {
+                        if (element) {
+                            collectExpr(*element);
+                        }
+                    }
+                } else if constexpr (std::is_same_v<T, AstDictLiteralExpr>) {
+                    for (const auto& entry : value.entries) {
+                        if (entry.key) {
+                            collectExpr(*entry.key);
+                        }
+                        if (entry.value) {
+                            collectExpr(*entry.value);
+                        }
+                    }
+                }
+            },
+            expr.value);
+    }
+};
+
 void appendReferenceRenameEdits(
     const ToolingDocumentAnalysis& analysis, AstNodeId declarationNodeId,
     std::string_view newName, std::vector<ToolingTextEdit>& outEdits) {
@@ -4366,6 +5012,11 @@ std::optional<ToolingHover> findHoverForTooling(
         declarationIt->second.kind,
         hoverDetailForDeclaration(analysis, declarationIt->second),
     };
+}
+
+std::vector<ToolingSemanticToken> findSemanticTokensForTooling(
+    const ToolingDocumentAnalysis& analysis) {
+    return SemanticTokenCollector(analysis).collect();
 }
 
 bool declarationSupportsTypeNameCompletion(const ToolingDocumentAnalysis& analysis,

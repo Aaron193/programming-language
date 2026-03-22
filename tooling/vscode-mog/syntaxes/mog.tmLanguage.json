@@ -38,16 +38,72 @@
       "match": "@operator\\b"
     },
     {
+      "match": "\\b(type)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
+      "captures": {
+        "1": {
+          "name": "keyword.control.mog"
+        },
+        "2": {
+          "name": "entity.name.type.mog"
+        }
+      }
+    },
+    {
+      "match": "\\b(fn)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
+      "captures": {
+        "1": {
+          "name": "keyword.control.mog"
+        },
+        "2": {
+          "name": "entity.name.function.mog"
+        }
+      }
+    },
+    {
+      "match": "\\b(const)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
+      "captures": {
+        "1": {
+          "name": "keyword.control.mog"
+        },
+        "2": {
+          "name": "variable.other.constant.mog"
+        }
+      }
+    },
+    {
+      "match": "\\b(var)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
+      "captures": {
+        "1": {
+          "name": "keyword.control.mog"
+        },
+        "2": {
+          "name": "variable.other.readwrite.mog"
+        }
+      }
+    },
+    {
       "name": "keyword.control.mog",
       "match": "\\b(?:print|var|const|fn|type|struct|if|else|for|while|this|super|return|as)\\b"
     },
     {
-      "name": "storage.type.primitive.mog",
+      "name": "entity.name.type.mog",
       "match": "\\b(?:i8|i16|i32|i64|u8|u16|u32|u64|u|usize|f32|f64|bool|str|void|null|fn)\\b"
     },
     {
       "name": "entity.name.type.mog",
       "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
+    },
+    {
+      "name": "entity.name.function.method.mog",
+      "match": "(?<=\\.)[A-Za-z_][A-Za-z0-9_]*\\b(?=\\s*\\()"
+    },
+    {
+      "name": "variable.other.property.mog",
+      "match": "(?<=\\.)[A-Za-z_][A-Za-z0-9_]*\\b"
+    },
+    {
+      "name": "entity.name.function.mog",
+      "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b(?=\\s*\\()"
     },
     {
       "name": "keyword.operator.mog",
