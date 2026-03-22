@@ -599,6 +599,34 @@ bool testSemanticTokens() {
         return false;
     }
 
+    const std::string genericSource =
+        "#!strict\n"
+        "type Pipe struct {}\n"
+        "fn reset() void {\n"
+        "    var pipes Array<Pipe> = []\n"
+        "}\n";
+    options.sourcePath = "tooling_semantic_tokens_generics_regression.mog";
+    ToolingDocumentAnalysis genericAnalysis =
+        analyzeDocumentForTooling(genericSource, options);
+    if (!require(genericAnalysis.status == AstFrontendBuildStatus::Success,
+                 "generic semantic token sample should succeed")) {
+        return false;
+    }
+
+    const auto genericTokens = findSemanticTokensForTooling(genericAnalysis);
+    const auto* genericPipeRef = findSemanticToken(genericTokens, 3, 20, "type");
+    if (!require(genericPipeRef != nullptr,
+                 "generic type references should emit type semantic tokens")) {
+        return false;
+    }
+
+    if (!require(genericPipeRef->range.end.character -
+                         genericPipeRef->range.start.character ==
+                     4,
+                 "generic type semantic tokens should not extend past the type name")) {
+        return false;
+    }
+
     const std::string importSource =
         "#!strict\n"
         "const { Answer, Get } = @import(\"./modules/frontend_identity_module.mog\")\n"

@@ -1844,7 +1844,7 @@ class MogLspServer {
 
             size_t length = 0;
             if (token.range.end.character >= token.range.start.character) {
-                length = token.range.end.character - token.range.start.character + 1;
+                length = token.range.end.character - token.range.start.character;
             }
             if (length == 0) {
                 continue;

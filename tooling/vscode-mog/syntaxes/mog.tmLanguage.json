@@ -86,6 +86,9 @@
       "match": "\\b(?:print|var|const|fn|type|struct|if|else|for|while|this|super|return|as)\\b"
     },
     {
+      "include": "#type-angle-expression"
+    },
+    {
       "name": "entity.name.type.mog",
       "match": "\\b(?:i8|i16|i32|i64|u8|u16|u32|u64|u|usize|f32|f64|bool|str|void|null|fn)\\b"
     },
@@ -121,5 +124,78 @@
       "name": "punctuation.section.group.end.mog",
       "match": "[\\]})]"
     }
-  ]
+  ],
+  "repository": {
+    "type-angle-expression": {
+      "patterns": [
+        {
+          "name": "meta.type.generic.collection.mog",
+          "begin": "\\b(Array|Set|Dict)\\s*(<)",
+          "beginCaptures": {
+            "1": {
+              "name": "entity.name.type.mog"
+            },
+            "2": {
+              "name": "punctuation.section.group.begin.mog"
+            }
+          },
+          "end": "(>)",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.section.group.end.mog"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#type-angle-expression"
+            },
+            {
+              "name": "punctuation.separator.mog",
+              "match": ","
+            },
+            {
+              "name": "entity.name.type.mog",
+              "match": "\\b(?:i8|i16|i32|i64|u8|u16|u32|u64|u|usize|f32|f64|bool|str|void|null|fn)\\b"
+            },
+            {
+              "name": "entity.name.type.mog",
+              "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
+            }
+          ]
+        },
+        {
+          "name": "meta.type.native-handle.mog",
+          "begin": "\\b(handle)\\s*(<)",
+          "beginCaptures": {
+            "1": {
+              "name": "entity.name.type.mog"
+            },
+            "2": {
+              "name": "punctuation.section.group.begin.mog"
+            }
+          },
+          "end": "(>)",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.section.group.end.mog"
+            }
+          },
+          "patterns": [
+            {
+              "name": "punctuation.separator.mog",
+              "match": ":"
+            },
+            {
+              "name": "entity.name.type.mog",
+              "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
+            },
+            {
+              "name": "variable.other.readwrite.mog",
+              "match": "\\b[a-z_][A-Za-z0-9_]*\\b"
+            }
+          ]
+        }
+      ]
+    }
+  }
 }

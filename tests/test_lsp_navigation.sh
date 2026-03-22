@@ -169,6 +169,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         "    x f64",
         "}",
         "fn makePipe(x f64) Pipe {",
+        "    var pipes Array<Pipe> = []",
         "    return makePipe(x)",
         "}",
         ""
@@ -646,6 +647,11 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
             raise AssertionError(f"expected built-in type semantic token: {type_tokens}")
         if find_semantic_token(type_tokens, 4, 19, "type") is None:
             raise AssertionError(f"expected custom type reference semantic token: {type_tokens}")
+        generic_pipe_ref = find_semantic_token(type_tokens, 5, 20, "type")
+        if generic_pipe_ref is None:
+            raise AssertionError(f"expected generic custom type reference semantic token: {type_tokens}")
+        if generic_pipe_ref["length"] != 4:
+            raise AssertionError(f"expected generic type semantic token length to match 'Pipe': {type_tokens}")
 
         send_message(proc, {
             "jsonrpc": "2.0",
@@ -885,7 +891,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         if not isinstance(type_declaration_result, list):
             raise AssertionError(
                 f"type declaration definition should return a location list: {type_declaration_result}")
-        if len(type_declaration_result) != 2:
+        if len(type_declaration_result) != 3:
             raise AssertionError(
                 f"type declaration definition should include declaration and references: {type_declaration_result}")
         if type_declaration_result[0]["uri"] != type_definition_uri or \
@@ -896,6 +902,10 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
                 type_declaration_result[1]["range"]["start"]["line"] != 4:
             raise AssertionError(
                 f"type declaration definition should include type references: {type_declaration_result}")
+        if type_declaration_result[2]["uri"] != type_definition_uri or \
+                type_declaration_result[2]["range"]["start"]["line"] != 5:
+            raise AssertionError(
+                f"type declaration definition should include generic type references: {type_declaration_result}")
 
         send_message(proc, {
             "jsonrpc": "2.0",
