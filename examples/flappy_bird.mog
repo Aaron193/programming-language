@@ -1,19 +1,19 @@
 #!strict
 const window = @import("mog:window")
-var WINDOW_WIDTH i64 = 800i64
-var WINDOW_HEIGHT i64 = 600i64
-var BIRD_X i64 = 160i64
-var BIRD_WIDTH i64 = 34i64
-var BIRD_HEIGHT i64 = 24i64
-var PIPE_WIDTH i64 = 80i64
-var PIPE_GAP i64 = 180i64
-var GROUND_HEIGHT i64 = 100i64
+const WINDOW_WIDTH i64 = 800i64
+const WINDOW_HEIGHT i64 = 600i64
+const BIRD_X i64 = 160i64
+const BIRD_WIDTH i64 = 34i64
+const BIRD_HEIGHT i64 = 24i64
+const PIPE_WIDTH i64 = 80i64
+const PIPE_GAP i64 = 180i64
+const GROUND_HEIGHT i64 = 100i64
 
-var FIXED_DT f64 = 1.0 / 60.0
-var GRAVITY f64 = 1400.0
-var FLAP_IMPULSE f64 = -350.0
-var PIPE_SPEED f64 = 180.0
-var SPAWN_INTERVAL f64 = 1.4
+const FIXED_DT f64 = 1.0 / 60.0
+const GRAVITY f64 = 1400.0
+const FLAP_IMPULSE f64 = -350.0
+const PIPE_SPEED f64 = 180.0
+const SPAWN_INTERVAL f64 = 1.4
 
 type Pipe struct {
     x f64
@@ -33,7 +33,7 @@ type GameState struct {
 }
 
 fn makePipe(x f64, gapY f64) Pipe {
-    var pipe Pipe = Pipe()
+    const pipe Pipe = Pipe()
     pipe.x = x
     pipe.gapY = gapY
     pipe.passed = false
@@ -72,7 +72,7 @@ fn nextGapY(spawnIndex i32) f64 {
 }
 
 fn spawnPipe(state GameState, x f64) void {
-    var pipe Pipe = makePipe(x, nextGapY(state.spawnIndex))
+    const pipe Pipe = makePipe(x, nextGapY(state.spawnIndex))
     state.spawnIndex = state.spawnIndex + 1
     state.pipes.push(pipe)
 }
@@ -83,8 +83,8 @@ fn seedInitialPipes(state GameState) void {
 }
 
 fn resetGame() GameState {
-    var state GameState = GameState()
-    var pipes Array<Pipe> = []
+    const state GameState = GameState()
+    const pipes Array<Pipe> = []
 
     state.birdY = 220.0
     state.birdVelocity = 0.0
@@ -109,9 +109,9 @@ fn updateBird(state GameState, flapPressed bool, dt f64) void {
 }
 
 fn updatePipes(state GameState, dt f64) void {
-    var activePipes Array<Pipe> = []
+    const activePipes Array<Pipe> = []
 
-    for (var pipe Pipe : state.pipes) {
+    for (const pipe Pipe : state.pipes) {
         pipe.x = pipe.x - (PIPE_SPEED * dt)
         if ((pipe.x + (PIPE_WIDTH as f64)) > 0.0) {
             activePipes.push(pipe)
@@ -131,20 +131,19 @@ fn updateScore(state GameState) void {
     var index i32 = 0
 
     for (var pipe Pipe : state.pipes) {
-        if (pipe.passed == false &&
-            (pipe.x + (PIPE_WIDTH as f64)) < (BIRD_X as f64)) {
+        if (pipe.passed == false && (pipe.x + (PIPE_WIDTH as f64)) < (BIRD_X as f64)) {
             pipe.passed = true
             state.score = state.score + 1
         }
     }
 }
 fn checkCollisions(state GameState) bool {
-    var birdLeft f64 = BIRD_X as f64
-    var birdRight f64 = birdLeft + (BIRD_WIDTH as f64)
-    var birdTop f64 = state.birdY
-    var birdBottom f64 = state.birdY + (BIRD_HEIGHT as f64)
-    var groundTop f64 = (WINDOW_HEIGHT - GROUND_HEIGHT) as f64
-    var halfGap f64 = (PIPE_GAP as f64) / 2.0
+    const birdLeft f64 = BIRD_X as f64
+    const birdRight f64 = birdLeft + (BIRD_WIDTH as f64)
+    const birdTop f64 = state.birdY
+    const birdBottom f64 = state.birdY + (BIRD_HEIGHT as f64)
+    const groundTop f64 = (WINDOW_HEIGHT - GROUND_HEIGHT) as f64
+    const halfGap f64 = (PIPE_GAP as f64) / 2.0
 
     if (birdTop < 0.0) {
         return true
@@ -154,12 +153,12 @@ fn checkCollisions(state GameState) bool {
         return true
     }
 
-    for (var pipe Pipe : state.pipes) {
-        var pipeLeft f64 = pipe.x
-        var pipeRight f64 = pipe.x + (PIPE_WIDTH as f64)
+    for (const pipe Pipe : state.pipes) {
+        const pipeLeft f64 = pipe.x
+        const pipeRight f64 = pipe.x + (PIPE_WIDTH as f64)
         if (birdRight > pipeLeft && birdLeft < pipeRight) {
-            var gapTop f64 = pipe.gapY - halfGap
-            var gapBottom f64 = pipe.gapY + halfGap
+            const gapTop f64 = pipe.gapY - halfGap
+            const gapBottom f64 = pipe.gapY + halfGap
             if (birdTop < gapTop || birdBottom > gapBottom) {
                 return true
             }
@@ -195,19 +194,17 @@ fn renderPipes(win handle<mog:window:WindowHandle>, pipes Array<Pipe>) void {
         var bottomY i64 = floor(pipe.gapY + halfGap) as i64
         var bottomHeight i64 = groundTop - bottomY
 
-        window.fillRect(win, pipeX, 0i64, PIPE_WIDTH, topHeight,
-                        94i64, 201i64, 72i64)
-        window.fillRect(win, pipeX, bottomY, PIPE_WIDTH, bottomHeight,
-                        94i64, 201i64, 72i64)
+        window.fillRect(win, pipeX, 0i64, PIPE_WIDTH, topHeight, 94i64, 201i64, 72i64)
+        window.fillRect(win, pipeX, bottomY, PIPE_WIDTH, bottomHeight, 94i64, 201i64, 72i64)
     }
 }
 
 fn renderBird(win handle<mog:window:WindowHandle>, state GameState) void {
-    var birdY i64 = floor(state.birdY) as i64
-    var birdEyeX i64 = BIRD_X + BIRD_WIDTH - 10i64
-    var birdEyeY i64 = birdY + 6i64
-    var birdBeakX i64 = BIRD_X + BIRD_WIDTH - 2i64
-    var birdBeakY i64 = birdY + 8i64
+    const birdY i64 = floor(state.birdY) as i64
+    const birdEyeX i64 = BIRD_X + BIRD_WIDTH - 10i64
+    const birdEyeY i64 = birdY + 6i64
+    const birdBeakX i64 = BIRD_X + BIRD_WIDTH - 2i64
+    const birdBeakY i64 = birdY + 8i64
 
     window.fillRect(win, BIRD_X, birdY, BIRD_WIDTH,
                     BIRD_HEIGHT, 255i64, 230i64, 64i64)
@@ -218,18 +215,16 @@ fn renderBird(win handle<mog:window:WindowHandle>, state GameState) void {
 }
 
 fn renderFrame(win handle<mog:window:WindowHandle>, state GameState) void {
-    var groundTop i64 = WINDOW_HEIGHT - GROUND_HEIGHT
+    const groundTop i64 = WINDOW_HEIGHT - GROUND_HEIGHT
 
     window.clearRgb(win, 135i64, 206i64, 235i64)
     renderPipes(win, state.pipes)
-    window.fillRect(win, 0i64, groundTop, WINDOW_WIDTH,
-                    GROUND_HEIGHT, 181i64, 101i64, 29i64)
+    window.fillRect(win, 0i64, groundTop, WINDOW_WIDTH, GROUND_HEIGHT, 181i64, 101i64, 29i64)
     renderBird(win, state)
     window.present(win)
 }
 
-const win handle<mog:window:WindowHandle> =
-    window.create("Flappy Mog", WINDOW_WIDTH, WINDOW_HEIGHT)
+const win handle<mog:window:WindowHandle> = window.create("Flappy Mog", WINDOW_WIDTH, WINDOW_HEIGHT)
 
 window.show(win)
 
@@ -246,12 +241,12 @@ print("Press Space to flap. Escape closes the window.")
 while (appRunning) {
     var evt handle<mog:window:EventHandle>? = window.pollEvent(win)
     while (evt != null) {
-        var kind str = window.eventKind(evt)
+        const kind str = window.eventKind(evt)
         if (kind == "quit") {
             appRunning = false
         } else {
             if (kind == "key_down") {
-                var keyCode i64 = window.eventKeyCode(evt)
+                const keyCode i64 = window.eventKeyCode(evt)
                 if (keyCode == window.KEY_ESCAPE) {
                     appRunning = false
                 }
@@ -277,7 +272,7 @@ while (appRunning) {
         pendingFlap = false
     }
 
-    var now f64 = clock()
+    const now f64 = clock()
     var frameTime f64 = now - lastTime
     lastTime = now
 
@@ -288,7 +283,7 @@ while (appRunning) {
     accumulator += frameTime
 
     while (accumulator >= FIXED_DT) {
-        var stepFlap bool = pendingFlap
+        const stepFlap bool = pendingFlap
         if (pendingFlap) {
             pendingFlap = false
         }
