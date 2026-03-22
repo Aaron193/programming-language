@@ -1,0 +1,4 @@
+#!strict
+const { Add: fn(f64, f64) f64 } = @import("../../modules/math.mog")
+
+print(Add(1.0, 2.0))

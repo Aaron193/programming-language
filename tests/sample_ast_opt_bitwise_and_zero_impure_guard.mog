@@ -1,0 +1,8 @@
+#!strict
+fn value() i32 {
+    print("call")
+    return 7
+}
+
+print(value() & 0i32)
+print(0i32 & value())

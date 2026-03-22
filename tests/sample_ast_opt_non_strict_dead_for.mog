@@ -1,0 +1,13 @@
+var counter i32 = 0
+
+fn bump() i32 {
+    print("init")
+    counter = counter + 1
+    return counter
+}
+
+for (bump(); false; counter = counter + 1) {
+    print("body")
+}
+
+print(counter)

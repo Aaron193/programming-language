@@ -1,0 +1,86 @@
+const C = @import("./constants.mog")
+const { GameState, Pipe, SpawnPipe } = @import("./state.mog")
+
+fn updateBird(state GameState, flapPressed bool, dt f64) void {
+    if (flapPressed) {
+        state.birdVelocity = C.FLAP_IMPULSE
+    }
+
+    state.birdVelocity = state.birdVelocity + (C.GRAVITY * dt)
+    state.birdY = state.birdY + (state.birdVelocity * dt)
+}
+
+fn updatePipes(state GameState, dt f64) void {
+    const activePipes Array<Pipe> = []
+
+    for (const pipe Pipe : state.pipes) {
+        pipe.x = pipe.x - (C.PIPE_SPEED * dt)
+        if ((pipe.x + (C.PIPE_WIDTH as f64)) > 0.0) {
+            activePipes.push(pipe)
+        }
+    }
+
+    state.pipes = activePipes
+    state.spawnTimer = state.spawnTimer + dt
+
+    while (state.spawnTimer >= C.SPAWN_INTERVAL) {
+        state.spawnTimer = state.spawnTimer - C.SPAWN_INTERVAL
+        SpawnPipe(state, (C.WINDOW_WIDTH as f64) + (C.PIPE_WIDTH as f64))
+    }
+}
+
+fn updateScore(state GameState) void {
+    for (var pipe Pipe : state.pipes) {
+        if (pipe.passed == false && (pipe.x + (C.PIPE_WIDTH as f64)) < (C.BIRD_X as f64)) {
+            pipe.passed = true
+            state.score = state.score + 1
+        }
+    }
+}
+
+fn checkCollisions(state GameState) bool {
+    const birdLeft f64 = C.BIRD_X as f64
+    const birdRight f64 = birdLeft + (C.BIRD_WIDTH as f64)
+    const birdTop f64 = state.birdY
+    const birdBottom f64 = state.birdY + (C.BIRD_HEIGHT as f64)
+    const groundTop f64 = (C.WINDOW_HEIGHT - C.GROUND_HEIGHT) as f64
+    const halfGap f64 = (C.PIPE_GAP as f64) / 2.0
+
+    if (birdTop < 0.0) {
+        return true
+    }
+
+    if (birdBottom >= groundTop) {
+        return true
+    }
+
+    for (const pipe Pipe : state.pipes) {
+        const pipeLeft f64 = pipe.x
+        const pipeRight f64 = pipe.x + (C.PIPE_WIDTH as f64)
+        if (birdRight > pipeLeft && birdLeft < pipeRight) {
+            const gapTop f64 = pipe.gapY - halfGap
+            const gapBottom f64 = pipe.gapY + halfGap
+            if (birdTop < gapTop || birdBottom > gapBottom) {
+                return true
+            }
+        }
+    }
+
+    return false
+}
+
+fn StepGame(state GameState, flapPressed bool, dt f64) void {
+    if (state.running == false) {
+        return
+    }
+
+    updateBird(state, flapPressed, dt)
+    updatePipes(state, dt)
+    updateScore(state)
+
+    if (checkCollisions(state)) {
+        state.birdVelocity = 0.0
+        state.running = false
+        state.dead = true
+    }
+}

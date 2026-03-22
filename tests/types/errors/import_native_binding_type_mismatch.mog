@@ -1,0 +1,4 @@
+#!strict
+const { addI64: fn(f64, f64) f64 } = @import("examples:math")
+
+print(addI64(1.0, 2.0))

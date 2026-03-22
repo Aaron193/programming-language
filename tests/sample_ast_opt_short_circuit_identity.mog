@@ -1,0 +1,13 @@
+#!strict
+fn rhsTrue() bool {
+    print("rhs-true")
+    return true
+}
+
+fn rhsFalse() bool {
+    print("rhs-false")
+    return false
+}
+
+print(true && rhsTrue())
+print(false || rhsFalse())

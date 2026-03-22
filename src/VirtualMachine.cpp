@@ -161,19 +161,6 @@ static bool hasStrictDirective(std::string_view source) {
     return source.rfind("#!strict", 0) == 0;
 }
 
-static std::string_view stripStrictDirectiveLine(std::string_view source) {
-    if (!hasStrictDirective(source)) {
-        return source;
-    }
-
-    size_t newlinePos = source.find('\n');
-    if (newlinePos == std::string_view::npos) {
-        return std::string_view();
-    }
-
-    return source.substr(newlinePos + 1);
-}
-
 static std::string valueToString(const Value& value) {
     if (value.isString()) return value.asString();
     if (value.isSignedInt()) return fastIntegerToString(value.asSignedInt());
@@ -205,6 +192,43 @@ static std::string valueTypeName(const Value& value) {
     if (value.isClosure()) return "closure";
     if (value.isFunction()) return "function";
     return "unknown";
+}
+
+static void printFrontendTimings(const AstFrontendResult::Timings& timings) {
+    std::cerr << "[frontend] parse=" << timings.parseMicros << "us"
+              << " symbols=" << timings.symbolCollectionMicros << "us"
+              << " imports=" << timings.importResolutionMicros << "us"
+              << " bind=" << timings.initialBindMicros << "us"
+              << " check=" << timings.initialTypecheckMicros << "us"
+              << " hir=" << timings.hirLowerMicros << "us"
+              << " hir-optimize=" << timings.hirOptimizeMicros << "us"
+              << " cache-hit=" << timings.moduleCacheHits
+              << " cache-miss=" << timings.moduleCacheMisses
+              << " cache-rebuild=" << timings.moduleCacheRebuilds
+              << " diagnostics=" << timings.diagnosticCount
+              << " interned=" << timings.internedIdentifierCount
+              << " total=" << timings.totalMicros << "us" << std::endl;
+}
+
+static void printFrontendTimingsJson(const AstFrontendResult::Timings& timings) {
+    std::cerr << "{"
+              << "\"parseMicros\":" << timings.parseMicros << ","
+              << "\"symbolCollectionMicros\":" << timings.symbolCollectionMicros
+              << ","
+              << "\"importResolutionMicros\":" << timings.importResolutionMicros
+              << ","
+              << "\"initialBindMicros\":" << timings.initialBindMicros << ","
+              << "\"initialTypecheckMicros\":" << timings.initialTypecheckMicros
+              << ","
+              << "\"hirLowerMicros\":" << timings.hirLowerMicros << ","
+              << "\"hirOptimizeMicros\":" << timings.hirOptimizeMicros << ","
+              << "\"moduleCacheHits\":" << timings.moduleCacheHits << ","
+              << "\"moduleCacheMisses\":" << timings.moduleCacheMisses << ","
+              << "\"moduleCacheRebuilds\":" << timings.moduleCacheRebuilds << ","
+              << "\"diagnosticCount\":" << timings.diagnosticCount << ","
+              << "\"internedIdentifierCount\":" << timings.internedIdentifierCount
+              << ","
+              << "\"totalMicros\":" << timings.totalMicros << "}" << std::endl;
 }
 
 static bool toArrayIndex(const Value& value, size_t& index) {
@@ -907,6 +931,23 @@ static bool valueMatchesType(const Value& value, const TypeRef& expected) {
     return isAssignable(actual, expected);
 }
 
+static bool valueMatchesExportedType(const Value& value, const TypeRef& expected) {
+    if (valueMatchesType(value, expected)) {
+        return true;
+    }
+
+    if (!expected || expected->isAny()) {
+        return true;
+    }
+
+    if (expected->kind == TypeKind::CLASS && value.isClass()) {
+        auto* klass = value.asClass();
+        return klass != nullptr && klass->name == expected->className;
+    }
+
+    return false;
+}
+
 UpvalueObject* VirtualMachine::captureUpvalue(size_t stackIndex) {
     UpvalueObject* previous = nullptr;
     UpvalueObject* current = m_openUpvaluesHead;
@@ -1418,9 +1459,9 @@ Status VirtualMachine::callClosure(ClosureObject* closure,
                                    uint8_t argumentCount,
                                    InstanceObject* receiver) {
     auto function = closure->function;
-    if (function->parameters.size() != argumentCount) {
+    if (function->arity != argumentCount) {
         return runtimeError("Function '" + function->name + "' expected " +
-                            std::to_string(function->parameters.size()) +
+                            std::to_string(function->arity) +
                             " arguments but got " +
                             std::to_string(static_cast<int>(argumentCount)) +
                             ".");
@@ -1438,7 +1479,8 @@ Status VirtualMachine::callClosure(ClosureObject* closure,
                                          calleeIndex + 1,
                                          calleeIndex,
                                          receiver,
-                                         closure};
+                                         closure,
+                                         closure ? closure->module : nullptr};
     m_activeFrame = &m_frames[m_frameCount - 1];
     return Status::OK;
 }
@@ -1901,7 +1943,7 @@ Status VirtualMachine::callValue(Value callee, uint8_t argumentCount,
         instance->fieldSlots.resize(instance->klass->fieldNames.size());
         instance->initializedFieldSlots.assign(
             instance->klass->fieldNames.size(), 0);
-        m_stack.setAt(calleeIndex, Value(instance));
+        m_stack.setAtUnchecked(calleeIndex, Value(instance));
         return Status::OK;
     }
 
@@ -1976,7 +2018,7 @@ Status VirtualMachine::invokeProperty(size_t instructionOffset,
 
         auto typeIt = module->exportTypes.find(name);
         if (typeIt != module->exportTypes.end() &&
-            !valueMatchesType(it->second, typeIt->second)) {
+            !valueMatchesExportedType(it->second, typeIt->second)) {
             return runtimeError("Type error: module export '" + name +
                                 "' from '" + module->path + "' expected '" +
                                 typeIt->second->toString() + "', got '" +
@@ -2156,6 +2198,8 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
         VM_OPCODE_ADDR(INT_TO_FLOAT),
         VM_OPCODE_ADDR(FLOAT_TO_INT),
         VM_OPCODE_ADDR(INT_TO_STR),
+        VM_OPCODE_ADDR(CONCAT_STRING_LITERAL_INT),
+        VM_OPCODE_ADDR(GET_INDEX_STRING_LITERAL_INT),
         VM_OPCODE_ADDR(CHECK_INSTANCE_TYPE),
         VM_OPCODE_ADDR(INT_NEGATE),
         VM_OPCODE_ADDR(ITER_INIT),
@@ -2695,37 +2739,45 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
         VM_CASE(DEFINE_GLOBAL_SLOT) {
             uint8_t slot = readByte();
-            if (slot >= m_globalValues.size()) {
+            auto& globalValues = currentGlobalValues();
+            auto& globalDefined = currentGlobalDefined();
+            if (slot >= globalValues.size()) {
                 return runtimeError("Invalid global slot.");
             }
-            m_globalValues[slot] = m_stack.pop();
-            m_globalDefined[slot] = true;
+            globalValues[slot] = m_stack.pop();
+            globalDefined[slot] = true;
             DISPATCH();
         }
 
         VM_CASE(GET_GLOBAL_SLOT) {
             uint8_t slot = readByte();
-            if (slot >= m_globalValues.size() || !m_globalDefined[slot]) {
-                std::string name = slot < m_globalNames.size()
-                                       ? m_globalNames[slot]
+            auto& globalValues = currentGlobalValues();
+            auto& globalDefined = currentGlobalDefined();
+            auto& globalNames = currentGlobalNames();
+            if (slot >= globalValues.size() || !globalDefined[slot]) {
+                std::string name = slot < globalNames.size()
+                                       ? globalNames[slot]
                                        : "<unknown>";
                 return runtimeError("Undefined variable '" + name + "'.");
             }
 
-            m_stack.push(m_globalValues[slot]);
+            m_stack.push(globalValues[slot]);
             DISPATCH();
         }
 
         VM_CASE(SET_GLOBAL_SLOT) {
             uint8_t slot = readByte();
-            if (slot >= m_globalValues.size() || !m_globalDefined[slot]) {
-                std::string name = slot < m_globalNames.size()
-                                       ? m_globalNames[slot]
+            auto& globalValues = currentGlobalValues();
+            auto& globalDefined = currentGlobalDefined();
+            auto& globalNames = currentGlobalNames();
+            if (slot >= globalValues.size() || !globalDefined[slot]) {
+                std::string name = slot < globalNames.size()
+                                       ? globalNames[slot]
                                        : "<unknown>";
                 return runtimeError("Undefined variable '" + name + "'.");
             }
 
-            m_globalValues[slot] = m_stack.peekUnchecked(0);
+            globalValues[slot] = m_stack.peekUnchecked(0);
             DISPATCH();
         }
 
@@ -2738,8 +2790,8 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
         VM_CASE(SET_LOCAL) {
             uint8_t slot = readByte();
-            m_stack.setAt(currentFrame().slotBase + slot,
-                          m_stack.peekUnchecked(0));
+            m_stack.setAtUnchecked(currentFrame().slotBase + slot,
+                                   m_stack.peekUnchecked(0));
             DISPATCH();
         }
 
@@ -2760,7 +2812,8 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
             if (upvalue->isClosed) {
                 upvalue->closed = m_stack.peekUnchecked(0);
             } else {
-                m_stack.setAt(upvalue->stackIndex, m_stack.peekUnchecked(0));
+                m_stack.setAtUnchecked(upvalue->stackIndex,
+                                       m_stack.peekUnchecked(0));
             }
             DISPATCH();
         }
@@ -2895,7 +2948,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
                 auto typeIt = module->exportTypes.find(name);
                 if (typeIt != module->exportTypes.end() &&
-                    !valueMatchesType(it->second, typeIt->second)) {
+                    !valueMatchesExportedType(it->second, typeIt->second)) {
                     return runtimeError(
                         "Type error: module export '" + name + "' from '" +
                         module->path + "' expected '" +
@@ -3246,7 +3299,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                                 instance->klass->fieldNames.size());
                             instance->initializedFieldSlots.assign(
                                 instance->klass->fieldNames.size(), 0);
-                            m_stack.setAt(calleeIndex, Value(instance));
+                            m_stack.setAtUnchecked(calleeIndex, Value(instance));
                         }
                         break;
                     }
@@ -3276,6 +3329,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
             auto function = constant.asFunction();
             auto closure = gcAlloc<ClosureObject>();
             closure->function = function;
+            closure->module = currentGlobalModule();
             closure->upvalues.reserve(function->upvalueCount);
             m_stack.push(Value(closure));
 
@@ -3695,7 +3749,8 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                     break;
             }
 
-            m_stack.setAt(currentFrame().slotBase + slot, std::move(nextValue));
+            m_stack.setAtUnchecked(currentFrame().slotBase + slot,
+                                   std::move(nextValue));
             DISPATCH();
         }
 
@@ -3782,7 +3837,6 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
             std::string source((std::istreambuf_iterator<char>(file)),
                                std::istreambuf_iterator<char>());
-            std::string_view compileSource = stripStrictDirectiveLine(source);
             bool importStrict =
                 m_defaultStrictMode || hasStrictDirective(source);
 
@@ -3790,13 +3844,28 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
             Chunk importedChunk;
             m_compiler.setStrictMode(importStrict);
-            if (!m_compiler.compile(compileSource, importedChunk, path)) {
+            if (!m_compiler.compile(source, importedChunk, path)) {
                 m_importStack.erase(path);
                 return Status::COMPILATION_ERROR;
             }
 
             auto* module = gcAlloc<ModuleObject>();
             module->path = path;
+            module->globalNames = m_compiler.globalNames();
+            module->globalTypes = m_compiler.globalTypes();
+            if (module->globalTypes.size() < module->globalNames.size()) {
+                module->globalTypes.resize(module->globalNames.size(),
+                                           TypeInfo::makeAny());
+            }
+            module->globalValues.assign(module->globalNames.size(), Value());
+            module->globalDefined.assign(module->globalNames.size(), false);
+            for (size_t i = 0; i < module->globalNames.size(); ++i) {
+                auto nativeIt = m_nativeGlobals.find(module->globalNames[i]);
+                if (nativeIt != m_nativeGlobals.end()) {
+                    module->globalValues[i] = nativeIt->second;
+                    module->globalDefined[i] = true;
+                }
+            }
 
             auto savedGlobalNames = m_globalNames;
             auto savedGlobalTypes = m_globalTypes;
@@ -3829,6 +3898,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
             auto closure = gcAlloc<ClosureObject>();
             closure->function = function;
+            closure->module = module;
             closure->upvalues = {};
 
             m_stack.push(Value(closure));
@@ -3876,17 +3946,19 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
             if (m_currentModule != nullptr) {
                 Value value = m_stack.peekUnchecked(0);
                 TypeRef declaredType = TypeInfo::makeAny();
-                for (size_t i = 0; i < m_globalNames.size(); ++i) {
-                    if (m_globalNames[i] == name) {
-                        if (i < m_globalTypes.size() && m_globalTypes[i]) {
-                            declaredType = m_globalTypes[i];
+                auto& globalNames = currentGlobalNames();
+                auto& globalTypes = currentGlobalTypes();
+                for (size_t i = 0; i < globalNames.size(); ++i) {
+                    if (globalNames[i] == name) {
+                        if (i < globalTypes.size() && globalTypes[i]) {
+                            declaredType = globalTypes[i];
                         }
                         break;
                     }
                 }
 
                 if (declaredType && !declaredType->isAny() &&
-                    !valueMatchesType(value, declaredType)) {
+                    !valueMatchesExportedType(value, declaredType)) {
                     return runtimeError("Type error: cannot export '" + name +
                                         "' as '" + declaredType->toString() +
                                         "' from module '" +
@@ -4164,6 +4236,67 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
             return runtimeError("Cannot cast value to str.");
         }
 
+        VM_CASE(CONCAT_STRING_LITERAL_INT) {
+            const std::string& prefix = readConstant().asString();
+            Value value = m_stack.pop();
+
+            std::string result;
+            result.reserve(prefix.size() + 24);
+            result += prefix;
+
+            if (value.isSignedInt()) {
+                appendFastInteger(result, value.asSignedInt());
+            } else if (value.isUnsignedInt()) {
+                appendFastInteger(result, value.asUnsignedInt());
+            } else if (value.isNumber()) {
+                result += std::to_string(value.asNumber());
+            } else {
+                return runtimeError(
+                    "String concatenation suffix must be numeric.");
+            }
+
+            m_stack.push(makeStringValue(std::move(result)));
+            DISPATCH();
+        }
+
+        VM_CASE(GET_INDEX_STRING_LITERAL_INT) {
+            const std::string& prefix = readConstant().asString();
+            Value suffix = m_stack.pop();
+            const Value& container = m_stack.topUnchecked();
+
+            if (!container.isDict()) {
+                return runtimeError(
+                    "String-key literal lookup is only supported on dict.");
+            }
+
+            std::string key;
+            key.reserve(prefix.size() + 24);
+            key += prefix;
+            if (suffix.isSignedInt()) {
+                appendFastInteger(key, suffix.asSignedInt());
+            } else if (suffix.isUnsignedInt()) {
+                appendFastInteger(key, suffix.asUnsignedInt());
+            } else if (suffix.isNumber()) {
+                key += std::to_string(suffix.asNumber());
+            } else {
+                return runtimeError("Dictionary key suffix must be numeric.");
+            }
+
+            StringObject tempKey;
+            tempKey.value = std::move(key);
+            tempKey.hashValue = std::hash<std::string>{}(tempKey.value);
+            tempKey.isInterned = false;
+
+            auto dict = container.asDict();
+            auto it = dict->map.find(Value(&tempKey));
+            if (it == dict->map.end()) {
+                return runtimeError("Dictionary key not found.");
+            }
+
+            m_stack.replaceTopUnchecked(it->second);
+            DISPATCH();
+        }
+
         VM_CASE(CHECK_INSTANCE_TYPE) {
             const std::string& expectedClass = readNameConstant();
             Value value = m_stack.peekUnchecked(0);
@@ -4238,8 +4371,9 @@ void VirtualMachine::resetRuntimeState() {
 Status VirtualMachine::interpret(std::string_view source, bool printReturnValue,
                                  bool traceEnabled, bool disassembleEnabled,
                                  const std::string& sourcePath,
-                                 bool strictMode) {
-    std::string_view compileSource = stripStrictDirectiveLine(source);
+                                 bool strictMode,
+                                 bool frontendTimingsEnabled,
+                                 bool frontendTimingsJsonEnabled) {
     Chunk chunk;
     resetRuntimeState();
     m_defaultStrictMode = strictMode || hasStrictDirective(source);
@@ -4249,8 +4383,15 @@ Status VirtualMachine::interpret(std::string_view source, bool printReturnValue,
     m_traceEnabled = traceEnabled;
     m_disassembleEnabled = disassembleEnabled;
 
-    if (!m_compiler.compile(compileSource, chunk, sourcePath)) {
+    if (!m_compiler.compile(source, chunk, sourcePath)) {
         return Status::COMPILATION_ERROR;
+    }
+
+    if (frontendTimingsEnabled) {
+        printFrontendTimings(m_compiler.lastFrontendTimings());
+    }
+    if (frontendTimingsJsonEnabled) {
+        printFrontendTimingsJson(m_compiler.lastFrontendTimings());
     }
 
     if (m_disassembleEnabled) {
@@ -4292,7 +4433,7 @@ Status VirtualMachine::interpret(std::string_view source, bool printReturnValue,
     }
 
     m_frames[m_frameCount++] =
-        CallFrame{&chunk, chunk.getBytes(), 0, 0, nullptr, nullptr};
+        CallFrame{&chunk, chunk.getBytes(), 0, 0, nullptr, nullptr, nullptr};
     m_activeFrame = &m_frames[m_frameCount - 1];
 
     Value returnValue;

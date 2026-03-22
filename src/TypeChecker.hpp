@@ -7,31 +7,14 @@
 #include <unordered_set>
 #include <vector>
 
+#include "FrontendDiagnostic.hpp"
+#include "SourceLocation.hpp"
 #include "TypeInfo.hpp"
 
-struct TypeError {
-    size_t line;
-    std::string message;
-};
+struct AstBindingMetadata;
+using TypeCheckerMetadata = AstBindingMetadata;
 
-struct TypeCheckerDeclarationType {
-    size_t line = 0;
-    size_t functionDepth = 0;
-    size_t scopeDepth = 0;
-    std::string name;
-    TypeRef type;
-    bool isConst = false;
-};
-
-struct TypeCheckerMetadata {
-    std::unordered_map<std::string, std::unordered_map<std::string, TypeRef>>
-        classFieldTypes;
-    std::unordered_map<std::string, std::unordered_map<std::string, TypeRef>>
-        classMethodSignatures;
-    std::unordered_map<std::string, std::string> superclassOf;
-    std::unordered_map<std::string, TypeRef> topLevelSymbolTypes;
-    std::vector<TypeCheckerDeclarationType> declarationTypes;
-};
+using TypeError = FrontendDiagnostic;
 
 class TypeChecker {
    public:

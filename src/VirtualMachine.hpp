@@ -37,6 +37,7 @@ class VirtualMachine {
         size_t calleeIndex;
         InstanceObject* receiver;
         ClosureObject* closure;
+        ModuleObject* module;
     };
 
     // expression evaluation stack
@@ -69,6 +70,25 @@ class VirtualMachine {
     bool m_disassembleEnabled = false;
 
     CallFrame& currentFrame() { return *m_activeFrame; }
+    ModuleObject* currentGlobalModule() {
+        return m_activeFrame ? m_activeFrame->module : nullptr;
+    }
+    std::vector<std::string>& currentGlobalNames() {
+        ModuleObject* module = currentGlobalModule();
+        return module ? module->globalNames : m_globalNames;
+    }
+    std::vector<TypeRef>& currentGlobalTypes() {
+        ModuleObject* module = currentGlobalModule();
+        return module ? module->globalTypes : m_globalTypes;
+    }
+    std::vector<Value>& currentGlobalValues() {
+        ModuleObject* module = currentGlobalModule();
+        return module ? module->globalValues : m_globalValues;
+    }
+    std::vector<bool>& currentGlobalDefined() {
+        ModuleObject* module = currentGlobalModule();
+        return module ? module->globalDefined : m_globalDefined;
+    }
 
     // inlined methods
     uint8_t readByte() { return *currentFrame().ip++; }
@@ -133,5 +153,7 @@ class VirtualMachine {
     Status interpret(std::string_view source, bool printReturnValue = false,
                      bool traceEnabled = false, bool disassembleEnabled = false,
                      const std::string& sourcePath = "",
-                     bool strictMode = false);
+                     bool strictMode = false,
+                     bool frontendTimingsEnabled = false,
+                     bool frontendTimingsJsonEnabled = false);
 };

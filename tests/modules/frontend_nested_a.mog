@@ -1,0 +1,8 @@
+#!strict
+const { Base, GetBase } = @import("./frontend_nested_b.mog")
+
+fn GetValue() i32 {
+    return GetBase()
+}
+
+const Value i32 = Base + 1i32

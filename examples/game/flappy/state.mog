@@ -1,0 +1,85 @@
+type Pipe struct {
+    x f64
+    gapY f64
+    passed bool
+}
+
+type GameState struct {
+    birdY f64
+    birdVelocity f64
+    pipes Array<Pipe>
+    spawnTimer f64
+    spawnIndex i32
+    score i32
+    running bool
+    dead bool
+}
+
+const { PIPE_SPEED, SPAWN_INTERVAL } = @import("./constants.mog")
+
+fn makePipe(x f64, gapY f64) Pipe {
+    const pipe Pipe = Pipe()
+    pipe.x = x
+    pipe.gapY = gapY
+    pipe.passed = false
+    return pipe
+}
+
+fn nextGapY(spawnIndex i32) f64 {
+    var cycle i32 = spawnIndex
+    while (cycle >= 8) {
+        cycle = cycle - 8
+    }
+
+    if (cycle == 0) {
+        return 180.0
+    }
+    if (cycle == 1) {
+        return 260.0
+    }
+    if (cycle == 2) {
+        return 320.0
+    }
+    if (cycle == 3) {
+        return 230.0
+    }
+    if (cycle == 4) {
+        return 150.0
+    }
+    if (cycle == 5) {
+        return 300.0
+    }
+    if (cycle == 6) {
+        return 210.0
+    }
+
+    return 280.0
+}
+
+fn SpawnPipe(state GameState, x f64) void {
+    const pipe Pipe = makePipe(x, nextGapY(state.spawnIndex))
+    state.spawnIndex = state.spawnIndex + 1
+    state.pipes.push(pipe)
+}
+
+fn SeedInitialPipes(state GameState) void {
+    SpawnPipe(state, 500.0)
+    SpawnPipe(state, 500.0 + (PIPE_SPEED * SPAWN_INTERVAL))
+}
+
+fn ResetGame() GameState {
+    const state GameState = GameState()
+    const pipes Array<Pipe> = []
+
+    state.birdY = 220.0
+    state.birdVelocity = 0.0
+    state.pipes = pipes
+    state.spawnTimer = 0.0
+    state.spawnIndex = 0
+    state.score = 0
+    state.running = true
+    state.dead = false
+
+    SeedInitialPipes(state)
+    return state
+}

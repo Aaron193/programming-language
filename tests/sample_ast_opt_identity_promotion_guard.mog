@@ -1,0 +1,7 @@
+#!strict
+fn value() u8 {
+    print("call")
+    return 5u8
+}
+
+print(0u16 + value())

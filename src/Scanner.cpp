@@ -2,12 +2,37 @@
 
 #include <cstring>
 
+namespace {
+
+bool startsWithStrictDirective(const char* text) {
+    constexpr const char* kDirective = "#!strict";
+    constexpr size_t kDirectiveLength = 8;
+    if (std::strncmp(text, kDirective, kDirectiveLength) != 0) {
+        return false;
+    }
+
+    const char boundary = text[kDirectiveLength];
+    return boundary == '\0' || boundary == '\n' || boundary == '\r';
+}
+
+}  // namespace
+
 Scanner::Scanner(std::string_view source)
     : m_source(source.data()),
       m_start(source.data()),
       m_current(source.data()) {}
 
-char Scanner::advance() { return *m_current++; }
+char Scanner::advance() {
+    const char current = *m_current++;
+    ++m_offset;
+    if (current == '\n') {
+        ++m_line;
+        m_column = 1;
+    } else {
+        ++m_column;
+    }
+    return current;
+}
 char Scanner::peek() { return *m_current; }
 char Scanner::peekNext() {
     if (isEOF()) return '\0';
@@ -19,10 +44,20 @@ bool Scanner::isEOF() { return *m_current == '\0'; }
 void Scanner::skipWhitespace() {
     while (true) {
         char c = peek();
+        if (m_offset == 0 && m_line == 1 && m_column == 1 && c == '#' &&
+            startsWithStrictDirective(m_current)) {
+            while (peek() != '\n' && !isEOF()) {
+                advance();
+            }
+            if (peek() == '\n') {
+                advance();
+            }
+            continue;
+        }
+
         if (c == ' ' || c == '\t' || c == '\v' || c == '\f' || c == '\r') {
             advance();
         } else if (c == '\n') {
-            m_line++;
             advance();
         } else if (c == '/' && peekNext() == '/') {
             while (peek() != '\n' && !isEOF()) {
@@ -49,6 +84,9 @@ bool Scanner::isAlpha(char c) {
 Token Scanner::nextToken() {
     skipWhitespace();
     m_start = m_current;
+    m_tokenStartLine = m_line;
+    m_tokenStartColumn = m_column;
+    m_tokenStartOffset = m_offset;
 
     if (isEOF()) {
         return createToken(TokenType::END_OF_FILE);
@@ -212,10 +250,6 @@ Token Scanner::nextToken() {
 
         case '"': {
             while (peek() != '"' && !isEOF()) {
-                if (peek() == '\n') {
-                    m_line++;
-                }
-
                 advance();
             }
 

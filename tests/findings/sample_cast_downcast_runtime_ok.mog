@@ -1,0 +1,9 @@
+type Animal struct {}
+
+type Dog struct < Animal {
+    bark str
+}
+
+var a Animal = Dog()
+var d Dog = a as Dog
+print("ok")

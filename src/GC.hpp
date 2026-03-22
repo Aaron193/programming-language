@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <memory>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -40,11 +41,17 @@ class GC {
     ~GC();
 
    private:
+    static constexpr size_t STRING_BLOCK_CAPACITY = 4096;
+
     GcObject* m_objects = nullptr;
     size_t m_bytesAllocated = 0;
     std::vector<GcObject*> m_grayStack;
     std::unordered_map<std::string, StringObject*> m_internedStrings;
+    std::vector<void*> m_stringBlocks;
+    size_t m_nextStringSlot = STRING_BLOCK_CAPACITY;
+    StringObject* m_freeStringObjects = nullptr;
 
     void freeObject(GcObject* obj);
     void removeInternedString(const StringObject* obj);
+    StringObject* allocateStringObject();
 };

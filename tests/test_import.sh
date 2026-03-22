@@ -24,6 +24,7 @@ SUCCESS_FILES=(
     "$SCRIPT_DIR/sample_import_native_named.mog"
     "$SCRIPT_DIR/sample_import_native_handle.mog"
     "$SCRIPT_DIR/sample_import_native_handle_typed.mog"
+    "$SCRIPT_DIR/sample_import_native_handle_frontend_typed.mog"
 )
 
 for file in "${SUCCESS_FILES[@]}"; do

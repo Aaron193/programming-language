@@ -35,8 +35,67 @@ file(GLOB_RECURSE SOURCES
     "src/*.cpp"
 )
 
-add_executable(interpreter ${SOURCES})
+set(CORE_SOURCES ${SOURCES})
+list(REMOVE_ITEM CORE_SOURCES
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp")
+
+add_library(interpreter_core STATIC ${CORE_SOURCES})
+target_include_directories(interpreter_core
+    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
+
+add_executable(interpreter
+    src/main.cpp
+)
+target_link_libraries(interpreter PRIVATE interpreter_core)
 target_include_directories(interpreter PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+
+add_executable(ast_parser_smoke
+    tests/ast_parser_smoke.cpp
+)
+target_include_directories(ast_parser_smoke
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(ast_parser_smoke PRIVATE interpreter_core)
+
+add_executable(ast_emitter_regression
+    tests/ast_emitter_regression.cpp
+)
+target_include_directories(ast_emitter_regression
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(ast_emitter_regression PRIVATE interpreter_core)
+
+add_executable(ast_frontend_regression
+    tests/ast_frontend_regression.cpp
+)
+target_include_directories(ast_frontend_regression
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(ast_frontend_regression PRIVATE interpreter_core)
+
+add_executable(frontend_benchmark
+    tests/frontend_benchmark.cpp
+)
+target_include_directories(frontend_benchmark
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(frontend_benchmark PRIVATE interpreter_core)
+
+add_executable(frontend_tooling_regression
+    tests/frontend_tooling_regression.cpp
+)
+target_include_directories(frontend_tooling_regression
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(frontend_tooling_regression PRIVATE interpreter_core)
+
+add_executable(mog-lsp
+    tooling/lsp/mog-lsp.cpp
+)
+target_include_directories(mog-lsp
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(mog-lsp PRIVATE interpreter_core)
 
 add_library(examples_math_package MODULE
     packages/examples/math/package.cpp
@@ -77,7 +136,7 @@ set_target_properties(examples_counter_package PROPERTIES
 add_subdirectory(packages/mog/window)
 
 if(ENABLE_VM_TRACE)
-    target_compile_definitions(interpreter PRIVATE VM_TRACE)
+    target_compile_definitions(interpreter_core PRIVATE VM_TRACE)
 endif()
 
 if(ENABLE_PGO_GENERATE AND ENABLE_PGO_USE)
@@ -148,11 +207,19 @@ endif()
 
 # If using Microsoft Visual Studio, set specific compile options
 if(MSVC)
+    target_compile_options(interpreter_core PRIVATE
+        $<$<CONFIG:Release>:/O2 /DNDEBUG>
+        $<$<CONFIG:Debug>:/Od /Zi>
+    )
     target_compile_options(interpreter PRIVATE
         $<$<CONFIG:Release>:/O2 /DNDEBUG>
         $<$<CONFIG:Debug>:/Od /Zi>
     )
 else()
+    target_compile_options(interpreter_core PRIVATE
+        $<$<CONFIG:Release>:-DNDEBUG>
+        $<$<CONFIG:Debug>:-g -O0>
+    )
     target_compile_options(interpreter PRIVATE
         $<$<CONFIG:Release>:-DNDEBUG>
         $<$<CONFIG:Debug>:-g -O0>
@@ -160,11 +227,14 @@ else()
 endif()
 
 foreach(flag IN LISTS EXTRA_RELEASE_COMPILE_FLAGS)
+    target_compile_options(interpreter_core PRIVATE $<$<CONFIG:Release>:${flag}>)
     target_compile_options(interpreter PRIVATE $<$<CONFIG:Release>:${flag}>)
 endforeach()
 
 foreach(flag IN LISTS EXTRA_RELEASE_LINK_FLAGS)
     set_property(TARGET interpreter APPEND_STRING PROPERTY
+                 LINK_FLAGS_RELEASE " ${flag}")
+    set_property(TARGET mog-lsp APPEND_STRING PROPERTY
                  LINK_FLAGS_RELEASE " ${flag}")
 endforeach()
 
@@ -176,6 +246,10 @@ if(ENABLE_LTO)
         message(FATAL_ERROR "ENABLE_LTO requested but IPO/LTO is unsupported: ${LTO_ERROR}")
     endif()
 
+    set_property(TARGET interpreter_core PROPERTY
+                 INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     set_property(TARGET interpreter PROPERTY
+                 INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    set_property(TARGET mog-lsp PROPERTY
                  INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()

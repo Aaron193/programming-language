@@ -279,6 +279,10 @@ int Chunk::disassembleInstruction(int offset) {
             return simpleInstruction("FLOAT_TO_INT", offset);
         case OpCode::INT_TO_STR:
             return simpleInstruction("INT_TO_STR", offset);
+        case OpCode::CONCAT_STRING_LITERAL_INT:
+            return constantInstruction("CONCAT_STRING_LITERAL_INT", offset);
+        case OpCode::GET_INDEX_STRING_LITERAL_INT:
+            return constantInstruction("GET_INDEX_STRING_LITERAL_INT", offset);
         case OpCode::CHECK_INSTANCE_TYPE:
             return constantInstruction("CHECK_INSTANCE_TYPE", offset);
         case OpCode::INT_NEGATE:
@@ -368,6 +372,7 @@ void UpvalueObject::trace(GC& gc) {
 
 void ClosureObject::trace(GC& gc) {
     gc.markObject(function);
+    gc.markObject(module);
     for (auto* upvalue : upvalues) {
         gc.markObject(upvalue);
     }
@@ -436,6 +441,12 @@ void IteratorObject::trace(GC& gc) {
 }
 
 void ModuleObject::trace(GC& gc) {
+    for (size_t index = 0; index < globalValues.size(); ++index) {
+        if (index < globalDefined.size() && globalDefined[index]) {
+            gc.markValue(globalValues[index]);
+        }
+    }
+
     for (const auto& [name, value] : exports) {
         (void)name;
         gc.markValue(value);

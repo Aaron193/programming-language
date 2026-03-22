@@ -1,0 +1,11 @@
+#!strict
+fn stop() i32 {
+    if (1 < 2) {
+        return 7
+    }
+
+    print("after")
+    return 9
+}
+
+print(stop())

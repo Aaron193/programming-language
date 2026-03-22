@@ -2,6 +2,8 @@
 #include <cstddef>
 #include <string>
 
+#include "SourceLocation.hpp"
+
 // Some tokens start with "_" because they are namespace conflicts
 enum TokenType {
     AT,
@@ -109,6 +111,8 @@ class Token {
     std::string m_lexeme;
     size_t m_length;
     size_t m_line;
+    size_t m_column;
+    SourceSpan m_span;
 
    public:
     Token()
@@ -116,9 +120,19 @@ class Token {
           m_type(TokenType::ERROR),
           m_lexeme(""),
           m_length(0),
-          m_line(0) {}
+          m_line(0),
+          m_column(1),
+          m_span(makePointSpan(1, 1)) {}
+    static Token synthetic(TokenType type, std::string lexeme,
+                           const SourceSpan& span);
     TokenType type() const { return m_type; }
     const char* start() const { return m_lexeme.c_str(); }
     size_t length() const { return m_length; }
     size_t line() const { return m_line; }
+    size_t column() const { return m_column; }
+    const SourceSpan& span() const { return m_span; }
 };
+
+inline std::string tokenLexeme(const Token& token) {
+    return std::string(token.start(), token.length());
+}

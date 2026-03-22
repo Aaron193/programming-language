@@ -82,6 +82,7 @@ run_expect_output "$NEWLINE_DIR/sample_newline_call_suffix.mog" "3" || failed=1
 run_expect_output "$NEWLINE_DIR/sample_newline_index_suffix.mog" "2" || failed=1
 run_expect_output "$NEWLINE_DIR/sample_newline_member_suffix.mog" "7" || failed=1
 run_expect_output "$NEWLINE_DIR/sample_newline_operator_rhs.mog" "3" || failed=1
+run_expect_output "$NEWLINE_DIR/sample_newline_call_suffix_folded_arg.mog" "42" || failed=1
 run_expect_output "$NEWLINE_DIR/sample_newline_lambda_body.mog" "42" || failed=1
 run_expect_output "$NEWLINE_DIR/sample_newline_prefix_statement.mog" $'2\n3' || failed=1
 run_expect_output "$NEWLINE_DIR/sample_newline_print_grouped_arg.mog" "3" || failed=1

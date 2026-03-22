@@ -1,0 +1,5 @@
+type Box struct {
+    value i32
+}
+
+print(Box().value)

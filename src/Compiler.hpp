@@ -1,106 +1,74 @@
 #pragma once
+
 #include <cstdint>
-#include <deque>
-#include <functional>
-#include <initializer_list>
-#include <memory>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
+#include "AstFrontend.hpp"
 #include "Chunk.hpp"
 #include "GC.hpp"
 #include "NativePackage.hpp"
-#include "Scanner.hpp"
-#include "TypeChecker.hpp"
+#include "Token.hpp"
 #include "TypeInfo.hpp"
 
-struct Parser {
-    Token current;
-    Token previous;
-    bool hadError = false;
-    // TODO: since we have exceptions, we can use them instead of panic mode
-    bool panicMode = false;
-};
-
-enum Precedence {
-    PREC_NONE,
-    PREC_ASSIGNMENT,
-    PREC_OR,
-    PREC_AND,
-    PREC_EQUALITY,
-    PREC_COMPARISON,
-    PREC_BITWISE_OR,
-    PREC_BITWISE_XOR,
-    PREC_BITWISE_AND,
-    PREC_SHIFT,
-    PREC_TERM,
-    PREC_FACTOR,
-    PREC_UNARY,
-    PREC_CALL,
-    PREC_PRIMARY,
+enum class CompilerEmitterMode {
+    Auto,
+    ForceHir,
 };
 
 class Compiler {
    private:
-    using ParseFn = std::function<void(bool)>;
+    friend class HirBytecodeEmitter;
 
     struct Local {
         Token name;
-        int depth;
-        bool isCaptured;
+        int depth = 0;
+        bool isCaptured = false;
         TypeRef type;
-        bool isConst;
+        bool isConst = false;
     };
 
     struct Upvalue {
-        uint8_t index;
-        bool isLocal;
+        uint8_t index = 0;
+        bool isLocal = false;
         TypeRef type;
-        bool isConst;
+        bool isConst = false;
     };
 
     struct ResolvedVariable {
-        uint8_t arg;
-        uint8_t getOp;
-        uint8_t setOp;
+        uint8_t arg = 0;
+        uint8_t getOp = 0;
+        uint8_t setOp = 0;
         TypeRef type;
-        bool isConst;
+        bool isConst = false;
     };
 
     struct FunctionContext {
         std::vector<Local> locals;
         std::vector<Upvalue> upvalues;
-        int scopeDepth;
-        bool inFunction;
-        bool inMethod;
+        int scopeDepth = 0;
+        bool inFunction = false;
+        bool inMethod = false;
         TypeRef returnType;
     };
 
     struct CompiledFunction {
-        FunctionObject* function;
+        FunctionObject* function = nullptr;
         std::vector<Upvalue> upvalues;
         std::vector<TypeRef> parameterTypes;
         TypeRef returnType;
     };
 
-    struct ParseRule {
-        ParseFn prefix;
-        ParseFn infix;
-        Precedence precedence;
-    };
-
     struct ClassContext {
-        bool hasSuperclass;
-        ClassContext* enclosing;
+        bool hasSuperclass = false;
+        ClassContext* enclosing = nullptr;
         std::string className;
     };
 
     Chunk* m_chunk = nullptr;
-    std::unique_ptr<Scanner> m_scanner;
-    std::unique_ptr<Parser> m_parser;
     ClassContext* m_currentClass = nullptr;
     std::vector<FunctionContext> m_contexts;
     GC* m_gc = nullptr;
@@ -115,8 +83,6 @@ class Compiler {
     std::unordered_map<std::string, std::unordered_map<int, std::string>>
         m_classOperatorMethods;
     std::unordered_map<std::string, std::string> m_superclassOf;
-    std::unordered_map<std::string, TypeRef> m_checkerTopLevelSymbolTypes;
-    std::vector<TypeCheckerDeclarationType> m_checkerDeclarationTypes;
     std::vector<TypeRef> m_globalTypes;
     std::vector<bool> m_globalConstness;
     std::vector<TypeRef> m_exprTypeStack;
@@ -124,44 +90,24 @@ class Compiler {
     std::vector<std::string> m_exportedNames;
     std::vector<std::string> m_packageSearchPaths;
     std::string m_sourcePath;
+    AstFrontendResult::Timings m_lastFrontendTimings;
+    AstFrontendModuleGraphCache m_frontendModuleGraph;
     bool m_strictMode = false;
-    std::deque<Token> m_bufferedTokens;
-
-    void advance();
-    const Token& peekToken(size_t offset = 1);
-    const Token& peekNextToken();
-    const Token& tokenAt(size_t offset);
-    bool parseTypeLookahead(size_t& offset);
-    bool looksLikeFunctionTypeDeclarationStart();
-    bool hasLineBreakBeforeCurrent() const;
-    void synchronize();
-    bool isRecoveryBoundaryToken(TokenType type) const;
-    void rejectStraySemicolon();
-    bool recoverLineLeadingContinuation(
-        std::initializer_list<TokenType> terminators = {});
-    bool rejectUnexpectedTrailingToken(
-        std::initializer_list<TokenType> allowedTerminators = {});
-    void errorAtCurrent(const std::string& message);
-    void errorAt(const Token& token, const std::string& message);
-    void consume(TokenType type, const std::string& message);
+    CompilerEmitterMode m_emitterMode = CompilerEmitterMode::Auto;
+    bool m_hadError = false;
+    bool m_panicMode = false;
 
     Chunk* currentChunk() { return m_chunk; }
-    void emitByte(uint8_t byte);
-    void emitBytes(uint8_t byte1, uint8_t byte2);
-    void emitReturn();
+    FunctionContext& currentContext() { return m_contexts.back(); }
+    const FunctionContext& currentContext() const { return m_contexts.back(); }
+
+    void emitByte(uint8_t byte, size_t line);
+    void emitBytes(uint8_t byte1, uint8_t byte2, size_t line);
     Value makeStringValue(const std::string& text);
     uint8_t makeConstant(Value value);
-    void emitConstant(Value value);
     uint8_t identifierConstant(const Token& name);
     uint8_t globalSlot(const Token& name);
     ResolvedVariable resolveNamedVariable(const Token& name);
-    void namedVariable(const Token& name, bool canAssign);
-    uint8_t parseVariable(const std::string& message,
-                          const TypeRef& declaredType = TypeInfo::makeAny(),
-                          bool isConst = false);
-    void defineVariable(uint8_t global);
-    void beginScope();
-    void endScope();
     void addLocal(const Token& name,
                   const TypeRef& declaredType = TypeInfo::makeAny(),
                   bool isConst = false);
@@ -171,96 +117,24 @@ class Compiler {
                    const TypeRef& type, bool isConst);
     int resolveUpvalue(const Token& name, int contextIndex);
     void markInitialized();
-    FunctionContext& currentContext() { return m_contexts.back(); }
-    const FunctionContext& currentContext() const { return m_contexts.back(); }
     bool identifiersEqual(const Token& lhs, const Token& rhs) const;
-    int emitJump(uint8_t instruction);
-    void patchJump(int offset);
-    void emitLoop(int loopStart);
-    bool isAssignmentOperator(TokenType type) const;
-    bool emitCompoundBinary(TokenType assignmentType,
-                            const TypeRef& leftType = TypeInfo::makeAny(),
-                            const TypeRef& rightType = TypeInfo::makeAny());
-    bool shouldPreserveCheckerGlobalType(uint8_t slot,
-                                         const TypeRef& newType) const;
-    const TypeCheckerDeclarationType* lookupCheckerDeclaration(
-        const Token& nameToken) const;
-    TypeRef lookupCheckerDeclarationType(const Token& nameToken) const;
-    TypeRef inferVariableType(const Token& name) const;
+    void errorAt(const Token& token, const std::string& message);
+    void errorAtSpan(const SourceSpan& span, const std::string& message);
+    void errorAtLine(size_t line, const std::string& message);
+
+    TypeRef tokenToType(const Token& token) const;
     TypeRef lookupClassFieldType(const std::string& className,
                                  const std::string& fieldName) const;
     TypeRef lookupClassMethodType(const std::string& className,
                                   const std::string& methodName) const;
     int lookupClassFieldSlot(const std::string& className,
                              const std::string& fieldName) const;
-    void emitCoerceToType(const TypeRef& sourceType, const TypeRef& targetType);
-    void emitCheckInstanceType(const TypeRef& targetType);
     uint8_t arithmeticOpcode(TokenType operatorType,
                              const TypeRef& numericType) const;
-    uint8_t parseCallArguments(std::vector<TypeRef>& argumentTypes);
     void pushCallResultType(const TypeRef& calleeType);
-    void emitInvokeCall(uint8_t invokeOpcode, uint8_t name,
-                        const TypeRef& calleeType);
     void pushExprType(const TypeRef& type);
     TypeRef popExprType();
     TypeRef peekExprType() const;
-
-    void expression();
-    void declaration();
-    bool resolveImportExportTypes(
-        const ImportTarget& importTarget,
-        std::unordered_map<std::string, TypeRef>& outExportTypes,
-        std::string& outError);
-    TypeRef tokenToType(const Token& token) const;
-    void typeDeclaration(Token* declaredName = nullptr);
-    void classMemberDeclaration();
-    void functionDeclaration();
-    void emitExportName(const Token& nameToken);
-    void statement();
-    void block();
-    void ifStatement();
-    void whileStatement();
-    void forStatement();
-    void printStatement();
-    void returnStatement();
-    void expressionStatement();
-    void typedVarDeclaration(Token* declaredName = nullptr);
-    bool isTypeToken(TokenType type) const;
-    bool isCollectionTypeName(const Token& token) const;
-    bool isTypedTypeAnnotationStart();
-    bool isTypedVarDeclarationStart();
-    bool parseTypeExpr();
-    TypeRef parseTypeExprType();
-    void parsePrecedence(Precedence precedence);
-    ParseRule getRule(TokenType type);
-
-    void number(bool canAssign);
-    void variable(bool canAssign);
-    void thisExpression(bool canAssign);
-    void superExpression(bool canAssign);
-    void literal(bool canAssign);
-    void stringLiteral(bool canAssign);
-    void atExpression(bool canAssign);
-    void grouping(bool canAssign);
-    void arrayLiteral(bool canAssign);
-    void dictLiteral(bool canAssign);
-    void unary(bool canAssign);
-    void prefixUpdate(bool canAssign);
-    void binary(bool canAssign);
-    void castOperator(bool canAssign);
-    void call(bool canAssign);
-    void dot(bool canAssign);
-    void subscript(bool canAssign);
-    void andOperator(bool canAssign);
-    void orOperator(bool canAssign);
-    void functionLiteral(bool canAssign);
-    TypeRef emitFunctionLiteral(const TypeRef& expectedType = nullptr);
-
-    CompiledFunction compileFunction(
-        const std::string& name, bool isMethod = false,
-        const TypeRef& declaredReturnType = TypeInfo::makeAny(),
-        const TypeRef& expectedFunctionType = nullptr,
-        bool allowExpressionBody = false);
 
    public:
     Compiler() = default;
@@ -269,6 +143,7 @@ class Compiler {
     void setGC(GC* gc) { m_gc = gc; }
     void setSourcePath(const std::string& path) { m_sourcePath = path; }
     void setStrictMode(bool strictMode) { m_strictMode = strictMode; }
+    void setEmitterMode(CompilerEmitterMode mode) { m_emitterMode = mode; }
     void setPackageSearchPaths(std::vector<std::string> packageSearchPaths) {
         m_packageSearchPaths = std::move(packageSearchPaths);
     }
@@ -278,6 +153,9 @@ class Compiler {
     const std::vector<TypeRef>& globalTypes() const { return m_globalTypes; }
     const std::vector<std::string>& exportedNames() const {
         return m_exportedNames;
+    }
+    const AstFrontendResult::Timings& lastFrontendTimings() const {
+        return m_lastFrontendTimings;
     }
     const std::unordered_map<std::string, TypeRef>& functionSignatures() const {
         return m_functionSignatures;
