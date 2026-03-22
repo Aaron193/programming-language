@@ -1,0 +1,14 @@
+const WINDOW_WIDTH i64 = 800i64
+const WINDOW_HEIGHT i64 = 600i64
+const BIRD_X i64 = 160i64
+const BIRD_WIDTH i64 = 34i64
+const BIRD_HEIGHT i64 = 24i64
+const PIPE_WIDTH i64 = 80i64
+const PIPE_GAP i64 = 180i64
+const GROUND_HEIGHT i64 = 100i64
+
+const FIXED_DT f64 = 1.0 / 60.0
+const GRAVITY f64 = 1400.0
+const FLAP_IMPULSE f64 = -350.0
+const PIPE_SPEED f64 = 180.0
+const SPAWN_INTERVAL f64 = 1.4

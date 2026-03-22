@@ -1,0 +1,85 @@
+const window = @import("mog:window")
+const { WINDOW_WIDTH, WINDOW_HEIGHT, FIXED_DT } = @import("./flappy/constants.mog")
+const { GameState, ResetGame } = @import("./flappy/state.mog")
+const { StepGame } = @import("./flappy/logic.mog")
+const { RenderFrame } = @import("./flappy/render.mog")
+
+const win handle<mog:window:WindowHandle> = window.create("Flappy Mog", WINDOW_WIDTH, WINDOW_HEIGHT)
+
+window.show(win)
+
+var state GameState = ResetGame()
+var appRunning bool = true
+var spaceHeld bool = false
+var pendingFlap bool = false
+var announcedDeath bool = false
+var accumulator f64 = 0.0
+var lastTime f64 = clock()
+
+print("Press Space to flap. Escape closes the window.")
+
+while (appRunning) {
+    var evt handle<mog:window:EventHandle>? = window.pollEvent(win)
+    while (evt != null) {
+        const kind str = window.eventKind(evt)
+        if (kind == "quit") {
+            appRunning = false
+        } else {
+            if (kind == "key_down") {
+                const keyCode i64 = window.eventKeyCode(evt)
+                if (keyCode == window.KEY_ESCAPE) {
+                    appRunning = false
+                }
+                if (keyCode == window.KEY_SPACE && (spaceHeld == false)) {
+                    pendingFlap = true
+                    spaceHeld = true
+                }
+            } else {
+                if (kind == "key_up" &&
+                    window.eventKeyCode(evt) == window.KEY_SPACE) {
+                    spaceHeld = false
+                }
+            }
+        }
+
+        evt = window.pollEvent(win)
+    }
+
+    if (state.dead && pendingFlap) {
+        state = ResetGame()
+        accumulator = 0.0
+        announcedDeath = false
+        pendingFlap = false
+    }
+
+    const now f64 = clock()
+    var frameTime f64 = now - lastTime
+    lastTime = now
+
+    if (frameTime > 0.25) {
+        frameTime = 0.25
+    }
+
+    accumulator += frameTime
+
+    while (accumulator >= FIXED_DT) {
+        const stepFlap bool = pendingFlap
+        if (pendingFlap) {
+            pendingFlap = false
+        }
+
+        StepGame(state, stepFlap, FIXED_DT)
+        accumulator = accumulator - FIXED_DT
+    }
+
+    if (state.dead && (announcedDeath == false)) {
+        print("Final score: " + (state.score as str))
+        print("Press Space to restart.")
+        announcedDeath = true
+    }
+
+    RenderFrame(win, state)
+    window.delay(1i64)
+}
+
+window.close(win)
