@@ -829,6 +829,10 @@ void HirBytecodeEmitter::emitStmt(const HirStmt& stmt) {
                 emitExpr(m_module.expr(*value.iterable));
                 m_compiler.popExprType();
                 emitByte(OpCode::ITER_INIT, stmt.node.line);
+                
+                Token iteratorToken = Token::synthetic(TokenType::IDENTIFIER, "$iterator", stmt.node.span);
+                m_compiler.addLocal(iteratorToken, TypeInfo::makeAny(), true);
+                m_compiler.markInitialized();
 
                 int loopStart = m_compiler.currentChunk()->count();
                 int exitJump =
@@ -838,7 +842,6 @@ void HirBytecodeEmitter::emitStmt(const HirStmt& stmt) {
                 emitStmt(m_module.stmt(*value.body));
                 emitLoop(loopStart, stmt.node.line);
                 patchJump(exitJump);
-                emitByte(OpCode::POP, stmt.node.line);
                 endScope(stmt.node.line);
             }
         },
