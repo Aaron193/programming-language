@@ -134,6 +134,9 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
     import_path = Path(tmpdir) / "import_sample.mog"
     import_path.write_text(import_source, encoding="utf-8")
     import_uri = import_path.resolve().as_uri()
+    import_path_line = import_source.splitlines()[0]
+    import_path_character = import_path_line.index("./dep.mog") + 2
+    import_keyword_character = import_path_line.index("@import") + 2
     alias_import_source = "\n".join([
         "const { Answer as Alias } = @import(\"./dep.mog\")",
         "print(Alias)",
@@ -362,7 +365,6 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         )
         if alias_import_diagnostics["params"]["diagnostics"]:
             raise AssertionError("expected aliased import sample to stay diagnostics-free")
-
         send_message(proc, {
             "jsonrpc": "2.0",
             "method": "textDocument/didOpen",
@@ -917,6 +919,49 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         if cross_result["range"]["start"]["line"] != 3 or \
                 cross_result["range"]["start"]["character"] != 6:
             raise AssertionError(f"unexpected cross-file definition range: {cross_result['range']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 10.25,
+            "method": "textDocument/definition",
+            "params": {
+                "textDocument": {
+                    "uri": import_uri
+                },
+                "position": {
+                    "line": 0,
+                    "character": import_path_character
+                }
+            }
+        })
+        import_path_definition = read_until(proc, lambda msg: msg.get("id") == 10.25)
+        import_path_result = import_path_definition["result"]
+        if import_path_result["uri"] != module_uri:
+            raise AssertionError(
+                f"import path definition should jump to imported source file: {import_path_result}")
+        if import_path_result["range"]["start"]["line"] != 0 or \
+                import_path_result["range"]["start"]["character"] != 0:
+            raise AssertionError(
+                f"import path definition should jump to file start: {import_path_result['range']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 10.5,
+            "method": "textDocument/definition",
+            "params": {
+                "textDocument": {
+                    "uri": import_uri
+                },
+                "position": {
+                    "line": 0,
+                    "character": import_keyword_character
+                }
+            }
+        })
+        import_keyword_definition = read_until(proc, lambda msg: msg.get("id") == 10.5)
+        if import_keyword_definition["result"] is not None:
+            raise AssertionError(
+                f"import keyword definition should stay unresolved: {import_keyword_definition['result']}")
 
         send_message(proc, {
             "jsonrpc": "2.0",

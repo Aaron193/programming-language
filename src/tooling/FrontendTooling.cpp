@@ -39,6 +39,11 @@ struct SymbolTarget {
     SourceSpan occurrenceSpan;
 };
 
+struct ImportPathTarget {
+    AstNodeId importExprNodeId = 0;
+    SourceSpan occurrenceSpan;
+};
+
 struct TypeNameTarget {
     std::string name;
     SourceSpan occurrenceSpan;
@@ -3991,6 +3996,13 @@ std::optional<SymbolTarget> resolveSymbolTarget(
                         identifierExpr->name.span()};
 }
 
+std::optional<ImportPathTarget> resolveImportPathTarget(
+    const ToolingDocumentAnalysis& analysis, const ToolingPosition& position);
+const AstExpr* findImportPathTargetItem(const AstItem& item,
+                                        const SourcePosition& position);
+const AstExpr* findImportPathTargetStmt(const AstStmt& stmt,
+                                        const SourcePosition& position);
+
 std::optional<SymbolTarget> resolveTypeSymbolTarget(
     const ToolingDocumentAnalysis& analysis, const ToolingPosition& position) {
     if (!analysis.hasParse) {
@@ -4019,6 +4031,243 @@ std::optional<SymbolTarget> resolveTypeSymbolTarget(
     }
 
     return std::nullopt;
+}
+
+const AstExpr* findImportPathTargetExpr(const AstExpr& expr,
+                                        const SourcePosition& position) {
+    if (!containsPosition(expr.node.span, position)) {
+        return nullptr;
+    }
+
+    const AstExpr* best = nullptr;
+    std::visit(
+        [&](const auto& value) {
+            using T = std::decay_t<decltype(value)>;
+
+            if constexpr (std::is_same_v<T, AstImportExpr>) {
+                if (containsPosition(value.path.span(), position)) {
+                    best = &expr;
+                }
+            } else if constexpr (std::is_same_v<T, AstGroupingExpr>) {
+                best = findImportPathTargetExpr(*value.expression, position);
+            } else if constexpr (std::is_same_v<T, AstUnaryExpr> ||
+                                 std::is_same_v<T, AstUpdateExpr>) {
+                best = findImportPathTargetExpr(*value.operand, position);
+            } else if constexpr (std::is_same_v<T, AstBinaryExpr>) {
+                best = findImportPathTargetExpr(*value.left, position);
+                if (best == nullptr) {
+                    best = findImportPathTargetExpr(*value.right, position);
+                }
+            } else if constexpr (std::is_same_v<T, AstAssignmentExpr>) {
+                best = findImportPathTargetExpr(*value.target, position);
+                if (best == nullptr) {
+                    best = findImportPathTargetExpr(*value.value, position);
+                }
+            } else if constexpr (std::is_same_v<T, AstCallExpr>) {
+                best = findImportPathTargetExpr(*value.callee, position);
+                if (best == nullptr) {
+                    for (const auto& argument : value.arguments) {
+                        best = findImportPathTargetExpr(*argument, position);
+                        if (best != nullptr) {
+                            break;
+                        }
+                    }
+                }
+            } else if constexpr (std::is_same_v<T, AstMemberExpr>) {
+                best = findImportPathTargetExpr(*value.object, position);
+            } else if constexpr (std::is_same_v<T, AstIndexExpr>) {
+                best = findImportPathTargetExpr(*value.object, position);
+                if (best == nullptr) {
+                    best = findImportPathTargetExpr(*value.index, position);
+                }
+            } else if constexpr (std::is_same_v<T, AstCastExpr>) {
+                best = findImportPathTargetExpr(*value.expression, position);
+            } else if constexpr (std::is_same_v<T, AstFunctionExpr>) {
+                if (value.expressionBody) {
+                    best = findImportPathTargetExpr(*value.expressionBody, position);
+                }
+                if (best == nullptr && value.blockBody) {
+                    best = findImportPathTargetStmt(*value.blockBody, position);
+                }
+            } else if constexpr (std::is_same_v<T, AstArrayLiteralExpr>) {
+                for (const auto& element : value.elements) {
+                    best = findImportPathTargetExpr(*element, position);
+                    if (best != nullptr) {
+                        break;
+                    }
+                }
+            } else if constexpr (std::is_same_v<T, AstDictLiteralExpr>) {
+                for (const auto& entry : value.entries) {
+                    best = findImportPathTargetExpr(*entry.key, position);
+                    if (best == nullptr) {
+                        best = findImportPathTargetExpr(*entry.value, position);
+                    }
+                    if (best != nullptr) {
+                        break;
+                    }
+                }
+            }
+        },
+        expr.value);
+
+    return best;
+}
+
+const AstExpr* findImportPathTargetItem(const AstItem& item,
+                                        const SourcePosition& position) {
+    const AstExpr* best = nullptr;
+    std::visit(
+        [&](const auto& value) {
+            using T = std::decay_t<decltype(value)>;
+
+            if constexpr (std::is_same_v<T, AstFunctionDecl>) {
+                if (value.body) {
+                    best = findImportPathTargetStmt(*value.body, position);
+                }
+            } else if constexpr (std::is_same_v<T, AstClassDecl>) {
+                for (const auto& method : value.methods) {
+                    if (method.body) {
+                        best = findImportPathTargetStmt(*method.body, position);
+                        if (best != nullptr) {
+                            break;
+                        }
+                    }
+                }
+            } else if constexpr (std::is_same_v<T, AstStmtPtr>) {
+                if (value) {
+                    best = findImportPathTargetStmt(*value, position);
+                }
+            }
+        },
+        item.value);
+    return best;
+}
+
+const AstExpr* findImportPathTargetStmt(const AstStmt& stmt,
+                                        const SourcePosition& position) {
+    const AstExpr* best = nullptr;
+    std::visit(
+        [&](const auto& value) {
+            using T = std::decay_t<decltype(value)>;
+
+            if constexpr (std::is_same_v<T, AstBlockStmt>) {
+                for (const auto& item : value.items) {
+                    if (!item) {
+                        continue;
+                    }
+                    best = findImportPathTargetItem(*item, position);
+                    if (best != nullptr) {
+                        break;
+                    }
+                }
+            } else if constexpr (std::is_same_v<T, AstExprStmt>) {
+                best = findImportPathTargetExpr(*value.expression, position);
+            } else if constexpr (std::is_same_v<T, AstPrintStmt>) {
+                best = findImportPathTargetExpr(*value.expression, position);
+            } else if constexpr (std::is_same_v<T, AstReturnStmt>) {
+                if (value.value) {
+                    best = findImportPathTargetExpr(*value.value, position);
+                }
+            } else if constexpr (std::is_same_v<T, AstIfStmt>) {
+                best = findImportPathTargetExpr(*value.condition, position);
+                if (best == nullptr) {
+                    best = findImportPathTargetStmt(*value.thenBranch, position);
+                }
+                if (best == nullptr && value.elseBranch) {
+                    best = findImportPathTargetStmt(*value.elseBranch, position);
+                }
+            } else if constexpr (std::is_same_v<T, AstWhileStmt>) {
+                best = findImportPathTargetExpr(*value.condition, position);
+                if (best == nullptr) {
+                    best = findImportPathTargetStmt(*value.body, position);
+                }
+            } else if constexpr (std::is_same_v<T, AstVarDeclStmt>) {
+                if (value.initializer) {
+                    best = findImportPathTargetExpr(*value.initializer, position);
+                }
+            } else if constexpr (std::is_same_v<T, AstDestructuredImportStmt>) {
+                if (value.initializer) {
+                    best = findImportPathTargetExpr(*value.initializer, position);
+                }
+            } else if constexpr (std::is_same_v<T, AstForStmt>) {
+                if (const auto* initDecl =
+                        std::get_if<std::unique_ptr<AstVarDeclStmt>>(
+                            &value.initializer)) {
+                    if (*initDecl && (*initDecl)->initializer) {
+                        best = findImportPathTargetExpr(*(*initDecl)->initializer,
+                                                        position);
+                    }
+                } else if (const auto* initExpr =
+                               std::get_if<AstExprPtr>(&value.initializer)) {
+                    if (*initExpr) {
+                        best = findImportPathTargetExpr(**initExpr, position);
+                    }
+                }
+                if (best == nullptr && value.condition) {
+                    best = findImportPathTargetExpr(*value.condition, position);
+                }
+                if (best == nullptr && value.increment) {
+                    best = findImportPathTargetExpr(*value.increment, position);
+                }
+                if (best == nullptr) {
+                    best = findImportPathTargetStmt(*value.body, position);
+                }
+            } else if constexpr (std::is_same_v<T, AstForEachStmt>) {
+                best = findImportPathTargetExpr(*value.iterable, position);
+                if (best == nullptr) {
+                    best = findImportPathTargetStmt(*value.body, position);
+                }
+            }
+        },
+        stmt.value);
+    return best;
+}
+
+std::optional<ImportPathTarget> resolveImportPathTarget(
+    const ToolingDocumentAnalysis& analysis, const ToolingPosition& position) {
+    if (!analysis.hasParse) {
+        return std::nullopt;
+    }
+
+    const auto sourcePosition = sourcePositionFromToolingPosition(position);
+    for (const auto& item : analysis.frontend.module.items) {
+        if (!item) {
+            continue;
+        }
+
+        const AstExpr* targetExpr = findImportPathTargetItem(*item, sourcePosition);
+        if (targetExpr == nullptr) {
+            continue;
+        }
+
+        const auto* importExpr = std::get_if<AstImportExpr>(&targetExpr->value);
+        if (importExpr == nullptr ||
+            !containsPosition(importExpr->path.span(), sourcePosition)) {
+            continue;
+        }
+
+        return ImportPathTarget{targetExpr->node.id, importExpr->path.span()};
+    }
+
+    return std::nullopt;
+}
+
+ToolingRange startOfFileToolingRange() {
+    return ToolingRange{ToolingPosition{0, 0}, ToolingPosition{0, 0}};
+}
+
+std::optional<ToolingLocation> findDefinitionLocationForImportPath(
+    const ToolingDocumentAnalysis& analysis, const ImportPathTarget& target) {
+    const auto importIt = analysis.frontend.importedModules.find(target.importExprNodeId);
+    if (importIt == analysis.frontend.importedModules.end() ||
+        importIt->second.importTarget.kind != ImportTargetKind::SOURCE_MODULE ||
+        importIt->second.importTarget.resolvedPath.empty()) {
+        return std::nullopt;
+    }
+
+    return ToolingLocation{importIt->second.importTarget.resolvedPath,
+                           startOfFileToolingRange(),
+                           startOfFileToolingRange()};
 }
 
 std::optional<ToolingLocation> findDefinitionLocationForTarget(
@@ -4845,6 +5094,11 @@ std::optional<ToolingLocation> findDefinitionForTooling(
             toolingRangeFromSourceSpan(memberAccess->declaration.range),
             toolingRangeFromSourceSpan(memberAccess->declaration.selectionRange),
         };
+    }
+
+    const auto importPathTarget = resolveImportPathTarget(analysis, position);
+    if (importPathTarget.has_value()) {
+        return findDefinitionLocationForImportPath(analysis, *importPathTarget);
     }
 
     const auto target = resolveSymbolTarget(analysis, position);

@@ -19,7 +19,7 @@
     ["(", ")"],
     ["\"", "\""]
   ],
-  "wordPattern": "(@?[A-Za-z_][A-Za-z0-9_]*)|([0-9]+(?:\\.[0-9]+)?(?:usize|i8|i16|i32|i64|u|u8|u16|u32|u64|f32|f64)?)",
+  "wordPattern": "([A-Za-z_][A-Za-z0-9_-]*(?:/[A-Za-z_][A-Za-z0-9_-]*)*\\.mog)|(@?[A-Za-z_][A-Za-z0-9_]*)|([0-9]+(?:\\.[0-9]+)?(?:usize|i8|i16|i32|i64|u|u8|u16|u32|u64|f32|f64)?)",
   "indentationRules": {
     "increaseIndentPattern": "^.*\\{[^}\"']*$",
     "decreaseIndentPattern": "^\\s*[}\\]].*$"
