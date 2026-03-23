@@ -971,7 +971,6 @@ std::optional<ToolingDocumentAnalysis> analyzeSourceModuleForTooling(
     options.sourcePath = path;
     options.packageSearchPaths = analysis.packageSearchPaths;
     options.moduleGraphCache = nullptr;
-    options.strictMode = toolingSourceStartsWithStrictDirective(*text);
     return analyzeDocumentForTooling(*text, options);
 }
 
@@ -4779,21 +4778,6 @@ bool isTopLevelRenameCandidate(const AstModule& module, AstNodeId nodeId) {
 
 }  // namespace
 
-bool toolingSourceStartsWithStrictDirective(std::string_view source) {
-    constexpr std::string_view directive = "#!strict";
-    if (source.size() < directive.size() ||
-        source.substr(0, directive.size()) != directive) {
-        return false;
-    }
-
-    if (source.size() == directive.size()) {
-        return true;
-    }
-
-    const char boundary = source[directive.size()];
-    return boundary == '\n' || boundary == '\r';
-}
-
 ToolingPosition toolingPositionFromSourcePosition(const SourcePosition& position) {
     ToolingPosition result;
     result.line = position.line == 0 ? 0 : position.line - 1;
@@ -4820,7 +4804,6 @@ ToolingDocumentAnalysis analyzeDocumentForTooling(
     ToolingDocumentAnalysis analysis;
     analysis.sourcePath = options.sourcePath;
     analysis.packageSearchPaths = options.packageSearchPaths;
-    analysis.strictMode = options.strictMode;
 
     AstFrontendOptions frontendOptions;
     frontendOptions.sourcePath = options.sourcePath;
@@ -4828,11 +4811,8 @@ ToolingDocumentAnalysis analyzeDocumentForTooling(
     frontendOptions.moduleGraphCache = options.moduleGraphCache;
 
     std::vector<TypeError> errors;
-    analysis.status = buildAstFrontend(
-        source, frontendOptions,
-        options.strictMode ? AstFrontendMode::StrictChecked
-                           : AstFrontendMode::LoweringOnly,
-        errors, analysis.frontend);
+    analysis.status =
+        buildAstFrontend(source, frontendOptions, errors, analysis.frontend);
     analysis.hasParse = analysis.status != AstFrontendBuildStatus::ParseFailed;
     analysis.hasSemantics = analysis.status == AstFrontendBuildStatus::Success;
     analysis.hasFrontend = analysis.hasSemantics;
@@ -5722,7 +5702,6 @@ std::vector<ToolingCompletionItem> findCompletionsForTooling(
     ToolingAnalyzeOptions options;
     options.sourcePath = analysis.sourcePath;
     options.packageSearchPaths = analysis.packageSearchPaths;
-    options.strictMode = analysis.strictMode;
     const std::string repairedSource =
         repairedCompletionSource(source, position);
     const auto repairedAnalysis =
@@ -5751,7 +5730,6 @@ std::optional<ToolingSignatureHelp> findSignatureHelpForToolingImpl(
         ToolingAnalyzeOptions options;
         options.sourcePath = analysis.sourcePath;
         options.packageSearchPaths = analysis.packageSearchPaths;
-        options.strictMode = analysis.strictMode;
         std::string repairedSource = repairedSignatureHelpSource(source, position);
         const auto repairedAnalysis =
             analyzeDocumentForTooling(repairedSource, options);

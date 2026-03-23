@@ -17,7 +17,7 @@ run_expect_output() {
 
     set +e
     local output
-    output="$($INTERPRETER --strict "$file" 2>&1)"
+    output="$($INTERPRETER "$file" 2>&1)"
     local status=$?
     set -e
 
@@ -52,5 +52,5 @@ if [[ $failed -ne 0 ]]; then
     exit 1
 fi
 
-echo "[PASS] strict collection literal tests"
+echo "[PASS] collection literal tests"
 exit 0

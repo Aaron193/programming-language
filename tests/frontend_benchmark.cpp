@@ -32,7 +32,7 @@ std::string canonicalPath(const std::string& path) {
 
 void printUsage(const char* argv0) {
     std::cerr << "Usage: " << argv0
-              << " [--json] [--strict] [--package-path DIR] source.mog [more.mog]"
+              << " [--json] [--package-path DIR] source.mog [more.mog]"
               << std::endl;
 }
 
@@ -40,7 +40,6 @@ void printUsage(const char* argv0) {
 
 int main(int argc, char** argv) {
     bool json = false;
-    bool strict = false;
     std::vector<std::string> packagePaths;
     std::vector<std::string> files;
 
@@ -48,8 +47,6 @@ int main(int argc, char** argv) {
         const std::string arg = argv[index];
         if (arg == "--json") {
             json = true;
-        } else if (arg == "--strict") {
-            strict = true;
         } else if (arg == "--package-path") {
             if (index + 1 >= argc) {
                 printUsage(argv[0]);
@@ -73,7 +70,6 @@ int main(int argc, char** argv) {
     Compiler compiler;
     compiler.setGC(&gc);
     compiler.setPackageSearchPaths(packagePaths);
-    compiler.setStrictMode(strict);
 
     for (size_t fileIndex = 0; fileIndex < files.size(); ++fileIndex) {
         std::string source;

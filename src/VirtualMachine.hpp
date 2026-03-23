@@ -63,7 +63,6 @@ class VirtualMachine {
     std::vector<void*> m_loadedNativeLibraryHandles;
     std::deque<NativePackageBinding> m_nativePackageBindings;
     ModuleObject* m_currentModule = nullptr;
-    bool m_defaultStrictMode = false;
     // open upvalues, maintained in descending stack-index order
     UpvalueObject* m_openUpvaluesHead = nullptr;
     bool m_traceEnabled = false;
@@ -153,7 +152,6 @@ class VirtualMachine {
     Status interpret(std::string_view source, bool printReturnValue = false,
                      bool traceEnabled = false, bool disassembleEnabled = false,
                      const std::string& sourcePath = "",
-                     bool strictMode = false,
                      bool frontendTimingsEnabled = false,
                      bool frontendTimingsJsonEnabled = false);
 };

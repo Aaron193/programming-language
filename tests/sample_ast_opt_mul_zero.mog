@@ -1,4 +1,3 @@
-#!strict
 var value i32 = 7
 
 print(value * 0i32)

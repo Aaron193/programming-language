@@ -1,4 +1,3 @@
-#!strict
 type Counter handle<examples:counter:CounterHandle>
 const { create: fn(i64) Counter, read: fn(Counter) i64, add: fn(Counter, i64) i64 } =
     @import("examples:counter")

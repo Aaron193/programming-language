@@ -100,7 +100,6 @@ def changes_for_uri(workspace_edit, uri):
 
 
 source = "\n".join([
-    "#!strict",
     "fn add(x i32) i32 {",
     "    var local i32 = x",
     "    return local",
@@ -113,7 +112,6 @@ source = "\n".join([
 
 with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
     module_source = "\n".join([
-        "#!strict",
         "fn Get() i32 {",
         "    return 42",
         "}",
@@ -128,7 +126,6 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
     source_path.write_text(source, encoding="utf-8")
     uri = source_path.resolve().as_uri()
     import_source = "\n".join([
-        "#!strict",
         "const { Answer, Get } = @import(\"./dep.mog\")",
         "print(Get())",
         "print(Answer)",
@@ -138,7 +135,6 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
     import_path.write_text(import_source, encoding="utf-8")
     import_uri = import_path.resolve().as_uri()
     alias_import_source = "\n".join([
-        "#!strict",
         "const { Answer as Alias } = @import(\"./dep.mog\")",
         "print(Alias)",
         ""
@@ -147,7 +143,6 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
     alias_import_path.write_text(alias_import_source, encoding="utf-8")
     alias_import_uri = alias_import_path.resolve().as_uri()
     member_source = "\n".join([
-        "#!strict",
         "type Box struct {",
         "    value i32",
         "",
@@ -164,7 +159,6 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
     member_path.write_text(member_source, encoding="utf-8")
     member_uri = member_path.resolve().as_uri()
     type_definition_source = "\n".join([
-        "#!strict",
         "type Pipe struct {",
         "    x f64",
         "}",
@@ -178,7 +172,6 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
     type_definition_path.write_text(type_definition_source, encoding="utf-8")
     type_definition_uri = type_definition_path.resolve().as_uri()
     module_member_source = "\n".join([
-        "#!strict",
         "const dep = @import(\"./dep.mog\")",
         "print(dep.Ans)",
         ""
@@ -187,7 +180,6 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
     module_member_path.write_text(module_member_source, encoding="utf-8")
     module_member_uri = module_member_path.resolve().as_uri()
     type_context_source = "\n".join([
-        "#!strict",
         "type LocalAlias i32",
         "type LocalBox struct {}",
         "fn use(value Loc) LocalA {",
@@ -199,7 +191,6 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
     type_context_path.write_text(type_context_source, encoding="utf-8")
     type_context_uri = type_context_path.resolve().as_uri()
     signature_source = "\n".join([
-        "#!strict",
         "fn Add(a i32, b i32) i32 {",
         "    return a + b",
         "}",
@@ -210,7 +201,6 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
     signature_path.write_text(signature_source, encoding="utf-8")
     signature_uri = signature_path.resolve().as_uri()
     signature_fail_source = "\n".join([
-        "#!strict",
         "fn Add(a i32, b i32) i32 {",
         "    return a + b",
         "}",
@@ -221,7 +211,6 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
     signature_fail_path.write_text(signature_fail_source, encoding="utf-8")
     signature_fail_uri = signature_fail_path.resolve().as_uri()
     parse_fail_source = "\n".join([
-        "#!strict",
         "fn broken(",
         ""
     ])
@@ -507,7 +496,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
                     "uri": uri
                 },
                 "position": {
-                    "line": 7,
+                    "line": 6,
                     "character": 6
                 }
             }
@@ -516,7 +505,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         result = definition["result"]
         if result["uri"] != uri:
             raise AssertionError("definition should stay within the same file")
-        if result["range"]["start"]["line"] != 5 or \
+        if result["range"]["start"]["line"] != 4 or \
                 result["range"]["start"]["character"] != 6:
             raise AssertionError(f"unexpected definition range: {result['range']}")
 
@@ -529,7 +518,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
                     "uri": uri
                 },
                 "position": {
-                    "line": 7,
+                    "line": 6,
                     "character": 6
                 },
                 "context": {
@@ -540,9 +529,9 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         references = read_until(proc, lambda msg: msg.get("id") == 4)
         if len(references["result"]) != 2:
             raise AssertionError(f"unexpected references result: {references['result']}")
-        if references["result"][0]["range"]["start"]["line"] != 5:
+        if references["result"][0]["range"]["start"]["line"] != 4:
             raise AssertionError("references should include the declaration first")
-        if references["result"][1]["range"]["start"]["line"] != 7:
+        if references["result"][1]["range"]["start"]["line"] != 6:
             raise AssertionError("references should include the usage site")
 
         send_message(proc, {
@@ -554,7 +543,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
                     "uri": uri
                 },
                 "position": {
-                    "line": 7,
+                    "line": 6,
                     "character": 6
                 }
             }
@@ -582,18 +571,18 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
             semantic_legend["tokenTypes"],
             semantic_legend["tokenModifiers"],
         )
-        add_decl = find_semantic_token(main_tokens, 1, 3, "function")
+        add_decl = find_semantic_token(main_tokens, 0, 3, "function")
         if add_decl is None or "declaration" not in add_decl["modifiers"]:
             raise AssertionError(f"expected function declaration semantic token: {main_tokens}")
-        if find_semantic_token(main_tokens, 1, 7, "parameter") is None:
+        if find_semantic_token(main_tokens, 0, 7, "parameter") is None:
             raise AssertionError(f"expected parameter semantic token: {main_tokens}")
-        value_decl = find_semantic_token(main_tokens, 5, 6, "variable")
+        value_decl = find_semantic_token(main_tokens, 4, 6, "variable")
         if value_decl is None or "declaration" not in value_decl["modifiers"] or \
                 "readonly" not in value_decl["modifiers"]:
             raise AssertionError(f"expected readonly const declaration semantic token: {main_tokens}")
-        if find_semantic_token(main_tokens, 5, 18, "function") is None:
+        if find_semantic_token(main_tokens, 4, 18, "function") is None:
             raise AssertionError(f"expected free-function call semantic token: {main_tokens}")
-        value_use = find_semantic_token(main_tokens, 7, 6, "variable")
+        value_use = find_semantic_token(main_tokens, 6, 6, "variable")
         if value_use is None or "readonly" not in value_use["modifiers"]:
             raise AssertionError(f"expected readonly const use semantic token: {main_tokens}")
 
@@ -613,15 +602,15 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
             semantic_legend["tokenTypes"],
             semantic_legend["tokenModifiers"],
         )
-        property_decl = find_semantic_token(member_tokens, 2, 4, "property")
+        property_decl = find_semantic_token(member_tokens, 1, 4, "property")
         if property_decl is None or "declaration" not in property_decl["modifiers"]:
             raise AssertionError(f"expected property declaration semantic token: {member_tokens}")
-        method_decl = find_semantic_token(member_tokens, 4, 7, "method")
+        method_decl = find_semantic_token(member_tokens, 3, 7, "method")
         if method_decl is None or "declaration" not in method_decl["modifiers"]:
             raise AssertionError(f"expected method declaration semantic token: {member_tokens}")
-        if find_semantic_token(member_tokens, 9, 15, "property") is None:
+        if find_semantic_token(member_tokens, 8, 15, "property") is None:
             raise AssertionError(f"expected property access semantic token: {member_tokens}")
-        if find_semantic_token(member_tokens, 9, 27, "method") is None:
+        if find_semantic_token(member_tokens, 8, 27, "method") is None:
             raise AssertionError(f"expected method call semantic token: {member_tokens}")
 
         send_message(proc, {
@@ -640,14 +629,14 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
             semantic_legend["tokenTypes"],
             semantic_legend["tokenModifiers"],
         )
-        pipe_decl = find_semantic_token(type_tokens, 1, 5, "type")
+        pipe_decl = find_semantic_token(type_tokens, 0, 5, "type")
         if pipe_decl is None or "declaration" not in pipe_decl["modifiers"]:
             raise AssertionError(f"expected type declaration semantic token: {type_tokens}")
-        if find_semantic_token(type_tokens, 2, 6, "type") is None:
+        if find_semantic_token(type_tokens, 1, 6, "type") is None:
             raise AssertionError(f"expected built-in type semantic token: {type_tokens}")
-        if find_semantic_token(type_tokens, 4, 19, "type") is None:
+        if find_semantic_token(type_tokens, 3, 19, "type") is None:
             raise AssertionError(f"expected custom type reference semantic token: {type_tokens}")
-        generic_pipe_ref = find_semantic_token(type_tokens, 5, 20, "type")
+        generic_pipe_ref = find_semantic_token(type_tokens, 4, 20, "type")
         if generic_pipe_ref is None:
             raise AssertionError(f"expected generic custom type reference semantic token: {type_tokens}")
         if generic_pipe_ref["length"] != 4:
@@ -662,7 +651,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
                     "uri": uri
                 },
                 "position": {
-                    "line": 3,
+                    "line": 2,
                     "character": 16
                 }
             }
@@ -684,7 +673,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
                     "uri": member_uri
                 },
                 "position": {
-                    "line": 9,
+                    "line": 8,
                     "character": 15
                 }
             }
@@ -718,7 +707,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
                     "uri": "file://" + os.path.abspath("tests/lsp_member_incomplete.mog")
                 },
                 "position": {
-                    "line": 9,
+                    "line": 8,
                     "character": 15
                 }
             }
@@ -741,7 +730,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
                     "uri": module_member_uri
                 },
                 "position": {
-                    "line": 2,
+                    "line": 1,
                     "character": 13
                 }
             }
@@ -762,7 +751,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
                     "uri": type_context_uri
                 },
                 "position": {
-                    "line": 3,
+                    "line": 2,
                     "character": 16
                 }
             }
@@ -783,7 +772,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
                     "uri": member_uri
                 },
                 "position": {
-                    "line": 9,
+                    "line": 8,
                     "character": 16
                 }
             }
@@ -802,7 +791,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
                     "uri": member_uri
                 },
                 "position": {
-                    "line": 9,
+                    "line": 8,
                     "character": 28
                 }
             }
@@ -811,7 +800,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         member_result = member_definition["result"]
         if member_result["uri"] != member_uri:
             raise AssertionError("member definition should stay in the same module")
-        if member_result["range"]["start"]["line"] != 4 or \
+        if member_result["range"]["start"]["line"] != 3 or \
                 member_result["range"]["start"]["character"] != 7:
             raise AssertionError(f"unexpected member definition range: {member_result['range']}")
 
@@ -824,7 +813,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
                     "uri": member_uri
                 },
                 "position": {
-                    "line": 2,
+                    "line": 1,
                     "character": 5
                 }
             }
@@ -838,15 +827,15 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
             raise AssertionError(
                 f"field declaration definition should include declaration and references: {field_declaration_result}")
         if field_declaration_result[0]["uri"] != member_uri or \
-                field_declaration_result[0]["range"]["start"]["line"] != 2:
+                field_declaration_result[0]["range"]["start"]["line"] != 1:
             raise AssertionError(
                 f"field declaration definition should start at the declaration: {field_declaration_result}")
         if field_declaration_result[1]["uri"] != member_uri or \
-                field_declaration_result[1]["range"]["start"]["line"] != 5:
+                field_declaration_result[1]["range"]["start"]["line"] != 4:
             raise AssertionError(
                 f"field declaration definition should include this.field usage: {field_declaration_result}")
         if field_declaration_result[2]["uri"] != member_uri or \
-                field_declaration_result[2]["range"]["start"]["line"] != 9:
+                field_declaration_result[2]["range"]["start"]["line"] != 8:
             raise AssertionError(
                 f"field declaration definition should include object.field usage: {field_declaration_result}")
 
@@ -859,7 +848,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
                     "uri": type_definition_uri
                 },
                 "position": {
-                    "line": 4,
+                    "line": 3,
                     "character": 20
                 }
             }
@@ -868,7 +857,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         type_result = type_definition["result"]
         if type_result["uri"] != type_definition_uri:
             raise AssertionError("type definition should stay in the same module")
-        if type_result["range"]["start"]["line"] != 1 or \
+        if type_result["range"]["start"]["line"] != 0 or \
                 type_result["range"]["start"]["character"] != 5:
             raise AssertionError(f"unexpected type definition range: {type_result['range']}")
 
@@ -881,7 +870,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
                     "uri": type_definition_uri
                 },
                 "position": {
-                    "line": 1,
+                    "line": 0,
                     "character": 6
                 }
             }
@@ -895,15 +884,15 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
             raise AssertionError(
                 f"type declaration definition should include declaration and references: {type_declaration_result}")
         if type_declaration_result[0]["uri"] != type_definition_uri or \
-                type_declaration_result[0]["range"]["start"]["line"] != 1:
+                type_declaration_result[0]["range"]["start"]["line"] != 0:
             raise AssertionError(
                 f"type declaration definition should start at the declaration: {type_declaration_result}")
         if type_declaration_result[1]["uri"] != type_definition_uri or \
-                type_declaration_result[1]["range"]["start"]["line"] != 4:
+                type_declaration_result[1]["range"]["start"]["line"] != 3:
             raise AssertionError(
                 f"type declaration definition should include type references: {type_declaration_result}")
         if type_declaration_result[2]["uri"] != type_definition_uri or \
-                type_declaration_result[2]["range"]["start"]["line"] != 5:
+                type_declaration_result[2]["range"]["start"]["line"] != 4:
             raise AssertionError(
                 f"type declaration definition should include generic type references: {type_declaration_result}")
 
@@ -916,7 +905,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
                     "uri": import_uri
                 },
                 "position": {
-                    "line": 3,
+                    "line": 2,
                     "character": 7
                 }
             }
@@ -925,7 +914,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         cross_result = cross_definition["result"]
         if cross_result["uri"] != module_uri:
             raise AssertionError("import definition should jump to the imported module")
-        if cross_result["range"]["start"]["line"] != 4 or \
+        if cross_result["range"]["start"]["line"] != 3 or \
                 cross_result["range"]["start"]["character"] != 6:
             raise AssertionError(f"unexpected cross-file definition range: {cross_result['range']}")
 
@@ -969,7 +958,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
                     "uri": signature_uri
                 },
                 "position": {
-                    "line": 4,
+                    "line": 3,
                     "character": 27
                 }
             }
@@ -989,7 +978,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
                     "uri": signature_fail_uri
                 },
                 "position": {
-                    "line": 4,
+                    "line": 3,
                     "character": 25
                 }
             }
@@ -1022,14 +1011,14 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
                     "uri": uri
                 },
                 "position": {
-                    "line": 7,
+                    "line": 6,
                     "character": 6
                 }
             }
         })
         prepare_local = read_until(proc, lambda msg: msg.get("id") == 13)
         local_range = prepare_local["result"]["range"]
-        if local_range["start"]["line"] != 7 or local_range["start"]["character"] != 6:
+        if local_range["start"]["line"] != 6 or local_range["start"]["character"] != 6:
             raise AssertionError(f"unexpected prepareRename range: {prepare_local['result']}")
         if prepare_local["result"].get("placeholder") != "Value":
             raise AssertionError(f"unexpected prepareRename placeholder: {prepare_local['result']}")
@@ -1043,7 +1032,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
                     "uri": member_uri
                 },
                 "position": {
-                    "line": 9,
+                    "line": 8,
                     "character": 16
                 }
             }
@@ -1061,7 +1050,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
                     "uri": uri
                 },
                 "position": {
-                    "line": 7,
+                    "line": 6,
                     "character": 6
                 },
                 "newName": "Result"
@@ -1071,10 +1060,10 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         local_changes = changes_for_uri(local_rename["result"], uri)
         if len(local_changes) != 2:
             raise AssertionError(f"unexpected same-file rename edits: {local_rename['result']}")
-        if not any(edit["newText"] == "Result" and edit["range"]["start"]["line"] == 5
+        if not any(edit["newText"] == "Result" and edit["range"]["start"]["line"] == 4
                    for edit in local_changes):
             raise AssertionError(f"expected declaration rename edit: {local_changes}")
-        if not any(edit["newText"] == "Result" and edit["range"]["start"]["line"] == 7
+        if not any(edit["newText"] == "Result" and edit["range"]["start"]["line"] == 6
                    for edit in local_changes):
             raise AssertionError(f"expected usage rename edit: {local_changes}")
 
@@ -1087,7 +1076,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
                     "uri": import_uri
                 },
                 "position": {
-                    "line": 3,
+                    "line": 2,
                     "character": 7
                 },
                 "newName": "LocalAnswer"
@@ -1098,12 +1087,12 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         if len(import_local_changes) != 2:
             raise AssertionError(f"unexpected importer-local rename edits: {import_local_rename['result']}")
         if not any(edit["newText"] == "Answer as LocalAnswer" and
-                   edit["range"]["start"]["line"] == 1 and
+                   edit["range"]["start"]["line"] == 0 and
                    edit["range"]["start"]["character"] == 8
                    for edit in import_local_changes):
             raise AssertionError(f"expected importer alias insertion edit: {import_local_changes}")
         if not any(edit["newText"] == "LocalAnswer" and
-                   edit["range"]["start"]["line"] == 3 and
+                   edit["range"]["start"]["line"] == 2 and
                    edit["range"]["start"]["character"] == 6
                    for edit in import_local_changes):
             raise AssertionError(f"expected importer usage rename edit: {import_local_changes}")
@@ -1117,7 +1106,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
                     "uri": module_uri
                 },
                 "position": {
-                    "line": 4,
+                    "line": 3,
                     "character": 6
                 },
                 "newName": "FinalAnswer"
@@ -1132,17 +1121,17 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         if module_changes[0]["newText"] != "FinalAnswer":
             raise AssertionError(f"unexpected defining-module rename edit: {module_changes}")
         if not any(edit["newText"] == "FinalAnswer" and
-                   edit["range"]["start"]["line"] == 1 and
+                   edit["range"]["start"]["line"] == 0 and
                    edit["range"]["start"]["character"] == 8
                    for edit in importer_changes):
             raise AssertionError(f"expected importer binding export rename: {importer_changes}")
         if not any(edit["newText"] == "FinalAnswer" and
-                   edit["range"]["start"]["line"] == 3 and
+                   edit["range"]["start"]["line"] == 2 and
                    edit["range"]["start"]["character"] == 6
                    for edit in importer_changes):
             raise AssertionError(f"expected importer usage rename: {importer_changes}")
         if alias_changes[0]["newText"] != "FinalAnswer" or \
-                alias_changes[0]["range"]["start"]["line"] != 1 or \
+                alias_changes[0]["range"]["start"]["line"] != 0 or \
                 alias_changes[0]["range"]["start"]["character"] != 8:
             raise AssertionError(f"expected aliased importer to rewrite only the export name: {alias_changes}")
 
@@ -1155,7 +1144,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
                     "uri": module_uri
                 },
                 "position": {
-                    "line": 4,
+                    "line": 3,
                     "character": 6
                 },
                 "newName": "answer"

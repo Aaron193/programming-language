@@ -1102,8 +1102,7 @@ void HirBytecodeEmitter::emitExpr(const HirExpr& expr) {
                         emitByte(OpCode::BITWISE_NOT, expr.node.line);
                         break;
                     case TokenType::MINUS:
-                        if (m_compiler.m_strictMode && operandType &&
-                            operandType->isInteger()) {
+                        if (operandType && operandType->isInteger()) {
                             emitByte(OpCode::INT_NEGATE, expr.node.line);
                         } else {
                             emitByte(OpCode::NEGATE, expr.node.line);
@@ -1237,7 +1236,7 @@ void HirBytecodeEmitter::emitExpr(const HirExpr& expr) {
                         }
                         break;
                     case TokenType::GREATER:
-                        emitByte((m_compiler.m_strictMode && promotedNumeric &&
+                        emitByte((promotedNumeric &&
                                   promotedNumeric->isInteger())
                                      ? (promotedNumeric->isSigned()
                                             ? OpCode::IGREATER
@@ -1246,7 +1245,7 @@ void HirBytecodeEmitter::emitExpr(const HirExpr& expr) {
                                  expr.node.line);
                         break;
                     case TokenType::GREATER_EQUAL:
-                        emitByte((m_compiler.m_strictMode && promotedNumeric &&
+                        emitByte((promotedNumeric &&
                                   promotedNumeric->isInteger())
                                      ? (promotedNumeric->isSigned()
                                             ? OpCode::IGREATER_EQ
@@ -1256,7 +1255,7 @@ void HirBytecodeEmitter::emitExpr(const HirExpr& expr) {
                         break;
                     case TokenType::LESS:
                         emitByte(
-                            (m_compiler.m_strictMode && promotedNumeric &&
+                            (promotedNumeric &&
                              promotedNumeric->isInteger())
                                 ? (promotedNumeric->isSigned() ? OpCode::ILESS
                                                                : OpCode::ULESS)
@@ -1264,7 +1263,7 @@ void HirBytecodeEmitter::emitExpr(const HirExpr& expr) {
                             expr.node.line);
                         break;
                     case TokenType::LESS_EQUAL:
-                        emitByte((m_compiler.m_strictMode && promotedNumeric &&
+                        emitByte((promotedNumeric &&
                                   promotedNumeric->isInteger())
                                      ? (promotedNumeric->isSigned()
                                             ? OpCode::ILESS_EQ

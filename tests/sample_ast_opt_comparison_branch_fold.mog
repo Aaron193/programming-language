@@ -1,4 +1,3 @@
-#!strict
 if (1u8 + 2u8 == 3u8) {
     print("then")
 } else {

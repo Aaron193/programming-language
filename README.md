@@ -1,6 +1,7 @@
 # Programming Language Interpreter
 
 This project is a bytecode-compiled, stack-based interpreter implemented in C++.
+The language is strictly typed by default; there is no opt-in non-strict mode.
 
 ## Supported Language Features
 

@@ -157,10 +157,6 @@ static uint64_t requireUnsignedInt(const Value& value) {
     return value.asUnsignedInt();
 }
 
-static bool hasStrictDirective(std::string_view source) {
-    return source.rfind("#!strict", 0) == 0;
-}
-
 static std::string valueToString(const Value& value) {
     if (value.isString()) return value.asString();
     if (value.isSignedInt()) return fastIntegerToString(value.asSignedInt());
@@ -3837,13 +3833,10 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
             std::string source((std::istreambuf_iterator<char>(file)),
                                std::istreambuf_iterator<char>());
-            bool importStrict =
-                m_defaultStrictMode || hasStrictDirective(source);
 
             m_importStack.insert(path);
 
             Chunk importedChunk;
-            m_compiler.setStrictMode(importStrict);
             if (!m_compiler.compile(source, importedChunk, path)) {
                 m_importStack.erase(path);
                 return Status::COMPILATION_ERROR;
@@ -4371,15 +4364,12 @@ void VirtualMachine::resetRuntimeState() {
 Status VirtualMachine::interpret(std::string_view source, bool printReturnValue,
                                  bool traceEnabled, bool disassembleEnabled,
                                  const std::string& sourcePath,
-                                 bool strictMode,
                                  bool frontendTimingsEnabled,
                                  bool frontendTimingsJsonEnabled) {
     Chunk chunk;
     resetRuntimeState();
-    m_defaultStrictMode = strictMode || hasStrictDirective(source);
     m_compiler.setGC(&m_gc);
     m_compiler.setPackageSearchPaths(m_packageSearchPaths);
-    m_compiler.setStrictMode(m_defaultStrictMode);
     m_traceEnabled = traceEnabled;
     m_disassembleEnabled = disassembleEnabled;
 

@@ -1,4 +1,3 @@
-#!strict
 var sum i32 = 0
 var nums Array<i32> = [1, 2, 3]
 

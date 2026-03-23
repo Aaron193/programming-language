@@ -86,20 +86,6 @@ std::optional<std::string> readFileText(const std::filesystem::path& path) {
     return text;
 }
 
-bool testStrictDirectiveDetection() {
-    if (!require(toolingSourceStartsWithStrictDirective("#!strict\nprint(1)\n"),
-                 "strict directive should be detected at file start")) {
-        return false;
-    }
-
-    if (!require(!toolingSourceStartsWithStrictDirective("print(1)\n#!strict\n"),
-                 "strict directive should only be detected at file start")) {
-        return false;
-    }
-
-    return true;
-}
-
 bool testRangeConversion() {
     SourceSpan span{
         makeSourcePosition(5, 3, 4),
@@ -121,8 +107,7 @@ bool testRangeConversion() {
 
 bool testDiagnosticsAndSymbols() {
     const std::string source =
-        "#!strict\n"
-        "type Box i32\n"
+                "type Box i32\n"
         "fn add(x i32) i32 {\n"
         "    return x\n"
         "}\n"
@@ -130,8 +115,6 @@ bool testDiagnosticsAndSymbols() {
 
     ToolingAnalyzeOptions options;
     options.sourcePath = "tooling_regression.mog";
-    options.strictMode = true;
-
     ToolingDocumentAnalysis analysis =
         analyzeDocumentForTooling(source, options);
 
@@ -146,7 +129,7 @@ bool testDiagnosticsAndSymbols() {
     }
 
     const ToolingDiagnostic& diagnostic = analysis.diagnostics.front();
-    if (!require(diagnostic.range.start.line == 5,
+    if (!require(diagnostic.range.start.line == 4,
                  "diagnostic line should be converted to zero-based indexing")) {
         return false;
     }
@@ -172,8 +155,7 @@ bool testDiagnosticsAndSymbols() {
     }
 
     const std::string validSource =
-        "#!strict\n"
-        "type Box i32\n"
+                "type Box i32\n"
         "fn add(x i32) i32 {\n"
         "    return x\n"
         "}\n"
@@ -210,8 +192,7 @@ bool testDiagnosticsAndSymbols() {
     }
 
     const std::string importSource =
-        "#!strict\n"
-        "const {Answer as FinalAnswer: i32} = @import(\"./dep.mog\")\n";
+                "const {Answer as FinalAnswer: i32} = @import(\"./dep.mog\")\n";
     ToolingDocumentAnalysis importAnalysis =
         analyzeDocumentForTooling(importSource, options);
     if (!require(importAnalysis.documentSymbols.size() == 1,
@@ -240,11 +221,8 @@ bool testDiagnosticsAndSymbols() {
 bool testDefinitionLookup() {
     ToolingAnalyzeOptions options;
     options.sourcePath = "tooling_definition_regression.mog";
-    options.strictMode = true;
-
     const std::string sourceWithTypeError =
-        "#!strict\n"
-        "fn add(x i32) i32 {\n"
+                "fn add(x i32) i32 {\n"
         "    var local i32 = x\n"
         "    return local\n"
         "}\n"
@@ -260,41 +238,40 @@ bool testDefinitionLookup() {
     }
 
     const auto localDefinition =
-        findDefinitionForTooling(analysis, ToolingPosition{3, 11});
+        findDefinitionForTooling(analysis, ToolingPosition{2, 11});
     if (!require(localDefinition.has_value(),
                  "local variable use should resolve to its declaration")) {
         return false;
     }
 
-    if (!require(localDefinition->selectionRange.start.line == 2 &&
+    if (!require(localDefinition->selectionRange.start.line == 1 &&
                      localDefinition->selectionRange.start.character == 8,
                  "local definition should point at the declared local name")) {
         return false;
     }
 
     const auto topLevelDefinition =
-        findDefinitionForTooling(analysis, ToolingPosition{7, 6});
+        findDefinitionForTooling(analysis, ToolingPosition{6, 6});
     if (!require(topLevelDefinition.has_value(),
                  "top-level identifier use should resolve to its declaration")) {
         return false;
     }
 
-    if (!require(topLevelDefinition->selectionRange.start.line == 5 &&
+    if (!require(topLevelDefinition->selectionRange.start.line == 4 &&
                      topLevelDefinition->selectionRange.start.character == 6,
                  "top-level definition should point at the const name")) {
         return false;
     }
 
     const std::string importSource =
-        "#!strict\n"
-        "const { Answer, Get } = @import(\"./modules/frontend_identity_module.mog\")\n"
+                "const { Answer, Get } = @import(\"./modules/frontend_identity_module.mog\")\n"
         "print(Get())\n"
         "print(Answer)\n";
     options.sourcePath = "tests/sample_import_frontend_identity.mog";
     ToolingDocumentAnalysis importAnalysis =
         analyzeDocumentForTooling(importSource, options);
     const auto importDefinition =
-        findDefinitionForTooling(importAnalysis, ToolingPosition{3, 7});
+        findDefinitionForTooling(importAnalysis, ToolingPosition{2, 7});
     if (!require(importDefinition.has_value(),
                  "imported binding use should resolve to the imported module declaration")) {
         return false;
@@ -306,15 +283,14 @@ bool testDefinitionLookup() {
         return false;
     }
 
-    if (!require(importDefinition->selectionRange.start.line == 5 &&
+    if (!require(importDefinition->selectionRange.start.line == 4 &&
                      importDefinition->selectionRange.start.character == 6,
                  "import definition should point at the exported binding name")) {
         return false;
     }
 
     const std::string memberSource =
-        "#!strict\n"
-        "type Box struct {\n"
+                "type Box struct {\n"
         "    value i32\n"
         "}\n"
         "fn read(box Box) i32 {\n"
@@ -324,21 +300,20 @@ bool testDefinitionLookup() {
     ToolingDocumentAnalysis memberAnalysis =
         analyzeDocumentForTooling(memberSource, options);
     const auto memberDefinition =
-        findDefinitionForTooling(memberAnalysis, ToolingPosition{5, 15});
+        findDefinitionForTooling(memberAnalysis, ToolingPosition{4, 15});
     if (!require(memberDefinition.has_value(),
                  "member access should resolve to the same-module field declaration")) {
         return false;
     }
 
-    if (!require(memberDefinition->selectionRange.start.line == 2 &&
+    if (!require(memberDefinition->selectionRange.start.line == 1 &&
                      memberDefinition->selectionRange.start.character == 4,
                  "member definition should point at the field name")) {
         return false;
     }
 
     const std::string typeUseSource =
-        "#!strict\n"
-        "type Pipe struct {\n"
+                "type Pipe struct {\n"
         "    x f64\n"
         "}\n"
         "fn makePipe(x f64) Pipe {\n"
@@ -352,13 +327,13 @@ bool testDefinitionLookup() {
         return false;
     }
     const auto typeUseDefinition =
-        findDefinitionForTooling(typeUseAnalysis, ToolingPosition{4, 20});
+        findDefinitionForTooling(typeUseAnalysis, ToolingPosition{3, 20});
     if (!require(typeUseDefinition.has_value(),
                  "type annotations should resolve to the same-module type declaration")) {
         return false;
     }
 
-    if (!require(typeUseDefinition->selectionRange.start.line == 1 &&
+    if (!require(typeUseDefinition->selectionRange.start.line == 0 &&
                      typeUseDefinition->selectionRange.start.character == 5,
                  "type definition should point at the declared type name")) {
         return false;
@@ -370,11 +345,8 @@ bool testDefinitionLookup() {
 bool testReferencesAndHover() {
     ToolingAnalyzeOptions options;
     options.sourcePath = "tooling_references_hover_regression.mog";
-    options.strictMode = true;
-
     const std::string source =
-        "#!strict\n"
-        "fn add(x i32) i32 {\n"
+                "fn add(x i32) i32 {\n"
         "    var local i32 = x\n"
         "    return local + local\n"
         "}\n"
@@ -389,25 +361,25 @@ bool testReferencesAndHover() {
     }
 
     const auto references =
-        findReferencesForTooling(analysis, ToolingPosition{6, 6});
+        findReferencesForTooling(analysis, ToolingPosition{5, 6});
     if (!require(references.size() == 2,
                  "top-level binding should return declaration and one usage")) {
         return false;
     }
 
-    if (!require(references[0].selectionRange.start.line == 5 &&
+    if (!require(references[0].selectionRange.start.line == 4 &&
                      references[0].selectionRange.start.character == 6,
                  "references should start with the declaration site")) {
         return false;
     }
 
-    if (!require(references[1].selectionRange.start.line == 6 &&
+    if (!require(references[1].selectionRange.start.line == 5 &&
                      references[1].selectionRange.start.character == 6,
                  "references should include same-file usages")) {
         return false;
     }
 
-    const auto hover = findHoverForTooling(analysis, ToolingPosition{6, 6});
+    const auto hover = findHoverForTooling(analysis, ToolingPosition{5, 6});
     if (!require(hover.has_value(), "hover should be available for bound identifiers")) {
         return false;
     }
@@ -419,15 +391,14 @@ bool testReferencesAndHover() {
     }
 
     const std::string importSource =
-        "#!strict\n"
-        "const { Answer, Get } = @import(\"./modules/frontend_identity_module.mog\")\n"
+                "const { Answer, Get } = @import(\"./modules/frontend_identity_module.mog\")\n"
         "print(Get())\n"
         "print(Answer)\n";
     options.sourcePath = "tests/sample_import_frontend_identity.mog";
     ToolingDocumentAnalysis importAnalysis =
         analyzeDocumentForTooling(importSource, options);
     const auto importHover =
-        findHoverForTooling(importAnalysis, ToolingPosition{3, 7});
+        findHoverForTooling(importAnalysis, ToolingPosition{2, 7});
     if (!require(importHover.has_value(),
                  "hover should be available for imported bindings")) {
         return false;
@@ -440,7 +411,7 @@ bool testReferencesAndHover() {
     }
 
     const auto importedFunctionHover =
-        findHoverForTooling(importAnalysis, ToolingPosition{2, 7});
+        findHoverForTooling(importAnalysis, ToolingPosition{1, 7});
     if (!require(importedFunctionHover.has_value(),
                  "hover should be available for imported functions")) {
         return false;
@@ -453,8 +424,7 @@ bool testReferencesAndHover() {
     }
 
     const std::string memberSource =
-        "#!strict\n"
-        "type Box struct {\n"
+                "type Box struct {\n"
         "    value i32\n"
         "}\n"
         "fn read(box Box) i32 {\n"
@@ -463,7 +433,7 @@ bool testReferencesAndHover() {
     options.sourcePath = "tooling_member_hover_regression.mog";
     ToolingDocumentAnalysis memberAnalysis =
         analyzeDocumentForTooling(memberSource, options);
-    const auto memberHover = findHoverForTooling(memberAnalysis, ToolingPosition{5, 15});
+    const auto memberHover = findHoverForTooling(memberAnalysis, ToolingPosition{4, 15});
     if (!require(memberHover.has_value(),
                  "member access hover should be available for same-module fields")) {
         return false;
@@ -476,15 +446,14 @@ bool testReferencesAndHover() {
     }
 
     const std::string parameterSource =
-        "#!strict\n"
-        "fn tick(dt f64) void {\n"
+                "fn tick(dt f64) void {\n"
         "    print(dt)\n"
         "}\n";
     options.sourcePath = "tooling_parameter_hover_regression.mog";
     ToolingDocumentAnalysis parameterAnalysis =
         analyzeDocumentForTooling(parameterSource, options);
     const auto parameterHover =
-        findHoverForTooling(parameterAnalysis, ToolingPosition{2, 10});
+        findHoverForTooling(parameterAnalysis, ToolingPosition{1, 10});
     if (!require(parameterHover.has_value(),
                  "hover should be available for parameters")) {
         return false;
@@ -502,11 +471,8 @@ bool testReferencesAndHover() {
 bool testSemanticTokens() {
     ToolingAnalyzeOptions options;
     options.sourcePath = "tooling_semantic_tokens_regression.mog";
-    options.strictMode = true;
-
     const std::string source =
-        "#!strict\n"
-        "type Pipe struct {\n"
+                "type Pipe struct {\n"
         "    value f64\n"
         "\n"
         "    fn push(pipe Pipe) Pipe {\n"
@@ -528,35 +494,35 @@ bool testSemanticTokens() {
 
     const auto tokens = findSemanticTokensForTooling(analysis);
 
-    const auto* pipeDecl = findSemanticToken(tokens, 1, 5, "type");
+    const auto* pipeDecl = findSemanticToken(tokens, 0, 5, "type");
     if (!require(pipeDecl != nullptr && tokenHasModifier(*pipeDecl, "declaration"),
                  "type declarations should emit declaration semantic tokens")) {
         return false;
     }
 
-    if (!require(findSemanticToken(tokens, 2, 4, "property") != nullptr,
+    if (!require(findSemanticToken(tokens, 1, 4, "property") != nullptr,
                  "field declarations should emit property semantic tokens")) {
         return false;
     }
 
-    if (!require(findSemanticToken(tokens, 2, 10, "type") != nullptr,
+    if (!require(findSemanticToken(tokens, 1, 10, "type") != nullptr,
                  "built-in types should emit type semantic tokens")) {
         return false;
     }
 
-    const auto* methodDecl = findSemanticToken(tokens, 4, 7, "method");
+    const auto* methodDecl = findSemanticToken(tokens, 3, 7, "method");
     if (!require(methodDecl != nullptr &&
                      tokenHasModifier(*methodDecl, "declaration"),
                  "method declarations should emit method declaration tokens")) {
         return false;
     }
 
-    if (!require(findSemanticToken(tokens, 4, 12, "parameter") != nullptr,
+    if (!require(findSemanticToken(tokens, 3, 12, "parameter") != nullptr,
                  "parameters should emit parameter semantic tokens")) {
         return false;
     }
 
-    const auto* localDecl = findSemanticToken(tokens, 5, 12, "variable");
+    const auto* localDecl = findSemanticToken(tokens, 4, 12, "variable");
     if (!require(localDecl != nullptr &&
                      tokenHasModifier(*localDecl, "declaration") &&
                      !tokenHasModifier(*localDecl, "readonly"),
@@ -564,19 +530,19 @@ bool testSemanticTokens() {
         return false;
     }
 
-    if (!require(findSemanticToken(tokens, 5, 24, "parameter") != nullptr,
+    if (!require(findSemanticToken(tokens, 4, 24, "parameter") != nullptr,
                  "parameter uses should keep the parameter semantic token kind")) {
         return false;
     }
 
-    const auto* functionDecl = findSemanticToken(tokens, 9, 3, "function");
+    const auto* functionDecl = findSemanticToken(tokens, 8, 3, "function");
     if (!require(functionDecl != nullptr &&
                      tokenHasModifier(*functionDecl, "declaration"),
                  "free function declarations should emit function declaration tokens")) {
         return false;
     }
 
-    const auto* constDecl = findSemanticToken(tokens, 10, 10, "variable");
+    const auto* constDecl = findSemanticToken(tokens, 9, 10, "variable");
     if (!require(constDecl != nullptr &&
                      tokenHasModifier(*constDecl, "declaration") &&
                      tokenHasModifier(*constDecl, "readonly"),
@@ -584,24 +550,23 @@ bool testSemanticTokens() {
         return false;
     }
 
-    if (!require(findSemanticToken(tokens, 10, 17, "type") != nullptr,
+    if (!require(findSemanticToken(tokens, 9, 17, "type") != nullptr,
                  "custom type references should emit type semantic tokens")) {
         return false;
     }
 
-    if (!require(findSemanticToken(tokens, 10, 24, "parameter") != nullptr,
+    if (!require(findSemanticToken(tokens, 9, 24, "parameter") != nullptr,
                  "receiver variables should retain their semantic token kind")) {
         return false;
     }
 
-    if (!require(findSemanticToken(tokens, 10, 29, "method") != nullptr,
+    if (!require(findSemanticToken(tokens, 9, 29, "method") != nullptr,
                  "member calls should emit method semantic tokens")) {
         return false;
     }
 
     const std::string genericSource =
-        "#!strict\n"
-        "type Pipe struct {}\n"
+                "type Pipe struct {}\n"
         "fn reset() void {\n"
         "    var pipes Array<Pipe> = []\n"
         "}\n";
@@ -614,7 +579,7 @@ bool testSemanticTokens() {
     }
 
     const auto genericTokens = findSemanticTokensForTooling(genericAnalysis);
-    const auto* genericPipeRef = findSemanticToken(genericTokens, 3, 20, "type");
+    const auto* genericPipeRef = findSemanticToken(genericTokens, 2, 20, "type");
     if (!require(genericPipeRef != nullptr,
                  "generic type references should emit type semantic tokens")) {
         return false;
@@ -628,8 +593,7 @@ bool testSemanticTokens() {
     }
 
     const std::string importSource =
-        "#!strict\n"
-        "const { Answer, Get } = @import(\"./modules/frontend_identity_module.mog\")\n"
+                "const { Answer, Get } = @import(\"./modules/frontend_identity_module.mog\")\n"
         "const value i32 = Get()\n"
         "print(Answer)\n";
     options.sourcePath = "tests/sample_import_frontend_identity.mog";
@@ -642,7 +606,7 @@ bool testSemanticTokens() {
 
     const auto importTokens = findSemanticTokensForTooling(importAnalysis);
     const auto* importedAnswerDecl =
-        findSemanticToken(importTokens, 1, 8, "variable");
+        findSemanticToken(importTokens, 0, 8, "variable");
     if (!require(importedAnswerDecl != nullptr &&
                      tokenHasModifier(*importedAnswerDecl, "declaration") &&
                      tokenHasModifier(*importedAnswerDecl, "readonly"),
@@ -650,20 +614,20 @@ bool testSemanticTokens() {
         return false;
     }
 
-    const auto* importedGetDecl = findSemanticToken(importTokens, 1, 16, "function");
+    const auto* importedGetDecl = findSemanticToken(importTokens, 0, 16, "function");
     if (!require(importedGetDecl != nullptr &&
                      tokenHasModifier(*importedGetDecl, "declaration"),
                  "imported functions should emit function declaration tokens")) {
         return false;
     }
 
-    if (!require(findSemanticToken(importTokens, 2, 18, "function") != nullptr,
+    if (!require(findSemanticToken(importTokens, 1, 18, "function") != nullptr,
                  "imported function uses should stay classified as functions")) {
         return false;
     }
 
     const auto* importedAnswerUse =
-        findSemanticToken(importTokens, 3, 6, "variable");
+        findSemanticToken(importTokens, 2, 6, "variable");
     if (!require(importedAnswerUse != nullptr &&
                      tokenHasModifier(*importedAnswerUse, "readonly"),
                  "imported constant uses should stay readonly variables")) {
@@ -675,11 +639,8 @@ bool testSemanticTokens() {
 
 bool testCompletions() {
     ToolingAnalyzeOptions options;
-    options.strictMode = true;
-
     const std::string topLevelSource =
-        "#!strict\n"
-        "fn Helper() i32 {\n"
+                "fn Helper() i32 {\n"
         "    return 1\n"
         "}\n"
         "\n"
@@ -711,8 +672,7 @@ bool testCompletions() {
     }
 
     const std::string localSource =
-        "#!strict\n"
-        "const Outer i32 = 1\n"
+                "const Outer i32 = 1\n"
         "fn use(Value i32) i32 {\n"
         "    var local i32 = Value\n"
         "    {\n"
@@ -730,7 +690,7 @@ bool testCompletions() {
     }
 
     const auto innerScope =
-        findCompletionsForTooling(localAnalysis, ToolingPosition{6, 8});
+        findCompletionsForTooling(localAnalysis, ToolingPosition{5, 8});
     const auto* innerValue = findCompletion(innerScope, "Value");
     if (!require(innerValue != nullptr && innerValue->kind == "constant",
                  "inner block completions should prefer the nearest shadowing binding")) {
@@ -742,7 +702,7 @@ bool testCompletions() {
     }
 
     const auto outerScope =
-        findCompletionsForTooling(localAnalysis, ToolingPosition{8, 4});
+        findCompletionsForTooling(localAnalysis, ToolingPosition{7, 4});
     const auto* outerValue = findCompletion(outerScope, "Value");
     if (!require(outerValue != nullptr && outerValue->kind == "parameter",
                  "after leaving the block, completions should restore the parameter binding")) {
@@ -750,8 +710,7 @@ bool testCompletions() {
     }
 
     const std::string importSemanticErrorSource =
-        "#!strict\n"
-        "const { Answer, Get } = @import(\"./modules/frontend_identity_module.mog\")\n"
+                "const { Answer, Get } = @import(\"./modules/frontend_identity_module.mog\")\n"
         "fn use(x i32) i32 {\n"
         "    var local i32 = x\n"
         "    return local\n"
@@ -767,7 +726,7 @@ bool testCompletions() {
     }
 
     const auto importCompletions =
-        findCompletionsForTooling(importAnalysis, ToolingPosition{4, 10});
+        findCompletionsForTooling(importAnalysis, ToolingPosition{3, 10});
     if (!require(findCompletion(importCompletions, "Answer") != nullptr &&
                      findCompletion(importCompletions, "Get") != nullptr,
                  "imported bindings should appear in local completions")) {
@@ -780,8 +739,7 @@ bool testCompletions() {
     }
 
     const std::string parseFailSource =
-        "#!strict\n"
-        "fn broken(\n";
+                "fn broken(\n";
     options.sourcePath = "tooling_completion_parse_fail_regression.mog";
     ToolingDocumentAnalysis parseFailAnalysis =
         analyzeDocumentForTooling(parseFailSource, options);
@@ -803,8 +761,7 @@ bool testCompletions() {
     }
 
     const std::string memberSource =
-        "#!strict\n"
-        "type Box struct {\n"
+                "type Box struct {\n"
         "    value i32\n"
         "\n"
         "    fn get() i32 {\n"
@@ -823,7 +780,7 @@ bool testCompletions() {
     }
 
     const auto memberCompletions =
-        findCompletionsForTooling(memberAnalysis, ToolingPosition{9, 18});
+        findCompletionsForTooling(memberAnalysis, ToolingPosition{8, 18});
     const auto* valueCompletion = findCompletion(memberCompletions, "value");
     const auto* getCompletion = findCompletion(memberCompletions, "get");
     if (!require(valueCompletion != nullptr &&
@@ -845,8 +802,7 @@ bool testCompletions() {
     }
 
     const std::string incompleteMemberSource =
-        "#!strict\n"
-        "type Box struct {\n"
+                "type Box struct {\n"
         "    value i32\n"
         "\n"
         "    fn get() i32 {\n"
@@ -861,7 +817,7 @@ bool testCompletions() {
         analyzeDocumentForTooling(incompleteMemberSource, options);
 
     const auto incompleteMemberCompletions = findCompletionsForTooling(
-        incompleteMemberAnalysis, incompleteMemberSource, ToolingPosition{9, 15});
+        incompleteMemberAnalysis, incompleteMemberSource, ToolingPosition{8, 15});
     const auto* incompleteValueCompletion =
         findCompletion(incompleteMemberCompletions, "value");
     const auto* incompleteGetCompletion =
@@ -880,8 +836,7 @@ bool testCompletions() {
     }
 
     const std::string incompleteMemberBeforeCallSource =
-        "#!strict\n"
-        "type Pipe struct {}\n"
+                "type Pipe struct {}\n"
         "type GameState struct {\n"
         "    birdY f64\n"
         "    birdVelocity f64\n"
@@ -935,8 +890,7 @@ bool testCompletions() {
     }
 
     const std::string moduleMemberSource =
-        "#!strict\n"
-        "const math = @import(\"./modules/math.mog\")\n"
+                "const math = @import(\"./modules/math.mog\")\n"
         "print(math.Ad)\n";
     options.sourcePath = "tests/sample_import_basic.mog";
     ToolingDocumentAnalysis moduleMemberAnalysis =
@@ -947,7 +901,7 @@ bool testCompletions() {
     }
 
     const auto moduleMemberCompletions =
-        findCompletionsForTooling(moduleMemberAnalysis, ToolingPosition{2, 13});
+        findCompletionsForTooling(moduleMemberAnalysis, ToolingPosition{1, 13});
     const auto* addCompletion = findCompletion(moduleMemberCompletions, "Add");
     const auto* piCompletion = findCompletion(moduleMemberCompletions, "PI");
     if (!require(addCompletion != nullptr &&
@@ -963,8 +917,7 @@ bool testCompletions() {
     }
 
     const std::string importExportSource =
-        "#!strict\n"
-        "const { Add, PI } = @import(\"./modules/math.mog\")\n";
+                "const { Add, PI } = @import(\"./modules/math.mog\")\n";
     options.sourcePath = "tests/sample_import_named.mog";
     ToolingDocumentAnalysis importExportAnalysis =
         analyzeDocumentForTooling(importExportSource, options);
@@ -977,7 +930,7 @@ bool testCompletions() {
     }
 
     const auto importExportCompletions =
-        findCompletionsForTooling(importExportAnalysis, ToolingPosition{1, 15});
+        findCompletionsForTooling(importExportAnalysis, ToolingPosition{0, 15});
     if (!require(findCompletion(importExportCompletions, "PI") != nullptr,
                  "destructured import completions should expose remaining exports")) {
         return false;
@@ -988,8 +941,7 @@ bool testCompletions() {
     }
 
     const std::string typeContextSource =
-        "#!strict\n"
-        "type LocalAlias i32\n"
+                "type LocalAlias i32\n"
         "type LocalBox struct {}\n"
         "fn use(value Loc) LocalA {\n"
         "    return 1\n"
@@ -1003,7 +955,7 @@ bool testCompletions() {
     }
 
     const auto typeContextCompletions =
-        findCompletionsForTooling(typeContextAnalysis, ToolingPosition{3, 16});
+        findCompletionsForTooling(typeContextAnalysis, ToolingPosition{2, 16});
     if (!require(findCompletion(typeContextCompletions, "LocalAlias") != nullptr &&
                      findCompletion(typeContextCompletions, "LocalBox") != nullptr &&
                      findCompletion(typeContextCompletions, "i32") != nullptr,
@@ -1017,8 +969,7 @@ bool testCompletions() {
     }
 
     const std::string importedTypeContextSource =
-        "#!strict\n"
-        "const { Counter } = @import(\"./modules/class_mod.mog\")\n"
+                "const { Counter } = @import(\"./modules/class_mod.mog\")\n"
         "fn make() void {\n"
         "    var value Cou = Counter()\n"
         "}\n";
@@ -1032,7 +983,7 @@ bool testCompletions() {
     }
 
     const auto importedTypeCompletions = findCompletionsForTooling(
-        importedTypeContextAnalysis, ToolingPosition{3, 16});
+        importedTypeContextAnalysis, ToolingPosition{2, 16});
     if (!require(findCompletion(importedTypeCompletions, "Counter") != nullptr,
                  "type-context completions should include imported class bindings")) {
         return false;
@@ -1051,11 +1002,8 @@ bool testCompletions() {
 
 bool testSignatureHelp() {
     ToolingAnalyzeOptions options;
-    options.strictMode = true;
-
     const std::string directSource =
-        "#!strict\n"
-        "fn Add(a i32, b i32) i32 {\n"
+                "fn Add(a i32, b i32) i32 {\n"
         "    return a + b\n"
         "}\n"
         "const value i32 = Add(1, 2)\n";
@@ -1068,7 +1016,7 @@ bool testSignatureHelp() {
     }
 
     const auto directHelp = findSignatureHelpForTooling(
-        directAnalysis, directSource, ToolingPosition{4, 27});
+        directAnalysis, directSource, ToolingPosition{3, 27});
     if (!require(directHelp.has_value() &&
                      directHelp->activeParameter == 1 &&
                      !directHelp->signatures.empty() &&
@@ -1087,8 +1035,7 @@ bool testSignatureHelp() {
     }
 
     const std::string moduleSource =
-        "#!strict\n"
-        "const math = @import(\"./modules/math.mog\")\n"
+                "const math = @import(\"./modules/math.mog\")\n"
         "const value i32 = math.Add(1, 2)\n";
     options.sourcePath = "tests/sample_import_basic.mog";
     ToolingDocumentAnalysis moduleAnalysis =
@@ -1099,7 +1046,7 @@ bool testSignatureHelp() {
     }
 
     const auto moduleHelp = findSignatureHelpForTooling(
-        moduleAnalysis, moduleSource, ToolingPosition{2, 31});
+        moduleAnalysis, moduleSource, ToolingPosition{1, 31});
     if (!require(moduleHelp.has_value() &&
                      moduleHelp->activeParameter == 1 &&
                      !moduleHelp->signatures.empty() &&
@@ -1110,8 +1057,7 @@ bool testSignatureHelp() {
     }
 
     const std::string parseFailSource =
-        "#!strict\n"
-        "fn Add(a i32, b i32) i32 {\n"
+                "fn Add(a i32, b i32) i32 {\n"
         "    return a + b\n"
         "}\n"
         "const value i32 = Add(1,\n";
@@ -1124,7 +1070,7 @@ bool testSignatureHelp() {
     }
 
     const auto parseFailHelp = findSignatureHelpForTooling(
-        parseFailAnalysis, parseFailSource, ToolingPosition{4, 25});
+        parseFailAnalysis, parseFailSource, ToolingPosition{3, 25});
     if (!require(parseFailHelp.has_value() &&
                      parseFailHelp->activeParameter == 1 &&
                      !parseFailHelp->signatures.empty(),
@@ -1137,11 +1083,8 @@ bool testSignatureHelp() {
 
 bool testWorkspaceSymbolsAndRename() {
     ToolingAnalyzeOptions options;
-    options.strictMode = true;
-
     const std::string localSource =
-        "#!strict\n"
-        "fn add(x i32) i32 {\n"
+                "fn add(x i32) i32 {\n"
         "    var local i32 = x\n"
         "    return local + local\n"
         "}\n";
@@ -1154,7 +1097,7 @@ bool testWorkspaceSymbolsAndRename() {
     }
 
     const auto localTarget =
-        prepareRenameForTooling(localAnalysis, ToolingPosition{3, 11});
+        prepareRenameForTooling(localAnalysis, ToolingPosition{2, 11});
     if (!require(localTarget.has_value() &&
                      localTarget->strategy == "same-file",
                  "local variable rename should stay same-file")) {
@@ -1178,16 +1121,15 @@ bool testWorkspaceSymbolsAndRename() {
         return false;
     }
 
-    if (!require(findEdit(localEdits, options.sourcePath, 2, 8) != nullptr &&
-                     findEdit(localEdits, options.sourcePath, 3, 11) != nullptr &&
-                     findEdit(localEdits, options.sourcePath, 3, 19) != nullptr,
+    if (!require(findEdit(localEdits, options.sourcePath, 1, 8) != nullptr &&
+                     findEdit(localEdits, options.sourcePath, 2, 11) != nullptr &&
+                     findEdit(localEdits, options.sourcePath, 2, 19) != nullptr,
                  "local rename should target only the bound local identifier spans")) {
         return false;
     }
 
     const std::string memberSource =
-        "#!strict\n"
-        "type Box struct {\n"
+                "type Box struct {\n"
         "    value i32\n"
         "}\n"
         "fn read(box Box) i32 {\n"
@@ -1196,7 +1138,7 @@ bool testWorkspaceSymbolsAndRename() {
     options.sourcePath = "tooling_prepare_rename_member_regression.mog";
     ToolingDocumentAnalysis memberAnalysis =
         analyzeDocumentForTooling(memberSource, options);
-    if (!require(!prepareRenameForTooling(memberAnalysis, ToolingPosition{5, 15})
+    if (!require(!prepareRenameForTooling(memberAnalysis, ToolingPosition{4, 15})
                       .has_value(),
                  "prepare rename should reject unsupported member access")) {
         return false;
@@ -1216,22 +1158,19 @@ bool testWorkspaceSymbolsAndRename() {
     const std::filesystem::path aliasPath = tempRoot / "alias_importer.mog";
 
     if (!require(writeFile(depPath,
-                           "#!strict\n"
-                           "fn Get() i32 {\n"
+                                                      "fn Get() i32 {\n"
                            "    return 42\n"
                            "}\n"
                            "const Answer i32 = 42\n"
                            "const privateValue i32 = 1\n"),
                  "rename regression should write the dependency module") ||
         !require(writeFile(importerPath,
-                           "#!strict\n"
-                           "const { Answer, Get } = @import(\"./dep.mog\")\n"
+                                                      "const { Answer, Get } = @import(\"./dep.mog\")\n"
                            "print(Get())\n"
                            "print(Answer)\n"),
                  "rename regression should write the importer module") ||
         !require(writeFile(aliasPath,
-                           "#!strict\n"
-                           "const { Answer as Alias } = @import(\"./dep.mog\")\n"
+                                                      "const { Answer as Alias } = @import(\"./dep.mog\")\n"
                            "print(Alias)\n"),
                  "rename regression should write the aliased importer module")) {
         return false;
@@ -1276,7 +1215,7 @@ bool testWorkspaceSymbolsAndRename() {
     }
 
     const auto importLocalTarget =
-        prepareRenameForTooling(importerAnalysis, ToolingPosition{3, 6});
+        prepareRenameForTooling(importerAnalysis, ToolingPosition{2, 6});
     if (!require(importLocalTarget.has_value() &&
                      importLocalTarget->strategy == "import-local" &&
                      !importLocalTarget->importHasAlias,
@@ -1292,7 +1231,7 @@ bool testWorkspaceSymbolsAndRename() {
     }
 
     const auto* importBindingEdit =
-        findEdit(importLocalEdits, importerPath.string(), 1, 8);
+        findEdit(importLocalEdits, importerPath.string(), 0, 8);
     if (!require(importBindingEdit != nullptr &&
                      importBindingEdit->newText == "Answer as LocalAnswer",
                  "unaliased import rename should insert a local alias")) {
@@ -1300,7 +1239,7 @@ bool testWorkspaceSymbolsAndRename() {
     }
 
     const auto* importUseEdit =
-        findEdit(importLocalEdits, importerPath.string(), 3, 6);
+        findEdit(importLocalEdits, importerPath.string(), 2, 6);
     if (!require(importUseEdit != nullptr &&
                      importUseEdit->newText == "LocalAnswer",
                  "unaliased import rename should update same-file uses")) {
@@ -1308,7 +1247,7 @@ bool testWorkspaceSymbolsAndRename() {
     }
 
     const auto importAliasTarget =
-        prepareRenameForTooling(aliasAnalysis, ToolingPosition{2, 6});
+        prepareRenameForTooling(aliasAnalysis, ToolingPosition{1, 6});
     if (!require(importAliasTarget.has_value() &&
                      importAliasTarget->strategy == "import-local" &&
                      importAliasTarget->importHasAlias,
@@ -1323,14 +1262,14 @@ bool testWorkspaceSymbolsAndRename() {
         return false;
     }
 
-    if (!require(findEdit(importAliasEdits, aliasPath.string(), 1, 18) != nullptr &&
-                     findEdit(importAliasEdits, aliasPath.string(), 2, 6) != nullptr,
+    if (!require(findEdit(importAliasEdits, aliasPath.string(), 0, 18) != nullptr &&
+                     findEdit(importAliasEdits, aliasPath.string(), 1, 6) != nullptr,
                  "aliased import rename should target the alias spans only")) {
         return false;
     }
 
     const auto exportedTarget =
-        prepareRenameForTooling(depAnalysis, ToolingPosition{4, 6});
+        prepareRenameForTooling(depAnalysis, ToolingPosition{3, 6});
     if (!require(exportedTarget.has_value() &&
                      exportedTarget->strategy == "exported",
                  "public top-level rename should be marked as exported")) {
@@ -1356,8 +1295,8 @@ bool testWorkspaceSymbolsAndRename() {
         return false;
     }
 
-    if (!require(findEdit(importerExportEdits, importerPath.string(), 1, 8) != nullptr &&
-                     findEdit(importerExportEdits, importerPath.string(), 3, 6) != nullptr,
+    if (!require(findEdit(importerExportEdits, importerPath.string(), 0, 8) != nullptr &&
+                     findEdit(importerExportEdits, importerPath.string(), 2, 6) != nullptr,
                  "exported rename should update the imported binding and its uses")) {
         return false;
     }
@@ -1370,7 +1309,7 @@ bool testWorkspaceSymbolsAndRename() {
     }
 
     const auto* aliasExportEdit =
-        findEdit(aliasExportEdits, aliasPath.string(), 1, 8);
+        findEdit(aliasExportEdits, aliasPath.string(), 0, 8);
     if (!require(aliasExportEdit != nullptr &&
                      aliasExportEdit->newText == "FinalAnswer",
                  "exported rename should still rewrite the imported exported name")) {
@@ -1383,10 +1322,6 @@ bool testWorkspaceSymbolsAndRename() {
 }  // namespace
 
 int main() {
-    if (!testStrictDirectiveDetection()) {
-        return 1;
-    }
-
     if (!testRangeConversion()) {
         return 1;
     }

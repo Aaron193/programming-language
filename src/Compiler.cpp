@@ -76,16 +76,12 @@ bool Compiler::compile(std::string_view source, Chunk& chunk,
 
     AstFrontendResult astFrontend;
     std::vector<TypeError> astErrors;
-    AstFrontendMode frontendMode = m_strictMode
-                                       ? AstFrontendMode::StrictChecked
-                                       : AstFrontendMode::LoweringOnly;
     AstFrontendOptions frontendOptions;
     frontendOptions.sourcePath = sourcePath;
     frontendOptions.packageSearchPaths = m_packageSearchPaths;
     frontendOptions.moduleGraphCache = &m_frontendModuleGraph;
     AstFrontendBuildStatus astStatus =
-        buildAstFrontend(source, frontendOptions, frontendMode, astErrors,
-                         astFrontend);
+        buildAstFrontend(source, frontendOptions, astErrors, astFrontend);
 
     if (astStatus != AstFrontendBuildStatus::Success) {
         m_lastFrontendTimings = astFrontend.timings;
@@ -188,7 +184,7 @@ TypeRef Compiler::peekExprType() const {
 
 uint8_t Compiler::arithmeticOpcode(TokenType operatorType,
                                    const TypeRef& numericType) const {
-    if (m_strictMode && numericType && numericType->isInteger()) {
+    if (numericType && numericType->isInteger()) {
         const bool isSigned = numericType->isSigned();
         switch (operatorType) {
             case TokenType::PLUS:

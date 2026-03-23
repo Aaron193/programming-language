@@ -118,14 +118,12 @@ struct ToolingAnalyzeOptions {
     std::string sourcePath;
     std::vector<std::string> packageSearchPaths;
     AstFrontendModuleGraphCache* moduleGraphCache = nullptr;
-    bool strictMode = false;
 };
 
 struct ToolingDocumentAnalysis {
     AstFrontendBuildStatus status = AstFrontendBuildStatus::ParseFailed;
     std::string sourcePath;
     std::vector<std::string> packageSearchPaths;
-    bool strictMode = false;
     bool hasFrontend = false;
     bool hasParse = false;
     bool hasBindings = false;
@@ -135,7 +133,6 @@ struct ToolingDocumentAnalysis {
     AstFrontendResult frontend;
 };
 
-bool toolingSourceStartsWithStrictDirective(std::string_view source);
 ToolingPosition toolingPositionFromSourcePosition(const SourcePosition& position);
 ToolingRange toolingRangeFromSourceSpan(const SourceSpan& span);
 SourcePosition sourcePositionFromToolingPosition(const ToolingPosition& position);

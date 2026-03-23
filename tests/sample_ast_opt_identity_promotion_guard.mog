@@ -1,4 +1,3 @@
-#!strict
 fn value() u8 {
     print("call")
     return 5u8

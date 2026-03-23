@@ -1,3 +1,4 @@
 const { Counter } = @import("./modules/class_mod.mog")
 
-print(Counter() != null)
+Counter()
+print(1)

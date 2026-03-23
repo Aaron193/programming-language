@@ -15,11 +15,6 @@
 #include "SourceLocation.hpp"
 #include "TypeChecker.hpp"
 
-enum class AstFrontendMode {
-    StrictChecked,
-    LoweringOnly,
-};
-
 struct FrontendFileFingerprint {
     bool valid = false;
     uint64_t size = 0;
@@ -27,7 +22,6 @@ struct FrontendFileFingerprint {
 };
 
 struct AstFrontendModuleGraphNode {
-    AstFrontendMode mode = AstFrontendMode::StrictChecked;
     FrontendFileFingerprint fingerprint;
     AstImportedModuleInterface importedInterface;
     std::vector<std::string> dependencies;
@@ -85,7 +79,6 @@ struct AstFrontendResult {
     AstBindResult bindings;
     AstSemanticModel semanticModel;
     std::unique_ptr<HirModule> hirModule;
-    AstFrontendMode mode = AstFrontendMode::StrictChecked;
     size_t terminalLine = 1;
     SourcePosition terminalPosition = makeSourcePosition(0, 1, 1);
     Timings timings;
@@ -93,6 +86,5 @@ struct AstFrontendResult {
 
 AstFrontendBuildStatus buildAstFrontend(std::string_view source,
                                         const AstFrontendOptions& options,
-                                        AstFrontendMode mode,
                                         std::vector<TypeError>& outErrors,
                                         AstFrontendResult& outFrontend);

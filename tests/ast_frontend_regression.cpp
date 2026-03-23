@@ -27,10 +27,6 @@ struct OptimizedFrontendResult {
     size_t preFoldedExprLine = 0;
 };
 
-bool hasStrictDirective(std::string_view source) {
-    return source.rfind("#!strict", 0) == 0;
-}
-
 std::string readFile(const std::filesystem::path& path) {
     std::ifstream input(path);
     if (!input) {
@@ -166,7 +162,7 @@ bool buildOptimizedFrontend(std::string_view source,
     const AstFrontendOptions options;
     std::vector<TypeError> errors;
     const AstFrontendBuildStatus status = buildAstFrontend(
-        source, options, AstFrontendMode::StrictChecked, errors,
+        source, options, errors,
         outResult.frontend);
     if (status != AstFrontendBuildStatus::Success) {
         outError = errors.empty() ? "failed to build optimized frontend"
@@ -200,7 +196,6 @@ bool compileFileCanonical(const std::filesystem::path& path,
     compiler.setPackageSearchPaths(
         {std::filesystem::current_path().append("build/packages").string()});
     compiler.setEmitterMode(emitterMode);
-    compiler.setStrictMode(hasStrictDirective(source));
 
     if (!compiler.compile(source, chunk, path.string())) {
         return false;
@@ -210,7 +205,7 @@ bool compileFileCanonical(const std::filesystem::path& path,
     return true;
 }
 
-bool compileSourceCanonical(std::string_view source, bool strictMode,
+bool compileSourceCanonical(std::string_view source,
                             CompilerEmitterMode emitterMode, GC& gc,
                             Chunk& chunk, std::string& outDisassembly) {
     Compiler compiler;
@@ -218,7 +213,6 @@ bool compileSourceCanonical(std::string_view source, bool strictMode,
     compiler.setPackageSearchPaths(
         {std::filesystem::current_path().append("build/packages").string()});
     compiler.setEmitterMode(emitterMode);
-    compiler.setStrictMode(strictMode);
     if (!compiler.compile(source, chunk, "<frontend-inline>")) {
         return false;
     }
@@ -263,19 +257,19 @@ bool checkStrictHirHasNoAdd(const std::filesystem::path& path,
     GC strictGc;
     Chunk strictChunk;
     std::string strictDisassembly;
-    if (!require(compileSourceCanonical(source, true, CompilerEmitterMode::Auto,
+    if (!require(compileSourceCanonical(source, CompilerEmitterMode::Auto,
                                         strictGc, strictChunk, strictDisassembly),
-                 description + " should compile in strict auto mode")) {
+                 description + " should compile in default auto mode")) {
         return false;
     }
 
     GC strictHirGc;
     Chunk strictHirChunk;
     std::string strictHirDisassembly;
-    if (!require(compileSourceCanonical(source, true, CompilerEmitterMode::ForceHir,
+    if (!require(compileSourceCanonical(source, CompilerEmitterMode::ForceHir,
                                         strictHirGc, strictHirChunk,
                                         strictHirDisassembly),
-                 description + " should compile in strict forced HIR mode")) {
+                 description + " should compile in default forced HIR mode")) {
         return false;
     }
 
@@ -283,7 +277,7 @@ bool checkStrictHirHasNoAdd(const std::filesystem::path& path,
                        strictDisassembly.find("IADD") == std::string::npos &&
                        strictDisassembly.find("ADD") == std::string::npos,
                    description +
-                       " should lower identically in strict auto/HIR modes without addition opcodes");
+                       " should lower identically in default auto/HIR modes without addition opcodes");
 }
 
 bool checkSemanticRefreshContract() {
@@ -358,7 +352,6 @@ bool checkSemanticRefreshContract() {
     Chunk chunk;
     Compiler compiler;
     compiler.setGC(&gc);
-    compiler.setStrictMode(true);
     if (!require(compiler.compile(kSource, chunk, "<frontend-regression>"),
                  "compiler should lower successfully after semantic optimization")) {
         return false;
@@ -430,7 +423,6 @@ bool checkBooleanIdentityRefreshContract() {
     Chunk chunk;
     Compiler compiler;
     compiler.setGC(&gc);
-    compiler.setStrictMode(true);
     if (!require(compiler.compile(kSource, chunk, "<frontend-bool-identity>"),
                  "compiler should lower successfully after bool identity rewrites")) {
         return false;
@@ -501,7 +493,6 @@ bool checkSyntheticNotSpanRegression() {
     Chunk chunk;
     Compiler compiler;
     compiler.setGC(&gc);
-    compiler.setStrictMode(true);
     if (!require(compiler.compile(kSource, chunk, "<frontend-synth-not>"),
                  "compiler should lower successfully after synthesized not rewrite")) {
         return false;
@@ -574,7 +565,6 @@ bool checkIntegerDoubleTildeRefreshContract() {
     Chunk chunk;
     Compiler compiler;
     compiler.setGC(&gc);
-    compiler.setStrictMode(true);
     if (!require(compiler.compile(kSource, chunk, "<frontend-int-double-tilde>"),
                  "compiler should lower successfully after integer double-tilde rewrites")) {
         return false;
@@ -644,7 +634,6 @@ bool checkIntegerMultiplyZeroRefreshContract() {
     Chunk chunk;
     Compiler compiler;
     compiler.setGC(&gc);
-    compiler.setStrictMode(true);
     if (!require(compiler.compile(kSource, chunk, "<frontend-mul-zero>"),
                  "compiler should lower successfully after integer multiply-zero rewrites")) {
         return false;
@@ -697,9 +686,9 @@ bool checkSemanticDiagnosticSpans() {
     std::vector<TypeError> errors;
     const AstFrontendOptions options;
     const AstFrontendBuildStatus status = buildAstFrontend(
-        kSource, options, AstFrontendMode::StrictChecked, errors, frontend);
+        kSource, options, errors, frontend);
     if (!require(status == AstFrontendBuildStatus::SemanticError,
-                 "indented strict semantic sample should fail semantic analysis")) {
+                 "indented semantic sample should fail semantic analysis")) {
         return false;
     }
 
@@ -728,7 +717,7 @@ bool checkCallableDiagnosticSpans() {
         std::vector<TypeError> errors;
         const AstFrontendOptions options;
         const AstFrontendBuildStatus status = buildAstFrontend(
-            kSource, options, AstFrontendMode::StrictChecked, errors, frontend);
+            kSource, options, errors, frontend);
         if (!require(status == AstFrontendBuildStatus::SemanticError,
                      "closure mismatch sample should fail semantic analysis") ||
             !require(!errors.empty(),
@@ -747,7 +736,7 @@ bool checkCallableDiagnosticSpans() {
         std::vector<TypeError> errors;
         const AstFrontendOptions options;
         const AstFrontendBuildStatus status = buildAstFrontend(
-            kSource, options, AstFrontendMode::StrictChecked, errors, frontend);
+            kSource, options, errors, frontend);
         if (!require(status == AstFrontendBuildStatus::SemanticError,
                      "lambda parameter sample should fail semantic analysis") ||
             !require(errors.size() == 1,
@@ -768,7 +757,7 @@ bool checkCallableDiagnosticSpans() {
         std::vector<TypeError> errors;
         const AstFrontendOptions options;
         const AstFrontendBuildStatus status = buildAstFrontend(
-            kSource, options, AstFrontendMode::StrictChecked, errors, frontend);
+            kSource, options, errors, frontend);
         if (!require(status == AstFrontendBuildStatus::SemanticError,
                      "lambda block-body sample should fail semantic analysis") ||
             !require(errors.size() == 1,
@@ -792,7 +781,7 @@ bool checkImportedModuleRegression(const std::filesystem::path& repoRoot) {
 
     if (!checkCanonicalLoweringStable(
             repoRoot / "tests/sample_import_frontend_nested_strict.mog",
-            "nested strict importer sample")) {
+            "nested importer sample")) {
         return false;
     }
 
@@ -814,7 +803,7 @@ bool checkTypedImportFrontendRegression(const std::filesystem::path& repoRoot) {
     AstFrontendResult frontend;
     std::vector<TypeError> errors;
     const AstFrontendBuildStatus status =
-        buildAstFrontend(source, options, AstFrontendMode::StrictChecked, errors,
+        buildAstFrontend(source, options, errors,
                          frontend);
     if (!require(status == AstFrontendBuildStatus::Success,
                  "typed import sample should build through the AST frontend")) {
@@ -921,7 +910,7 @@ bool checkNativeHandleTypeFrontendRegression(
     AstFrontendResult frontend;
     std::vector<TypeError> errors;
     const AstFrontendBuildStatus status =
-        buildAstFrontend(source, options, AstFrontendMode::StrictChecked, errors,
+        buildAstFrontend(source, options, errors,
                          frontend);
     if (!require(status == AstFrontendBuildStatus::Success,
                  "native handle typed import sample should build through the AST frontend")) {
@@ -998,7 +987,7 @@ bool checkTypedImportDiagnosticRegression(const std::filesystem::path& repoRoot)
         AstFrontendResult frontend;
         std::vector<TypeError> errors;
         const AstFrontendBuildStatus status = buildAstFrontend(
-            source, options, AstFrontendMode::StrictChecked, errors, frontend);
+            source, options, errors, frontend);
         return require(status == AstFrontendBuildStatus::SemanticError,
                        description + " should fail semantic analysis") &&
                require(!errors.empty(),
@@ -1012,20 +1001,20 @@ bool checkTypedImportDiagnosticRegression(const std::filesystem::path& repoRoot)
 
     if (!expectStrictError(repoRoot /
                                "tests/types/errors/import_binding_type_mismatch.mog",
-                           2, 9, "cannot assign imported value",
+                           1, 9, "cannot assign imported value",
                            "typed import mismatch sample")) {
         return false;
     }
 
     if (!expectStrictError(repoRoot / "tests/types/errors/import_missing_export.mog",
-                           2, 9, "has no export 'Missing'",
+                           1, 9, "has no export 'Missing'",
                            "missing export sample")) {
         return false;
     }
 
     if (!expectStrictError(
             repoRoot / "tests/types/errors/import_native_binding_type_mismatch.mog",
-            2, 9, "function(i64, i64) -> i64",
+            1, 9, "function(i64, i64) -> i64",
             "native typed import mismatch sample")) {
         return false;
     }
@@ -1033,14 +1022,14 @@ bool checkTypedImportDiagnosticRegression(const std::filesystem::path& repoRoot)
     if (!expectStrictError(
             repoRoot /
                 "tests/types/errors/import_native_handle_binding_type_mismatch.mog",
-            2, 9, "function(i64) -> handle<examples:counter:CounterHandle>",
+            1, 9, "function(i64) -> handle<examples:counter:CounterHandle>",
             "native handle typed import mismatch sample")) {
         return false;
     }
 
     if (!expectStrictError(repoRoot /
                                "tests/types/errors/import_cycle_frontend.mog",
-                           2, 21, "Circular import detected",
+                           1, 21, "Circular import detected",
                            "import cycle sample")) {
         return false;
     }
@@ -1061,7 +1050,7 @@ bool checkStructuredDiagnosticRegression(const std::filesystem::path& repoRoot) 
     AstFrontendResult frontend;
     std::vector<TypeError> errors;
     const AstFrontendBuildStatus status = buildAstFrontend(
-        source, options, AstFrontendMode::StrictChecked, errors, frontend);
+        source, options, errors, frontend);
     const bool sawRootImportSpecifier =
         !errors.empty() &&
         std::any_of(errors.front().importTrace.begin(),
@@ -1075,7 +1064,7 @@ bool checkStructuredDiagnosticRegression(const std::filesystem::path& repoRoot) 
                  "structured diagnostic sample should report errors") ||
         !require(errors.front().code == "import.cycle",
                  "structured diagnostic sample should keep the import cycle code") ||
-        !require(errors.front().line == 2 && errors.front().column == 21,
+        !require(errors.front().line == 1 && errors.front().column == 21,
                  "structured diagnostic sample should keep the import-site span") ||
         !require(!errors.front().importTrace.empty(),
                  "structured diagnostic sample should carry an import trace") ||
@@ -1099,10 +1088,10 @@ bool checkModuleGraphCacheRegression() {
 
     const std::filesystem::path depPath = tempRoot / "dep.mog";
     const std::filesystem::path importerPath = tempRoot / "main.mog";
-    if (!require(writeFile(depPath, "#!strict\nconst Value i32 = 1i32\n"),
+    if (!require(writeFile(depPath, "const Value i32 = 1i32\n"),
                  "module graph cache regression should write the dependency sample") ||
         !require(writeFile(importerPath,
-                           "#!strict\nconst { Value: i32 } = @import(\"./dep.mog\")\nprint(Value)\n"),
+                           "const { Value: i32 } = @import(\"./dep.mog\")\nprint(Value)\n"),
                  "module graph cache regression should write the importer sample")) {
         return false;
     }
@@ -1116,7 +1105,7 @@ bool checkModuleGraphCacheRegression() {
     AstFrontendResult firstFrontend;
     std::vector<TypeError> errors;
     const AstFrontendBuildStatus firstStatus =
-        buildAstFrontend(importerSource, options, AstFrontendMode::StrictChecked,
+        buildAstFrontend(importerSource, options,
                          errors, firstFrontend);
     if (!require(firstStatus == AstFrontendBuildStatus::Success,
                  "module graph cache regression first build should succeed") ||
@@ -1128,7 +1117,7 @@ bool checkModuleGraphCacheRegression() {
     AstFrontendResult secondFrontend;
     errors.clear();
     const AstFrontendBuildStatus secondStatus =
-        buildAstFrontend(importerSource, options, AstFrontendMode::StrictChecked,
+        buildAstFrontend(importerSource, options,
                          errors, secondFrontend);
     if (!require(secondStatus == AstFrontendBuildStatus::Success,
                  "module graph cache regression second build should succeed") ||
@@ -1138,7 +1127,7 @@ bool checkModuleGraphCacheRegression() {
     }
 
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
-    if (!require(writeFile(depPath, "#!strict\nconst Value str = \"oops\"\n"),
+    if (!require(writeFile(depPath, "const Value str = \"oops\"\n"),
                  "module graph cache regression should rewrite the dependency sample")) {
         return false;
     }
@@ -1146,7 +1135,7 @@ bool checkModuleGraphCacheRegression() {
     AstFrontendResult thirdFrontend;
     errors.clear();
     const AstFrontendBuildStatus thirdStatus =
-        buildAstFrontend(importerSource, options, AstFrontendMode::StrictChecked,
+        buildAstFrontend(importerSource, options,
                          errors, thirdFrontend);
     if (!require(thirdStatus == AstFrontendBuildStatus::SemanticError,
                  "module graph cache regression third build should fail after invalidation") ||
@@ -1197,13 +1186,13 @@ bool checkNewlineOptimizationRegression(const std::filesystem::path& repoRoot) {
 
     if (!checkStrictHirHasNoAdd(
             repoRoot / "tests/newline/sample_newline_operator_rhs.mog",
-            "strict newline operator sample")) {
+            "default newline operator sample")) {
         return false;
     }
 
     if (!checkStrictHirHasNoAdd(
             repoRoot / "tests/newline/sample_newline_call_suffix_folded_arg.mog",
-            "strict newline folded call sample")) {
+            "default newline folded call sample")) {
         return false;
     }
 

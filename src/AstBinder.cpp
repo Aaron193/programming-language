@@ -349,6 +349,7 @@ class AstBinderImpl {
             const std::string localName =
                 binding.localName.has_value() ? tokenText(*binding.localName)
                                               : exportedName;
+            AstBindingKind bindingKind = AstBindingKind::Variable;
             if (importedModule) {
                 auto exportIt = importedModule->exportTypes.find(exportedName);
                 if (exportIt == importedModule->exportTypes.end()) {
@@ -356,12 +357,14 @@ class AstBinderImpl {
                              "Type error: imported module '" +
                                  importedModule->importTarget.displayName +
                                  "' has no export '" + exportedName + "'.");
+                } else if (exportIt->second &&
+                           exportIt->second->kind == TypeKind::CLASS) {
+                    bindingKind = AstBindingKind::Class;
                 }
             }
 
-            defineBinding(localName,
-                          AstBindingRef{AstBindingKind::Variable, binding.node.id,
-                                        localName, true, ""});
+            defineBinding(localName, AstBindingRef{bindingKind, binding.node.id,
+                                                   localName, true, localName});
         }
     }
 

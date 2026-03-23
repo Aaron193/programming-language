@@ -13,9 +13,9 @@ if [[ ! -x "$INTERPRETER" ]]; then
 fi
 
 set +e
-PROGRAM_OUTPUT="$($INTERPRETER --strict "$TARGET" 2>&1)"
+PROGRAM_OUTPUT="$($INTERPRETER "$TARGET" 2>&1)"
 PROGRAM_STATUS=$?
-DISASSEMBLE_OUTPUT="$($INTERPRETER --strict --disassemble "$TARGET" 2>&1)"
+DISASSEMBLE_OUTPUT="$($INTERPRETER --disassemble "$TARGET" 2>&1)"
 DISASSEMBLE_STATUS=$?
 set -e
 

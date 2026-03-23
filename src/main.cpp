@@ -15,7 +15,6 @@ struct CliOptions {
     bool disassemble = false;
     bool frontendTimings = false;
     bool frontendTimingsJson = false;
-    bool strict = false;
     std::string validatePackageDir;
     std::string sourceFile;
     std::vector<std::string> packagePaths;
@@ -24,7 +23,7 @@ struct CliOptions {
 static void printUsage(const char* executable) {
     std::cout
         << "Usage: " << executable
-        << " [--trace] [--show-return] [--disassemble] [--frontend-timings] [--strict]"
+        << " [--trace] [--show-return] [--disassemble] [--frontend-timings]"
         << " [--frontend-timings-json]"
         << " [--package-path <dir>|--package-path=<dir>]"
         << " [--validate-package <dir>|--validate-package=<dir>]"
@@ -47,8 +46,6 @@ static bool parseArgs(int argc, char** argv, CliOptions& options) {
             options.frontendTimings = true;
         } else if (arg == "--frontend-timings-json") {
             options.frontendTimingsJson = true;
-        } else if (arg == "--strict") {
-            options.strict = true;
         } else if (arg == "--package-path") {
             if (index + 1 >= argc) {
                 std::cerr << "Missing value for --package-path." << std::endl;
@@ -150,7 +147,7 @@ static int runFile(const CliOptions& options) {
     vm.setPackageSearchPaths(options.packagePaths);
     Status status =
         vm.interpret(*source, options.showReturn, options.trace,
-                     options.disassemble, absolutePath, options.strict,
+                     options.disassemble, absolutePath,
                      options.frontendTimings,
                      options.frontendTimingsJson);
 
@@ -189,7 +186,7 @@ static int runRepl(const CliOptions& options) {
         }
 
         Status status = vm.interpret(line, options.showReturn, options.trace,
-                                     options.disassemble, "", options.strict,
+                                     options.disassemble, "",
                                      options.frontendTimings,
                                      options.frontendTimingsJson);
         if (status == Status::COMPILATION_ERROR) {

@@ -23,6 +23,8 @@ FRONTEND_TIMINGS_OUTPUT="$($INTERPRETER --frontend-timings "$TARGET" 2>&1)"
 FRONTEND_TIMINGS_STATUS=$?
 FRONTEND_TIMINGS_JSON_OUTPUT="$($INTERPRETER --frontend-timings-json "$TARGET" 2>&1)"
 FRONTEND_TIMINGS_JSON_STATUS=$?
+STRICT_FLAG_OUTPUT="$($INTERPRETER --strict "$TARGET" 2>&1)"
+STRICT_FLAG_STATUS=$?
 set -e
 
 if [[ $TRACE_STATUS -ne 0 ]]; then
@@ -87,5 +89,15 @@ if ! grep -q "42" <<< "$TRACE_OUTPUT" || ! grep -q "42" <<< "$SHOW_RETURN_OUTPUT
     exit 1
 fi
 
-echo "[PASS] CLI flags --trace, --show-return, --disassemble, --frontend-timings, --frontend-timings-json work."
+if [[ $STRICT_FLAG_STATUS -eq 0 ]]; then
+    echo "[FAIL] expected --strict to be rejected"
+    exit 1
+fi
+if ! grep -q "Unknown option: --strict" <<< "$STRICT_FLAG_OUTPUT"; then
+    echo "[FAIL] expected unknown-option output for --strict"
+    echo "$STRICT_FLAG_OUTPUT"
+    exit 1
+fi
+
+echo "[PASS] CLI flags work and --strict is rejected."
 exit 0

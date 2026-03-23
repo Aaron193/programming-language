@@ -1598,8 +1598,6 @@ class MogLspServer {
             options.sourcePath = openDocument->path;
             options.packageSearchPaths = m_packageSearchPaths;
             options.moduleGraphCache = &m_cache;
-            options.strictMode =
-                toolingSourceStartsWithStrictDirective(openDocument->text);
             return analyzeDocumentForTooling(openDocument->text, options);
         }
 
@@ -1612,7 +1610,6 @@ class MogLspServer {
         options.sourcePath = path;
         options.packageSearchPaths = m_packageSearchPaths;
         options.moduleGraphCache = &m_cache;
-        options.strictMode = toolingSourceStartsWithStrictDirective(*text);
         return analyzeDocumentForTooling(*text, options);
     }
 
@@ -1697,7 +1694,6 @@ class MogLspServer {
         options.sourcePath = document.path;
         options.packageSearchPaths = m_packageSearchPaths;
         options.moduleGraphCache = &m_cache;
-        options.strictMode = toolingSourceStartsWithStrictDirective(document.text);
 
         document.analysis = analyzeDocumentForTooling(document.text, options);
         sendPublishDiagnostics(document.uri, document.analysis.diagnostics);

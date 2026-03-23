@@ -42,14 +42,10 @@ run_expect_output() {
 }
 
 run_expect_compile_error() {
-    local mode="$1"
-    local file="$2"
-    local expected="$3"
+    local file="$1"
+    local expected="$2"
 
     local -a cmd=("$INTERPRETER")
-    if [[ "$mode" == "strict" ]]; then
-        cmd+=("--strict")
-    fi
     cmd+=("$file")
 
     set +e
@@ -59,20 +55,20 @@ run_expect_compile_error() {
     set -e
 
     if [[ $status -eq 0 ]]; then
-        echo "[FAIL] Expected compile failure ($mode): $file"
+        echo "[FAIL] Expected compile failure: $file"
         echo "$output"
         return 1
     fi
 
     if ! grep -Fq "$expected" <<< "$output"; then
-        echo "[FAIL] Expected message not found ($mode): $file"
+        echo "[FAIL] Expected message not found: $file"
         echo "Expected: $expected"
         echo "Actual output:"
         echo "$output"
         return 1
     fi
 
-    echo "[PASS] $mode $file"
+    echo "[PASS] $file"
     return 0
 }
 
@@ -116,12 +112,10 @@ do
             ;;
     esac
 
-    run_expect_compile_error "default" "$file" "$expected" || failed=1
-    run_expect_compile_error "strict" "$file" "$expected" || failed=1
+    run_expect_compile_error "$file" "$expected" || failed=1
 done
 
 run_expect_compile_error \
-    "default" \
     "$NEWLINE_DIR/fail_newline_trailing_comma_call.mog" \
     "Expected expression." || failed=1
 

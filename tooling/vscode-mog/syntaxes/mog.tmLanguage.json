@@ -7,10 +7,6 @@
       "match": "//.*$"
     },
     {
-      "name": "meta.preprocessor.strict.mog",
-      "match": "^#!strict\\b"
-    },
-    {
       "name": "string.quoted.double.mog",
       "begin": "\"",
       "end": "\"",

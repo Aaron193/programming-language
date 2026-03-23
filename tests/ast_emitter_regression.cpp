@@ -3,7 +3,6 @@
 #include <iostream>
 #include <sstream>
 #include <string>
-#include <string_view>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -12,10 +11,6 @@
 #include "GC.hpp"
 
 namespace {
-
-bool hasStrictDirective(std::string_view source) {
-    return source.rfind("#!strict", 0) == 0;
-}
 
 std::string readFile(const std::filesystem::path& path) {
     std::ifstream input(path);
@@ -98,7 +93,6 @@ bool compileWithMode(const std::filesystem::path& path, CompilerEmitterMode mode
     compiler.setGC(&gc);
     compiler.setPackageSearchPaths(packagePaths);
     compiler.setEmitterMode(mode);
-    compiler.setStrictMode(hasStrictDirective(source));
 
     if (!compiler.compile(source, outChunk, path.string())) {
         return false;
