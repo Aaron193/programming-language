@@ -928,7 +928,10 @@ class AstTypeCheckerImpl {
                         result = ExprInfo{type, !isClass, isClass, name,
                                           value.name.line(), false, false, 0};
                     } else if (binding->kind == AstBindingKind::Class) {
-                        result = ExprInfo{TypeInfo::makeClass(binding->name), false,
+                        const std::string className =
+                            binding->className.empty() ? binding->name
+                                                       : binding->className;
+                        result = ExprInfo{TypeInfo::makeClass(className), false,
                                           true, binding->name, value.name.line(),
                                           false, true,
                                           binding->declarationNodeId};

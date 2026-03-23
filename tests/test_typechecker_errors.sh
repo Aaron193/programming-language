@@ -170,6 +170,11 @@ run_expect_compile_error \
     "1:9" || failed=1
 
 run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/import_value_used_as_type.mog" \
+    "expected type after variable name." \
+    "3:5" || failed=1
+
+run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/import_native_binding_type_mismatch.mog" \
     "cannot assign imported value 'function(i64, i64) -> i64' to binding 'addI64' of type 'function(f64, f64) -> f64'" \
     "1:9" || failed=1

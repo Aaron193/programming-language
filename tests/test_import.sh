@@ -19,6 +19,7 @@ SUCCESS_FILES=(
     "$SCRIPT_DIR/sample_import_named.mog"
     "$SCRIPT_DIR/sample_import_alias.mog"
     "$SCRIPT_DIR/sample_import_class.mog"
+    "$SCRIPT_DIR/sample_import_class_typed.mog"
     "$SCRIPT_DIR/sample_import_nested.mog"
     "$SCRIPT_DIR/sample_import_native_package.mog"
     "$SCRIPT_DIR/sample_import_native_named.mog"

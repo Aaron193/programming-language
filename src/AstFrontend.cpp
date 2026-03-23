@@ -107,6 +107,50 @@ bool fingerprintMatches(const FrontendFileFingerprint& fingerprint,
            current.modifiedNanos == fingerprint.modifiedNanos;
 }
 
+void mergeImportedClassTypeAliases(AstFrontendResult& frontend) {
+    for (const auto& item : frontend.module.items) {
+        if (!item) {
+            continue;
+        }
+
+        const auto* stmtPtr = std::get_if<AstStmtPtr>(&item->value);
+        if (!stmtPtr || !*stmtPtr) {
+            continue;
+        }
+
+        const auto* importStmt =
+            std::get_if<AstDestructuredImportStmt>(&(*stmtPtr)->value);
+        if (!importStmt || !importStmt->initializer) {
+            continue;
+        }
+
+        const auto importIt =
+            frontend.importedModules.find(importStmt->initializer->node.id);
+        if (importIt == frontend.importedModules.end()) {
+            continue;
+        }
+
+        for (const auto& binding : importStmt->bindings) {
+            const auto exportIt = importIt->second.exportTypes.find(
+                tokenLexeme(binding.exportedName));
+            if (exportIt == importIt->second.exportTypes.end() ||
+                !exportIt->second || exportIt->second->kind != TypeKind::CLASS) {
+                continue;
+            }
+
+            const std::string localName =
+                binding.localName.has_value() ? tokenLexeme(*binding.localName)
+                                              : tokenLexeme(binding.exportedName);
+            if (frontend.classNames.find(localName) != frontend.classNames.end() ||
+                frontend.typeAliases.find(localName) != frontend.typeAliases.end()) {
+                continue;
+            }
+
+            frontend.typeAliases[localName] = exportIt->second;
+        }
+    }
+}
+
 bool moduleGraphNodeUpToDate(const AstFrontendModuleGraphCache& cache,
                              const std::string& canonicalId,
                              std::unordered_set<std::string>& visiting) {
@@ -344,6 +388,9 @@ bool buildImportedModuleInterface(const ImportTarget& importTarget,
 
         importedInterface.exportTypes =
             importedFrontend.semanticModel.exportedSymbolTypes;
+        importedInterface.metadata = importedFrontend.semanticModel.metadata;
+        importedInterface.classOperatorMethods =
+            importedFrontend.semanticModel.classOperatorMethods;
         cachedNode.dependencies = collectDependencyIds(importedFrontend);
     }
 
@@ -764,6 +811,8 @@ AstFrontendBuildStatus buildAstFrontend(std::string_view source,
         finalizeTotal();
         return AstFrontendBuildStatus::SemanticError;
     }
+
+    mergeImportedClassTypeAliases(outFrontend);
 
     const AstFrontendBuildStatus status =
         runSemanticPhases(outFrontend, outErrors,

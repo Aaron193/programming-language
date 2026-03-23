@@ -327,6 +327,31 @@ class AstBinderImpl {
                                     tokenText(stmt.name), stmt.isConst, ""});
     }
 
+    void mergeImportedClassMetadata(const AstImportedModuleInterface& importedModule,
+                                    const std::string& className) {
+        auto fieldIt = importedModule.metadata.classFieldTypes.find(className);
+        if (fieldIt != importedModule.metadata.classFieldTypes.end()) {
+            m_result.metadata.classFieldTypes[className] = fieldIt->second;
+        }
+
+        auto methodIt =
+            importedModule.metadata.classMethodSignatures.find(className);
+        if (methodIt != importedModule.metadata.classMethodSignatures.end()) {
+            m_result.metadata.classMethodSignatures[className] = methodIt->second;
+        }
+
+        auto operatorIt = importedModule.classOperatorMethods.find(className);
+        if (operatorIt != importedModule.classOperatorMethods.end()) {
+            m_result.classOperatorMethods[className] = operatorIt->second;
+        }
+
+        auto superIt = importedModule.metadata.superclassOf.find(className);
+        if (superIt != importedModule.metadata.superclassOf.end()) {
+            m_result.metadata.superclassOf[className] = superIt->second;
+            mergeImportedClassMetadata(importedModule, superIt->second);
+        }
+    }
+
     void bindDestructuredImport(const AstDestructuredImportStmt& stmt) {
         if (stmt.initializer) {
             bindExpr(*stmt.initializer);
@@ -350,6 +375,7 @@ class AstBinderImpl {
                 binding.localName.has_value() ? tokenText(*binding.localName)
                                               : exportedName;
             AstBindingKind bindingKind = AstBindingKind::Variable;
+            std::string className;
             if (importedModule) {
                 auto exportIt = importedModule->exportTypes.find(exportedName);
                 if (exportIt == importedModule->exportTypes.end()) {
@@ -360,11 +386,13 @@ class AstBinderImpl {
                 } else if (exportIt->second &&
                            exportIt->second->kind == TypeKind::CLASS) {
                     bindingKind = AstBindingKind::Class;
+                    className = exportIt->second->className;
+                    mergeImportedClassMetadata(*importedModule, className);
                 }
             }
 
             defineBinding(localName, AstBindingRef{bindingKind, binding.node.id,
-                                                   localName, true, localName});
+                                                   localName, true, className});
         }
     }
 

@@ -789,6 +789,77 @@ bool checkImportedModuleRegression(const std::filesystem::path& repoRoot) {
     return true;
 }
 
+bool checkImportedClassTypeFrontendRegression(
+    const std::filesystem::path& repoRoot) {
+    const std::filesystem::path sourcePath =
+        repoRoot / "tests/sample_import_class_typed.mog";
+    const std::string source = readFile(sourcePath);
+
+    AstFrontendModuleGraphCache moduleGraphCache;
+    AstFrontendOptions options;
+    options.sourcePath = sourcePath.string();
+    options.packageSearchPaths = {(repoRoot / "build/packages").string()};
+    options.moduleGraphCache = &moduleGraphCache;
+
+    AstFrontendResult frontend;
+    std::vector<TypeError> errors;
+    const AstFrontendBuildStatus status =
+        buildAstFrontend(source, options, errors, frontend);
+    if (!require(status == AstFrontendBuildStatus::Success,
+                 "imported class type sample should build through the AST frontend")) {
+        return false;
+    }
+
+    if (!require(frontend.typeAliases.find("ImportedCounter") !=
+                     frontend.typeAliases.end() &&
+                     frontend.typeAliases.at("ImportedCounter") &&
+                     frontend.typeAliases.at("ImportedCounter")->toString() ==
+                         "Counter",
+                 "imported class type sample should register the aliased class name in type context")) {
+        return false;
+    }
+
+    if (!require(frontend.hirModule != nullptr,
+                 "imported class type sample should lower to HIR")) {
+        return false;
+    }
+
+    if (!checkCanonicalLoweringStable(sourcePath, "imported class typed sample")) {
+        return false;
+    }
+
+    const std::filesystem::path windowPackageSo =
+        repoRoot / "build/packages/mog/window/package.so";
+    const std::filesystem::path windowPackageDylib =
+        repoRoot / "build/packages/mog/window/package.dylib";
+    if (!std::filesystem::exists(windowPackageSo) &&
+        !std::filesystem::exists(windowPackageDylib)) {
+        std::cout << "[PASS] imported class type frontend regression\n";
+        return true;
+    }
+
+    const std::filesystem::path flappyPath =
+        repoRoot / "examples/game/flappy_bird.mog";
+    const std::string flappySource = readFile(flappyPath);
+
+    AstFrontendOptions flappyOptions;
+    flappyOptions.sourcePath = flappyPath.string();
+    flappyOptions.packageSearchPaths = {(repoRoot / "build/packages").string()};
+    flappyOptions.moduleGraphCache = &moduleGraphCache;
+
+    AstFrontendResult flappyFrontend;
+    errors.clear();
+    const AstFrontendBuildStatus flappyStatus =
+        buildAstFrontend(flappySource, flappyOptions, errors, flappyFrontend);
+    if (!require(flappyStatus == AstFrontendBuildStatus::Success,
+                 "flappy example should build through the AST frontend after imported class typing support")) {
+        return false;
+    }
+
+    std::cout << "[PASS] imported class type frontend regression\n";
+    return true;
+}
+
 bool checkTypedImportFrontendRegression(const std::filesystem::path& repoRoot) {
     const std::filesystem::path sourcePath =
         repoRoot / "tests/sample_import_frontend_typed.mog";
@@ -1230,6 +1301,9 @@ int main() {
         return 1;
     }
     if (!checkImportedModuleRegression(repoRoot)) {
+        return 1;
+    }
+    if (!checkImportedClassTypeFrontendRegression(repoRoot)) {
         return 1;
     }
     if (!checkTypedImportFrontendRegression(repoRoot)) {
