@@ -34,6 +34,19 @@ void appendParserErrors(const AstParser& parser,
     outErrors = parser.errors();
 }
 
+void assignDiagnosticPaths(std::vector<TypeError>& diagnostics,
+                           const std::string& path) {
+    if (path.empty()) {
+        return;
+    }
+
+    for (auto& diagnostic : diagnostics) {
+        if (diagnostic.path.empty()) {
+            diagnostic.path = path;
+        }
+    }
+}
+
 TypeRef nodeTypeOrAny(const AstSemanticModel& model, AstNodeId nodeId) {
     auto it = model.nodeTypes.find(nodeId);
     if (it == model.nodeTypes.end() || !it->second) {
@@ -373,11 +386,13 @@ bool buildImportedModuleInterface(const ImportTarget& importTarget,
         if (status != AstFrontendBuildStatus::Success) {
             outDiagnostics = importedErrors;
             if (outDiagnostics.empty()) {
-                outDiagnostics.push_back(TypeError{
+                TypeError diagnostic{
                     importSpan,
                     "Failed to type-check imported module '" +
                         importTarget.resolvedPath + "'.",
-                    "import.module_build_failed"});
+                    "import.module_build_failed"};
+                diagnostic.path = options.sourcePath;
+                outDiagnostics.push_back(std::move(diagnostic));
             }
             cachedNode.dependencies = collectDependencyIds(importedFrontend);
             cachedNode.diagnostics = outDiagnostics;
@@ -774,6 +789,7 @@ AstFrontendBuildStatus buildAstFrontend(std::string_view source,
     });
     if (!parseSuccess) {
         appendParserErrors(parser, outErrors);
+        assignDiagnosticPaths(outErrors, options.sourcePath);
         finalizeTotal();
         return AstFrontendBuildStatus::ParseFailed;
     }
@@ -808,6 +824,7 @@ AstFrontendBuildStatus buildAstFrontend(std::string_view source,
         return success;
     }();
     if (!importSuccess) {
+        assignDiagnosticPaths(outErrors, options.sourcePath);
         finalizeTotal();
         return AstFrontendBuildStatus::SemanticError;
     }
@@ -819,6 +836,7 @@ AstFrontendBuildStatus buildAstFrontend(std::string_view source,
                           options.moduleGraphCache
                               ? &options.moduleGraphCache->identifierInterner
                               : nullptr);
+    assignDiagnosticPaths(outErrors, options.sourcePath);
     finalizeTotal();
     return status;
 }

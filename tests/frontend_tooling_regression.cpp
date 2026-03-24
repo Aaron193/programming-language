@@ -218,6 +218,135 @@ bool testDiagnosticsAndSymbols() {
     return true;
 }
 
+bool testImportedDiagnosticPaths() {
+    const std::filesystem::path tempRoot =
+        std::filesystem::temp_directory_path() / "mog_tooling_import_diagnostics";
+    std::error_code ec;
+    std::filesystem::create_directories(tempRoot, ec);
+    if (!require(!ec,
+                 "import diagnostic regression should create its temporary workspace")) {
+        return false;
+    }
+
+    const std::filesystem::path depPath = tempRoot / "dep.mog";
+    const std::filesystem::path importerPath = tempRoot / "main.mog";
+    if (!require(writeFile(depPath, "var broken i32 = 1;\n"),
+                 "import diagnostic regression should write the dependency sample") ||
+        !require(writeFile(importerPath,
+                           "const { broken } = @import(\"./dep.mog\")\nprint(broken)\n"),
+                 "import diagnostic regression should write the importer sample")) {
+        return false;
+    }
+
+    ToolingAnalyzeOptions options;
+    options.sourcePath = importerPath.string();
+    AstFrontendModuleGraphCache cache;
+    options.moduleGraphCache = &cache;
+
+    const auto importerSource = readFileText(importerPath);
+    ToolingDocumentAnalysis importerAnalysis =
+        analyzeDocumentForTooling(importerSource.value_or(""), options);
+    if (!require(importerAnalysis.status == AstFrontendBuildStatus::SemanticError,
+                 "import diagnostic regression should fail through the importer")) {
+        return false;
+    }
+    if (!require(!importerAnalysis.diagnostics.empty(),
+                 "import diagnostic regression should report importer diagnostics")) {
+        return false;
+    }
+
+    const ToolingDiagnostic& importedDiagnostic = importerAnalysis.diagnostics.front();
+    const bool tracedFromImporter =
+        std::any_of(importedDiagnostic.importTrace.begin(),
+                    importedDiagnostic.importTrace.end(),
+                    [&](const ToolingImportTraceFrame& frame) {
+                        return frame.importerPath == importerPath.string();
+                    });
+    if (!require(importedDiagnostic.path == depPath.string(),
+                 "imported parser diagnostic should keep the dependency path") ||
+        !require(importedDiagnostic.message ==
+                     "Semicolons are only allowed inside 'for (...)' clauses.",
+                 "imported parser diagnostic should preserve the semicolon message") ||
+        !require(tracedFromImporter,
+                 "imported parser diagnostic should preserve import trace information")) {
+        return false;
+    }
+
+    options.sourcePath = depPath.string();
+    const auto depSource = readFileText(depPath);
+    ToolingDocumentAnalysis depAnalysis =
+        analyzeDocumentForTooling(depSource.value_or(""), options);
+    if (!require(depAnalysis.status == AstFrontendBuildStatus::ParseFailed,
+                 "dependency diagnostic regression should fail parsing directly") ||
+        !require(depAnalysis.diagnostics.size() == 1,
+                 "dependency diagnostic regression should report one direct parser diagnostic") ||
+        !require(depAnalysis.diagnostics.front().path == depPath.string(),
+                 "direct dependency diagnostic should use the dependency path")) {
+        return false;
+    }
+
+    std::cout << "[PASS] imported diagnostic paths\n";
+    return true;
+}
+
+bool testInlineSemicolonDiagnostics() {
+    const std::string source = "const state GameState ;= GameState()\n";
+
+    ToolingAnalyzeOptions options;
+    options.sourcePath = "tooling_inline_semicolon_regression.mog";
+    ToolingDocumentAnalysis analysis =
+        analyzeDocumentForTooling(source, options);
+    if (!require(analysis.status == AstFrontendBuildStatus::ParseFailed,
+                 "inline semicolon sample should fail parsing")) {
+        return false;
+    }
+    if (!require(analysis.diagnostics.size() == 1,
+                 "inline semicolon sample should emit one diagnostic")) {
+        return false;
+    }
+
+    const ToolingDiagnostic& diagnostic = analysis.diagnostics.front();
+    if (!require(diagnostic.message ==
+                     "Semicolons are only allowed inside 'for (...)' clauses.",
+                 "inline semicolon sample should preserve the semicolon message") ||
+        !require(diagnostic.range.start.line == 0 &&
+                     diagnostic.range.start.character == 22,
+                 "inline semicolon sample should point at the stray semicolon")) {
+        return false;
+    }
+
+    std::cout << "[PASS] inline semicolon diagnostics\n";
+    return true;
+}
+
+bool testLexerDiagnostics() {
+    const std::string source = "const value i32 = 1$\n";
+
+    ToolingAnalyzeOptions options;
+    options.sourcePath = "tooling_lexer_regression.mog";
+    ToolingDocumentAnalysis analysis =
+        analyzeDocumentForTooling(source, options);
+    if (!require(analysis.status == AstFrontendBuildStatus::ParseFailed,
+                 "lexer regression sample should fail parsing")) {
+        return false;
+    }
+    if (!require(analysis.diagnostics.size() == 1,
+                 "lexer regression sample should emit one diagnostic")) {
+        return false;
+    }
+
+    const ToolingDiagnostic& diagnostic = analysis.diagnostics.front();
+    if (!require(diagnostic.code == "lex.invalid_token",
+                 "lexer regression sample should keep the lexer diagnostic code") ||
+        !require(diagnostic.message == "Unexpected Token.",
+                 "lexer regression sample should keep the scanner message")) {
+        return false;
+    }
+
+    std::cout << "[PASS] lexer diagnostics\n";
+    return true;
+}
+
 bool testDefinitionLookup() {
     ToolingAnalyzeOptions options;
     options.sourcePath = "tooling_definition_regression.mog";
@@ -1378,6 +1507,18 @@ int main() {
     }
 
     if (!testDiagnosticsAndSymbols()) {
+        return 1;
+    }
+
+    if (!testImportedDiagnosticPaths()) {
+        return 1;
+    }
+
+    if (!testInlineSemicolonDiagnostics()) {
+        return 1;
+    }
+
+    if (!testLexerDiagnostics()) {
         return 1;
     }
 

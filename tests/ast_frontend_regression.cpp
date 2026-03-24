@@ -679,6 +679,96 @@ bool checkParserDiagnosticSpans() {
     return true;
 }
 
+bool checkStraySemicolonDiagnostic() {
+    constexpr std::string_view kSource =
+        "var x i32 = 1;\n"
+        "print(x)\n";
+
+    AstParser parser(kSource);
+    AstModule module;
+    if (!require(!parser.parseModule(module),
+                 "semicolon sample should fail to parse")) {
+        return false;
+    }
+
+    if (!require(!parser.errors().empty(),
+                 "semicolon sample should report a parser diagnostic")) {
+        return false;
+    }
+
+    const auto& error = parser.errors().front();
+    if (!require(error.code == "parse.unexpected_semicolon",
+                 "semicolon sample should use a stable diagnostic code") ||
+        !require(error.message ==
+                     "Semicolons are only allowed inside 'for (...)' clauses.",
+                 "semicolon sample should report the semicolon-specific message") ||
+        !require(error.line == 1 && error.column == 14,
+                 "semicolon sample should point at the semicolon token")) {
+        return false;
+    }
+
+    std::cout << "[PASS] semicolon parser diagnostic\n";
+    return true;
+}
+
+bool checkSemicolonBeforeInitializerDiagnostic() {
+    constexpr std::string_view kSource =
+        "const state GameState ;= GameState()\n";
+
+    AstParser parser(kSource);
+    AstModule module;
+    if (!require(!parser.parseModule(module),
+                 "semicolon-before-initializer sample should fail to parse")) {
+        return false;
+    }
+
+    if (!require(!parser.errors().empty(),
+                 "semicolon-before-initializer sample should report a parser diagnostic")) {
+        return false;
+    }
+
+    const auto& error = parser.errors().front();
+    if (!require(error.code == "parse.unexpected_semicolon",
+                 "semicolon-before-initializer sample should use the semicolon diagnostic code") ||
+        !require(error.message ==
+                     "Semicolons are only allowed inside 'for (...)' clauses.",
+                 "semicolon-before-initializer sample should report the semicolon message") ||
+        !require(error.line == 1 && error.column == 23,
+                 "semicolon-before-initializer sample should point at the stray semicolon")) {
+        return false;
+    }
+
+    std::cout << "[PASS] semicolon before initializer diagnostic\n";
+    return true;
+}
+
+bool checkLexerDiagnosticPropagation() {
+    constexpr std::string_view kSource = "const value i32 = 1$\n";
+
+    AstParser parser(kSource);
+    AstModule module;
+    if (!require(!parser.parseModule(module),
+                 "invalid-token sample should fail to parse")) {
+        return false;
+    }
+
+    if (!require(!parser.errors().empty(),
+                 "invalid-token sample should report a lexer diagnostic")) {
+        return false;
+    }
+
+    const auto& error = parser.errors().front();
+    if (!require(error.code == "lex.invalid_token",
+                 "invalid-token sample should preserve the lexer diagnostic code") ||
+        !require(error.message == "Unexpected Token.",
+                 "invalid-token sample should preserve the scanner message")) {
+        return false;
+    }
+
+    std::cout << "[PASS] lexer diagnostic propagation\n";
+    return true;
+}
+
 bool checkSemanticDiagnosticSpans() {
     constexpr std::string_view kSource = "    var age i32 = \"str\"\n";
 
@@ -1292,6 +1382,15 @@ int main() {
         return 1;
     }
     if (!checkParserDiagnosticSpans()) {
+        return 1;
+    }
+    if (!checkStraySemicolonDiagnostic()) {
+        return 1;
+    }
+    if (!checkSemicolonBeforeInitializerDiagnostic()) {
+        return 1;
+    }
+    if (!checkLexerDiagnosticPropagation()) {
         return 1;
     }
     if (!checkSemanticDiagnosticSpans()) {

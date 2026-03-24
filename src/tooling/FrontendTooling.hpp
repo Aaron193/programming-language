@@ -20,6 +20,7 @@ struct ToolingRange {
 
 struct ToolingDiagnosticNote {
     ToolingRange range;
+    std::string path;
     std::string message;
 };
 
@@ -32,6 +33,7 @@ struct ToolingImportTraceFrame {
 
 struct ToolingDiagnostic {
     std::string code;
+    std::string path;
     std::string message;
     ToolingRange range;
     std::vector<ToolingDiagnosticNote> notes;

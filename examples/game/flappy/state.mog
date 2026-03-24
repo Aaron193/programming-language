@@ -15,6 +15,7 @@ type GameState struct {
     dead bool
 }
 
+// TODO: LSP allows stuff like: @import(@ASDAS"./constants.mog")
 const { PIPE_SPEED, SPAWN_INTERVAL } = @import("./constants.mog")
 
 fn makePipe(x f64, gapY f64) Pipe {

@@ -114,7 +114,7 @@ void AstParser::advance() {
         if (m_current.type() != TokenType::ERROR) {
             break;
         }
-        error();
+        reportScannerError(m_current);
     }
 }
 
@@ -151,7 +151,11 @@ bool AstParser::matchSameLine(TokenType type) {
 
 bool AstParser::consume(TokenType type) {
     if (!check(type)) {
-        error();
+        if (check(TokenType::SEMI_COLON)) {
+            rejectStraySemicolon();
+            return false;
+        }
+        reportExpectedToken(type);
         if (!check(TokenType::END_OF_FILE)) {
             advance();
         }
@@ -169,23 +173,251 @@ std::string AstParser::tokenText(const Token& token) const {
     return std::string(token.start(), token.length());
 }
 
-void AstParser::error() { m_hadError = true; }
+std::string AstParser::tokenDescription(TokenType type) const {
+    switch (type) {
+        case TokenType::AT:
+            return "'@'";
+        case TokenType::BANG:
+            return "'!'";
+        case TokenType::BANG_EQUAL:
+            return "'!='";
+        case TokenType::TILDE:
+            return "'~'";
+        case TokenType::AMPERSAND:
+            return "'&'";
+        case TokenType::AMPERSAND_EQUAL:
+            return "'&='";
+        case TokenType::CARET:
+            return "'^'";
+        case TokenType::CARET_EQUAL:
+            return "'^='";
+        case TokenType::PIPE:
+            return "'|'";
+        case TokenType::PIPE_EQUAL:
+            return "'|='";
+        case TokenType::PLUS:
+            return "'+'";
+        case TokenType::PLUS_PLUS:
+            return "'++'";
+        case TokenType::PLUS_EQUAL:
+            return "'+='";
+        case TokenType::MINUS:
+            return "'-'";
+        case TokenType::MINUS_MINUS:
+            return "'--'";
+        case TokenType::MINUS_EQUAL:
+            return "'-='";
+        case TokenType::STAR:
+            return "'*'";
+        case TokenType::STAR_EQUAL:
+            return "'*='";
+        case TokenType::GREATER:
+            return "'>'";
+        case TokenType::GREATER_EQUAL:
+            return "'>='";
+        case TokenType::LESS:
+            return "'<'";
+        case TokenType::LESS_EQUAL:
+            return "'<='";
+        case TokenType::SHIFT_LEFT_TOKEN:
+            return "'<<'";
+        case TokenType::SHIFT_LEFT_EQUAL:
+            return "'<<='";
+        case TokenType::SHIFT_RIGHT_TOKEN:
+            return "'>>'";
+        case TokenType::SHIFT_RIGHT_EQUAL:
+            return "'>>='";
+        case TokenType::SLASH:
+            return "'/'";
+        case TokenType::SLASH_EQUAL:
+            return "'/='";
+        case TokenType::OPEN_PAREN:
+            return "'('";
+        case TokenType::CLOSE_PAREN:
+            return "')'";
+        case TokenType::OPEN_BRACKET:
+            return "'['";
+        case TokenType::CLOSE_BRACKET:
+            return "']'";
+        case TokenType::OPEN_CURLY:
+            return "'{'";
+        case TokenType::CLOSE_CURLY:
+            return "'}'";
+        case TokenType::SEMI_COLON:
+            return "';'";
+        case TokenType::COMMA:
+            return "','";
+        case TokenType::COLON:
+            return "':'";
+        case TokenType::DOT:
+            return "'.'";
+        case TokenType::QUESTION:
+            return "'?'";
+        case TokenType::EQUAL:
+            return "'='";
+        case TokenType::FAT_ARROW:
+            return "'=>'";
+        case TokenType::EQUAL_EQUAL:
+            return "'=='";
+        case TokenType::LOGICAL_AND:
+            return "'&&'";
+        case TokenType::LOGICAL_OR:
+            return "'||'";
+        case TokenType::IDENTIFIER:
+            return "identifier";
+        case TokenType::STRING:
+            return "string literal";
+        case TokenType::NUMBER:
+            return "number";
+        case TokenType::PRINT:
+            return "'print'";
+        case TokenType::VAR:
+            return "'var'";
+        case TokenType::CONST:
+            return "'const'";
+        case TokenType::TYPE:
+            return "'type'";
+        case TokenType::STRUCT:
+            return "'struct'";
+        case TokenType::SUPER:
+            return "'super'";
+        case TokenType::FOR:
+            return "'for'";
+        case TokenType::WHILE:
+            return "'while'";
+        case TokenType::IF:
+            return "'if'";
+        case TokenType::ELSE:
+            return "'else'";
+        case TokenType::TRUE:
+            return "'true'";
+        case TokenType::FALSE:
+            return "'false'";
+        case TokenType::_NULL:
+            return "'null'";
+        case TokenType::THIS:
+            return "'this'";
+        case TokenType::_RETURN:
+            return "'return'";
+        case TokenType::IMPORT:
+            return "'import'";
+        case TokenType::TYPE_I8:
+            return "'i8'";
+        case TokenType::TYPE_I16:
+            return "'i16'";
+        case TokenType::TYPE_I32:
+            return "'i32'";
+        case TokenType::TYPE_I64:
+            return "'i64'";
+        case TokenType::TYPE_U8:
+            return "'u8'";
+        case TokenType::TYPE_U16:
+            return "'u16'";
+        case TokenType::TYPE_U32:
+            return "'u32'";
+        case TokenType::TYPE_U64:
+            return "'u64'";
+        case TokenType::TYPE_USIZE:
+            return "'usize'";
+        case TokenType::TYPE_F32:
+            return "'f32'";
+        case TokenType::TYPE_F64:
+            return "'f64'";
+        case TokenType::TYPE_BOOL:
+            return "'bool'";
+        case TokenType::TYPE_STR:
+            return "'str'";
+        case TokenType::TYPE_FN:
+            return "'fn'";
+        case TokenType::TYPE_VOID:
+            return "'void'";
+        case TokenType::TYPE_NULL_KW:
+            return "'null'";
+        case TokenType::AS_KW:
+            return "'as'";
+        case TokenType::END_OF_FILE:
+            return "end of file";
+        case TokenType::ERROR:
+            return "invalid token";
+        default:
+            return "token";
+    }
+}
+
+std::string AstParser::tokenDisplayText(const Token& token) const {
+    if (token.type() == TokenType::END_OF_FILE) {
+        return "end of file";
+    }
+    if (token.type() == TokenType::ERROR) {
+        return "invalid token";
+    }
+
+    const std::string text = tokenText(token);
+    if (!text.empty()) {
+        return "'" + text + "'";
+    }
+
+    return tokenDescription(token.type());
+}
+
+void AstParser::reportDiagnostic(const SourceSpan& span,
+                                 const std::string& message,
+                                 const std::string& code) {
+    m_hadError = true;
+    m_errors.push_back(ParseError{span, message, code});
+}
+
+void AstParser::reportScannerError(const Token& token) {
+    const std::string message = tokenText(token);
+    std::string code = "lex.invalid_token";
+    if (message == "Unterminated string.") {
+        code = "lex.unterminated_string";
+    } else if (message == "Invalid numeric literal suffix.") {
+        code = "lex.invalid_numeric_suffix";
+    }
+
+    reportDiagnostic(token.span(), message, code);
+}
+
+void AstParser::reportExpectedToken(TokenType expected) {
+    reportDiagnostic(m_current.span(),
+                     "Expected " + tokenDescription(expected) + " but found " +
+                         tokenDisplayText(m_current) + ".",
+                     "parse.expected_token");
+}
+
+void AstParser::reportUnexpectedToken(const Token& token) {
+    if (token.type() == TokenType::SEMI_COLON) {
+        rejectStraySemicolon();
+        return;
+    }
+
+    reportDiagnostic(token.span(),
+                     "Unexpected token " + tokenDisplayText(token) + ".",
+                     "parse.unexpected_token");
+}
+
+void AstParser::error() { reportUnexpectedToken(m_current); }
 
 void AstParser::errorAtLine(size_t line, const std::string& message) {
     errorAtSpan(makePointSpan(line == 0 ? 1 : line, 1), message);
 }
 
 void AstParser::errorAtSpan(const SourceSpan& span, const std::string& message) {
-    m_hadError = true;
-    m_errors.push_back(ParseError{span, message, "parse.error"});
+    reportDiagnostic(span, message, "parse.error");
 }
 
-void AstParser::rejectStraySemicolon() {
+void AstParser::rejectStraySemicolon(std::string code) {
     if (!check(TokenType::SEMI_COLON)) {
         return;
     }
 
-    error();
+    m_hadError = true;
+    m_errors.push_back(ParseError{
+        m_current.span(),
+        "Semicolons are only allowed inside 'for (...)' clauses.",
+        std::move(code),
+    });
     advance();
 }
 

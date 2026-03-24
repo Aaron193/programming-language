@@ -162,13 +162,14 @@ ToolingDiagnostic toolingDiagnosticFromFrontend(
     const FrontendDiagnostic& diagnostic) {
     ToolingDiagnostic result;
     result.code = diagnostic.code;
+    result.path = diagnostic.path;
     result.message = diagnostic.message;
     result.range = toolingRangeFromSourceSpan(diagnostic.span);
 
     result.notes.reserve(diagnostic.notes.size());
     for (const auto& note : diagnostic.notes) {
         result.notes.push_back(
-            ToolingDiagnosticNote{toolingRangeFromSourceSpan(note.span),
+            ToolingDiagnosticNote{toolingRangeFromSourceSpan(note.span), "",
                                   note.message});
     }
 
