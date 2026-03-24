@@ -17,6 +17,7 @@
 #include "Chunk.hpp"
 #include "Compiler.hpp"
 #include "GC.hpp"
+#include "HirOptimizer.hpp"
 
 namespace {
 
@@ -1361,6 +1362,77 @@ bool checkNewlineOptimizationRegression(const std::filesystem::path& repoRoot) {
     return true;
 }
 
+bool checkHirDeadForRewriteRegression() {
+    HirModule module;
+
+    HirStmt initializerStmt;
+    initializerStmt.node.id = 1;
+    initializerStmt.node.type = TypeInfo::makeAny();
+    HirVarDeclStmt initializerDecl;
+    initializerDecl.node.id = 2;
+    initializerDecl.node.type = TypeInfo::makeAny();
+    initializerDecl.name =
+        Token::synthetic(TokenType::IDENTIFIER, "value", SourceSpan{});
+    initializerDecl.declaredType = TypeInfo::makeI32();
+    initializerDecl.omittedType = false;
+    initializerStmt.value = std::move(initializerDecl);
+    const HirStmtId initializerId = module.addStmt(std::move(initializerStmt));
+
+    HirExpr conditionExpr;
+    conditionExpr.node.id = 3;
+    conditionExpr.node.type = TypeInfo::makeBool();
+    conditionExpr.value = HirLiteralExpr{
+        Token::synthetic(TokenType::FALSE, "false", SourceSpan{})};
+    const HirExprId conditionId = module.addExpr(std::move(conditionExpr));
+
+    HirStmt bodyStmt;
+    bodyStmt.node.id = 4;
+    bodyStmt.node.type = TypeInfo::makeAny();
+    bodyStmt.value = HirBlockStmt{};
+    const HirStmtId bodyId = module.addStmt(std::move(bodyStmt));
+
+    HirStmt forStmt;
+    forStmt.node.id = 5;
+    forStmt.node.type = TypeInfo::makeAny();
+    HirForStmt forLoop;
+    forLoop.initializer = initializerId;
+    forLoop.condition = conditionId;
+    forLoop.body = bodyId;
+    forStmt.value = std::move(forLoop);
+    const HirStmtId forStmtId = module.addStmt(std::move(forStmt));
+
+    HirItem topLevelItem;
+    topLevelItem.value = forStmtId;
+    module.items.push_back(module.addItem(std::move(topLevelItem)));
+
+    optimizeHir(module);
+
+    auto* block = std::get_if<HirBlockStmt>(&module.stmt(forStmtId).value);
+    if (!require(block != nullptr,
+                 "HIR dead-for rewrite should replace the loop with a block")) {
+        return false;
+    }
+
+    if (!require(block->items.size() == 1,
+                 "HIR dead-for rewrite should keep exactly one initializer item")) {
+        return false;
+    }
+
+    auto* itemStmtId = std::get_if<HirStmtId>(&module.item(block->items.front()).value);
+    if (!require(itemStmtId != nullptr && *itemStmtId == initializerId,
+                 "HIR dead-for rewrite should preserve the original initializer statement")) {
+        return false;
+    }
+
+    if (!require(module.stmt(forStmtId).node.id == 5,
+                 "HIR dead-for rewrite should preserve the original statement node")) {
+        return false;
+    }
+
+    std::cout << "[PASS] HIR dead-for rewrite regression\n";
+    return true;
+}
+
 }  // namespace
 
 int main() {
@@ -1421,6 +1493,9 @@ int main() {
         return 1;
     }
     if (!checkNewlineOptimizationRegression(repoRoot)) {
+        return 1;
+    }
+    if (!checkHirDeadForRewriteRegression()) {
         return 1;
     }
 

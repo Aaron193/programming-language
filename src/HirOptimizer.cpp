@@ -1291,16 +1291,12 @@ std::optional<HirStmtId> takeForInitializerStmt(HirForStmt& loop) {
     return initializer;
 }
 
-HirStmtId makeForFalseReplacement(HirForStmt& loop, const HirStmt& original) {
+HirBlockStmt makeForFalseReplacement(HirForStmt& loop) {
     HirBlockStmt block;
     if (std::optional<HirStmtId> initializer = takeForInitializerStmt(loop)) {
         block.items.push_back(makeItemId(*initializer));
     }
-
-    HirStmt stmt;
-    stmt.node = original.node;
-    stmt.value = std::move(block);
-    return makeStmtId(std::move(stmt));
+    return block;
 }
 
 void optimizeStmtTree(HirStmt& stmt, const ConstantEvaluator& evaluator) {
@@ -1409,7 +1405,7 @@ void optimizeStmtTree(HirStmt& stmt, const ConstantEvaluator& evaluator) {
                     tryEvaluateConditionBool(exprRef(*value.condition), evaluator,
                                              condition) &&
                     !condition) {
-                    return;
+                    stmt.value = makeForFalseReplacement(value);
                 }
             } else if constexpr (std::is_same_v<T, HirForEachStmt>) {
                 if (value.iterable) {
