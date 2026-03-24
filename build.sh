@@ -6,6 +6,8 @@ BUILD_TYPE=Release
 RUN_AFTER_BUILD=0
 RUN_FILE=""
 ENABLE_LTO=0
+ENABLE_ASAN=0
+ENABLE_UBSAN=0
 ENABLE_PGO_GENERATE=0
 ENABLE_PGO_USE=0
 ENABLE_PROFILING=0
@@ -21,6 +23,12 @@ for arg in "$@"; do
             ;;
         --lto)
             ENABLE_LTO=1
+            ;;
+        --asan)
+            ENABLE_ASAN=1
+            ;;
+        --ubsan)
+            ENABLE_UBSAN=1
             ;;
         --pgo-generate)
             ENABLE_PGO_GENERATE=1
@@ -42,7 +50,7 @@ for arg in "$@"; do
             ;;
         *)
             echo "Unknown option: $arg"
-            echo "Usage: $0 [--debug|--release] [--lto] [--profiling] [--pgo-generate[=PATH]|--pgo-use=PATH] [--runfile=FILENAME]"
+            echo "Usage: $0 [--debug|--release] [--lto] [--asan] [--ubsan] [--profiling] [--pgo-generate[=PATH]|--pgo-use=PATH] [--runfile=FILENAME]"
             exit 1
             ;;
     esac
@@ -55,6 +63,16 @@ fi
 
 if [[ $ENABLE_PROFILING -eq 1 && ($ENABLE_PGO_GENERATE -eq 1 || $ENABLE_PGO_USE -eq 1) ]]; then
     echo "Error: --profiling cannot be combined with --pgo-generate or --pgo-use."
+    exit 1
+fi
+
+if [[ ($ENABLE_ASAN -eq 1 || $ENABLE_UBSAN -eq 1) && $ENABLE_LTO -eq 1 ]]; then
+    echo "Error: sanitizers cannot be combined with --lto."
+    exit 1
+fi
+
+if [[ ($ENABLE_ASAN -eq 1 || $ENABLE_UBSAN -eq 1) && ($ENABLE_PGO_GENERATE -eq 1 || $ENABLE_PGO_USE -eq 1) ]]; then
+    echo "Error: sanitizers cannot be combined with --pgo-generate or --pgo-use."
     exit 1
 fi
 
@@ -72,6 +90,8 @@ cd build
 cmake_args=(
     "-DCMAKE_BUILD_TYPE=$BUILD_TYPE"
     "-DENABLE_LTO=OFF"
+    "-DENABLE_ASAN=OFF"
+    "-DENABLE_UBSAN=OFF"
     "-DENABLE_PGO_GENERATE=OFF"
     "-DENABLE_PGO_USE=OFF"
     "-DENABLE_PROFILING=OFF"
@@ -79,6 +99,14 @@ cmake_args=(
 
 if [[ $ENABLE_LTO -eq 1 ]]; then
     cmake_args+=("-DENABLE_LTO=ON")
+fi
+
+if [[ $ENABLE_ASAN -eq 1 ]]; then
+    cmake_args+=("-DENABLE_ASAN=ON")
+fi
+
+if [[ $ENABLE_UBSAN -eq 1 ]]; then
+    cmake_args+=("-DENABLE_UBSAN=ON")
 fi
 
 if [[ $ENABLE_PGO_GENERATE -eq 1 ]]; then
@@ -110,6 +138,9 @@ fi
 # ./build.sh --release :                      builds in Release mode
 # ./build.sh --debug :                        builds in Debug mode
 # ./build.sh --release --lto :                builds with LTO enabled
+# ./build.sh --debug --asan :                 builds with AddressSanitizer
+# ./build.sh --debug --ubsan :                builds with UndefinedBehaviorSanitizer
+# ./build.sh --debug --asan --ubsan :         builds with both sanitizers
 # ./build.sh --release --profiling :          builds a profiler-friendly optimized binary
 # ./build.sh --release --pgo-generate :       builds with PGO instrumentation (default profile path build/pgo-data)
 # ./build.sh --release --pgo-use=/tmp/pgo :   builds using collected PGO profile data

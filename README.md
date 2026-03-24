@@ -87,10 +87,28 @@ print(1
 ./build.sh
 ```
 
+Build a debug binary with sanitizers:
+
+```bash
+./build.sh --debug --asan
+./build.sh --debug --ubsan
+./build.sh --debug --asan --ubsan
+```
+
 Build a profiler-friendly optimized binary:
 
 ```bash
 ./build.sh --release --profiling
+```
+
+Sanitizer builds cannot be combined with `--lto`, `--pgo-generate`, or
+`--pgo-use`.
+
+When running shell-based test suites under AddressSanitizer in this environment,
+disable leak detection to avoid `LeakSanitizer`/output-capture issues:
+
+```bash
+ASAN_OPTIONS=detect_leaks=0 bash tests/test_ast_optimizer.sh
 ```
 
 Direct-threaded VM dispatch via computed-goto is enabled by default.

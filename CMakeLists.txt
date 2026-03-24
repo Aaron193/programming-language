@@ -13,6 +13,8 @@ endif()
 
 option(ENABLE_VM_TRACE "Enable VM stack and disassembly trace output" OFF)
 option(ENABLE_LTO "Enable link-time optimization for Release builds" OFF)
+option(ENABLE_ASAN "Build with AddressSanitizer instrumentation" OFF)
+option(ENABLE_UBSAN "Build with UndefinedBehaviorSanitizer instrumentation" OFF)
 option(ENABLE_PGO_GENERATE
        "Build with profile generation instrumentation for Release builds" OFF)
 option(ENABLE_PGO_USE
@@ -139,6 +141,16 @@ if(ENABLE_VM_TRACE)
     target_compile_definitions(interpreter_core PRIVATE VM_TRACE)
 endif()
 
+if((ENABLE_ASAN OR ENABLE_UBSAN) AND ENABLE_LTO)
+    message(FATAL_ERROR
+            "Sanitizers cannot be combined with ENABLE_LTO in this build.")
+endif()
+
+if((ENABLE_ASAN OR ENABLE_UBSAN) AND (ENABLE_PGO_GENERATE OR ENABLE_PGO_USE))
+    message(FATAL_ERROR
+            "Sanitizers cannot be combined with PGO generation/use.")
+endif()
+
 if(ENABLE_PGO_GENERATE AND ENABLE_PGO_USE)
     message(FATAL_ERROR "ENABLE_PGO_GENERATE and ENABLE_PGO_USE are mutually exclusive.")
 endif()
@@ -163,6 +175,52 @@ endif()
 
 set(EXTRA_RELEASE_COMPILE_FLAGS "")
 set(EXTRA_RELEASE_LINK_FLAGS "")
+set(SANITIZER_COMPILE_FLAGS "")
+set(SANITIZER_LINK_FLAGS "")
+
+if(ENABLE_ASAN)
+    list(APPEND SANITIZER_COMPILE_FLAGS
+         "-fsanitize=address"
+         "-fno-omit-frame-pointer")
+    list(APPEND SANITIZER_LINK_FLAGS "-fsanitize=address")
+endif()
+
+if(ENABLE_UBSAN)
+    list(APPEND SANITIZER_COMPILE_FLAGS
+         "-fsanitize=undefined"
+         "-fno-omit-frame-pointer")
+    list(APPEND SANITIZER_LINK_FLAGS "-fsanitize=undefined")
+endif()
+
+function(apply_common_compile_options target_name)
+    if(MSVC)
+        target_compile_options(${target_name} PRIVATE
+            $<$<CONFIG:Release>:/O2 /DNDEBUG>
+            $<$<CONFIG:Debug>:/Od /Zi>
+        )
+    else()
+        target_compile_options(${target_name} PRIVATE
+            $<$<CONFIG:Release>:-DNDEBUG>
+            $<$<CONFIG:Debug>:-g -O0>
+        )
+        if(SANITIZER_COMPILE_FLAGS)
+            target_compile_options(${target_name} PRIVATE
+                ${SANITIZER_COMPILE_FLAGS}
+            )
+        endif()
+    endif()
+endfunction()
+
+function(apply_common_link_flags target_name)
+    foreach(flag IN LISTS SANITIZER_LINK_FLAGS)
+        set_property(TARGET ${target_name} APPEND_STRING PROPERTY
+                     LINK_FLAGS " ${flag}")
+    endforeach()
+    foreach(flag IN LISTS EXTRA_RELEASE_LINK_FLAGS)
+        set_property(TARGET ${target_name} APPEND_STRING PROPERTY
+                     LINK_FLAGS_RELEASE " ${flag}")
+    endforeach()
+endfunction()
 
 if(ENABLE_PGO_GENERATE)
     if(NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -205,37 +263,55 @@ if(ENABLE_PROFILING)
          "-fno-inline-functions-called-once")
 endif()
 
-# If using Microsoft Visual Studio, set specific compile options
-if(MSVC)
-    target_compile_options(interpreter_core PRIVATE
-        $<$<CONFIG:Release>:/O2 /DNDEBUG>
-        $<$<CONFIG:Debug>:/Od /Zi>
-    )
-    target_compile_options(interpreter PRIVATE
-        $<$<CONFIG:Release>:/O2 /DNDEBUG>
-        $<$<CONFIG:Debug>:/Od /Zi>
-    )
-else()
-    target_compile_options(interpreter_core PRIVATE
-        $<$<CONFIG:Release>:-DNDEBUG>
-        $<$<CONFIG:Debug>:-g -O0>
-    )
-    target_compile_options(interpreter PRIVATE
-        $<$<CONFIG:Release>:-DNDEBUG>
-        $<$<CONFIG:Debug>:-g -O0>
-    )
+set(PROJECT_COMPILE_TARGETS
+    interpreter_core
+    interpreter
+    ast_parser_smoke
+    ast_emitter_regression
+    ast_frontend_regression
+    frontend_benchmark
+    frontend_tooling_regression
+    mog-lsp
+    examples_math_package
+    examples_mismatch_package
+    examples_counter_package
+)
+
+if(TARGET mog_window_package)
+    list(APPEND PROJECT_COMPILE_TARGETS mog_window_package)
 endif()
 
-foreach(flag IN LISTS EXTRA_RELEASE_COMPILE_FLAGS)
-    target_compile_options(interpreter_core PRIVATE $<$<CONFIG:Release>:${flag}>)
-    target_compile_options(interpreter PRIVATE $<$<CONFIG:Release>:${flag}>)
+foreach(target_name IN LISTS PROJECT_COMPILE_TARGETS)
+    apply_common_compile_options(${target_name})
 endforeach()
 
-foreach(flag IN LISTS EXTRA_RELEASE_LINK_FLAGS)
-    set_property(TARGET interpreter APPEND_STRING PROPERTY
-                 LINK_FLAGS_RELEASE " ${flag}")
-    set_property(TARGET mog-lsp APPEND_STRING PROPERTY
-                 LINK_FLAGS_RELEASE " ${flag}")
+foreach(flag IN LISTS EXTRA_RELEASE_COMPILE_FLAGS)
+    foreach(target_name IN LISTS PROJECT_COMPILE_TARGETS)
+        target_compile_options(${target_name} PRIVATE
+            $<$<CONFIG:Release>:${flag}>
+        )
+    endforeach()
+endforeach()
+
+set(PROJECT_LINK_TARGETS
+    interpreter
+    ast_parser_smoke
+    ast_emitter_regression
+    ast_frontend_regression
+    frontend_benchmark
+    frontend_tooling_regression
+    mog-lsp
+    examples_math_package
+    examples_mismatch_package
+    examples_counter_package
+)
+
+if(TARGET mog_window_package)
+    list(APPEND PROJECT_LINK_TARGETS mog_window_package)
+endif()
+
+foreach(target_name IN LISTS PROJECT_LINK_TARGETS)
+    apply_common_link_flags(${target_name})
 endforeach()
 
 if(ENABLE_LTO)
