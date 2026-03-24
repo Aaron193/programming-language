@@ -805,13 +805,10 @@ void replaceExprWithLogicalNotPreservingNode(HirExpr& target,
         return;
     }
 
-    HirExpr replacement;
-    replacement.node = target.node;
     HirUnaryExpr logicalNot;
     logicalNot.op = Token::synthetic(TokenType::BANG, "!", target.node.span);
     logicalNot.operand = operand;
-    replacement.value = std::move(logicalNot);
-    replaceExprPreservingNode(target, makeExprId(std::move(replacement)));
+    target.value = std::move(logicalNot);
 }
 
 bool sameKnownType(const ConstantEvaluator& evaluator, const HirNodeInfo& lhs,

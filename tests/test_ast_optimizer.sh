@@ -437,6 +437,28 @@ if grep -Eq "EQUAL|NOT_EQUAL" <<< "$bool_identity_disassembly"; then
     exit 1
 fi
 
+run_and_capture "$SCRIPT_DIR/sample_ast_opt_bool_equality_realloc_regression.mog" \
+    bool_realloc_output bool_realloc_status bool_realloc_disassembly bool_realloc_disassembly_status
+
+if [[ $bool_realloc_status -ne 0 || $bool_realloc_disassembly_status -ne 0 ]]; then
+    echo "[FAIL] bool-equality realloc regression sample failed"
+    echo "$bool_realloc_output"
+    echo "$bool_realloc_disassembly"
+    exit 1
+fi
+
+if [[ "$bool_realloc_output" != "ok" ]]; then
+    echo "[FAIL] bool-equality realloc regression sample produced unexpected output"
+    echo "$bool_realloc_output"
+    exit 1
+fi
+
+if grep -Eq "EQUAL|NOT_EQUAL" <<< "$bool_realloc_disassembly"; then
+    echo "[FAIL] bool-equality realloc regression sample still emits equality opcodes"
+    echo "$bool_realloc_disassembly"
+    exit 1
+fi
+
 run_and_capture "$SCRIPT_DIR/sample_ast_opt_double_not.mog" \
     double_not_output double_not_status double_not_disassembly double_not_disassembly_status
 
