@@ -2,3 +2,6 @@
 - rework import system (@import('')) when it comes to standard library/packages vs user code vs external dependencies (need clear way to distinguish based off import statement)
 - compile time decorators using '@' ???
 - fix syntax highlight bug when putting large expression on one line instead of multi-lines... weird
+Intellisense:
+    - intellisense type hints across files does not work correctly
+    - intellisense does not flag a semicolon at end of line... putting semicolon will actual stop other syntax errors on LSP

@@ -74,6 +74,9 @@ SourceSpan enclosingSpan(const SourceSpan& lhs, const SourceSpan& rhs) {
 
 std::string tokenText(const Token& token) { return tokenLexeme(token); }
 
+std::optional<ToolingDocumentAnalysis> analyzeSourceModuleForTooling(
+    const std::string& path, const ToolingDocumentAnalysis& analysis);
+
 DeclarationSite makeDeclarationSite(AstNodeId nodeId, const Token& name,
                                     std::string kind,
                                     const SourceSpan& range) {
@@ -299,6 +302,72 @@ const AstClassDecl* findClassDeclaration(const AstModule& module,
     }
 
     return nullptr;
+}
+
+class ImportedToolingAnalysisCache {
+   public:
+    const ToolingDocumentAnalysis* analysisForImport(
+        const AstImportedModuleInterface& importedModule,
+        const ToolingDocumentAnalysis& ownerAnalysis) {
+        if (importedModule.importTarget.kind != ImportTargetKind::SOURCE_MODULE ||
+            importedModule.importTarget.resolvedPath.empty()) {
+            return nullptr;
+        }
+
+        const std::string& path = importedModule.importTarget.resolvedPath;
+        auto it = m_cache.find(path);
+        if (it == m_cache.end()) {
+            it = m_cache.emplace(path,
+                                 analyzeSourceModuleForTooling(path, ownerAnalysis))
+                     .first;
+        }
+
+        return it->second.has_value() ? &it->second.value() : nullptr;
+    }
+
+   private:
+    std::unordered_map<std::string, std::optional<ToolingDocumentAnalysis>>
+        m_cache;
+};
+
+struct ResolvedClassDeclaration {
+    const ToolingDocumentAnalysis* analysis = nullptr;
+    const AstClassDecl* declaration = nullptr;
+};
+
+std::optional<ResolvedClassDeclaration> resolveClassDeclarationForTooling(
+    const ToolingDocumentAnalysis& analysis, std::string_view className,
+    ImportedToolingAnalysisCache& cache) {
+    if (const AstClassDecl* classDecl =
+            findClassDeclaration(analysis.frontend.module, className);
+        classDecl != nullptr) {
+        return ResolvedClassDeclaration{&analysis, classDecl};
+    }
+
+    for (const auto& [nodeId, importedModule] : analysis.frontend.importedModules) {
+        (void)nodeId;
+        for (const auto& [exportedName, type] : importedModule.exportTypes) {
+            (void)exportedName;
+            if (!type || type->kind != TypeKind::CLASS ||
+                type->className != className) {
+                continue;
+            }
+
+            const ToolingDocumentAnalysis* importedAnalysis =
+                cache.analysisForImport(importedModule, analysis);
+            if (importedAnalysis == nullptr || !importedAnalysis->hasParse) {
+                continue;
+            }
+
+            if (const AstClassDecl* classDecl = findClassDeclaration(
+                    importedAnalysis->frontend.module, className);
+                classDecl != nullptr) {
+                return ResolvedClassDeclaration{importedAnalysis, classDecl};
+            }
+        }
+    }
+
+    return std::nullopt;
 }
 
 std::optional<DeclarationSite> findClassMemberDeclarationSite(
@@ -1388,6 +1457,125 @@ ToolingCompletionItem completionItemForExportedSymbol(std::string_view name,
                                  "const " + std::string(name) + " " +
                                      mogTypeText(type),
                                  completionSortText(0, std::string(name))};
+}
+
+ToolingCompletionItem completionItemForFieldMetadata(std::string_view name,
+                                                     const TypeRef& type) {
+    return ToolingCompletionItem{std::string(name),
+                                 "field",
+                                 std::string(name) + " " + mogTypeText(type),
+                                 completionSortText(0, std::string(name))};
+}
+
+ToolingCompletionItem completionItemForMethodMetadata(std::string_view name,
+                                                      const TypeRef& type) {
+    return ToolingCompletionItem{std::string(name),
+                                 "method",
+                                 callablePresentationFromType(name, type).label,
+                                 completionSortText(0, std::string(name))};
+}
+
+void collectClassMemberCompletionItems(
+    const ToolingDocumentAnalysis& analysis, std::string_view className,
+    ImportedToolingAnalysisCache& cache, std::unordered_set<std::string>& visited,
+    std::unordered_set<std::string>& seenMembers,
+    std::vector<ToolingCompletionItem>& outItems) {
+    if (!visited.insert(std::string(className)).second) {
+        return;
+    }
+
+    const auto resolvedClass =
+        resolveClassDeclarationForTooling(analysis, className, cache);
+    if (resolvedClass.has_value()) {
+        for (const auto& field : resolvedClass->declaration->fields) {
+            const std::string name = tokenText(field.name);
+            if (!seenMembers.insert(name).second) {
+                continue;
+            }
+            outItems.push_back(completionItemForDeclaration(
+                *resolvedClass->analysis, fieldDeclarationSite(field)));
+        }
+
+        for (const auto& method : resolvedClass->declaration->methods) {
+            const std::string name = tokenText(method.name);
+            if (!seenMembers.insert(name).second) {
+                continue;
+            }
+            outItems.push_back(completionItemForDeclaration(
+                *resolvedClass->analysis, methodDeclarationSite(method)));
+        }
+
+        const auto superIt =
+            resolvedClass->analysis->frontend.bindings.metadata.superclassOf.find(
+                std::string(className));
+        if (superIt !=
+            resolvedClass->analysis->frontend.bindings.metadata.superclassOf.end()) {
+            collectClassMemberCompletionItems(*resolvedClass->analysis,
+                                              superIt->second, cache, visited,
+                                              seenMembers, outItems);
+        }
+        return;
+    }
+
+    auto fieldIt =
+        analysis.frontend.bindings.metadata.classFieldTypes.find(std::string(className));
+    if (fieldIt != analysis.frontend.bindings.metadata.classFieldTypes.end()) {
+        std::vector<std::pair<std::string, TypeRef>> fields(fieldIt->second.begin(),
+                                                            fieldIt->second.end());
+        std::sort(fields.begin(), fields.end(),
+                  [](const auto& lhs, const auto& rhs) {
+                      return lhs.first < rhs.first;
+                  });
+        for (const auto& [name, type] : fields) {
+            if (!seenMembers.insert(name).second) {
+                continue;
+            }
+            outItems.push_back(completionItemForFieldMetadata(name, type));
+        }
+    }
+
+    auto methodIt = analysis.frontend.bindings.metadata.classMethodSignatures.find(
+        std::string(className));
+    if (methodIt != analysis.frontend.bindings.metadata.classMethodSignatures.end()) {
+        std::vector<std::pair<std::string, TypeRef>> methods(
+            methodIt->second.begin(), methodIt->second.end());
+        std::sort(methods.begin(), methods.end(),
+                  [](const auto& lhs, const auto& rhs) {
+                      return lhs.first < rhs.first;
+                  });
+        for (const auto& [name, type] : methods) {
+            if (!seenMembers.insert(name).second) {
+                continue;
+            }
+            outItems.push_back(completionItemForMethodMetadata(name, type));
+        }
+    }
+
+    const auto superIt =
+        analysis.frontend.bindings.metadata.superclassOf.find(std::string(className));
+    if (superIt != analysis.frontend.bindings.metadata.superclassOf.end()) {
+        collectClassMemberCompletionItems(analysis, superIt->second, cache, visited,
+                                          seenMembers, outItems);
+    }
+}
+
+std::vector<ToolingCompletionItem> classMemberCompletionItemsForTooling(
+    const ToolingDocumentAnalysis& analysis, std::string_view className) {
+    ImportedToolingAnalysisCache cache;
+    std::unordered_set<std::string> visited;
+    std::unordered_set<std::string> seenMembers;
+    std::vector<ToolingCompletionItem> items;
+    collectClassMemberCompletionItems(analysis, className, cache, visited,
+                                      seenMembers, items);
+    std::sort(items.begin(), items.end(),
+              [](const ToolingCompletionItem& lhs,
+                 const ToolingCompletionItem& rhs) {
+                  if (lhs.label != rhs.label) {
+                      return lhs.label < rhs.label;
+                  }
+                  return lhs.kind < rhs.kind;
+              });
+    return items;
 }
 
 const std::vector<ToolingCompletionItem>& builtInTypeCompletionItems() {
@@ -3744,13 +3932,8 @@ std::optional<std::vector<ToolingCompletionItem>> findMemberCompletionsForToolin
         return std::vector<ToolingCompletionItem>{};
     }
 
-    std::vector<ToolingCompletionItem> items;
-    for (const auto& member : collectClassMemberDeclarationSites(
-             analysis, objectTypeIt->second->className)) {
-        items.push_back(completionItemForDeclaration(analysis, member));
-    }
-
-    return items;
+    return classMemberCompletionItemsForTooling(analysis,
+                                                objectTypeIt->second->className);
 }
 
 const AstExpr* findDefinitionTargetExpr(const AstExpr& expr,

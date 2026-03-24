@@ -161,6 +161,26 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
     member_path = Path(tmpdir) / "member_sample.mog"
     member_path.write_text(member_source, encoding="utf-8")
     member_uri = member_path.resolve().as_uri()
+    imported_state_source = "\n".join([
+        "type GameState struct {",
+        "    birdY f64",
+        "    spawnTimer f64",
+        "}",
+        ""
+    ])
+    imported_state_path = Path(tmpdir) / "imported_state.mog"
+    imported_state_path.write_text(imported_state_source, encoding="utf-8")
+    imported_state_uri = imported_state_path.resolve().as_uri()
+    imported_member_source = "\n".join([
+        "const { GameState } = @import(\"./imported_state.mog\")",
+        "fn update(state GameState) void {",
+        "    state.",
+        "}",
+        ""
+    ])
+    imported_member_path = Path(tmpdir) / "imported_member_sample.mog"
+    imported_member_path.write_text(imported_member_source, encoding="utf-8")
+    imported_member_uri = imported_member_path.resolve().as_uri()
     type_definition_source = "\n".join([
         "type Pipe struct {",
         "    x f64",
@@ -722,6 +742,67 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         if "box" in incomplete_member_labels or "return" in incomplete_member_labels:
             raise AssertionError(
                 f"incomplete member completion should exclude scope items: {incomplete_member_completion['result']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": imported_state_uri,
+                    "languageId": "mog",
+                    "version": 1,
+                    "text": imported_state_source
+                }
+            }
+        })
+        imported_state_diagnostics = read_until(
+            proc,
+            lambda msg: msg.get("method") == "textDocument/publishDiagnostics" and
+            msg.get("params", {}).get("uri") == imported_state_uri,
+        )
+        if imported_state_diagnostics["params"]["diagnostics"]:
+            raise AssertionError("expected imported state module to stay diagnostics-free")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": imported_member_uri,
+                    "languageId": "mog",
+                    "version": 1,
+                    "text": imported_member_source
+                }
+            }
+        })
+        imported_member_diagnostics = read_until(
+            proc,
+            lambda msg: msg.get("method") == "textDocument/publishDiagnostics" and
+            msg.get("params", {}).get("uri") == imported_member_uri,
+        )
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 7.4,
+            "method": "textDocument/completion",
+            "params": {
+                "textDocument": {
+                    "uri": imported_member_uri
+                },
+                "position": {
+                    "line": 2,
+                    "character": 10
+                }
+            }
+        })
+        imported_member_completion = read_until(proc, lambda msg: msg.get("id") == 7.4)
+        imported_member_labels = [item["label"] for item in imported_member_completion["result"]]
+        if "birdY" not in imported_member_labels or "spawnTimer" not in imported_member_labels:
+            raise AssertionError(
+                f"expected imported member completion items: {imported_member_completion['result']}")
+        if "update" in imported_member_labels or "state" in imported_member_labels:
+            raise AssertionError(
+                f"imported member completion should exclude scope items: {imported_member_completion['result']}")
 
         send_message(proc, {
             "jsonrpc": "2.0",

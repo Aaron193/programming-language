@@ -889,6 +889,57 @@ bool testCompletions() {
         return false;
     }
 
+    const std::filesystem::path completionTempRoot =
+        std::filesystem::temp_directory_path() / "mog_tooling_completion_regression";
+    std::error_code completionEc;
+    std::filesystem::create_directories(completionTempRoot, completionEc);
+    if (!require(!completionEc,
+                 "imported member completion regression should create its temporary workspace")) {
+        return false;
+    }
+
+    const std::filesystem::path importedStatePath = completionTempRoot / "state.mog";
+    const std::filesystem::path importedLogicPath = completionTempRoot / "logic.mog";
+    const std::string importedStateSource =
+                "type GameState struct {\n"
+        "    birdY f64\n"
+        "    spawnTimer f64\n"
+        "}\n";
+    const std::string importedLogicSource =
+                "const { GameState } = @import(\"./state.mog\")\n"
+        "fn update(state GameState) void {\n"
+        "    state.\n"
+        "}\n";
+    if (!require(writeFile(importedStatePath, importedStateSource),
+                 "imported member completion regression should write the state module") ||
+        !require(writeFile(importedLogicPath, importedLogicSource),
+                 "imported member completion regression should write the consumer module")) {
+        return false;
+    }
+
+    options.sourcePath = importedLogicPath.string();
+    ToolingDocumentAnalysis importedMemberAnalysis =
+        analyzeDocumentForTooling(importedLogicSource, options);
+    const auto importedMemberCompletions = findCompletionsForTooling(
+        importedMemberAnalysis, importedLogicSource, ToolingPosition{2, 10});
+    const auto* importedBirdY = findCompletion(importedMemberCompletions, "birdY");
+    const auto* importedSpawnTimer =
+        findCompletion(importedMemberCompletions, "spawnTimer");
+    if (!require(importedBirdY != nullptr &&
+                     importedBirdY->kind == "field" &&
+                     importedBirdY->detail == "birdY f64" &&
+                     importedSpawnTimer != nullptr &&
+                     importedSpawnTimer->kind == "field" &&
+                     importedSpawnTimer->detail == "spawnTimer f64",
+                 "imported member completions should expose fields from source modules")) {
+        return false;
+    }
+    if (!require(findCompletion(importedMemberCompletions, "update") == nullptr &&
+                     findCompletion(importedMemberCompletions, "state") == nullptr,
+                 "imported member completions should not fall back to scope items")) {
+        return false;
+    }
+
     const std::string moduleMemberSource =
                 "const math = @import(\"./modules/math.mog\")\n"
         "print(math.Ad)\n";
