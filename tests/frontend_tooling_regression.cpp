@@ -289,6 +289,39 @@ bool testImportedDiagnosticPaths() {
     return true;
 }
 
+bool testMalformedImportArgumentDiagnostic() {
+    const std::string source =
+        "const value = @import(@ASDAS\"./constants.mog\")\n";
+
+    ToolingAnalyzeOptions options;
+    options.sourcePath = "tooling_malformed_import_arg_regression.mog";
+    ToolingDocumentAnalysis analysis =
+        analyzeDocumentForTooling(source, options);
+    if (!require(analysis.status == AstFrontendBuildStatus::ParseFailed,
+                 "malformed import arg sample should fail parsing")) {
+        return false;
+    }
+    if (!require(analysis.diagnostics.size() == 1,
+                 "malformed import arg sample should emit one diagnostic")) {
+        return false;
+    }
+
+    const ToolingDiagnostic& diagnostic = analysis.diagnostics.front();
+    if (!require(diagnostic.code == "parse.expected_token",
+                 "malformed import arg sample should keep the expected-token code") ||
+        !require(diagnostic.message ==
+                     "Expected string literal but found '@'.",
+                 "malformed import arg sample should report the missing string literal") ||
+        !require(diagnostic.range.start.line == 0 &&
+                     diagnostic.range.start.character == 22,
+                 "malformed import arg sample should point at the unexpected '@'")) {
+        return false;
+    }
+
+    std::cout << "[PASS] malformed import argument diagnostic\n";
+    return true;
+}
+
 bool testInlineSemicolonDiagnostics() {
     const std::string source = "const state GameState ;= GameState()\n";
 
@@ -1511,6 +1544,10 @@ int main() {
     }
 
     if (!testImportedDiagnosticPaths()) {
+        return 1;
+    }
+
+    if (!testMalformedImportArgumentDiagnostic()) {
         return 1;
     }
 

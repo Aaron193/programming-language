@@ -142,6 +142,45 @@ try:
     if dep_diag["range"]["start"]["line"] != 0 or dep_diag["range"]["start"]["character"] != 18:
         raise AssertionError(f"dependency diagnostic should point at the semicolon token: {dep_diag}")
 
+    malformed_path = workspace / "malformed_import.mog"
+    malformed_path.write_text(
+        "const value = @import(@ASDAS\"./dep.mog\")\n",
+        encoding="utf-8",
+    )
+    malformed_uri = "file://" + str(malformed_path)
+
+    send_message(proc, {
+        "jsonrpc": "2.0",
+        "method": "textDocument/didOpen",
+        "params": {
+            "textDocument": {
+                "uri": malformed_uri,
+                "languageId": "mog",
+                "version": 1,
+                "text": malformed_path.read_text(encoding="utf-8"),
+            }
+        },
+    })
+    malformed_diagnostics = read_until(
+        proc,
+        lambda msg: msg.get("method") == "textDocument/publishDiagnostics"
+        and msg.get("params", {}).get("uri") == malformed_uri,
+    )
+    published_malformed = malformed_diagnostics["params"]["diagnostics"]
+    if len(published_malformed) != 1:
+        raise AssertionError(
+            f"expected one malformed-import diagnostic, got {published_malformed}"
+        )
+    malformed_diag = published_malformed[0]
+    if malformed_diag.get("code") != "parse.expected_token":
+        raise AssertionError(f"unexpected malformed-import code: {malformed_diag}")
+    if malformed_diag["message"] != "Expected string literal but found '@'.":
+        raise AssertionError(f"unexpected malformed-import message: {malformed_diag}")
+    if malformed_diag["range"]["start"]["line"] != 0 or malformed_diag["range"]["start"]["character"] != 22:
+        raise AssertionError(
+            f"malformed-import diagnostic should point at the unexpected '@': {malformed_diag}"
+        )
+
     send_message(proc, {"jsonrpc": "2.0", "id": 2, "method": "shutdown", "params": {}})
     read_until(proc, lambda msg: msg.get("id") == 2)
     send_message(proc, {"jsonrpc": "2.0", "method": "exit", "params": {}})

@@ -2009,7 +2009,12 @@ AstExprPtr AstParser::parseImportExpression(const Token& atToken) {
         return nullptr;
     }
 
-    if (!consume(TokenType::OPEN_PAREN) || !check(TokenType::STRING)) {
+    if (!consume(TokenType::OPEN_PAREN)) {
+        return nullptr;
+    }
+
+    if (!check(TokenType::STRING)) {
+        reportExpectedToken(TokenType::STRING);
         return nullptr;
     }
 

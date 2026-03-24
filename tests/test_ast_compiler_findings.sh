@@ -167,6 +167,10 @@ run_expect_compile_error_contains \
     "$FINDINGS_DIR/fail_strict_line_top_level.mog" \
     "AST frontend failed to parse source" \
     "1:1" || failed=1
+run_expect_compile_error_contains \
+    "$FINDINGS_DIR/fail_import_non_string_arg.mog" \
+    "Expected string literal but found '@'\\." \
+    "1:23" || failed=1
 
 run_expect_disassembly_contains \
     "$FINDINGS_DIR/sample_constructor_field_slot.mog" \
