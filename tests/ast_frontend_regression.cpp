@@ -853,7 +853,7 @@ bool checkCallableDiagnosticSpans() {
                      "lambda block-body sample should fail semantic analysis") ||
             !require(errors.size() == 1,
                      "lambda block-body sample should report one error") ||
-            !require(errors.front().line == 1 && errors.front().column == 35,
+            !require(errors.front().line == 1 && errors.front().column == 36,
                      "lambda block-body diagnostic should point at the block body")) {
             return false;
         }
