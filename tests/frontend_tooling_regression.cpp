@@ -796,6 +796,63 @@ bool testSemanticTokens() {
         return false;
     }
 
+    const std::string operatorAndCastSource =
+                "type Pipe struct {\n"
+        "    passed bool\n"
+        "    x f64\n"
+        "}\n"
+        "const PIPE_WIDTH i64 = 80i64\n"
+        "const BIRD_X i64 = 160i64\n"
+        "fn check(pipe Pipe) void {\n"
+        "    if (pipe.passed == false && (pipe.x + (PIPE_WIDTH as f64)) < (BIRD_X as f64)) {\n"
+        "        return\n"
+        "    }\n"
+        "}\n";
+    options.sourcePath = "tooling_semantic_tokens_operator_cast_regression.mog";
+    ToolingDocumentAnalysis operatorAndCastAnalysis =
+        analyzeDocumentForTooling(operatorAndCastSource, options);
+    if (!require(operatorAndCastAnalysis.status == AstFrontendBuildStatus::Success,
+                 "operator/cast semantic token sample should succeed")) {
+        return false;
+    }
+
+    const auto operatorAndCastTokens =
+        findSemanticTokensForTooling(operatorAndCastAnalysis);
+    if (!require(findSemanticToken(operatorAndCastTokens, 7, 43, "variable") !=
+                     nullptr,
+                 "PIPE_WIDTH use should keep its exact start column after == and &&")) {
+        return false;
+    }
+    const auto* firstCastType =
+        findSemanticToken(operatorAndCastTokens, 7, 57, "type");
+    if (!require(firstCastType != nullptr,
+                 "first cast target should keep its exact start column")) {
+        return false;
+    }
+    if (!require(firstCastType->range.end.character -
+                         firstCastType->range.start.character ==
+                     3,
+                 "first cast target length should match 'f64'")) {
+        return false;
+    }
+    if (!require(findSemanticToken(operatorAndCastTokens, 7, 66, "variable") !=
+                     nullptr,
+                 "BIRD_X use should keep its exact start column after prior operators")) {
+        return false;
+    }
+    const auto* secondCastType =
+        findSemanticToken(operatorAndCastTokens, 7, 76, "type");
+    if (!require(secondCastType != nullptr,
+                 "second cast target should keep its exact start column")) {
+        return false;
+    }
+    if (!require(secondCastType->range.end.character -
+                         secondCastType->range.start.character ==
+                     3,
+                 "second cast target length should match 'f64'")) {
+        return false;
+    }
+
     return true;
 }
 

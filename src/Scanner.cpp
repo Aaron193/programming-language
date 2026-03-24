@@ -46,7 +46,7 @@ void Scanner::skipWhitespace() {
 bool Scanner::match(char c) {
     if (isEOF()) return false;
     if (peek() != c) return false;
-    m_current++;
+    advance();
     return true;
 }
 
@@ -97,7 +97,9 @@ Token Scanner::nextToken() {
                 return false;
             }
 
-            m_current += length;
+            for (size_t index = 0; index < length; ++index) {
+                advance();
+            }
             return true;
         };
 
