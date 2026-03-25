@@ -153,7 +153,7 @@ run_expect_compile_error \
 run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/lambda_block_body.mog" \
     "expression-bodied lambdas do not support block bodies" \
-    "1:35" || failed=1
+    "1:36" || failed=1
 
 run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/assign_handle_foreign_type.mog" \
