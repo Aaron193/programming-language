@@ -2091,13 +2091,14 @@ Status VirtualMachine::invokeProperty(size_t instructionOffset,
 Status VirtualMachine::invokeSuper(const std::string& name,
                                    uint8_t argumentCount) {
     Value receiver = m_stack.peekUnchecked(argumentCount);
-    if (!receiver.isInstance() || !receiver.asInstance()->klass ||
-        !receiver.asInstance()->klass->superclass) {
+    ClosureObject* closure = currentFrame().closure;
+    if (!receiver.isInstance() || closure == nullptr ||
+        closure->superclassContext == nullptr) {
         return runtimeError("Invalid super lookup.");
     }
 
     auto instance = receiver.asInstance();
-    auto method = findMethodClosure(instance->klass->superclass, name);
+    auto method = findMethodClosure(closure->superclassContext, name);
     if (!method) {
         return runtimeError("Undefined superclass method '" + name + "'.");
     }
@@ -2884,7 +2885,10 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 return runtimeError("Invalid method declaration.");
             }
 
-            klass.asClass()->methods[name] = method.asClosure();
+            auto* klassObject = klass.asClass();
+            auto* methodClosure = method.asClosure();
+            methodClosure->superclassContext = klassObject->superclass;
+            klassObject->methods[name] = methodClosure;
             m_stack.pop();
             DISPATCH();
         }
@@ -2902,11 +2906,13 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
         VM_CASE(GET_SUPER) {
             const std::string& name = readNameConstant();
             auto receiver = currentFrame().receiver;
-            if (!receiver || !receiver->klass || !receiver->klass->superclass) {
+            ClosureObject* closure = currentFrame().closure;
+            if (!receiver || closure == nullptr ||
+                closure->superclassContext == nullptr) {
                 return runtimeError("Invalid super lookup.");
             }
 
-            auto method = findMethodClosure(receiver->klass->superclass, name);
+            auto method = findMethodClosure(closure->superclassContext, name);
             if (!method) {
                 return runtimeError("Undefined superclass method '" + name +
                                     "'.");
