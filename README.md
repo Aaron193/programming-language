@@ -187,7 +187,18 @@ Run additional suites:
 ./tests/test_syntax_breakage.sh
 ./tests/test_newline_syntax.sh
 ./tests/test_frontend_benchmark.sh
+./tests/test_vscode_manifest.sh
 ```
+
+## VS Code
+
+The VS Code extension lives under `tooling/vscode-mog`.
+
+`.mog` files now declare a Mog language icon through the extension manifest, so
+Explorer and tabs can show the bundled icon when the active file icon theme
+supports language default icons. Themes such as `Minimal` may still show the
+generic file icon because the extension does not override the user's full file
+icon theme.
 
 ## Benchmarks
 

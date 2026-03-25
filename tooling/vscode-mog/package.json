@@ -28,6 +28,10 @@
         "extensions": [
           ".mog"
         ],
+        "icon": {
+          "light": "./images/fileicons/icon.png",
+          "dark": "./images/fileicons/icon.png"
+        },
         "configuration": "./language-configuration.json"
       }
     ],
