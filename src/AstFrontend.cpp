@@ -15,6 +15,7 @@
 #include "AstTypeChecker.hpp"
 #include "HirOptimizer.hpp"
 #include "NativePackage.hpp"
+#include "StdLib.hpp"
 #include "SyntaxRules.hpp"
 
 namespace {
@@ -807,9 +808,15 @@ AstFrontendBuildStatus buildAstFrontend(std::string_view source,
         makeSourcePosition(source.size(), outFrontend.terminalLine, terminalColumn);
     outFrontend.module = std::move(module);
     outFrontend.timings.symbolCollectionMicros = measureMicros([&]() {
+        std::unordered_map<std::string, TypeRef> sourceFunctionSignatures;
         collectSymbolsFromAst(outFrontend.module, outFrontend.classNames,
-                              outFrontend.functionSignatures,
-                              &outFrontend.typeAliases);
+                              sourceFunctionSignatures, &outFrontend.typeAliases);
+        outFrontend.functionSignatures.clear();
+        registerOrdinaryStandardLibraryTypeSignatures(
+            outFrontend.functionSignatures);
+        for (auto& [name, type] : sourceFunctionSignatures) {
+            outFrontend.functionSignatures[name] = std::move(type);
+        }
     });
 
     AstFrontendModuleGraphCache localModuleGraphCache;

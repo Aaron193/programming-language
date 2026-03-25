@@ -1241,11 +1241,13 @@ AstStmtPtr AstParser::parseBlockStatement() {
 }
 
 AstStmtPtr AstParser::parsePrintStatement(const Token& printToken) {
+    const Token keywordToken = printToken;
     if (!consume(TokenType::OPEN_PAREN)) {
         return nullptr;
     }
 
     AstPrintStmt printStmt;
+    printStmt.keyword = keywordToken;
     printStmt.expression = parseExpression();
     if (!printStmt.expression) {
         return nullptr;
@@ -1258,7 +1260,8 @@ AstStmtPtr AstParser::parsePrintStatement(const Token& printToken) {
 
     auto stmt = std::make_unique<AstStmt>();
     stmt->node =
-        makeNodeInfo(combineSourceSpans(printToken.span(), printStmt.expression->node.span));
+        makeNodeInfo(combineSourceSpans(keywordToken.span(),
+                                        printStmt.expression->node.span));
     stmt->value = std::move(printStmt);
     return stmt;
 }

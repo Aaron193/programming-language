@@ -164,6 +164,16 @@ class AstBinderImpl {
         }
     }
 
+    void predeclareBuiltinFunctions() {
+        for (const auto& [name, type] : m_functionSignatures) {
+            if (!type || type->kind != TypeKind::FUNCTION) {
+                continue;
+            }
+            defineBinding(name, AstBindingRef{AstBindingKind::Function, 0, name,
+                                              false, ""});
+        }
+    }
+
     void predeclareClassMetadata(const AstModule& module) {
         for (const auto& item : module.items) {
             if (!item) {
@@ -548,6 +558,7 @@ class AstBinderImpl {
     }
 
     void run(const AstModule& module) {
+        predeclareBuiltinFunctions();
         predeclareTopLevel(module);
         predeclareClassMetadata(module);
 

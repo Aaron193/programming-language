@@ -171,6 +171,22 @@ requireCondition(
   "parameter/type-context rule should not swallow cast syntax"
 );
 
+const keywordPattern = grammar.patterns.find(
+  (pattern) => pattern.name === "keyword.control.mog"
+);
+requireCondition(
+  keywordPattern !== undefined && !new RegExp(keywordPattern.match, "g").test("print"),
+  "print should not be highlighted as a keyword"
+);
+
+const functionPattern = grammar.patterns.find(
+  (pattern) => pattern.name === "entity.name.function.mog"
+);
+requireCondition(
+  functionPattern !== undefined && new RegExp(functionPattern.match, "g").test("print("),
+  "print should still be highlighted by the function-call rule"
+);
+
 const paramLine = "fn updateScore(state GameState) void {";
 requireCondition(
   typeRangesForText(paramLine, "GameState").some(

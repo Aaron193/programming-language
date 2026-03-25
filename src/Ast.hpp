@@ -169,6 +169,7 @@ struct AstExprStmt {
 };
 
 struct AstPrintStmt {
+    Token keyword;
     AstExprPtr expression;
 };
 

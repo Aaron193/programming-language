@@ -233,6 +233,14 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
     signature_fail_path = Path(tmpdir) / "signature_fail_sample.mog"
     signature_fail_path.write_text(signature_fail_source, encoding="utf-8")
     signature_fail_uri = signature_fail_path.resolve().as_uri()
+    builtin_source = "\n".join([
+        "const value f64 = sqrt(9.0)",
+        "print(value)",
+        ""
+    ])
+    builtin_path = Path(tmpdir) / "builtin_sample.mog"
+    builtin_path.write_text(builtin_source, encoding="utf-8")
+    builtin_uri = builtin_path.resolve().as_uri()
     parse_fail_source = "\n".join([
         "fn broken(",
         ""
@@ -493,6 +501,25 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
             lambda msg: msg.get("method") == "textDocument/publishDiagnostics" and
             msg.get("params", {}).get("uri") == signature_fail_uri,
         )
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": builtin_uri,
+                    "languageId": "mog",
+                    "version": 1,
+                    "text": builtin_source
+                }
+            }
+        })
+        builtin_diagnostics = read_until(
+            proc,
+            lambda msg: msg.get("method") == "textDocument/publishDiagnostics" and
+            msg.get("params", {}).get("uri") == builtin_uri,
+        )
+        if builtin_diagnostics["params"]["diagnostics"]:
+            raise AssertionError("expected builtin sample to stay diagnostics-free")
 
         send_message(proc, {
             "jsonrpc": "2.0",
@@ -579,6 +606,25 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
 
         send_message(proc, {
             "jsonrpc": "2.0",
+            "id": 5.1,
+            "method": "textDocument/hover",
+            "params": {
+                "textDocument": {
+                    "uri": builtin_uri
+                },
+                "position": {
+                    "line": 0,
+                    "character": 20
+                }
+            }
+        })
+        builtin_hover = read_until(proc, lambda msg: msg.get("id") == 5.1)
+        builtin_hover_value = builtin_hover["result"]["contents"]["value"]
+        if builtin_hover_value != "```mog\n(function) fn sqrt(f64) f64\n```":
+            raise AssertionError(f"unexpected builtin hover payload: {builtin_hover['result']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
             "id": 5.25,
             "method": "textDocument/semanticTokens/full",
             "params": {
@@ -607,6 +653,29 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         value_use = find_semantic_token(main_tokens, 6, 6, "variable")
         if value_use is None or "readonly" not in value_use["modifiers"]:
             raise AssertionError(f"expected readonly const use semantic token: {main_tokens}")
+        if find_semantic_token(main_tokens, 6, 0, "function") is None:
+            raise AssertionError(f"expected print semantic token: {main_tokens}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 5.4,
+            "method": "textDocument/semanticTokens/full",
+            "params": {
+                "textDocument": {
+                    "uri": builtin_uri
+                }
+            }
+        })
+        builtin_semantic_tokens = read_until(proc, lambda msg: msg.get("id") == 5.4)
+        builtin_tokens = decode_semantic_tokens(
+            builtin_semantic_tokens["result"],
+            semantic_legend["tokenTypes"],
+            semantic_legend["tokenModifiers"],
+        )
+        if find_semantic_token(builtin_tokens, 0, 18, "function") is None:
+            raise AssertionError(f"expected builtin stdlib semantic token: {builtin_tokens}")
+        if find_semantic_token(builtin_tokens, 1, 0, "function") is None:
+            raise AssertionError(f"expected builtin print semantic token: {builtin_tokens}")
 
         send_message(proc, {
             "jsonrpc": "2.0",
@@ -685,6 +754,31 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         local_item = next(item for item in completion["result"] if item["label"] == "local")
         if local_item.get("detail") != "var local i32":
             raise AssertionError(f"unexpected local completion detail: {local_item}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 6.1,
+            "method": "textDocument/completion",
+            "params": {
+                "textDocument": {
+                    "uri": builtin_uri
+                },
+                "position": {
+                    "line": 2,
+                    "character": 0
+                }
+            }
+        })
+        builtin_completion = read_until(proc, lambda msg: msg.get("id") == 6.1)
+        builtin_labels = [item["label"] for item in builtin_completion["result"]]
+        if "sqrt" not in builtin_labels or "print" not in builtin_labels:
+            raise AssertionError(f"expected builtin completion items: {builtin_completion['result']}")
+        sqrt_item = next(item for item in builtin_completion["result"] if item["label"] == "sqrt")
+        print_item = next(item for item in builtin_completion["result"] if item["label"] == "print")
+        if sqrt_item.get("detail") != "fn sqrt(f64) f64":
+            raise AssertionError(f"unexpected sqrt completion detail: {sqrt_item}")
+        if print_item.get("detail") != "fn print(any) void":
+            raise AssertionError(f"unexpected print completion detail: {print_item}")
 
         send_message(proc, {
             "jsonrpc": "2.0",
@@ -1072,8 +1166,9 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         })
         parse_completion = read_until(proc, lambda msg: msg.get("id") == 11)
         parse_labels = [item["label"] for item in parse_completion["result"]]
-        if "fn" not in parse_labels or "while" not in parse_labels:
-            raise AssertionError(f"expected keyword completions on parse failure: {parse_completion['result']}")
+        if "fn" not in parse_labels or "while" not in parse_labels or \
+                "sqrt" not in parse_labels or "print" not in parse_labels:
+            raise AssertionError(f"expected keyword and builtin completions on parse failure: {parse_completion['result']}")
 
         send_message(proc, {
             "jsonrpc": "2.0",
@@ -1112,6 +1207,46 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         parse_signature_help = read_until(proc, lambda msg: msg.get("id") == 11.6)
         if parse_signature_help["result"]["activeParameter"] != 1:
             raise AssertionError(f"unexpected parse-fail signature help payload: {parse_signature_help['result']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 11.55,
+            "method": "textDocument/signatureHelp",
+            "params": {
+                "textDocument": {
+                    "uri": builtin_uri
+                },
+                "position": {
+                    "line": 0,
+                    "character": 24
+                }
+            }
+        })
+        builtin_signature_help = read_until(proc, lambda msg: msg.get("id") == 11.55)
+        if builtin_signature_help["result"]["activeParameter"] != 0:
+            raise AssertionError(f"unexpected builtin signature help payload: {builtin_signature_help['result']}")
+        if builtin_signature_help["result"]["signatures"][0]["label"] != "fn sqrt(f64) f64":
+            raise AssertionError(f"unexpected builtin signature label: {builtin_signature_help['result']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 11.56,
+            "method": "textDocument/signatureHelp",
+            "params": {
+                "textDocument": {
+                    "uri": builtin_uri
+                },
+                "position": {
+                    "line": 1,
+                    "character": 7
+                }
+            }
+        })
+        print_signature_help = read_until(proc, lambda msg: msg.get("id") == 11.56)
+        if print_signature_help["result"]["activeParameter"] != 0:
+            raise AssertionError(f"unexpected print signature help payload: {print_signature_help['result']}")
+        if print_signature_help["result"]["signatures"][0]["label"] != "fn print(any) void":
+            raise AssertionError(f"unexpected print signature label: {print_signature_help['result']}")
 
         send_message(proc, {
             "jsonrpc": "2.0",

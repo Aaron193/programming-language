@@ -82,7 +82,7 @@
     },
     {
       "name": "keyword.control.mog",
-      "match": "\\b(?:print|var|const|fn|type|struct|if|else|for|while|break|continue|this|super|return|as)\\b"
+      "match": "\\b(?:var|const|fn|type|struct|if|else|for|while|break|continue|this|super|return|as)\\b"
     },
     {
       "include": "#type-angle-expression"

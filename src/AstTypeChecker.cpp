@@ -936,6 +936,14 @@ class AstTypeCheckerImpl {
                             isClass ? TypeInfo::makeClass(name) : TypeInfo::makeAny();
                         result = ExprInfo{type, !isClass, isClass, name,
                                           value.name.line(), false, false, 0};
+                    } else if (binding->kind == AstBindingKind::Function &&
+                               binding->declarationNodeId == 0) {
+                        auto signatureIt = m_functionSignatures.find(name);
+                        TypeRef type = signatureIt != m_functionSignatures.end()
+                                           ? signatureIt->second
+                                           : TypeInfo::makeAny();
+                        result = ExprInfo{type, false, false, name,
+                                          value.name.line(), false, true, 0};
                     } else if (binding->kind == AstBindingKind::Class) {
                         const std::string className =
                             binding->className.empty() ? binding->name

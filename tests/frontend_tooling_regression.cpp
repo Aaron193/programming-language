@@ -627,6 +627,25 @@ bool testReferencesAndHover() {
         return false;
     }
 
+    const std::string builtinSource =
+                "const value f64 = sqrt(9.0)\n"
+        "print(value)\n";
+    options.sourcePath = "tooling_builtin_hover_regression.mog";
+    ToolingDocumentAnalysis builtinAnalysis =
+        analyzeDocumentForTooling(builtinSource, options);
+    const auto builtinHover =
+        findHoverForTooling(builtinAnalysis, ToolingPosition{0, 20});
+    if (!require(builtinHover.has_value(),
+                 "hover should be available for builtin stdlib functions")) {
+        return false;
+    }
+
+    if (!require(builtinHover->kind == "function" &&
+                     builtinHover->detail == "(function) fn sqrt(f64) f64",
+                 "builtin stdlib hover should preserve callable type detail")) {
+        return false;
+    }
+
     return true;
 }
 
@@ -853,6 +872,27 @@ bool testSemanticTokens() {
         return false;
     }
 
+    const std::string builtinSource =
+                "const value f64 = sqrt(9.0)\n"
+        "print(value)\n";
+    options.sourcePath = "tooling_semantic_tokens_builtin_regression.mog";
+    ToolingDocumentAnalysis builtinAnalysis =
+        analyzeDocumentForTooling(builtinSource, options);
+    if (!require(builtinAnalysis.status == AstFrontendBuildStatus::Success,
+                 "builtin semantic token sample should succeed")) {
+        return false;
+    }
+
+    const auto builtinTokens = findSemanticTokensForTooling(builtinAnalysis);
+    if (!require(findSemanticToken(builtinTokens, 0, 18, "function") != nullptr,
+                 "builtin stdlib calls should emit function semantic tokens")) {
+        return false;
+    }
+    if (!require(findSemanticToken(builtinTokens, 1, 0, "function") != nullptr,
+                 "print syntax should emit function semantic tokens")) {
+        return false;
+    }
+
     return true;
 }
 
@@ -970,12 +1010,38 @@ bool testCompletions() {
     const auto parseFailCompletions =
         findCompletionsForTooling(parseFailAnalysis, ToolingPosition{1, 10});
     if (!require(findCompletion(parseFailCompletions, "fn") != nullptr &&
-                     findCompletion(parseFailCompletions, "while") != nullptr,
-                 "parse-failed completions should still include keywords")) {
+                     findCompletion(parseFailCompletions, "while") != nullptr &&
+                     findCompletion(parseFailCompletions, "sqrt") != nullptr &&
+                     findCompletion(parseFailCompletions, "print") != nullptr,
+                 "parse-failed completions should include keywords and builtin functions")) {
         return false;
     }
     if (!require(findCompletion(parseFailCompletions, "broken") == nullptr,
                  "parse-failed completions should not invent local bindings")) {
+        return false;
+    }
+
+    const std::string shadowedBuiltinSource =
+                "fn sqrt(text str) str {\n"
+        "    return text\n"
+        "}\n"
+        "const value str = \"\"\n"
+        "\n";
+    options.sourcePath = "tooling_completion_builtin_shadow_regression.mog";
+    ToolingDocumentAnalysis shadowedBuiltinAnalysis =
+        analyzeDocumentForTooling(shadowedBuiltinSource, options);
+    if (!require(shadowedBuiltinAnalysis.status == AstFrontendBuildStatus::Success,
+                 "builtin shadowing completion sample should succeed")) {
+        return false;
+    }
+
+    const auto shadowedBuiltinCompletions =
+        findCompletionsForTooling(shadowedBuiltinAnalysis, ToolingPosition{4, 0});
+    const auto* shadowedSqrt =
+        findCompletion(shadowedBuiltinCompletions, "sqrt");
+    if (!require(shadowedSqrt != nullptr &&
+                     shadowedSqrt->detail == "fn sqrt(text str) str",
+                 "user declarations should shadow builtin completion entries")) {
         return false;
     }
 
@@ -1323,6 +1389,39 @@ bool testSignatureHelp() {
                      moduleHelp->signatures.front().label ==
                          "fn Add(a i32, b i32) i32",
                  "module export calls should expose signature help")) {
+        return false;
+    }
+
+    const std::string builtinSource =
+                "const value f64 = sqrt(9.0)\n"
+        "print(1)\n";
+    options.sourcePath = "tooling_signature_help_builtin_regression.mog";
+    ToolingDocumentAnalysis builtinAnalysis =
+        analyzeDocumentForTooling(builtinSource, options);
+    if (!require(builtinAnalysis.status == AstFrontendBuildStatus::Success,
+                 "builtin signature help sample should succeed")) {
+        return false;
+    }
+
+    const auto builtinHelp = findSignatureHelpForTooling(
+        builtinAnalysis, builtinSource, ToolingPosition{0, 24});
+    if (!require(builtinHelp.has_value() &&
+                     builtinHelp->activeParameter == 0 &&
+                     !builtinHelp->signatures.empty() &&
+                     builtinHelp->signatures.front().label ==
+                         "fn sqrt(f64) f64",
+                 "builtin stdlib calls should expose signature help")) {
+        return false;
+    }
+
+    const auto printHelp = findSignatureHelpForTooling(
+        builtinAnalysis, builtinSource, ToolingPosition{1, 7});
+    if (!require(printHelp.has_value() &&
+                     printHelp->activeParameter == 0 &&
+                     !printHelp->signatures.empty() &&
+                     printHelp->signatures.front().label ==
+                         "fn print(any) void",
+                 "print syntax should expose signature help")) {
         return false;
     }
 

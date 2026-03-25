@@ -34,9 +34,24 @@ const std::vector<NativeDescriptor>& standardLibraryNatives() {
     return makeDescriptors();
 }
 
+bool isOrdinaryStandardLibraryFunctionName(std::string_view name) {
+    return name != "type" && name != "str" && name != "Set";
+}
+
 void registerStandardLibraryTypeSignatures(
     std::unordered_map<std::string, TypeRef>& signatures) {
     for (const auto& descriptor : standardLibraryNatives()) {
+        signatures[descriptor.name] = TypeInfo::makeFunction(
+            descriptor.paramTypes, descriptor.returnType);
+    }
+}
+
+void registerOrdinaryStandardLibraryTypeSignatures(
+    std::unordered_map<std::string, TypeRef>& signatures) {
+    for (const auto& descriptor : standardLibraryNatives()) {
+        if (!isOrdinaryStandardLibraryFunctionName(descriptor.name)) {
+            continue;
+        }
         signatures[descriptor.name] = TypeInfo::makeFunction(
             descriptor.paramTypes, descriptor.returnType);
     }
