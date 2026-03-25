@@ -289,6 +289,10 @@ std::string AstParser::tokenDescription(TokenType type) const {
             return "'if'";
         case TokenType::ELSE:
             return "'else'";
+        case TokenType::BREAK:
+            return "'break'";
+        case TokenType::CONTINUE:
+            return "'continue'";
         case TokenType::TRUE:
             return "'true'";
         case TokenType::FALSE:
@@ -1166,6 +1170,16 @@ AstStmtPtr AstParser::parseStatement() {
         return nullptr;
     }
 
+    if (check(TokenType::IDENTIFIER) && peekToken().type() == TokenType::COLON &&
+        peekToken().line() == m_current.line()) {
+        Token labelToken = m_current;
+        advance();
+        if (!consume(TokenType::COLON)) {
+            return nullptr;
+        }
+        return parseLabeledLoopStatement(labelToken);
+    }
+
     if (match(TokenType::PRINT)) {
         return parsePrintStatement(m_previous);
     }
@@ -1184,6 +1198,14 @@ AstStmtPtr AstParser::parseStatement() {
 
     if (match(TokenType::_RETURN)) {
         return parseReturnStatement(m_previous);
+    }
+
+    if (match(TokenType::BREAK)) {
+        return parseLoopControlStatement(m_previous, false);
+    }
+
+    if (match(TokenType::CONTINUE)) {
+        return parseLoopControlStatement(m_previous, true);
     }
 
     if (check(TokenType::OPEN_CURLY)) {
@@ -1272,6 +1294,42 @@ AstStmtPtr AstParser::parseIfStatement(const Token& ifToken) {
                                    : ifStmt.thenBranch->node.span;
     stmt->node = makeNodeInfo(combineSourceSpans(ifToken.span(), endSpan));
     stmt->value = std::move(ifStmt);
+    return stmt;
+}
+
+AstStmtPtr AstParser::parseLabeledLoopStatement(const Token& labelToken) {
+    if (hasLineBreakBeforeCurrent()) {
+        errorAtSpan(labelToken.span(),
+                    "Loop labels must be followed by a loop statement on the same line.");
+        return nullptr;
+    }
+
+    AstStmtPtr stmt;
+    if (match(TokenType::WHILE)) {
+        stmt = parseWhileStatement(m_previous);
+    } else if (match(TokenType::FOR)) {
+        stmt = parseForStatement(m_previous);
+    } else {
+        errorAtSpan(labelToken.span(),
+                    "Labels may only be attached to 'while' or 'for' statements.");
+        return nullptr;
+    }
+
+    if (!stmt) {
+        return nullptr;
+    }
+
+    std::visit(
+        [&](auto& value) {
+            using T = std::decay_t<decltype(value)>;
+            if constexpr (std::is_same_v<T, AstWhileStmt> ||
+                          std::is_same_v<T, AstForStmt> ||
+                          std::is_same_v<T, AstForEachStmt>) {
+                value.label = labelToken;
+            }
+        },
+        stmt->value);
+    stmt->node = makeNodeInfo(combineSourceSpans(labelToken.span(), stmt->node.span));
     return stmt;
 }
 
@@ -1443,6 +1501,35 @@ AstStmtPtr AstParser::parseReturnStatement(const Token& returnToken) {
                                                        returnStmt.value->node.span)
                                   : returnToken.span());
     stmt->value = std::move(returnStmt);
+    return stmt;
+}
+
+AstStmtPtr AstParser::parseLoopControlStatement(const Token& keywordToken,
+                                                bool isContinue) {
+    std::optional<Token> label;
+
+    if (check(TokenType::IDENTIFIER) && !hasLineBreakBeforeCurrent()) {
+        label = m_current;
+        advance();
+    }
+
+    recoverLineLeadingContinuation();
+    rejectUnexpectedTrailingToken();
+    rejectStraySemicolon();
+
+    auto stmt = std::make_unique<AstStmt>();
+    stmt->node = makeNodeInfo(label ? combineSourceSpans(keywordToken.span(),
+                                                         label->span())
+                                    : keywordToken.span());
+    if (isContinue) {
+        AstContinueStmt continueStmt;
+        continueStmt.label = label;
+        stmt->value = std::move(continueStmt);
+    } else {
+        AstBreakStmt breakStmt;
+        breakStmt.label = label;
+        stmt->value = std::move(breakStmt);
+    }
     return stmt;
 }
 

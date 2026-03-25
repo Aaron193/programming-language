@@ -1,0 +1,58 @@
+var total i32 = 0
+for (var i i32 = 0; i < 4; i = i + 1) {
+    if (i == 1) {
+        continue
+    }
+
+    if (i == 3) {
+        break
+    }
+
+    total += i
+}
+print(total)
+
+var j i32 = 0
+count: while (j < 5) {
+    j++
+    if (j == 2) {
+        continue count
+    }
+
+    if (j == 4) {
+        break count
+    }
+
+    print(j)
+}
+
+var values Array<i32> = [1, 2, 3, 4]
+var sum i32 = 0
+scan: for (var value i32 : values) {
+    if (value == 2) {
+        continue scan
+    }
+
+    if (value == 4) {
+        break scan
+    }
+
+    sum += value
+}
+print(sum)
+
+var outerCount i32 = 0
+outer: while (outerCount < 3) {
+    outerCount++
+    for (var inner i32 = 0; inner < 3; inner++) {
+        if (inner == 1) {
+            continue
+        }
+
+        if (outerCount == 2) {
+            break outer
+        }
+
+        print((outerCount * 10) + inner)
+    }
+}

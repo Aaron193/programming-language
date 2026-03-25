@@ -82,7 +82,7 @@
     },
     {
       "name": "keyword.control.mog",
-      "match": "\\b(?:print|var|const|fn|type|struct|if|else|for|while|this|super|return|as)\\b"
+      "match": "\\b(?:print|var|const|fn|type|struct|if|else|for|while|break|continue|this|super|return|as)\\b"
     },
     {
       "include": "#type-angle-expression"
@@ -138,7 +138,7 @@
           }
         },
         {
-          "match": "\\b(?!(?:as|print|var|const|fn|type|struct|if|else|for|while|this|super|return)\\b)([A-Za-z_][A-Za-z0-9_]*)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b(?=\\s*(?:,|\\)|:))",
+          "match": "\\b(?!(?:as|print|var|const|fn|type|struct|if|else|for|while|break|continue|this|super|return)\\b)([A-Za-z_][A-Za-z0-9_]*)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b(?=\\s*(?:,|\\)|:))",
           "captures": {
             "2": {
               "name": "entity.name.type.mog"

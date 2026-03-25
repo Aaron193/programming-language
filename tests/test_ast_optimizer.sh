@@ -657,4 +657,26 @@ if ! grep -q "BITWISE_AND" <<< "$and_zero_type_guard_disassembly"; then
     exit 1
 fi
 
+run_and_capture "$SCRIPT_DIR/sample_ast_opt_break_continue_terminal.mog" \
+    loop_terminal_output loop_terminal_status loop_terminal_disassembly loop_terminal_disassembly_status
+
+if [[ $loop_terminal_status -ne 0 || $loop_terminal_disassembly_status -ne 0 ]]; then
+    echo "[FAIL] break/continue terminal sample failed"
+    echo "$loop_terminal_output"
+    echo "$loop_terminal_disassembly"
+    exit 1
+fi
+
+if [[ "$loop_terminal_output" != "1" ]]; then
+    echo "[FAIL] break/continue terminal sample produced unexpected output"
+    echo "$loop_terminal_output"
+    exit 1
+fi
+
+if [[ $(grep -Fc "PRINT" <<< "$loop_terminal_disassembly") -ne 1 ]]; then
+    echo "[FAIL] break/continue terminal sample still emits unreachable prints"
+    echo "$loop_terminal_disassembly"
+    exit 1
+fi
+
 echo "[PASS] AST optimizer handles strict typed control-flow and expression rewrites."

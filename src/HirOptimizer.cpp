@@ -708,7 +708,9 @@ bool isDefinitelyTerminal(const HirStmt& stmt) {
     return std::visit(
         [&](const auto& value) -> bool {
             using T = std::decay_t<decltype(value)>;
-            if constexpr (std::is_same_v<T, HirReturnStmt>) {
+            if constexpr (std::is_same_v<T, HirReturnStmt> ||
+                          std::is_same_v<T, HirBreakStmt> ||
+                          std::is_same_v<T, HirContinueStmt>) {
                 return true;
             } else if constexpr (std::is_same_v<T, HirBlockStmt>) {
                 return blockIsDefinitelyTerminal(value);

@@ -188,6 +188,26 @@ run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/import_cycle_frontend.mog" \
     "Circular import detected" || failed=1
 
+run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/break_outside_loop.mog" \
+    "cannot break outside of a loop" \
+    "1:1" || failed=1
+
+run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/continue_outside_loop.mog" \
+    "cannot continue outside of a loop" \
+    "1:1" || failed=1
+
+run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/unknown_loop_label.mog" \
+    "unknown loop label 'missing' for 'break'" \
+    "2:11" || failed=1
+
+run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/duplicate_loop_label.mog" \
+    "duplicate loop label 'outer'" \
+    "2:5" || failed=1
+
 if [[ $failed -ne 0 ]]; then
     exit 1
 fi

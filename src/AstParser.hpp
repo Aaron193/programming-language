@@ -74,9 +74,12 @@ class AstParser {
     AstStmtPtr parseBlockStatement();
     AstStmtPtr parsePrintStatement(const Token& printToken);
     AstStmtPtr parseIfStatement(const Token& ifToken);
+    AstStmtPtr parseLabeledLoopStatement(const Token& labelToken);
     AstStmtPtr parseWhileStatement(const Token& whileToken);
     AstStmtPtr parseForStatement(const Token& forToken);
     AstStmtPtr parseReturnStatement(const Token& returnToken);
+    AstStmtPtr parseLoopControlStatement(const Token& keywordToken,
+                                         bool isContinue);
     AstStmtPtr parseExpressionStatement();
     AstStmtPtr parseVariableDeclarationStatement(bool allowForClause = false);
 

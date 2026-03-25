@@ -113,6 +113,7 @@ std::vector<std::filesystem::path> defaultCorpus(
         repoRoot / "tests/sample_inherit_super.mog",
         repoRoot / "tests/sample_invoke_fusion.mog",
         repoRoot / "tests/sample_for_each.mog",
+        repoRoot / "tests/sample_break_continue.mog",
         repoRoot / "tests/sample_import_basic.mog",
         repoRoot / "tests/sample_import_named.mog",
         repoRoot / "tests/sample_import_alias.mog",

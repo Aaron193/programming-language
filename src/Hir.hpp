@@ -151,6 +151,14 @@ struct HirReturnStmt {
     std::optional<HirExprId> value;
 };
 
+struct HirBreakStmt {
+    std::optional<Token> label;
+};
+
+struct HirContinueStmt {
+    std::optional<Token> label;
+};
+
 struct HirIfStmt {
     std::optional<HirExprId> condition;
     std::optional<HirStmtId> thenBranch;
@@ -158,6 +166,7 @@ struct HirIfStmt {
 };
 
 struct HirWhileStmt {
+    std::optional<Token> label;
     std::optional<HirExprId> condition;
     std::optional<HirStmtId> body;
 };
@@ -186,6 +195,7 @@ struct HirDestructuredImportStmt {
 };
 
 struct HirForStmt {
+    std::optional<Token> label;
     std::optional<HirStmtId> initializer;
     std::optional<HirExprId> condition;
     std::optional<HirExprId> increment;
@@ -193,6 +203,7 @@ struct HirForStmt {
 };
 
 struct HirForEachStmt {
+    std::optional<Token> label;
     bool isConst = false;
     Token name;
     TypeRef declaredType = TypeInfo::makeAny();
@@ -204,7 +215,7 @@ struct HirStmt {
     HirNodeInfo node;
     using Variant =
         std::variant<HirBlockStmt, HirExprStmt, HirPrintStmt, HirReturnStmt,
-                     HirIfStmt, HirWhileStmt, HirVarDeclStmt,
+                     HirBreakStmt, HirContinueStmt, HirIfStmt, HirWhileStmt, HirVarDeclStmt,
                      HirDestructuredImportStmt, HirForStmt, HirForEachStmt>;
 
     Variant value;

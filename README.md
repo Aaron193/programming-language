@@ -12,7 +12,7 @@ The language is strictly typed by default; there is no opt-in non-strict mode.
 - Bitwise operators: `&`, `|`, `^`, `~`, `<<`, `>>`
 - Variables: `var name Type = value`, `const name Type = value`, `const name = @import(...)`, assignment, compound assignment (`+=`, `-=`, `*=`, `/=`, `&=`, `|=`, `^=`, `<<=`, `>>=`), lexical scope
 - Update operators: `++`, `--`
-- Control flow: `if`/`else`, `while`, `for`, foreach (`for (var x Type : collection)`)
+- Control flow: `if`/`else`, `while`, `for`, foreach (`for (var x Type : collection)`), `break`, `continue`, labeled loops
 - Functions: `fn name(param Type, ...) ReturnType { ... }`, block function literals, expression-bodied lambdas, recursion
 - Closures: nested functions with captured/upvalue variables
 - Types: `type Name struct { ... }`, aliases via `type Alias ExistingType`, fields/methods, `this`
@@ -330,6 +330,17 @@ Namespace import:
 const math = @import("./math.mog")
 print(math.PI)
 print(math.Add(1, 2))
+```
+
+Labeled loop control:
+
+```expr
+outer: while (true) {
+    for (var i i32 = 0; i < 10; i++) {
+        if (i == 3) continue
+        if (i == 7) break outer
+    }
+}
 ```
 
 Named import and aliasing:

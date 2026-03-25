@@ -79,6 +79,10 @@ class AstTypeCheckerImpl {
         TypeRef returnType = TypeInfo::makeAny();
     };
 
+    struct LoopCtx {
+        std::optional<Token> label;
+    };
+
     struct ClassCtx {
         std::string className;
     };
@@ -100,10 +104,15 @@ class AstTypeCheckerImpl {
 
     std::unordered_map<AstNodeId, SymbolInfo> m_declaredValueTypes;
     std::vector<FunctionCtx> m_functionContexts;
+    std::vector<LoopCtx> m_loopContexts;
     std::vector<ClassCtx> m_classContexts;
 
     std::string tokenText(const Token& token) const {
         return tokenLexeme(token);
+    }
+
+    bool labelsEqual(const Token& lhs, const Token& rhs) const {
+        return tokenText(lhs) == tokenText(rhs);
     }
 
     void addError(const SourceSpan& span, const std::string& message) {
@@ -1759,6 +1768,52 @@ class AstTypeCheckerImpl {
         }
     }
 
+    void beginLoop(const std::optional<Token>& label) {
+        if (label) {
+            for (auto it = m_loopContexts.rbegin(); it != m_loopContexts.rend();
+                 ++it) {
+                if (it->label && labelsEqual(*it->label, *label)) {
+                    addError(*label, "Type error: duplicate loop label '" +
+                                         tokenText(*label) + "'.");
+                    break;
+                }
+            }
+        }
+
+        m_loopContexts.push_back(LoopCtx{label});
+    }
+
+    void endLoop() {
+        if (!m_loopContexts.empty()) {
+            m_loopContexts.pop_back();
+        }
+    }
+
+    void analyzeLoopControlStmt(const AstNodeInfo& stmtNode,
+                                const std::optional<Token>& label,
+                                bool isContinue) {
+        const char* action = isContinue ? "continue" : "break";
+        if (m_loopContexts.empty()) {
+            addError(stmtNode, std::string("Type error: cannot ") + action +
+                                   " outside of a loop.");
+            return;
+        }
+
+        if (!label) {
+            return;
+        }
+
+        for (auto it = m_loopContexts.rbegin(); it != m_loopContexts.rend();
+             ++it) {
+            if (it->label && labelsEqual(*it->label, *label)) {
+                return;
+            }
+        }
+
+        addError(*label, std::string("Type error: unknown loop label '") +
+                             tokenText(*label) + "' for '" + action + "'.");
+    }
+
     void analyzeStmt(const AstStmt& stmt) {
         std::visit(
             [&](const auto& value) {
@@ -1776,6 +1831,10 @@ class AstTypeCheckerImpl {
                     analyzeExpr(*value.expression);
                 } else if constexpr (std::is_same_v<T, AstReturnStmt>) {
                     analyzeReturnStmt(stmt.node, value);
+                } else if constexpr (std::is_same_v<T, AstBreakStmt>) {
+                    analyzeLoopControlStmt(stmt.node, value.label, false);
+                } else if constexpr (std::is_same_v<T, AstContinueStmt>) {
+                    analyzeLoopControlStmt(stmt.node, value.label, true);
                 } else if constexpr (std::is_same_v<T, AstIfStmt>) {
                     ExprInfo cond = analyzeExpr(*value.condition);
                     if (!(cond.type->kind == TypeKind::BOOL ||
@@ -1794,7 +1853,9 @@ class AstTypeCheckerImpl {
                         addError(value.condition->node,
                                  "Type error: while condition must be bool.");
                     }
+                    beginLoop(value.label);
                     analyzeStmt(*value.body);
+                    endLoop();
                 } else if constexpr (std::is_same_v<T, AstVarDeclStmt>) {
                     analyzeVarDecl(stmt.node, value);
                 } else if constexpr (std::is_same_v<T,
@@ -1827,7 +1888,9 @@ class AstTypeCheckerImpl {
                         analyzeExpr(*value.increment);
                     }
 
+                    beginLoop(value.label);
                     analyzeStmt(*value.body);
+                    endLoop();
                 } else if constexpr (std::is_same_v<T, AstForEachStmt>) {
                     TypeRef declaredType = requireTypeExpr(
                         value.declaredType.get(), value.name.span(),
@@ -1876,7 +1939,9 @@ class AstTypeCheckerImpl {
                     recordDeclarationType(stmt.node, tokenText(value.name),
                                           declaredType, value.name.line(),
                                           value.isConst);
+                    beginLoop(value.label);
                     analyzeStmt(*value.body);
+                    endLoop();
                 }
             },
             stmt.value);

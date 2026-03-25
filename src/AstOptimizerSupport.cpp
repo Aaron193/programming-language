@@ -689,7 +689,9 @@ bool isDefinitelyTerminal(const AstStmt& stmt) {
     return std::visit(
         [&](const auto& value) -> bool {
             using T = std::decay_t<decltype(value)>;
-            if constexpr (std::is_same_v<T, AstReturnStmt>) {
+            if constexpr (std::is_same_v<T, AstReturnStmt> ||
+                          std::is_same_v<T, AstBreakStmt> ||
+                          std::is_same_v<T, AstContinueStmt>) {
                 return true;
             } else if constexpr (std::is_same_v<T, AstBlockStmt>) {
                 return blockIsDefinitelyTerminal(value);

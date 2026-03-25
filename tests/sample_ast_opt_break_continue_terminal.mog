@@ -1,0 +1,10 @@
+while (true) {
+    print(1)
+    break
+    print(2)
+}
+
+for (var value i32 : [1]) {
+    continue
+    print(value)
+}

@@ -260,10 +260,12 @@ TokenType Scanner::getIdentifier() {
 
         case 'b':
             if (matchKeyword("bool", 4)) return TokenType::TYPE_BOOL;
+            if (matchKeyword("break", 5)) return TokenType::BREAK;
             break;
 
         case 'c':
             if (matchKeyword("const", 5)) return TokenType::CONST;
+            if (matchKeyword("continue", 8)) return TokenType::CONTINUE;
             break;
 
         case 'e':

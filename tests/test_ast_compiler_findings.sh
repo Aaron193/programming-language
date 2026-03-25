@@ -172,6 +172,15 @@ run_expect_compile_error_contains \
     "Expected string literal but found '@'\\." \
     "1:23" || failed=1
 
+run_expect_compile_error_contains \
+    "$FINDINGS_DIR/fail_label_on_non_loop.mog" \
+    "Labels may only be attached to 'while' or 'for' statements" \
+    "1:1" || failed=1
+
+run_expect_success_output \
+    "$SCRIPT_DIR/sample_break_continue.mog" \
+    $'2\n1\n3\n4\n10\n12' || failed=1
+
 run_expect_disassembly_contains \
     "$FINDINGS_DIR/sample_constructor_field_slot.mog" \
     "GET_FIELD_SLOT" \

@@ -24,10 +24,16 @@ fn runner(seed i32) i32 {
     }
 
     for (var value i32 : [1, 2, 3]) {
+        if (value == 2) {
+            continue
+        }
         total += value
     }
 
-    while (total < 20) {
+    adjust: while (total < 20) {
+        if (total == 10) {
+            break adjust
+        }
         total++
     }
 

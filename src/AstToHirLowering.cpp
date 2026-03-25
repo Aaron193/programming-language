@@ -269,6 +269,14 @@ class AstToHirLowerer {
                         returnStmt.value = lowerExpr(*value.value);
                     }
                     lowered.value = std::move(returnStmt);
+                } else if constexpr (std::is_same_v<T, AstBreakStmt>) {
+                    HirBreakStmt breakStmt;
+                    breakStmt.label = value.label;
+                    lowered.value = std::move(breakStmt);
+                } else if constexpr (std::is_same_v<T, AstContinueStmt>) {
+                    HirContinueStmt continueStmt;
+                    continueStmt.label = value.label;
+                    lowered.value = std::move(continueStmt);
                 } else if constexpr (std::is_same_v<T, AstIfStmt>) {
                     HirIfStmt ifStmt;
                     if (value.condition) {
@@ -283,6 +291,7 @@ class AstToHirLowerer {
                     lowered.value = std::move(ifStmt);
                 } else if constexpr (std::is_same_v<T, AstWhileStmt>) {
                     HirWhileStmt whileStmt;
+                    whileStmt.label = value.label;
                     if (value.condition) {
                         whileStmt.condition = lowerExpr(*value.condition);
                     }
@@ -311,6 +320,7 @@ class AstToHirLowerer {
                     lowered.value = std::move(importStmt);
                 } else if constexpr (std::is_same_v<T, AstForStmt>) {
                     HirForStmt forStmt;
+                    forStmt.label = value.label;
                     if (const auto* initDecl =
                             std::get_if<std::unique_ptr<AstVarDeclStmt>>(
                                 &value.initializer)) {
@@ -343,6 +353,7 @@ class AstToHirLowerer {
                     lowered.value = std::move(forStmt);
                 } else if constexpr (std::is_same_v<T, AstForEachStmt>) {
                     HirForEachStmt forEach;
+                    forEach.label = value.label;
                     forEach.isConst = value.isConst;
                     forEach.name = value.name;
                     forEach.declaredType =

@@ -1,0 +1,5 @@
+outer: while (true) {
+    outer: while (false) {
+    }
+    break
+}

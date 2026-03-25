@@ -176,6 +176,14 @@ struct AstReturnStmt {
     AstExprPtr value;
 };
 
+struct AstBreakStmt {
+    std::optional<Token> label;
+};
+
+struct AstContinueStmt {
+    std::optional<Token> label;
+};
+
 struct AstIfStmt {
     AstExprPtr condition;
     AstStmtPtr thenBranch;
@@ -183,6 +191,7 @@ struct AstIfStmt {
 };
 
 struct AstWhileStmt {
+    std::optional<Token> label;
     AstExprPtr condition;
     AstStmtPtr body;
 };
@@ -210,6 +219,7 @@ struct AstDestructuredImportStmt {
 };
 
 struct AstForStmt {
+    std::optional<Token> label;
     std::variant<std::monostate, std::unique_ptr<AstVarDeclStmt>, AstExprPtr>
         initializer;
     AstExprPtr condition;
@@ -218,6 +228,7 @@ struct AstForStmt {
 };
 
 struct AstForEachStmt {
+    std::optional<Token> label;
     bool isConst = false;
     Token name;
     std::unique_ptr<AstTypeExpr> declaredType;
@@ -229,7 +240,7 @@ struct AstStmt {
     AstNodeInfo node;
     using Variant =
         std::variant<AstBlockStmt, AstExprStmt, AstPrintStmt, AstReturnStmt,
-                     AstIfStmt, AstWhileStmt, AstVarDeclStmt,
+                     AstBreakStmt, AstContinueStmt, AstIfStmt, AstWhileStmt, AstVarDeclStmt,
                      AstDestructuredImportStmt, AstForStmt, AstForEachStmt>;
 
     Variant value;
