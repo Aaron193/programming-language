@@ -256,6 +256,20 @@ bool testDiagnosticsAndSymbols() {
         return false;
     }
 
+    const std::string specialBuiltinSource =
+                "var keys Set<str> = Set()\n"
+        "var text str = str(42)\n"
+        "print(type(text))\n";
+    options.sourcePath = "tooling_special_builtin_regression.mog";
+    ToolingDocumentAnalysis specialBuiltinAnalysis =
+        analyzeDocumentForTooling(specialBuiltinSource, options);
+    if (!require(specialBuiltinAnalysis.status == AstFrontendBuildStatus::Success,
+                 "special builtin identifier sample should succeed for tooling") ||
+        !require(specialBuiltinAnalysis.diagnostics.empty(),
+                 "special builtin identifier sample should stay diagnostics-free")) {
+        return false;
+    }
+
     return true;
 }
 

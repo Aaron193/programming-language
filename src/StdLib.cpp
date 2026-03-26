@@ -22,6 +22,11 @@ const std::vector<NativeDescriptor>& makeDescriptors() {
          {TypeInfo::makeF64(), TypeInfo::makeF64()},
          TypeInfo::makeF64(),
          2},
+        {"Array", {}, TypeInfo::makeArray(TypeInfo::makeAny()), -1},
+        {"Dict",
+         {},
+         TypeInfo::makeDict(TypeInfo::makeAny(), TypeInfo::makeAny()),
+         0},
         {"Set", {}, TypeInfo::makeSet(TypeInfo::makeAny()), -1},
     };
 
@@ -35,7 +40,8 @@ const std::vector<NativeDescriptor>& standardLibraryNatives() {
 }
 
 bool isOrdinaryStandardLibraryFunctionName(std::string_view name) {
-    return name != "type" && name != "str" && name != "Set";
+    return name != "type" && name != "str" && name != "Array" &&
+           name != "Dict" && name != "Set";
 }
 
 void registerStandardLibraryTypeSignatures(

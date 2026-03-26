@@ -336,6 +336,8 @@ enum class BuiltinNativeKind : uint8_t {
     CEIL,
     POW,
     ERROR,
+    ARRAY,
+    DICT,
     SET,
 };
 
@@ -490,6 +492,10 @@ static const char* builtinKindName(BuiltinNativeKind kind) {
             return "pow";
         case BuiltinNativeKind::ERROR:
             return "error";
+        case BuiltinNativeKind::ARRAY:
+            return "Array";
+        case BuiltinNativeKind::DICT:
+            return "Dict";
         case BuiltinNativeKind::SET:
             return "Set";
         default:
@@ -515,6 +521,8 @@ static const void* builtinNativeTag(const std::string& name) {
     static constexpr BuiltinNativeKind kCeil = BuiltinNativeKind::CEIL;
     static constexpr BuiltinNativeKind kPow = BuiltinNativeKind::POW;
     static constexpr BuiltinNativeKind kError = BuiltinNativeKind::ERROR;
+    static constexpr BuiltinNativeKind kArray = BuiltinNativeKind::ARRAY;
+    static constexpr BuiltinNativeKind kDict = BuiltinNativeKind::DICT;
     static constexpr BuiltinNativeKind kSet = BuiltinNativeKind::SET;
 
     if (name == "clock") return &kClock;
@@ -532,6 +540,8 @@ static const void* builtinNativeTag(const std::string& name) {
     if (name == "ceil") return &kCeil;
     if (name == "pow") return &kPow;
     if (name == "error") return &kError;
+    if (name == "Array") return &kArray;
+    if (name == "Dict") return &kDict;
     if (name == "Set") return &kSet;
     return nullptr;
 }
@@ -1349,6 +1359,30 @@ Status invokeBuiltinNative(VirtualMachine& vm, const NativeFunctionObject& nativ
             }
 
             return vm.runtimeError(arg.asString());
+        }
+        case BuiltinNativeKind::ARRAY: {
+            auto array = vm.gcAlloc<ArrayObject>();
+            array->elements.reserve(argumentCount);
+            for (uint8_t i = 0; i < argumentCount; ++i) {
+                Value& arg = argAtRef(i);
+                if (array->elementType->isAny()) {
+                    array->elementType = inferRuntimeType(arg);
+                } else if (!valueMatchesType(arg, array->elementType)) {
+                    return vm.runtimeError("Native function 'Array' expects all "
+                                           "elements to have a consistent "
+                                           "type.");
+                }
+
+                array->elements.push_back(std::move(arg));
+            }
+
+            result = Value(array);
+            break;
+        }
+        case BuiltinNativeKind::DICT: {
+            auto dict = vm.gcAlloc<DictObject>();
+            result = Value(dict);
+            break;
         }
         case BuiltinNativeKind::SET: {
             auto set = vm.gcAlloc<SetObject>();

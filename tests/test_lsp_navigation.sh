@@ -258,6 +258,15 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
     undefined_path = Path(tmpdir) / "undefined_receiver_sample.mog"
     undefined_path.write_text(undefined_source, encoding="utf-8")
     undefined_uri = undefined_path.resolve().as_uri()
+    special_builtin_source = "\n".join([
+        "var keys Set<str> = Set()",
+        "var text str = str(42)",
+        "print(type(text))",
+        ""
+    ])
+    special_builtin_path = Path(tmpdir) / "special_builtin_sample.mog"
+    special_builtin_path.write_text(special_builtin_source, encoding="utf-8")
+    special_builtin_uri = special_builtin_path.resolve().as_uri()
 
     proc = subprocess.Popen(
         [lsp_bin],
@@ -563,6 +572,26 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         if published_undefined[1]["range"]["start"] != {"line": 2, "character": 4}:
             raise AssertionError(
                 f"second undefined identifier diagnostic should point at asdasdas: {published_undefined[1]}")
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": special_builtin_uri,
+                    "languageId": "mog",
+                    "version": 1,
+                    "text": special_builtin_source
+                }
+            }
+        })
+        special_builtin_diagnostics = read_until(
+            proc,
+            lambda msg: msg.get("method") == "textDocument/publishDiagnostics" and
+            msg.get("params", {}).get("uri") == special_builtin_uri,
+        )
+        if special_builtin_diagnostics["params"]["diagnostics"]:
+            raise AssertionError(
+                f"special builtin sample should stay diagnostics-free: {special_builtin_diagnostics['params']['diagnostics']}")
 
         send_message(proc, {
             "jsonrpc": "2.0",

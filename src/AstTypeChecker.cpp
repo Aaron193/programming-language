@@ -59,6 +59,10 @@ bool isBitwiseCompoundAssignment(TokenType type) {
 }
 
 bool isSpecialStandardLibraryIdentifier(std::string_view name) {
+    if (isCollectionTypeNameText(name)) {
+        return true;
+    }
+
     for (const auto& descriptor : standardLibraryNatives()) {
         if (descriptor.name == name &&
             !isOrdinaryStandardLibraryFunctionName(descriptor.name)) {

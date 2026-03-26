@@ -2218,6 +2218,23 @@ AstExprPtr AstParser::parsePrimary() {
 
     if (check(TokenType::IDENTIFIER) || check(TokenType::TYPE) ||
         isTypeToken(m_current.type())) {
+        size_t constructorTypeOffset = 0;
+        if (isTypedTypeAnnotationStart() &&
+            (constructorTypeOffset = 0,
+             parseTypeLookahead(constructorTypeOffset)) &&
+            tokenAt(constructorTypeOffset).type() == TokenType::OPEN_PAREN) {
+            Token nameToken = m_current;
+            std::unique_ptr<AstTypeExpr> constructorType = parseTypeExpr();
+            if (!constructorType) {
+                return nullptr;
+            }
+
+            auto expr = std::make_unique<AstExpr>();
+            expr->node = makeNodeInfo(constructorType->node.span);
+            expr->value = AstIdentifierExpr{nameToken};
+            return expr;
+        }
+
         Token nameToken = m_current;
         advance();
         auto expr = std::make_unique<AstExpr>();

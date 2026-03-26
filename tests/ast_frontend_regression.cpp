@@ -923,6 +923,37 @@ bool checkSpecialBuiltinIdentifiersRemainValid() {
     return true;
 }
 
+bool checkGenericCollectionConstructorParsing() {
+    constexpr std::string_view kSource =
+        "type Player struct {\n"
+        "    id usize\n"
+        "}\n"
+        "fn main() void {\n"
+        "    var players Dict<usize, Player> = Dict<usize, Player>()\n"
+        "    var keys Set<str> = Set<str>()\n"
+        "    print(players.size())\n"
+        "    print(keys.size())\n"
+        "}\n";
+
+    AstFrontendResult frontend;
+    std::vector<TypeError> errors;
+    const AstFrontendOptions options;
+    const AstFrontendBuildStatus status = buildAstFrontend(
+        kSource, options, errors, frontend);
+    if (!require(status == AstFrontendBuildStatus::Success,
+                 "generic collection constructor sample should parse and build")) {
+        return false;
+    }
+
+    if (!require(errors.empty(),
+                 "generic collection constructor sample should stay diagnostics-free")) {
+        return false;
+    }
+
+    std::cout << "[PASS] generic collection constructor parsing\n";
+    return true;
+}
+
 bool checkCallableDiagnosticSpans() {
     {
         constexpr std::string_view kSource =
@@ -1604,6 +1635,9 @@ int main() {
         return 1;
     }
     if (!checkSpecialBuiltinIdentifiersRemainValid()) {
+        return 1;
+    }
+    if (!checkGenericCollectionConstructorParsing()) {
         return 1;
     }
     if (!checkCallableDiagnosticSpans()) {

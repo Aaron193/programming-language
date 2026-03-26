@@ -1,0 +1,8 @@
+var values Array<i32> = Array<i32>()
+values.push(3)
+values.push(5)
+print(values.size())
+
+var players Dict<usize, str> = Dict<usize, str>()
+players.set(7usize, "Ada")
+print(players.get(7usize))
