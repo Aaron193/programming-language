@@ -376,6 +376,8 @@ void AstParser::reportScannerError(const Token& token) {
     std::string code = "lex.invalid_token";
     if (message == "Unterminated string.") {
         code = "lex.unterminated_string";
+    } else if (message == "Unterminated block comment.") {
+        code = "lex.unterminated_block_comment";
     } else if (message == "Invalid numeric literal suffix.") {
         code = "lex.invalid_numeric_suffix";
     }

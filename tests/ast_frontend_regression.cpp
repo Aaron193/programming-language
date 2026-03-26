@@ -770,6 +770,66 @@ bool checkLexerDiagnosticPropagation() {
     return true;
 }
 
+bool checkBlockCommentParsing() {
+    constexpr std::string_view kSource =
+        "/* top-level block comment */\n"
+        "const first i32 = /* inline block comment */ 1\n"
+        "fn answer() i32 {\n"
+        "    /* multiline block comment\n"
+        "       // line comment text inside block comment */\n"
+        "    return first\n"
+        "}\n"
+        "print(answer())\n";
+
+    AstFrontendResult frontend;
+    std::vector<TypeError> errors;
+    const AstFrontendOptions options;
+    const AstFrontendBuildStatus status = buildAstFrontend(
+        kSource, options, errors, frontend);
+    if (!require(status == AstFrontendBuildStatus::Success,
+                 "block comment sample should build successfully") ||
+        !require(errors.empty(),
+                 "block comment sample should not emit diagnostics") ||
+        !require(frontend.module.items.size() == 3,
+                 "block comment sample should preserve the non-comment items")) {
+        return false;
+    }
+
+    std::cout << "[PASS] block comment parsing\n";
+    return true;
+}
+
+bool checkUnterminatedBlockCommentDiagnostic() {
+    constexpr std::string_view kSource =
+        "const value i32 = 1\n"
+        "/* unterminated block comment\n";
+
+    AstParser parser(kSource);
+    AstModule module;
+    if (!require(!parser.parseModule(module),
+                 "unterminated block comment sample should fail to parse")) {
+        return false;
+    }
+
+    if (!require(!parser.errors().empty(),
+                 "unterminated block comment sample should report a lexer diagnostic")) {
+        return false;
+    }
+
+    const auto& error = parser.errors().front();
+    if (!require(error.code == "lex.unterminated_block_comment",
+                 "unterminated block comment sample should use the block comment diagnostic code") ||
+        !require(error.message == "Unterminated block comment.",
+                 "unterminated block comment sample should preserve the scanner message") ||
+        !require(error.line == 2 && error.column == 1,
+                 "unterminated block comment sample should point at the comment start")) {
+        return false;
+    }
+
+    std::cout << "[PASS] unterminated block comment diagnostic\n";
+    return true;
+}
+
 bool checkSemanticDiagnosticSpans() {
     constexpr std::string_view kSource = "    var age i32 = \"str\"\n";
 
@@ -1463,6 +1523,12 @@ int main() {
         return 1;
     }
     if (!checkLexerDiagnosticPropagation()) {
+        return 1;
+    }
+    if (!checkBlockCommentParsing()) {
+        return 1;
+    }
+    if (!checkUnterminatedBlockCommentDiagnostic()) {
         return 1;
     }
     if (!checkSemanticDiagnosticSpans()) {

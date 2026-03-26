@@ -3,6 +3,11 @@
   "name": "Mog",
   "patterns": [
     {
+      "name": "comment.block.mog",
+      "begin": "/\\*",
+      "end": "\\*/"
+    },
+    {
       "name": "comment.line.double-slash.mog",
       "match": "//.*$"
     },

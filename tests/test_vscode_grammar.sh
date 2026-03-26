@@ -16,7 +16,14 @@ const grammarPath = path.join(
   "syntaxes",
   "mog.tmLanguage.json"
 );
+const languageConfigPath = path.join(
+  projectRoot,
+  "tooling",
+  "vscode-mog",
+  "language-configuration.json"
+);
 const grammar = JSON.parse(fs.readFileSync(grammarPath, "utf8"));
+const languageConfig = JSON.parse(fs.readFileSync(languageConfigPath, "utf8"));
 
 function fail(message) {
   console.error(`[FAIL] ${message}`);
@@ -119,6 +126,21 @@ requireCondition(
 requireCondition(
   hasPattern("\\b(var|const)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b"),
   "grammar should color explicit variable declaration types"
+);
+
+const blockCommentPattern = grammar.patterns.find(
+  (pattern) => pattern.name === "comment.block.mog"
+);
+requireCondition(
+  blockCommentPattern !== undefined &&
+    blockCommentPattern.begin === "/\\*" &&
+    blockCommentPattern.end === "\\*/",
+  "grammar should include a block comment rule"
+);
+requireCondition(
+  languageConfig.comments?.blockComment?.[0] === "/*" &&
+    languageConfig.comments?.blockComment?.[1] === "*/",
+  "language configuration should advertise block comments"
 );
 
 const reproLine =

@@ -380,6 +380,39 @@ bool testLexerDiagnostics() {
     return true;
 }
 
+bool testUnterminatedBlockCommentDiagnostic() {
+    const std::string source =
+        "const value i32 = 1\n"
+        "/* unterminated block comment\n";
+
+    ToolingAnalyzeOptions options;
+    options.sourcePath = "tooling_unterminated_block_comment_regression.mog";
+    ToolingDocumentAnalysis analysis =
+        analyzeDocumentForTooling(source, options);
+    if (!require(analysis.status == AstFrontendBuildStatus::ParseFailed,
+                 "unterminated block comment sample should fail parsing")) {
+        return false;
+    }
+    if (!require(analysis.diagnostics.size() == 1,
+                 "unterminated block comment sample should emit one diagnostic")) {
+        return false;
+    }
+
+    const ToolingDiagnostic& diagnostic = analysis.diagnostics.front();
+    if (!require(diagnostic.code == "lex.unterminated_block_comment",
+                 "unterminated block comment sample should keep the block comment diagnostic code") ||
+        !require(diagnostic.message == "Unterminated block comment.",
+                 "unterminated block comment sample should keep the scanner message") ||
+        !require(diagnostic.range.start.line == 1 &&
+                     diagnostic.range.start.character == 0,
+                 "unterminated block comment sample should point at the comment start")) {
+        return false;
+    }
+
+    std::cout << "[PASS] unterminated block comment diagnostics\n";
+    return true;
+}
+
 bool testDefinitionLookup() {
     ToolingAnalyzeOptions options;
     options.sourcePath = "tooling_definition_regression.mog";
@@ -1712,6 +1745,9 @@ int main() {
     }
 
     if (!testLexerDiagnostics()) {
+        return 1;
+    }
+    if (!testUnterminatedBlockCommentDiagnostic()) {
         return 1;
     }
 

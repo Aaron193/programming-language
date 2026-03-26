@@ -26,7 +26,7 @@ char Scanner::peekNext() {
 
 bool Scanner::isEOF() { return *m_current == '\0'; }
 
-void Scanner::skipWhitespace() {
+bool Scanner::skipWhitespace(std::string& outError) {
     while (true) {
         char c = peek();
         if (c == ' ' || c == '\t' || c == '\v' || c == '\f' || c == '\r') {
@@ -37,10 +37,35 @@ void Scanner::skipWhitespace() {
             while (peek() != '\n' && !isEOF()) {
                 advance();
             }
+        } else if (c == '/' && peekNext() == '*') {
+            m_start = m_current;
+            m_tokenStartLine = m_line;
+            m_tokenStartColumn = m_column;
+            m_tokenStartOffset = m_offset;
+
+            advance();
+            advance();
+
+            while (true) {
+                if (isEOF()) {
+                    outError = "Unterminated block comment.";
+                    return false;
+                }
+
+                if (peek() == '*' && peekNext() == '/') {
+                    advance();
+                    advance();
+                    break;
+                }
+
+                advance();
+            }
         } else {
             break;
         }
     }
+
+    return true;
 }
 
 bool Scanner::match(char c) {
@@ -56,7 +81,11 @@ bool Scanner::isAlpha(char c) {
 }
 
 Token Scanner::nextToken() {
-    skipWhitespace();
+    std::string whitespaceError;
+    if (!skipWhitespace(whitespaceError)) {
+        return createErrorToken(whitespaceError);
+    }
+
     m_start = m_current;
     m_tokenStartLine = m_line;
     m_tokenStartColumn = m_column;

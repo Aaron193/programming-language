@@ -1,5 +1,6 @@
 #pragma once
 #include <cstddef>
+#include <string>
 #include <string_view>
 
 #include "./Token.hpp"
@@ -12,7 +13,7 @@ class Scanner {
     bool isDigit(char c);
     bool isAlpha(char c);
     bool isEOF();
-    void skipWhitespace();
+    bool skipWhitespace(std::string& outError);
     TokenType getIdentifier();
     bool matchKeyword(const char* keyword, size_t length);
     Token createToken(TokenType type);
