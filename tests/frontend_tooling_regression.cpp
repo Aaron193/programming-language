@@ -215,6 +215,47 @@ bool testDiagnosticsAndSymbols() {
         return false;
     }
 
+    const std::string undefinedSource =
+                "fn main() void {\n"
+        "    app.update(1)\n"
+        "    asdasdas.update(1)\n"
+        "}\n";
+    options.sourcePath = "tooling_undefined_identifier_regression.mog";
+    ToolingDocumentAnalysis undefinedAnalysis =
+        analyzeDocumentForTooling(undefinedSource, options);
+    if (!require(undefinedAnalysis.status == AstFrontendBuildStatus::SemanticError,
+                 "undefined identifier sample should return semantic error status") ||
+        !require(undefinedAnalysis.hasBindings,
+                 "undefined identifier sample should preserve bindings") ||
+        !require(undefinedAnalysis.diagnostics.size() == 2,
+                 "undefined identifier sample should expose two diagnostics")) {
+        return false;
+    }
+
+    if (!require(undefinedAnalysis.diagnostics[0].message ==
+                     "Type error: unknown identifier 'app'.",
+                 "first undefined identifier tooling diagnostic should preserve frontend text") ||
+        !require(undefinedAnalysis.diagnostics[0].range.start.line == 1 &&
+                     undefinedAnalysis.diagnostics[0].range.start.character == 4,
+                 "first undefined identifier tooling diagnostic should point at the receiver")) {
+        return false;
+    }
+
+    if (!require(undefinedAnalysis.diagnostics[1].message ==
+                     "Type error: unknown identifier 'asdasdas'.",
+                 "second undefined identifier tooling diagnostic should preserve frontend text") ||
+        !require(undefinedAnalysis.diagnostics[1].range.start.line == 2 &&
+                     undefinedAnalysis.diagnostics[1].range.start.character == 4,
+                 "second undefined identifier tooling diagnostic should point at the receiver")) {
+        return false;
+    }
+
+    if (!require(undefinedAnalysis.documentSymbols.size() == 1 &&
+                     undefinedAnalysis.documentSymbols[0].name == "main",
+                 "undefined identifier diagnostics should not hide document symbols")) {
+        return false;
+    }
+
     return true;
 }
 

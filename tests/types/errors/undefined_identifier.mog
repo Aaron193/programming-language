@@ -1,0 +1,5 @@
+fn main() void {
+    app.update(1)
+}
+
+main()

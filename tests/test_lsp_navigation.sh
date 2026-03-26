@@ -248,6 +248,16 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
     parse_fail_path = Path(tmpdir) / "parse_fail.mog"
     parse_fail_path.write_text(parse_fail_source, encoding="utf-8")
     parse_fail_uri = parse_fail_path.resolve().as_uri()
+    undefined_source = "\n".join([
+        "fn main() void {",
+        "    app.update(1)",
+        "    asdasdas.update(1)",
+        "}",
+        ""
+    ])
+    undefined_path = Path(tmpdir) / "undefined_receiver_sample.mog"
+    undefined_path.write_text(undefined_source, encoding="utf-8")
+    undefined_uri = undefined_path.resolve().as_uri()
 
     proc = subprocess.Popen(
         [lsp_bin],
@@ -520,6 +530,39 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         )
         if builtin_diagnostics["params"]["diagnostics"]:
             raise AssertionError("expected builtin sample to stay diagnostics-free")
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": undefined_uri,
+                    "languageId": "mog",
+                    "version": 1,
+                    "text": undefined_source
+                }
+            }
+        })
+        undefined_diagnostics = read_until(
+            proc,
+            lambda msg: msg.get("method") == "textDocument/publishDiagnostics" and
+            msg.get("params", {}).get("uri") == undefined_uri,
+        )
+        published_undefined = undefined_diagnostics["params"]["diagnostics"]
+        if len(published_undefined) != 2:
+            raise AssertionError(
+                f"expected two undefined identifier diagnostics, got {published_undefined}")
+        if published_undefined[0]["message"] != "Type error: unknown identifier 'app'.":
+            raise AssertionError(
+                f"unexpected first undefined identifier diagnostic: {published_undefined[0]}")
+        if published_undefined[0]["range"]["start"] != {"line": 1, "character": 4}:
+            raise AssertionError(
+                f"first undefined identifier diagnostic should point at app: {published_undefined[0]}")
+        if published_undefined[1]["message"] != "Type error: unknown identifier 'asdasdas'.":
+            raise AssertionError(
+                f"unexpected second undefined identifier diagnostic: {published_undefined[1]}")
+        if published_undefined[1]["range"]["start"] != {"line": 2, "character": 4}:
+            raise AssertionError(
+                f"second undefined identifier diagnostic should point at asdasdas: {published_undefined[1]}")
 
         send_message(proc, {
             "jsonrpc": "2.0",

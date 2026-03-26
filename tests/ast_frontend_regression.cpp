@@ -857,6 +857,72 @@ bool checkSemanticDiagnosticSpans() {
     return true;
 }
 
+bool checkUndefinedIdentifierDiagnostics() {
+    constexpr std::string_view kSource =
+        "fn main() void {\n"
+        "    app.update(1)\n"
+        "    asdasdas.update(1)\n"
+        "}\n";
+
+    AstFrontendResult frontend;
+    std::vector<TypeError> errors;
+    const AstFrontendOptions options;
+    const AstFrontendBuildStatus status = buildAstFrontend(
+        kSource, options, errors, frontend);
+    if (!require(status == AstFrontendBuildStatus::SemanticError,
+                 "undefined identifier sample should fail semantic analysis")) {
+        return false;
+    }
+
+    if (!require(errors.size() == 2,
+                 "undefined identifier sample should report one error per receiver")) {
+        return false;
+    }
+
+    if (!require(errors[0].message == "Type error: unknown identifier 'app'.",
+                 "first undefined identifier diagnostic should keep the identifier name") ||
+        !require(errors[0].line == 2 && errors[0].column == 5,
+                 "first undefined identifier diagnostic should point at the receiver")) {
+        return false;
+    }
+
+    if (!require(errors[1].message ==
+                     "Type error: unknown identifier 'asdasdas'.",
+                 "second undefined identifier diagnostic should keep the identifier name") ||
+        !require(errors[1].line == 3 && errors[1].column == 5,
+                 "second undefined identifier diagnostic should point at the receiver")) {
+        return false;
+    }
+
+    std::cout << "[PASS] undefined identifier diagnostics\n";
+    return true;
+}
+
+bool checkSpecialBuiltinIdentifiersRemainValid() {
+    constexpr std::string_view kSource =
+        "var set Set<i32> = Set(1, 2, 3)\n"
+        "print(type(123))\n"
+        "print(str(42))\n";
+
+    AstFrontendResult frontend;
+    std::vector<TypeError> errors;
+    const AstFrontendOptions options;
+    const AstFrontendBuildStatus status = buildAstFrontend(
+        kSource, options, errors, frontend);
+    if (!require(status == AstFrontendBuildStatus::Success,
+                 "special builtin identifier sample should remain valid")) {
+        return false;
+    }
+
+    if (!require(errors.empty(),
+                 "special builtin identifier sample should not emit diagnostics")) {
+        return false;
+    }
+
+    std::cout << "[PASS] special builtin identifiers\n";
+    return true;
+}
+
 bool checkCallableDiagnosticSpans() {
     {
         constexpr std::string_view kSource =
@@ -1532,6 +1598,12 @@ int main() {
         return 1;
     }
     if (!checkSemanticDiagnosticSpans()) {
+        return 1;
+    }
+    if (!checkUndefinedIdentifierDiagnostics()) {
+        return 1;
+    }
+    if (!checkSpecialBuiltinIdentifiersRemainValid()) {
         return 1;
     }
     if (!checkCallableDiagnosticSpans()) {

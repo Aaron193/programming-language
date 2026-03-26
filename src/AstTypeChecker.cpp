@@ -14,6 +14,7 @@
 #include "FrontendTypeUtils.hpp"
 #include "NativePackage.hpp"
 #include "NumericLiteral.hpp"
+#include "StdLib.hpp"
 #include "SyntaxRules.hpp"
 
 namespace {
@@ -55,6 +56,17 @@ bool isBitwiseCompoundAssignment(TokenType type) {
         default:
             return false;
     }
+}
+
+bool isSpecialStandardLibraryIdentifier(std::string_view name) {
+    for (const auto& descriptor : standardLibraryNatives()) {
+        if (descriptor.name == name &&
+            !isOrdinaryStandardLibraryFunctionName(descriptor.name)) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 class AstTypeCheckerImpl {
@@ -932,9 +944,16 @@ class AstTypeCheckerImpl {
                     if (!binding) {
                         const bool isClass =
                             m_classNames.find(name) != m_classNames.end();
+                        const bool isSpecialBuiltin =
+                            isSpecialStandardLibraryIdentifier(name);
+                        if (!isClass && !isSpecialBuiltin) {
+                            addError(value.name,
+                                     "Type error: unknown identifier '" + name +
+                                         "'.");
+                        }
                         TypeRef type =
                             isClass ? TypeInfo::makeClass(name) : TypeInfo::makeAny();
-                        result = ExprInfo{type, !isClass, isClass, name,
+                        result = ExprInfo{type, false, isClass, name,
                                           value.name.line(), false, false, 0};
                     } else if (binding->kind == AstBindingKind::Function &&
                                binding->declarationNodeId == 0) {

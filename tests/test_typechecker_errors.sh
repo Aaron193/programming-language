@@ -142,6 +142,11 @@ run_expect_compile_error \
     "cannot assign to const variable 'value'." || failed=1
 
 run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/undefined_identifier.mog" \
+    "unknown identifier 'app'" \
+    "2:5" || failed=1
+
+run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/lambda_missing_param_type.mog" \
     "expression-bodied lambdas require explicit parameter types." \
     "1:29" || failed=1
