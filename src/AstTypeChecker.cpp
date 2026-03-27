@@ -657,120 +657,21 @@ class AstTypeCheckerImpl {
             return TypeInfo::makeAny();
         }
 
-        if (receiverType->kind == TypeKind::ARRAY) {
-            TypeRef element = receiverType->elementType
-                                  ? receiverType->elementType
-                                  : TypeInfo::makeAny();
-            if (memberName == "push") {
-                return TypeInfo::makeFunction({element}, TypeInfo::makeI64());
-            }
-            if (memberName == "pop") {
-                return TypeInfo::makeFunction({}, element);
-            }
-            if (memberName == "size") {
-                return TypeInfo::makeFunction({}, TypeInfo::makeI64());
-            }
-            if (memberName == "has") {
-                return TypeInfo::makeFunction({element}, TypeInfo::makeBool());
-            }
-            if (memberName == "insert") {
-                return TypeInfo::makeFunction({TypeInfo::makeI64(), element},
-                                              element);
-            }
-            if (memberName == "remove") {
-                return TypeInfo::makeFunction({TypeInfo::makeI64()}, element);
-            }
-            if (memberName == "clear") {
-                return TypeInfo::makeFunction({}, TypeInfo::makeI64());
-            }
-            if (memberName == "isEmpty") {
-                return TypeInfo::makeFunction({}, TypeInfo::makeBool());
-            }
-            if (memberName == "first" || memberName == "last") {
-                return TypeInfo::makeFunction({}, element);
-            }
+        if (const auto memberType =
+                builtinCollectionMemberType(receiverType, memberName);
+            memberType.has_value()) {
+            return *memberType;
+        }
 
+        if (receiverType->kind == TypeKind::ARRAY) {
             addError(span,
                      "Type error: array has no member '" + memberName + "'.");
-            return TypeInfo::makeAny();
-        }
-
-        if (receiverType->kind == TypeKind::DICT) {
-            TypeRef key = receiverType->keyType ? receiverType->keyType
-                                                : TypeInfo::makeAny();
-            TypeRef value = receiverType->valueType ? receiverType->valueType
-                                                    : TypeInfo::makeAny();
-            if (memberName == "get") {
-                return TypeInfo::makeFunction({key}, value);
-            }
-            if (memberName == "set") {
-                return TypeInfo::makeFunction({key, value}, value);
-            }
-            if (memberName == "has") {
-                return TypeInfo::makeFunction({key}, TypeInfo::makeBool());
-            }
-            if (memberName == "keys") {
-                return TypeInfo::makeFunction({}, TypeInfo::makeArray(key));
-            }
-            if (memberName == "values") {
-                return TypeInfo::makeFunction({}, TypeInfo::makeArray(value));
-            }
-            if (memberName == "size") {
-                return TypeInfo::makeFunction({}, TypeInfo::makeI64());
-            }
-            if (memberName == "remove") {
-                return TypeInfo::makeFunction({key}, value);
-            }
-            if (memberName == "clear") {
-                return TypeInfo::makeFunction({}, TypeInfo::makeI64());
-            }
-            if (memberName == "isEmpty") {
-                return TypeInfo::makeFunction({}, TypeInfo::makeBool());
-            }
-            if (memberName == "getOr") {
-                return TypeInfo::makeFunction({key, value}, value);
-            }
-
+        } else if (receiverType->kind == TypeKind::DICT) {
             addError(span,
                      "Type error: dict has no member '" + memberName + "'.");
-            return TypeInfo::makeAny();
-        }
-
-        if (receiverType->kind == TypeKind::SET) {
-            TypeRef element = receiverType->elementType
-                                  ? receiverType->elementType
-                                  : TypeInfo::makeAny();
-            TypeRef setType = TypeInfo::makeSet(element);
-
-            if (memberName == "add") {
-                return TypeInfo::makeFunction({element}, TypeInfo::makeBool());
-            }
-            if (memberName == "has") {
-                return TypeInfo::makeFunction({element}, TypeInfo::makeBool());
-            }
-            if (memberName == "remove") {
-                return TypeInfo::makeFunction({element}, TypeInfo::makeBool());
-            }
-            if (memberName == "size") {
-                return TypeInfo::makeFunction({}, TypeInfo::makeI64());
-            }
-            if (memberName == "toArray") {
-                return TypeInfo::makeFunction({}, TypeInfo::makeArray(element));
-            }
-            if (memberName == "clear") {
-                return TypeInfo::makeFunction({}, TypeInfo::makeI64());
-            }
-            if (memberName == "isEmpty") {
-                return TypeInfo::makeFunction({}, TypeInfo::makeBool());
-            }
-            if (memberName == "union" || memberName == "intersect" ||
-                memberName == "difference") {
-                return TypeInfo::makeFunction({setType}, setType);
-            }
-
+        } else if (receiverType->kind == TypeKind::SET) {
             addError(span,
                      "Type error: set has no member '" + memberName + "'.");
-            return TypeInfo::makeAny();
         }
 
         return TypeInfo::makeAny();

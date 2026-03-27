@@ -1081,7 +1081,10 @@ std::optional<ToolingDocumentAnalysis> analyzeSourceModuleForTooling(
 }
 
 struct MemberAccessResolution {
-    DeclarationSite declaration;
+    std::optional<DeclarationSite> declaration;
+    std::string name;
+    std::string kind;
+    TypeRef type;
     SourceSpan occurrenceSpan;
 };
 
@@ -1330,6 +1333,11 @@ std::string builtinFunctionHoverDetail(std::string_view name,
     return hoverRoleDetail("function", callablePresentationFromType(name, type).label);
 }
 
+std::string builtinCollectionMethodHoverDetail(std::string_view name,
+                                               const TypeRef& type) {
+    return hoverRoleDetail("method", callablePresentationFromType(name, type).label);
+}
+
 ToolingSignatureInformation builtinFunctionSignatureInformation(
     std::string_view name, const TypeRef& type) {
     const auto presentation = callablePresentationFromType(name, type);
@@ -1518,6 +1526,17 @@ ToolingCompletionItem completionItemForMethodMetadata(std::string_view name,
                                  "method",
                                  callablePresentationFromType(name, type).label,
                                  completionSortText(0, std::string(name))};
+}
+
+std::vector<ToolingCompletionItem> builtinCollectionMemberCompletionItemsForTooling(
+    const TypeRef& receiverType) {
+    const auto members = builtinCollectionMembers(receiverType);
+    std::vector<ToolingCompletionItem> items;
+    items.reserve(members.size());
+    for (const auto& [name, type] : members) {
+        items.push_back(completionItemForMethodMetadata(name, type));
+    }
+    return items;
 }
 
 ToolingCompletionItem completionItemForBuiltinFunction(std::string_view name,
@@ -3944,18 +3963,40 @@ std::optional<MemberAccessResolution> resolveMemberAccessForTooling(
     const auto objectTypeIt = analysis.frontend.semanticModel.nodeTypes.find(
         target->memberExpr->object->node.id);
     if (objectTypeIt == analysis.frontend.semanticModel.nodeTypes.end() ||
-        !objectTypeIt->second || objectTypeIt->second->kind != TypeKind::CLASS) {
+        !objectTypeIt->second) {
         return std::nullopt;
     }
 
-    const auto declaration = findClassMemberDeclarationSite(
-        analysis, objectTypeIt->second->className,
-        tokenText(target->memberExpr->member));
-    if (!declaration.has_value()) {
+    const std::string memberName = tokenText(target->memberExpr->member);
+    if (objectTypeIt->second->kind == TypeKind::CLASS) {
+        const auto declaration = findClassMemberDeclarationSite(
+            analysis, objectTypeIt->second->className, memberName);
+        if (!declaration.has_value()) {
+            return std::nullopt;
+        }
+
+        const auto declarationType =
+            declarationTypeForTooling(analysis, *declaration);
+        return MemberAccessResolution{declaration,
+                                      declaration->name,
+                                      declaration->kind,
+                                      declarationType.has_value()
+                                          ? *declarationType
+                                          : nullptr,
+                                      target->memberExpr->member.span()};
+    }
+
+    const auto memberType =
+        builtinCollectionMemberType(objectTypeIt->second, memberName);
+    if (!memberType.has_value()) {
         return std::nullopt;
     }
 
-    return MemberAccessResolution{*declaration, target->memberExpr->member.span()};
+    return MemberAccessResolution{std::nullopt,
+                                  memberName,
+                                  "method",
+                                  *memberType,
+                                  target->memberExpr->member.span()};
 }
 
 const AstImportedModuleInterface* resolveImportedModuleForExpr(
@@ -4017,12 +4058,16 @@ std::optional<std::vector<ToolingCompletionItem>> findMemberCompletionsForToolin
     const auto objectTypeIt = analysis.frontend.semanticModel.nodeTypes.find(
         target->memberExpr->object->node.id);
     if (objectTypeIt == analysis.frontend.semanticModel.nodeTypes.end() ||
-        !objectTypeIt->second || objectTypeIt->second->kind != TypeKind::CLASS) {
+        !objectTypeIt->second) {
         return std::vector<ToolingCompletionItem>{};
     }
 
-    return classMemberCompletionItemsForTooling(analysis,
-                                                objectTypeIt->second->className);
+    if (objectTypeIt->second->kind == TypeKind::CLASS) {
+        return classMemberCompletionItemsForTooling(
+            analysis, objectTypeIt->second->className);
+    }
+
+    return builtinCollectionMemberCompletionItemsForTooling(objectTypeIt->second);
 }
 
 const AstExpr* findDefinitionTargetExpr(const AstExpr& expr,
@@ -4985,18 +5030,26 @@ class SemanticTokenCollector {
         const auto objectTypeIt = m_analysis.frontend.semanticModel.nodeTypes.find(
             memberExpr.object->node.id);
         if (objectTypeIt == m_analysis.frontend.semanticModel.nodeTypes.end() ||
-            !objectTypeIt->second ||
-            objectTypeIt->second->kind != TypeKind::CLASS) {
+            !objectTypeIt->second) {
             return std::nullopt;
         }
 
-        const auto declaration = findClassMemberDeclarationSite(
-            m_analysis, objectTypeIt->second->className,
-            tokenText(memberExpr.member));
-        if (!declaration.has_value()) {
-            return std::nullopt;
+        if (objectTypeIt->second->kind == TypeKind::CLASS) {
+            const auto declaration = findClassMemberDeclarationSite(
+                m_analysis, objectTypeIt->second->className,
+                tokenText(memberExpr.member));
+            if (!declaration.has_value()) {
+                return std::nullopt;
+            }
+            return semanticInfoForDeclaration(*declaration);
         }
-        return semanticInfoForDeclaration(*declaration);
+
+        if (builtinCollectionMemberType(objectTypeIt->second,
+                                        tokenText(memberExpr.member))
+                .has_value()) {
+            return SemanticTokenInfo{"method", false};
+        }
+        return std::nullopt;
     }
 
     void collectTypeExpr(const AstTypeExpr& typeExpr) {
@@ -5369,11 +5422,11 @@ ToolingDocumentAnalysis analyzeDocumentForTooling(
 std::optional<ToolingLocation> findDefinitionForTooling(
     const ToolingDocumentAnalysis& analysis, const ToolingPosition& position) {
     const auto memberAccess = resolveMemberAccessForTooling(analysis, position);
-    if (memberAccess.has_value()) {
+    if (memberAccess.has_value() && memberAccess->declaration.has_value()) {
         return ToolingLocation{
             analysis.sourcePath,
-            toolingRangeFromSourceSpan(memberAccess->declaration.range),
-            toolingRangeFromSourceSpan(memberAccess->declaration.selectionRange),
+            toolingRangeFromSourceSpan(memberAccess->declaration->range),
+            toolingRangeFromSourceSpan(memberAccess->declaration->selectionRange),
         };
     }
 
@@ -5618,11 +5671,16 @@ std::optional<ToolingHover> findHoverForTooling(
     const ToolingDocumentAnalysis& analysis, const ToolingPosition& position) {
     const auto memberAccess = resolveMemberAccessForTooling(analysis, position);
     if (memberAccess.has_value()) {
+        const std::string detail =
+            memberAccess->declaration.has_value()
+                ? hoverDetailForDeclaration(analysis, *memberAccess->declaration)
+                : builtinCollectionMethodHoverDetail(memberAccess->name,
+                                                     memberAccess->type);
         return ToolingHover{
             toolingRangeFromSourceSpan(memberAccess->occurrenceSpan),
-            memberAccess->declaration.name,
-            memberAccess->declaration.kind,
-            hoverDetailForDeclaration(analysis, memberAccess->declaration),
+            memberAccess->name,
+            memberAccess->kind,
+            detail,
         };
     }
 
@@ -6300,16 +6358,23 @@ std::optional<ToolingSignatureInformation> signatureInformationForCallable(
         const auto objectTypeIt = analysis.frontend.semanticModel.nodeTypes.find(
             member->object->node.id);
         if (objectTypeIt != analysis.frontend.semanticModel.nodeTypes.end() &&
-            objectTypeIt->second && objectTypeIt->second->kind == TypeKind::CLASS) {
-            const auto declaration = findClassMemberDeclarationSite(
-                analysis, objectTypeIt->second->className,
-                tokenText(member->member));
-            if (declaration.has_value()) {
-                if (const auto info = signatureInformationForDeclaration(
-                        analysis, *declaration, tokenText(member->member));
-                    info.has_value()) {
-                    return info;
+            objectTypeIt->second) {
+            if (objectTypeIt->second->kind == TypeKind::CLASS) {
+                const auto declaration = findClassMemberDeclarationSite(
+                    analysis, objectTypeIt->second->className,
+                    tokenText(member->member));
+                if (declaration.has_value()) {
+                    if (const auto info = signatureInformationForDeclaration(
+                            analysis, *declaration, tokenText(member->member));
+                        info.has_value()) {
+                        return info;
+                    }
                 }
+            } else if (const auto memberType = builtinCollectionMemberType(
+                           objectTypeIt->second, tokenText(member->member));
+                       memberType.has_value()) {
+                return signatureInformationForCallableType(
+                    tokenText(member->member), *memberType);
             }
         }
     }

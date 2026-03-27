@@ -5,3 +5,64 @@
 Intellisense:
     - intellisense type hints across files does not work correctly
     - intellisense does not flag a semicolon at end of line... putting semicolon will actual stop other syntax errors on LSP
+
+
+Array Methods:
+    fn push(value T) void
+    fn pop() T
+    fn size() usize
+    fn isEmpty() bool
+    fn clear() void
+    fn reserve(capacity usize) void
+    fn contains(value T) bool
+    fn indexOf(value T) Option<usize>
+    fn removeAt(index usize) T
+    fn swapRemove(index usize) T
+    fn insert(index usize, value T) void
+    fn last() Option<T>
+    fn first() Option<T>
+    fn get(index usize) Option<T>
+    fn set(index usize, value T) void
+
+Set Methods:
+    fn add(value T) bool         // true if newly inserted
+    fn remove(value T) bool
+    fn has(value T) bool
+    fn size() usize
+    fn isEmpty() bool
+    fn clear() void
+
+Dict Methods:
+    fn set(key K, value V) void
+    fn get(key K) Option<V>
+    fn getOr(key K, fallback V) V
+    fn has(key K) bool
+    fn remove(key K) bool
+    fn size() usize
+    fn isEmpty() bool
+    fn clear() void
+    fn keys() KeyView<K>
+    fn values() ValueView<V>
+    fn entries() EntryView<K, V>
+
+Possible: 
+    const player Option<Player> = this.game.players.get(id)
+    if (player.isSome()) {
+        const p Player = player.unwrap()
+    }
+
+
+Loops:
+for (x : container) should iterate the most natural element type of that container
+    Array<T> yields T
+    Set<T> yields T
+    Dict<K, V> should not yield just K by default unless you are very sure
+
+for (entry : dict) yields DictEntry<K, V>
+for (key : dict.keys()) yields K
+for (value : dict.values()) yields V
+
+or possibly:
+for (const (id, player) : this.players) {
+    print(player.name)
+}

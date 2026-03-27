@@ -161,6 +161,21 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
     member_path = Path(tmpdir) / "member_sample.mog"
     member_path.write_text(member_source, encoding="utf-8")
     member_uri = member_path.resolve().as_uri()
+    collection_source = "\n".join([
+        "var arr Array<i32> = Array<i32>()",
+        "arr.push(1)",
+        "var dict Dict<str, i32> = Dict<str, i32>()",
+        "dict.set(\"a\", 1)",
+        "var set Set<str> = Set<str>()",
+        "set.add(\"x\")",
+        "print(arr.push(2))",
+        "print(dict.keys())",
+        "print(set.union(set))",
+        ""
+    ])
+    collection_path = Path(tmpdir) / "collection_sample.mog"
+    collection_path.write_text(collection_source, encoding="utf-8")
+    collection_uri = collection_path.resolve().as_uri()
     imported_state_source = "\n".join([
         "type GameState struct {",
         "    birdY f64",
@@ -431,6 +446,25 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         )
         if member_diagnostics["params"]["diagnostics"]:
             raise AssertionError("expected member sample to stay diagnostics-free")
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": collection_uri,
+                    "languageId": "mog",
+                    "version": 1,
+                    "text": collection_source
+                }
+            }
+        })
+        collection_diagnostics = read_until(
+            proc,
+            lambda msg: msg.get("method") == "textDocument/publishDiagnostics" and
+            msg.get("params", {}).get("uri") == collection_uri,
+        )
+        if collection_diagnostics["params"]["diagnostics"]:
+            raise AssertionError("expected collection sample to stay diagnostics-free")
         send_message(proc, {
             "jsonrpc": "2.0",
             "method": "textDocument/didOpen",
@@ -911,6 +945,117 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
 
         send_message(proc, {
             "jsonrpc": "2.0",
+            "id": 7.31,
+            "method": "textDocument/completion",
+            "params": {
+                "textDocument": {
+                    "uri": collection_uri
+                },
+                "position": {
+                    "line": 6,
+                    "character": 10
+                }
+            }
+        })
+        array_completion = read_until(proc, lambda msg: msg.get("id") == 7.31)
+        array_labels = [item["label"] for item in array_completion["result"]]
+        for label in ["clear", "first", "has", "insert", "isEmpty",
+                      "last", "pop", "push", "remove", "size"]:
+            if label not in array_labels:
+                raise AssertionError(f"expected array completion item {label}: {array_completion['result']}")
+        if "arr" in array_labels or "dict" in array_labels:
+            raise AssertionError(f"array member completion should exclude scope items: {array_completion['result']}")
+        array_push_item = next(item for item in array_completion["result"] if item["label"] == "push")
+        if array_push_item.get("detail") != "fn push(i32) i64":
+            raise AssertionError(f"unexpected array push completion detail: {array_push_item}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 7.32,
+            "method": "textDocument/completion",
+            "params": {
+                "textDocument": {
+                    "uri": collection_uri
+                },
+                "position": {
+                    "line": 7,
+                    "character": 11
+                }
+            }
+        })
+        dict_completion = read_until(proc, lambda msg: msg.get("id") == 7.32)
+        dict_labels = [item["label"] for item in dict_completion["result"]]
+        for label in ["clear", "get", "getOr", "has", "isEmpty",
+                      "keys", "remove", "set", "size", "values"]:
+            if label not in dict_labels:
+                raise AssertionError(f"expected dict completion item {label}: {dict_completion['result']}")
+        dict_keys_item = next(item for item in dict_completion["result"] if item["label"] == "keys")
+        if dict_keys_item.get("detail") != "fn keys() Array<str>":
+            raise AssertionError(f"unexpected dict keys completion detail: {dict_keys_item}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 7.33,
+            "method": "textDocument/completion",
+            "params": {
+                "textDocument": {
+                    "uri": collection_uri
+                },
+                "position": {
+                    "line": 8,
+                    "character": 10
+                }
+            }
+        })
+        set_completion = read_until(proc, lambda msg: msg.get("id") == 7.33)
+        set_labels = [item["label"] for item in set_completion["result"]]
+        for label in ["add", "clear", "difference", "has", "intersect",
+                      "isEmpty", "remove", "size", "toArray", "union"]:
+            if label not in set_labels:
+                raise AssertionError(f"expected set completion item {label}: {set_completion['result']}")
+        set_union_item = next(item for item in set_completion["result"] if item["label"] == "union")
+        if set_union_item.get("detail") != "fn union(Set<str>) Set<str>":
+            raise AssertionError(f"unexpected set union completion detail: {set_union_item}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 7.34,
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": "file://" + os.path.abspath("tests/lsp_collection_incomplete.mog"),
+                    "languageId": "mog",
+                    "version": 1,
+                    "text": collection_source.replace("print(arr.push(2))", "arr.")
+                }
+            }
+        })
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 7.35,
+            "method": "textDocument/completion",
+            "params": {
+                "textDocument": {
+                    "uri": "file://" + os.path.abspath("tests/lsp_collection_incomplete.mog")
+                },
+                "position": {
+                    "line": 6,
+                    "character": 4
+                }
+            }
+        })
+        incomplete_collection_completion = read_until(proc, lambda msg: msg.get("id") == 7.35)
+        incomplete_collection_labels = [item["label"] for item in incomplete_collection_completion["result"]]
+        for label in ["clear", "pop", "push", "size"]:
+            if label not in incomplete_collection_labels:
+                raise AssertionError(
+                    f"expected incomplete collection completion item {label}: {incomplete_collection_completion['result']}")
+        if "arr" in incomplete_collection_labels or "print" in incomplete_collection_labels:
+            raise AssertionError(
+                f"incomplete collection completion should exclude scope items: {incomplete_collection_completion['result']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
             "method": "textDocument/didOpen",
             "params": {
                 "textDocument": {
@@ -1030,6 +1175,25 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         member_hover_value = member_hover["result"]["contents"]["value"]
         if member_hover_value != "```mog\n(property) value i32\n```":
             raise AssertionError(f"unexpected member hover payload: {member_hover['result']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 8.1,
+            "method": "textDocument/hover",
+            "params": {
+                "textDocument": {
+                    "uri": collection_uri
+                },
+                "position": {
+                    "line": 7,
+                    "character": 12
+                }
+            }
+        })
+        collection_hover = read_until(proc, lambda msg: msg.get("id") == 8.1)
+        collection_hover_value = collection_hover["result"]["contents"]["value"]
+        if collection_hover_value != "```mog\n(method) fn keys() Array<str>\n```":
+            raise AssertionError(f"unexpected collection hover payload: {collection_hover['result']}")
 
         send_message(proc, {
             "jsonrpc": "2.0",
@@ -1299,6 +1463,29 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
             raise AssertionError(f"unexpected builtin signature help payload: {builtin_signature_help['result']}")
         if builtin_signature_help["result"]["signatures"][0]["label"] != "fn sqrt(f64) f64":
             raise AssertionError(f"unexpected builtin signature label: {builtin_signature_help['result']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 11.57,
+            "method": "textDocument/signatureHelp",
+            "params": {
+                "textDocument": {
+                    "uri": collection_uri
+                },
+                "position": {
+                    "line": 8,
+                    "character": 19
+                }
+            }
+        })
+        collection_signature_help = read_until(proc, lambda msg: msg.get("id") == 11.57)
+        if collection_signature_help["result"]["activeParameter"] != 0:
+            raise AssertionError(
+                f"unexpected collection signature help payload: {collection_signature_help['result']}")
+        if collection_signature_help["result"]["signatures"][0]["label"] != \
+                "fn union(Set<str>) Set<str>":
+            raise AssertionError(
+                f"unexpected collection signature label: {collection_signature_help['result']}")
 
         send_message(proc, {
             "jsonrpc": "2.0",

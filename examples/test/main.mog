@@ -26,7 +26,6 @@ type Player struct {
     }
 }
 
-
 type Connection struct {
     id usize
 }
@@ -72,19 +71,9 @@ type SocketServer struct {
     }
 }
 
-
 type Game struct {
     players Dict<usize, Player>
-/* ERROR HERE ^ 
-    dev@programming-language$ ./build/interpreter examples/test/main.mog
-    [error][runtime][line 86] Undefined variable 'Dict'.
-    [trace][runtime] stack:
-    at init() [line 86]
-    at main() [line 115]
-    at <script>() [line 129]
-    Runtime error in source file: examples/test/main.mog    
-*/
-    
+
     fn init() void {
         this.players = Dict<usize, Player>()
 
@@ -112,20 +101,20 @@ type Game struct {
     }
 }
 
-
 fn main() void {
     const game Game = Game()
     game.init()
 
     var then f64 = clock()
 
-    while (true) {
-        const now f64 = clock()
-        const dt f64 = now - then
-        then = now
+    // while (true) {
 
-        game.update(dt)
-    }
+    //     const now f64 = clock()
+    //     const dt f64 = now - then
+    //     then = now
+
+    //     game.update(dt)
+    // }
 
 }
 

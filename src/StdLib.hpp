@@ -1,8 +1,10 @@
 #pragma once
 
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "TypeInfo.hpp"
@@ -21,3 +23,8 @@ void registerStandardLibraryTypeSignatures(
     std::unordered_map<std::string, TypeRef>& signatures);
 void registerOrdinaryStandardLibraryTypeSignatures(
     std::unordered_map<std::string, TypeRef>& signatures);
+
+std::optional<TypeRef> builtinCollectionMemberType(
+    const TypeRef& receiverType, std::string_view memberName);
+std::vector<std::pair<std::string, TypeRef>> builtinCollectionMembers(
+    const TypeRef& receiverType);
