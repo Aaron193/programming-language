@@ -634,7 +634,7 @@ bool testReferencesAndHover() {
         return false;
     }
 
-    if (!require(hover->kind == "constant" &&
+    if (!require(hover->kind == "constant" && hover->role.empty() &&
                      hover->detail == "const Value i32",
                  "hover should include kind and formatted type detail")) {
         return false;
@@ -654,7 +654,7 @@ bool testReferencesAndHover() {
         return false;
     }
 
-    if (!require(importHover->kind == "import" &&
+    if (!require(importHover->kind == "import" && importHover->role.empty() &&
                      importHover->detail == "const Answer i32",
                  "import hover should preserve imported type information")) {
         return false;
@@ -668,7 +668,8 @@ bool testReferencesAndHover() {
     }
 
     if (!require(importedFunctionHover->kind == "import" &&
-                     importedFunctionHover->detail == "(function) fn Get() i32",
+                     importedFunctionHover->role == "function" &&
+                     importedFunctionHover->detail == "fn Get() i32",
                  "imported source functions should preserve Mog declaration syntax")) {
         return false;
     }
@@ -690,7 +691,8 @@ bool testReferencesAndHover() {
     }
 
     if (!require(memberHover->kind == "field" &&
-                     memberHover->detail == "(property) value i32",
+                     memberHover->role == "property" &&
+                     memberHover->detail == "value i32",
                  "member hover should preserve field kind and type detail")) {
         return false;
     }
@@ -710,8 +712,9 @@ bool testReferencesAndHover() {
     }
 
     if (!require(parameterHover->kind == "parameter" &&
-                     parameterHover->detail == "(parameter) dt f64",
-                 "parameter hover should include a parenthesized role label")) {
+                     parameterHover->role == "parameter" &&
+                     parameterHover->detail == "dt f64",
+                 "parameter hover should preserve its role and raw type detail")) {
         return false;
     }
 
@@ -729,8 +732,85 @@ bool testReferencesAndHover() {
     }
 
     if (!require(builtinHover->kind == "function" &&
-                     builtinHover->detail == "(function) fn sqrt(f64) f64",
+                     builtinHover->role == "function" &&
+                     builtinHover->detail == "fn sqrt(f64) f64",
                  "builtin stdlib hover should preserve callable type detail")) {
+        return false;
+    }
+
+    const std::string collectionBuiltinSource =
+                "fn main() void {\n"
+        "    var values Array<i32> = Array<i32>()\n"
+        "    var players Dict<usize, i32> = Dict<usize, i32>()\n"
+        "    var keys Set<str> = Set<str>()\n"
+        "}\n";
+    options.sourcePath = "tooling_collection_builtin_hover_regression.mog";
+    ToolingDocumentAnalysis collectionBuiltinAnalysis =
+        analyzeDocumentForTooling(collectionBuiltinSource, options);
+    if (!require(collectionBuiltinAnalysis.status == AstFrontendBuildStatus::Success,
+                 "collection builtin hover sample should succeed")) {
+        return false;
+    }
+
+    const auto arrayBuiltinHover =
+        findHoverForTooling(collectionBuiltinAnalysis, ToolingPosition{1, 16});
+    if (!require(arrayBuiltinHover.has_value() &&
+                     arrayBuiltinHover->kind == "function" &&
+                     arrayBuiltinHover->role == "function" &&
+                     arrayBuiltinHover->detail == "fn Array() Array<any>",
+                 "Array should expose builtin hover information in type positions")) {
+        return false;
+    }
+
+    const auto dictBuiltinHover =
+        findHoverForTooling(collectionBuiltinAnalysis, ToolingPosition{2, 17});
+    if (!require(dictBuiltinHover.has_value() &&
+                     dictBuiltinHover->kind == "function" &&
+                     dictBuiltinHover->role == "function" &&
+                     dictBuiltinHover->detail == "fn Dict() Dict<any, any>",
+                 "Dict should expose builtin hover information in type positions")) {
+        return false;
+    }
+
+    const auto setBuiltinHover =
+        findHoverForTooling(collectionBuiltinAnalysis, ToolingPosition{3, 14});
+    if (!require(setBuiltinHover.has_value() &&
+                     setBuiltinHover->kind == "function" &&
+                     setBuiltinHover->role == "function" &&
+                     setBuiltinHover->detail == "fn Set() Set<any>",
+                 "Set should expose builtin hover information in type positions")) {
+        return false;
+    }
+
+    const std::string constructorTypeSource =
+                "type Player struct {}\n"
+        "fn main() void {\n"
+        "    var players Dict<usize, Player> = Dict<usize, Player>()\n"
+        "}\n";
+    options.sourcePath = "tooling_constructor_type_hover_regression.mog";
+    ToolingDocumentAnalysis constructorTypeAnalysis =
+        analyzeDocumentForTooling(constructorTypeSource, options);
+    if (!require(constructorTypeAnalysis.status == AstFrontendBuildStatus::Success,
+                 "constructor generic type hover sample should succeed")) {
+        return false;
+    }
+
+    const auto constructorTypeHover =
+        findHoverForTooling(constructorTypeAnalysis, ToolingPosition{2, 52});
+    if (!require(constructorTypeHover.has_value() &&
+                     constructorTypeHover->kind == "class" &&
+                     constructorTypeHover->role.empty() &&
+                     constructorTypeHover->detail == "type Player struct",
+                 "generic constructor type arguments should expose the same hover as declaration types")) {
+        return false;
+    }
+
+    const auto constructorTypeDefinition =
+        findDefinitionForTooling(constructorTypeAnalysis, ToolingPosition{2, 52});
+    if (!require(constructorTypeDefinition.has_value() &&
+                     constructorTypeDefinition->selectionRange.start.line == 0 &&
+                     constructorTypeDefinition->selectionRange.start.character == 5,
+                 "generic constructor type arguments should resolve to the type declaration")) {
         return false;
     }
 
@@ -837,7 +917,7 @@ bool testSemanticTokens() {
     const std::string genericSource =
                 "type Pipe struct {}\n"
         "fn reset() void {\n"
-        "    var pipes Array<Pipe> = []\n"
+        "    var pipes Array<Pipe> = Array<Pipe>()\n"
         "}\n";
     options.sourcePath = "tooling_semantic_tokens_generics_regression.mog";
     ToolingDocumentAnalysis genericAnalysis =
@@ -858,6 +938,38 @@ bool testSemanticTokens() {
                          genericPipeRef->range.start.character ==
                      4,
                  "generic type semantic tokens should not extend past the type name")) {
+        return false;
+    }
+
+    const auto* constructorPipeRef =
+        findSemanticToken(genericTokens, 2, 34, "type");
+    if (!require(constructorPipeRef != nullptr,
+                 "generic constructor type arguments should emit type semantic tokens")) {
+        return false;
+    }
+
+    const std::string ordinaryCallSource =
+                "fn sqrtValue() i32 {\n"
+        "    return 1\n"
+        "}\n"
+        "fn main() void {\n"
+        "    sqrtValue()\n"
+        "}\n";
+    options.sourcePath = "tooling_semantic_tokens_ordinary_call_regression.mog";
+    ToolingDocumentAnalysis ordinaryCallAnalysis =
+        analyzeDocumentForTooling(ordinaryCallSource, options);
+    if (!require(ordinaryCallAnalysis.status == AstFrontendBuildStatus::Success,
+                 "ordinary call semantic token sample should succeed")) {
+        return false;
+    }
+
+    const auto ordinaryCallTokens = findSemanticTokensForTooling(ordinaryCallAnalysis);
+    if (!require(findSemanticToken(ordinaryCallTokens, 4, 4, "function") != nullptr,
+                 "ordinary call identifiers should keep function semantic tokens")) {
+        return false;
+    }
+    if (!require(findSemanticToken(ordinaryCallTokens, 4, 4, "type") == nullptr,
+                 "ordinary call identifiers should not also emit type semantic tokens")) {
         return false;
     }
 
@@ -1418,6 +1530,36 @@ bool testCompletions() {
     if (!require(findCompletion(normalCompletions, "LocalAlias") == nullptr &&
                      findCompletion(normalCompletions, "i32") == nullptr,
                  "ordinary completions should exclude type-only names")) {
+        return false;
+    }
+
+    const std::string ordinaryCallCompletionSource =
+                "fn sqrtValue() i32 {\n"
+        "    return 1\n"
+        "}\n"
+        "fn main() void {\n"
+        "    sq()\n"
+        "}\n";
+    options.sourcePath = "tooling_completion_ordinary_call_regression.mog";
+    ToolingDocumentAnalysis ordinaryCallCompletionAnalysis =
+        analyzeDocumentForTooling(ordinaryCallCompletionSource, options);
+    if (!require(ordinaryCallCompletionAnalysis.status ==
+                     AstFrontendBuildStatus::SemanticError &&
+                     ordinaryCallCompletionAnalysis.hasParse,
+                 "ordinary call completion sample should preserve parse data on semantic errors")) {
+        return false;
+    }
+
+    const auto ordinaryCallCompletions = findCompletionsForTooling(
+        ordinaryCallCompletionAnalysis, ToolingPosition{4, 6});
+    if (!require(findCompletion(ordinaryCallCompletions, "sqrtValue") != nullptr &&
+                     findCompletion(ordinaryCallCompletions, "print") != nullptr,
+                 "ordinary call completions should keep function suggestions")) {
+        return false;
+    }
+    if (!require(findCompletion(ordinaryCallCompletions, "i32") == nullptr &&
+                     findCompletion(ordinaryCallCompletions, "LocalAlias") == nullptr,
+                 "ordinary call completions should not switch into type-context suggestions")) {
         return false;
     }
 

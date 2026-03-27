@@ -145,6 +145,20 @@
         {
           "match": "\\b(?!(?:as|print|var|const|fn|type|struct|if|else|for|while|break|continue|this|super|return)\\b)([A-Za-z_][A-Za-z0-9_]*)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b(?=\\s*(?:,|\\)|:))",
           "captures": {
+            "1": {
+              "name": "variable.parameter.mog"
+            },
+            "2": {
+              "name": "entity.name.type.mog"
+            }
+          }
+        },
+        {
+          "match": "\\b(?!(?:as|print|var|const|fn|type|struct|if|else|for|while|break|continue|this|super|return)\\b)([A-Za-z_][A-Za-z0-9_]*)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b(?=\\s*$)",
+          "captures": {
+            "1": {
+              "name": "variable.parameter.mog"
+            },
             "2": {
               "name": "entity.name.type.mog"
             }

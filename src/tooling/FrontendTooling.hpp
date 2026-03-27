@@ -58,6 +58,7 @@ struct ToolingHover {
     ToolingRange range;
     std::string name;
     std::string kind;
+    std::string role;
     std::string detail;
 };
 

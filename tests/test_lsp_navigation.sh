@@ -176,6 +176,16 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
     collection_path = Path(tmpdir) / "collection_sample.mog"
     collection_path.write_text(collection_source, encoding="utf-8")
     collection_uri = collection_path.resolve().as_uri()
+    constructor_type_source = "\n".join([
+        "type Player struct {}",
+        "fn main() void {",
+        "    var players Dict<usize, Player> = Dict<usize, Player>()",
+        "}",
+        ""
+    ])
+    constructor_type_path = Path(tmpdir) / "constructor_type_sample.mog"
+    constructor_type_path.write_text(constructor_type_source, encoding="utf-8")
+    constructor_type_uri = constructor_type_path.resolve().as_uri()
     imported_state_source = "\n".join([
         "type GameState struct {",
         "    birdY f64",
@@ -470,6 +480,25 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
             "method": "textDocument/didOpen",
             "params": {
                 "textDocument": {
+                    "uri": constructor_type_uri,
+                    "languageId": "mog",
+                    "version": 1,
+                    "text": constructor_type_source
+                }
+            }
+        })
+        constructor_type_diagnostics = read_until(
+            proc,
+            lambda msg: msg.get("method") == "textDocument/publishDiagnostics" and
+            msg.get("params", {}).get("uri") == constructor_type_uri,
+        )
+        if constructor_type_diagnostics["params"]["diagnostics"]:
+            raise AssertionError("expected constructor type sample to stay diagnostics-free")
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
                     "uri": type_definition_uri,
                     "languageId": "mog",
                     "version": 1,
@@ -726,8 +755,65 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         })
         builtin_hover = read_until(proc, lambda msg: msg.get("id") == 5.1)
         builtin_hover_value = builtin_hover["result"]["contents"]["value"]
-        if builtin_hover_value != "```mog\n(function) fn sqrt(f64) f64\n```":
+        if builtin_hover_value != "**function**\n\n```mog\nfn sqrt(f64) f64\n```":
             raise AssertionError(f"unexpected builtin hover payload: {builtin_hover['result']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 5.15,
+            "method": "textDocument/hover",
+            "params": {
+                "textDocument": {
+                    "uri": collection_uri
+                },
+                "position": {
+                    "line": 0,
+                    "character": 10
+                }
+            }
+        })
+        array_builtin_hover = read_until(proc, lambda msg: msg.get("id") == 5.15)
+        array_builtin_hover_value = array_builtin_hover["result"]["contents"]["value"]
+        if array_builtin_hover_value != "**function**\n\n```mog\nfn Array() Array<any>\n```":
+            raise AssertionError(f"unexpected Array builtin hover payload: {array_builtin_hover['result']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 5.16,
+            "method": "textDocument/hover",
+            "params": {
+                "textDocument": {
+                    "uri": collection_uri
+                },
+                "position": {
+                    "line": 2,
+                    "character": 11
+                }
+            }
+        })
+        dict_builtin_hover = read_until(proc, lambda msg: msg.get("id") == 5.16)
+        dict_builtin_hover_value = dict_builtin_hover["result"]["contents"]["value"]
+        if dict_builtin_hover_value != "**function**\n\n```mog\nfn Dict() Dict<any, any>\n```":
+            raise AssertionError(f"unexpected Dict builtin hover payload: {dict_builtin_hover['result']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 5.17,
+            "method": "textDocument/hover",
+            "params": {
+                "textDocument": {
+                    "uri": collection_uri
+                },
+                "position": {
+                    "line": 4,
+                    "character": 10
+                }
+            }
+        })
+        set_builtin_hover = read_until(proc, lambda msg: msg.get("id") == 5.17)
+        set_builtin_hover_value = set_builtin_hover["result"]["contents"]["value"]
+        if set_builtin_hover_value != "**function**\n\n```mog\nfn Set() Set<any>\n```":
+            raise AssertionError(f"unexpected Set builtin hover payload: {set_builtin_hover['result']}")
 
         send_message(proc, {
             "jsonrpc": "2.0",
@@ -1173,7 +1259,7 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         })
         member_hover = read_until(proc, lambda msg: msg.get("id") == 8)
         member_hover_value = member_hover["result"]["contents"]["value"]
-        if member_hover_value != "```mog\n(property) value i32\n```":
+        if member_hover_value != "**property**\n\n```mog\nvalue i32\n```":
             raise AssertionError(f"unexpected member hover payload: {member_hover['result']}")
 
         send_message(proc, {
@@ -1192,8 +1278,27 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         })
         collection_hover = read_until(proc, lambda msg: msg.get("id") == 8.1)
         collection_hover_value = collection_hover["result"]["contents"]["value"]
-        if collection_hover_value != "```mog\n(method) fn keys() Array<str>\n```":
+        if collection_hover_value != "**method**\n\n```mog\nfn keys() Array<str>\n```":
             raise AssertionError(f"unexpected collection hover payload: {collection_hover['result']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 8.2,
+            "method": "textDocument/hover",
+            "params": {
+                "textDocument": {
+                    "uri": constructor_type_uri
+                },
+                "position": {
+                    "line": 2,
+                    "character": 52
+                }
+            }
+        })
+        constructor_type_hover = read_until(proc, lambda msg: msg.get("id") == 8.2)
+        constructor_type_hover_value = constructor_type_hover["result"]["contents"]["value"]
+        if constructor_type_hover_value != "```mog\ntype Player struct\n```":
+            raise AssertionError(f"unexpected constructor type hover payload: {constructor_type_hover['result']}")
 
         send_message(proc, {
             "jsonrpc": "2.0",
@@ -1308,6 +1413,29 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
                 type_declaration_result[2]["range"]["start"]["line"] != 4:
             raise AssertionError(
                 f"type declaration definition should include generic type references: {type_declaration_result}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 9.7,
+            "method": "textDocument/definition",
+            "params": {
+                "textDocument": {
+                    "uri": constructor_type_uri
+                },
+                "position": {
+                    "line": 2,
+                    "character": 52
+                }
+            }
+        })
+        constructor_type_definition = read_until(proc, lambda msg: msg.get("id") == 9.7)
+        constructor_type_result = constructor_type_definition["result"]
+        if constructor_type_result["uri"] != constructor_type_uri:
+            raise AssertionError("constructor generic type definition should stay in the same module")
+        if constructor_type_result["range"]["start"]["line"] != 0 or \
+                constructor_type_result["range"]["start"]["character"] != 5:
+            raise AssertionError(
+                f"unexpected constructor generic type definition range: {constructor_type_result['range']}")
 
         send_message(proc, {
             "jsonrpc": "2.0",

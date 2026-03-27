@@ -1265,8 +1265,16 @@ class MogLspServer {
 
         JsonObject contents;
         contents["kind"] = JsonValue(std::string("markdown"));
-        contents["value"] =
-            JsonValue(std::string("```mog\n") + hover->detail + "\n```");
+        std::string hoverValue;
+        if (!hover->role.empty()) {
+            hoverValue += "**";
+            hoverValue += hover->role;
+            hoverValue += "**\n\n";
+        }
+        hoverValue += "```mog\n";
+        hoverValue += hover->detail;
+        hoverValue += "\n```";
+        contents["value"] = JsonValue(std::move(hoverValue));
 
         JsonObject result;
         result["contents"] = JsonValue(std::move(contents));

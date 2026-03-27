@@ -2231,7 +2231,15 @@ AstExprPtr AstParser::parsePrimary() {
 
             auto expr = std::make_unique<AstExpr>();
             expr->node = makeNodeInfo(constructorType->node.span);
-            expr->value = AstIdentifierExpr{nameToken};
+            if (constructorType->kind == AstTypeKind::ARRAY ||
+                constructorType->kind == AstTypeKind::DICT ||
+                constructorType->kind == AstTypeKind::SET ||
+                constructorType->kind == AstTypeKind::NATIVE_HANDLE) {
+                expr->value =
+                    AstIdentifierExpr{nameToken, std::move(constructorType)};
+            } else {
+                expr->value = AstIdentifierExpr{nameToken, nullptr};
+            }
             return expr;
         }
 
@@ -2239,7 +2247,7 @@ AstExprPtr AstParser::parsePrimary() {
         advance();
         auto expr = std::make_unique<AstExpr>();
         expr->node = makeNodeInfo(nameToken);
-        expr->value = AstIdentifierExpr{nameToken};
+        expr->value = AstIdentifierExpr{nameToken, nullptr};
         return expr;
     }
 

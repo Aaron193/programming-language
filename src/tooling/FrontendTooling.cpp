@@ -90,6 +90,16 @@ ordinaryBuiltinFunctionSignatures() {
     return signatures;
 }
 
+const std::unordered_map<std::string, TypeRef>&
+allStandardLibraryFunctionSignatures() {
+    static const std::unordered_map<std::string, TypeRef> signatures = [] {
+        std::unordered_map<std::string, TypeRef> result;
+        registerStandardLibraryTypeSignatures(result);
+        return result;
+    }();
+    return signatures;
+}
+
 TypeRef printBuiltinFunctionType() {
     static const TypeRef type =
         TypeInfo::makeFunction({TypeInfo::makeAny()}, TypeInfo::makeVoid());
@@ -98,6 +108,15 @@ TypeRef printBuiltinFunctionType() {
 
 std::optional<TypeRef> ordinaryBuiltinFunctionType(std::string_view name) {
     const auto& signatures = ordinaryBuiltinFunctionSignatures();
+    const auto it = signatures.find(std::string(name));
+    if (it == signatures.end()) {
+        return std::nullopt;
+    }
+    return it->second;
+}
+
+std::optional<TypeRef> standardLibraryBuiltinFunctionType(std::string_view name) {
+    const auto& signatures = allStandardLibraryFunctionSignatures();
     const auto it = signatures.find(std::string(name));
     if (it == signatures.end()) {
         return std::nullopt;
@@ -1324,18 +1343,46 @@ ToolingCallablePresentation callablePresentationForDeclaration(
 std::optional<std::string> importedDeclarationDetailForTooling(
     const ToolingDocumentAnalysis& analysis, const DeclarationSite& declaration);
 
-std::string hoverRoleDetail(std::string_view role, const std::string& detail) {
-    return "(" + std::string(role) + ") " + detail;
+struct HoverPresentation {
+    std::string role;
+    std::string detail;
+};
+
+HoverPresentation hoverPresentationForDeclaration(
+    const ToolingDocumentAnalysis& analysis, const DeclarationSite& declaration);
+
+std::optional<HoverPresentation> importedDeclarationHoverPresentationForTooling(
+    const ToolingDocumentAnalysis& analysis, const DeclarationSite& declaration);
+
+std::optional<std::string> importedDeclarationDetailForTooling(
+    const ToolingDocumentAnalysis& analysis, const DeclarationSite& declaration);
+
+std::string hoverRoleForKind(std::string_view kind) {
+    if (kind == "function") {
+        return "function";
+    }
+    if (kind == "field") {
+        return "property";
+    }
+    if (kind == "method") {
+        return "method";
+    }
+    if (kind == "parameter") {
+        return "parameter";
+    }
+    return "";
 }
 
-std::string builtinFunctionHoverDetail(std::string_view name,
-                                       const TypeRef& type) {
-    return hoverRoleDetail("function", callablePresentationFromType(name, type).label);
+HoverPresentation builtinFunctionHoverPresentation(std::string_view name,
+                                                   const TypeRef& type) {
+    return HoverPresentation{"function",
+                             callablePresentationFromType(name, type).label};
 }
 
-std::string builtinCollectionMethodHoverDetail(std::string_view name,
-                                               const TypeRef& type) {
-    return hoverRoleDetail("method", callablePresentationFromType(name, type).label);
+HoverPresentation builtinCollectionMethodHoverPresentation(
+    std::string_view name, const TypeRef& type) {
+    return HoverPresentation{"method",
+                             callablePresentationFromType(name, type).label};
 }
 
 ToolingSignatureInformation builtinFunctionSignatureInformation(
@@ -1391,24 +1438,35 @@ std::string declarationDetailForDeclaration(
 
 std::string hoverDetailForDeclaration(const ToolingDocumentAnalysis& analysis,
                                       const DeclarationSite& declaration) {
-    const std::string detail =
-        declarationDetailForDeclaration(analysis, declaration);
-    if (declaration.kind == "function") {
-        return hoverRoleDetail("function", detail);
+    if (declaration.kind == "import") {
+        if (const auto importedPresentation =
+                importedDeclarationHoverPresentationForTooling(analysis,
+                                                               declaration);
+            importedPresentation.has_value()) {
+            return importedPresentation->detail;
+        }
     }
-    if (declaration.kind == "field") {
-        return hoverRoleDetail("property", detail);
-    }
-    if (declaration.kind == "method") {
-        return hoverRoleDetail("method", detail);
-    }
-    if (declaration.kind == "parameter") {
-        return hoverRoleDetail("parameter", detail);
-    }
-    return detail;
+
+    return declarationDetailForDeclaration(analysis, declaration);
 }
 
-std::optional<std::string> importedDeclarationDetailForTooling(
+HoverPresentation hoverPresentationForDeclaration(
+    const ToolingDocumentAnalysis& analysis, const DeclarationSite& declaration) {
+    if (declaration.kind == "import") {
+        if (const auto importedPresentation =
+                importedDeclarationHoverPresentationForTooling(analysis,
+                                                               declaration);
+            importedPresentation.has_value()) {
+            return *importedPresentation;
+        }
+    }
+
+    return HoverPresentation{hoverRoleForKind(declaration.kind),
+                             declarationDetailForDeclaration(analysis,
+                                                             declaration)};
+}
+
+std::optional<HoverPresentation> importedDeclarationHoverPresentationForTooling(
     const ToolingDocumentAnalysis& analysis, const DeclarationSite& declaration) {
     std::unordered_map<AstNodeId, ImportBindingSite> importBindingSites;
     collectImportBindingSites(analysis.frontend.module,
@@ -1438,7 +1496,17 @@ std::optional<std::string> importedDeclarationDetailForTooling(
 
     DeclarationSite importedDeclaration = exportedIt->second;
     importedDeclaration.name = declaration.name;
-    return hoverDetailForDeclaration(*importedAnalysis, importedDeclaration);
+    return hoverPresentationForDeclaration(*importedAnalysis, importedDeclaration);
+}
+
+std::optional<std::string> importedDeclarationDetailForTooling(
+    const ToolingDocumentAnalysis& analysis, const DeclarationSite& declaration) {
+    if (const auto presentation =
+            importedDeclarationHoverPresentationForTooling(analysis, declaration);
+        presentation.has_value()) {
+        return presentation->detail;
+    }
+    return std::nullopt;
 }
 
 std::string completionSortText(int group, const std::string& label) {
@@ -2384,7 +2452,10 @@ const AstTypeExpr* findTypeNameTargetInTypeExpr(const AstTypeExpr& typeExpr,
         }
     }
 
-    if (typeExpr.kind == AstTypeKind::NAMED &&
+    if ((typeExpr.kind == AstTypeKind::NAMED ||
+         typeExpr.kind == AstTypeKind::ARRAY ||
+         typeExpr.kind == AstTypeKind::DICT ||
+         typeExpr.kind == AstTypeKind::SET) &&
         containsPosition(typeExpr.token.span(), position)) {
         return &typeExpr;
     }
@@ -2583,7 +2654,13 @@ const AstTypeExpr* findTypeNameTargetInExpr(const AstExpr& expr,
         [&](const auto& value) {
             using T = std::decay_t<decltype(value)>;
 
-            if constexpr (std::is_same_v<T, AstGroupingExpr>) {
+            if constexpr (std::is_same_v<T, AstIdentifierExpr>) {
+                if (value.constructorType) {
+                    found =
+                        findTypeNameTargetInTypeExpr(*value.constructorType,
+                                                     position);
+                }
+            } else if constexpr (std::is_same_v<T, AstGroupingExpr>) {
                 found = findTypeNameTargetInExpr(*value.expression, position);
             } else if constexpr (std::is_same_v<T, AstUnaryExpr> ||
                                  std::is_same_v<T, AstUpdateExpr>) {
@@ -3148,7 +3225,12 @@ void collectTypeReferenceSitesInExpr(const AstExpr& expr,
         [&](const auto& value) {
             using T = std::decay_t<decltype(value)>;
 
-            if constexpr (std::is_same_v<T, AstGroupingExpr>) {
+            if constexpr (std::is_same_v<T, AstIdentifierExpr>) {
+                if (value.constructorType) {
+                    collectTypeReferenceSitesInTypeExpr(*value.constructorType,
+                                                        typeName, outSites);
+                }
+            } else if constexpr (std::is_same_v<T, AstGroupingExpr>) {
                 collectTypeReferenceSitesInExpr(*value.expression, typeName,
                                                 outSites);
             } else if constexpr (std::is_same_v<T, AstUnaryExpr> ||
@@ -3321,6 +3403,8 @@ bool exprHasTypeContextAtPosition(const AstExpr& expr,
                                   const SourcePosition& position);
 bool stmtHasTypeContextAtPosition(const AstStmt& stmt,
                                   const SourcePosition& position);
+bool identifierExprContainsTypeContext(const AstIdentifierExpr& identifier,
+                                       const SourcePosition& position);
 
 bool itemHasTypeContextAtPosition(const AstItem& item,
                                   const SourcePosition& position) {
@@ -3473,7 +3557,9 @@ bool exprHasTypeContextAtPosition(const AstExpr& expr,
         [&](const auto& value) {
             using T = std::decay_t<decltype(value)>;
 
-            if constexpr (std::is_same_v<T, AstGroupingExpr>) {
+            if constexpr (std::is_same_v<T, AstIdentifierExpr>) {
+                found = identifierExprContainsTypeContext(value, position);
+            } else if constexpr (std::is_same_v<T, AstGroupingExpr>) {
                 found = exprHasTypeContextAtPosition(*value.expression, position);
             } else if constexpr (std::is_same_v<T, AstUnaryExpr> ||
                                  std::is_same_v<T, AstUpdateExpr>) {
@@ -3556,6 +3642,12 @@ bool hasTypeContextAtPosition(const AstModule& module,
         }
     }
     return false;
+}
+
+bool identifierExprContainsTypeContext(const AstIdentifierExpr& identifier,
+                                       const SourcePosition& position) {
+    return identifier.constructorType &&
+           typeExprContainsPosition(*identifier.constructorType, position);
 }
 
 struct DestructuredImportCompletionContext {
@@ -5258,6 +5350,9 @@ class SemanticTokenCollector {
                               std::is_same_v<T, AstSuperExpr>) {
                     return;
                 } else if constexpr (std::is_same_v<T, AstIdentifierExpr>) {
+                    if (value.constructorType) {
+                        collectTypeExpr(*value.constructorType);
+                    }
                     const auto info =
                         semanticInfoForIdentifierBinding(value, expr.node.id);
                     if (info.has_value()) {
@@ -5627,10 +5722,10 @@ std::optional<ToolingHover> findBuiltinHoverForTooling(
         if (!printTarget.has_value()) {
             continue;
         }
+        const auto presentation =
+            builtinFunctionHoverPresentation("print", printBuiltinFunctionType());
         return ToolingHover{toolingRangeFromSourceSpan(*printTarget), "print",
-                            "function",
-                            builtinFunctionHoverDetail(
-                                "print", printBuiltinFunctionType())};
+                            "function", presentation.role, presentation.detail};
     }
 
     const AstExpr* targetExpr =
@@ -5653,17 +5748,19 @@ std::optional<ToolingHover> findBuiltinHoverForTooling(
     }
 
     const auto builtinType =
-        ordinaryBuiltinFunctionType(tokenText(identifierExpr->name));
+        standardLibraryBuiltinFunctionType(tokenText(identifierExpr->name));
     if (!builtinType.has_value()) {
         return std::nullopt;
     }
 
     const std::string name = tokenText(identifierExpr->name);
+    const auto presentation = builtinFunctionHoverPresentation(name, *builtinType);
     return ToolingHover{
         toolingRangeFromSourceSpan(identifierExpr->name.span()),
         name,
         "function",
-        builtinFunctionHoverDetail(name, *builtinType),
+        presentation.role,
+        presentation.detail,
     };
 }
 
@@ -5671,16 +5768,18 @@ std::optional<ToolingHover> findHoverForTooling(
     const ToolingDocumentAnalysis& analysis, const ToolingPosition& position) {
     const auto memberAccess = resolveMemberAccessForTooling(analysis, position);
     if (memberAccess.has_value()) {
-        const std::string detail =
+        const auto presentation =
             memberAccess->declaration.has_value()
-                ? hoverDetailForDeclaration(analysis, *memberAccess->declaration)
-                : builtinCollectionMethodHoverDetail(memberAccess->name,
-                                                     memberAccess->type);
+                ? hoverPresentationForDeclaration(analysis,
+                                                  *memberAccess->declaration)
+                : builtinCollectionMethodHoverPresentation(memberAccess->name,
+                                                           memberAccess->type);
         return ToolingHover{
             toolingRangeFromSourceSpan(memberAccess->occurrenceSpan),
             memberAccess->name,
             memberAccess->kind,
-            detail,
+            presentation.role,
+            presentation.detail,
         };
     }
 
@@ -5693,12 +5792,13 @@ std::optional<ToolingHover> findHoverForTooling(
             return std::nullopt;
         }
 
-        return ToolingHover{
-            toolingRangeFromSourceSpan(target->occurrenceSpan),
-            declarationIt->second.name,
-            declarationIt->second.kind,
-            hoverDetailForDeclaration(analysis, declarationIt->second),
-        };
+        const auto presentation =
+            hoverPresentationForDeclaration(analysis, declarationIt->second);
+        return ToolingHover{toolingRangeFromSourceSpan(target->occurrenceSpan),
+                            declarationIt->second.name,
+                            declarationIt->second.kind,
+                            presentation.role,
+                            presentation.detail};
     }
 
     if (const auto builtinHover = findBuiltinHoverForTooling(analysis, position);
@@ -5706,9 +5806,31 @@ std::optional<ToolingHover> findHoverForTooling(
         return builtinHover;
     }
 
+    std::optional<TypeNameTarget> rawTypeTarget;
+    if (analysis.hasParse) {
+        rawTypeTarget = findTypeNameTarget(
+            analysis.frontend.module, sourcePositionFromToolingPosition(position));
+    }
+
     const auto typeTarget = resolveTypeSymbolTarget(analysis, position);
     if (!typeTarget.has_value()) {
-        return std::nullopt;
+        if (!rawTypeTarget.has_value()) {
+            return std::nullopt;
+        }
+
+        const auto builtinType =
+            standardLibraryBuiltinFunctionType(rawTypeTarget->name);
+        if (!builtinType.has_value()) {
+            return std::nullopt;
+        }
+
+        const auto presentation =
+            builtinFunctionHoverPresentation(rawTypeTarget->name, *builtinType);
+        return ToolingHover{toolingRangeFromSourceSpan(rawTypeTarget->occurrenceSpan),
+                            rawTypeTarget->name,
+                            "function",
+                            presentation.role,
+                            presentation.detail};
     }
 
     std::unordered_map<AstNodeId, DeclarationSite> declarationSites;
@@ -5716,15 +5838,30 @@ std::optional<ToolingHover> findHoverForTooling(
     const auto declarationIt =
         declarationSites.find(typeTarget->declarationNodeId);
     if (declarationIt == declarationSites.end()) {
-        return std::nullopt;
+        if (!rawTypeTarget.has_value()) {
+            return std::nullopt;
+        }
+        const auto builtinType =
+            standardLibraryBuiltinFunctionType(rawTypeTarget->name);
+        if (!builtinType.has_value()) {
+            return std::nullopt;
+        }
+        const auto presentation =
+            builtinFunctionHoverPresentation(rawTypeTarget->name, *builtinType);
+        return ToolingHover{toolingRangeFromSourceSpan(rawTypeTarget->occurrenceSpan),
+                            rawTypeTarget->name,
+                            "function",
+                            presentation.role,
+                            presentation.detail};
     }
 
-    return ToolingHover{
-        toolingRangeFromSourceSpan(typeTarget->occurrenceSpan),
-        declarationIt->second.name,
-        declarationIt->second.kind,
-        hoverDetailForDeclaration(analysis, declarationIt->second),
-    };
+    const auto presentation =
+        hoverPresentationForDeclaration(analysis, declarationIt->second);
+    return ToolingHover{toolingRangeFromSourceSpan(typeTarget->occurrenceSpan),
+                        declarationIt->second.name,
+                        declarationIt->second.kind,
+                        presentation.role,
+                        presentation.detail};
 }
 
 std::vector<ToolingSemanticToken> findSemanticTokensForTooling(

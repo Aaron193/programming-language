@@ -65,6 +65,7 @@ struct AstLiteralExpr {
 
 struct AstIdentifierExpr {
     Token name;
+    std::unique_ptr<AstTypeExpr> constructorType;
 };
 
 struct AstGroupingExpr {
@@ -241,8 +242,9 @@ struct AstStmt {
     AstNodeInfo node;
     using Variant =
         std::variant<AstBlockStmt, AstExprStmt, AstPrintStmt, AstReturnStmt,
-                     AstBreakStmt, AstContinueStmt, AstIfStmt, AstWhileStmt, AstVarDeclStmt,
-                     AstDestructuredImportStmt, AstForStmt, AstForEachStmt>;
+                     AstBreakStmt, AstContinueStmt, AstIfStmt, AstWhileStmt,
+                     AstVarDeclStmt, AstDestructuredImportStmt, AstForStmt,
+                     AstForEachStmt>;
 
     Variant value;
 };

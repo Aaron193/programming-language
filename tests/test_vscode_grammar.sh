@@ -41,6 +41,10 @@ function compileMatch(pattern) {
 }
 
 function collectTypeCaptureRanges(line) {
+  return collectCaptureRanges(line, "entity.name.type.mog");
+}
+
+function collectCaptureRanges(line, scopeName) {
   const ranges = [];
   for (const pattern of grammar.repository["type-context-expression"].patterns) {
     if (!pattern.match) {
@@ -50,7 +54,7 @@ function collectTypeCaptureRanges(line) {
     const regex = compileMatch(pattern);
     let match;
     while ((match = regex.exec(line)) !== null) {
-      if (pattern.name === "entity.name.type.mog") {
+      if (pattern.name === scopeName) {
         const indices = match.indices[0];
         if (indices) {
           ranges.push({
@@ -69,7 +73,7 @@ function collectTypeCaptureRanges(line) {
       }
 
       for (const [groupIndex, capture] of Object.entries(pattern.captures)) {
-        if (capture.name !== "entity.name.type.mog") {
+        if (capture.name !== scopeName) {
           continue;
         }
 
@@ -97,6 +101,10 @@ function collectTypeCaptureRanges(line) {
     }
   }
   return ranges;
+}
+
+function collectParameterCaptureRanges(line) {
+  return collectCaptureRanges(line, "variable.parameter.mog");
 }
 
 function typeRangesForText(line, text) {
@@ -209,6 +217,36 @@ requireCondition(
   "print should still be highlighted by the function-call rule"
 );
 
+const functionDeclPattern = grammar.patterns.find(
+  (pattern) => pattern.match === "\\b(fn)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b"
+);
+requireCondition(
+  functionDeclPattern !== undefined,
+  "grammar should include the function declaration rule"
+);
+
+const rawHoverSignature =
+  "fn init(id usize, name str, position Vec2, velocity Vec2, viewport Vec2) void";
+const rawHoverDeclMatch = new RegExp(functionDeclPattern.match, "d").exec(rawHoverSignature);
+requireCondition(
+  rawHoverDeclMatch !== null &&
+    rawHoverDeclMatch[1] === "fn" &&
+    rawHoverDeclMatch[2] === "init",
+  "hover-style signatures should still recognize fn and the function name"
+);
+requireCondition(
+  collectParameterCaptureRanges(rawHoverSignature).filter((range) => range.text === "id").length === 1,
+  "hover-style signatures should color the first parameter name"
+);
+requireCondition(
+  collectParameterCaptureRanges(rawHoverSignature).filter((range) => range.text === "name").length === 1,
+  "hover-style signatures should color later parameter names"
+);
+requireCondition(
+  collectParameterCaptureRanges(rawHoverSignature).filter((range) => range.text === "position").length === 1,
+  "hover-style signatures should color custom-typed parameter names"
+);
+
 const paramLine = "fn updateScore(state GameState) void {";
 requireCondition(
   typeRangesForText(paramLine, "GameState").some(
@@ -217,8 +255,43 @@ requireCondition(
   "function parameter types should still be colored"
 );
 requireCondition(
+  collectParameterCaptureRanges(paramLine).some((range) => range.text === "state"),
+  "function parameter names should be colored separately from types"
+);
+requireCondition(
   typeRangesForText(paramLine, "void").some((range) => range.text === "void"),
   "function return types should still be colored"
+);
+
+const standaloneParameterHover = "player Player";
+requireCondition(
+  collectParameterCaptureRanges(standaloneParameterHover).some(
+    (range) => range.text === "player"
+  ),
+  "standalone parameter hover lines should color the parameter name"
+);
+requireCondition(
+  typeRangesForText(standaloneParameterHover, "Player").some(
+    (range) => range.text === "Player"
+  ),
+  "standalone parameter hover lines should color the parameter type"
+);
+
+requireCondition(
+  typeRangesForText(rawHoverSignature, "usize").some((range) => range.text === "usize"),
+  "hover-style signatures should color built-in parameter types"
+);
+requireCondition(
+  typeRangesForText(rawHoverSignature, "str").some((range) => range.text === "str"),
+  "hover-style signatures should color subsequent parameter types"
+);
+requireCondition(
+  collectTypeCaptureRanges(rawHoverSignature).filter((range) => range.text === "Vec2").length === 3,
+  "hover-style signatures should color custom parameter types"
+);
+requireCondition(
+  typeRangesForText(rawHoverSignature, "void").some((range) => range.text === "void"),
+  "hover-style signatures should color return types"
 );
 
 console.log("[PASS] VS Code grammar regression checks");
