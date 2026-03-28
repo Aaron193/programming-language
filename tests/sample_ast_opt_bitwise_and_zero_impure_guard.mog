@@ -1,4 +1,3 @@
-#!strict
 fn value() i32 {
     print("call")
     return 7

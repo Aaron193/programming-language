@@ -20,6 +20,7 @@ struct FrontendImportTraceFrame {
 
 struct FrontendDiagnostic {
     std::string code = "frontend.error";
+    std::string path;
     size_t line = 0;
     size_t column = 1;
     SourceSpan span = makePointSpan(1, 1);
@@ -31,6 +32,7 @@ struct FrontendDiagnostic {
     FrontendDiagnostic(size_t lineValue, std::string messageValue,
                        std::string codeValue = "frontend.error")
         : code(std::move(codeValue)),
+          path(),
           line(lineValue == 0 ? 1 : lineValue),
           column(1),
           span(makePointSpan(lineValue == 0 ? 1 : lineValue, 1)),
@@ -38,6 +40,7 @@ struct FrontendDiagnostic {
     FrontendDiagnostic(SourceSpan spanValue, std::string messageValue,
                        std::string codeValue = "frontend.error")
         : code(std::move(codeValue)),
+          path(),
           line(spanValue.line()),
           column(spanValue.column()),
           span(std::move(spanValue)),

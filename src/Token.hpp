@@ -67,6 +67,8 @@ enum TokenType {
     WHILE,
     IF,
     ELSE,
+    BREAK,
+    CONTINUE,
     TRUE,
     FALSE,
     _NULL,

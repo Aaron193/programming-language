@@ -3,12 +3,13 @@
   "name": "Mog",
   "patterns": [
     {
-      "name": "comment.line.double-slash.mog",
-      "match": "//.*$"
+      "name": "comment.block.mog",
+      "begin": "/\\*",
+      "end": "\\*/"
     },
     {
-      "name": "meta.preprocessor.strict.mog",
-      "match": "^#!strict\\b"
+      "name": "comment.line.double-slash.mog",
+      "match": "//.*$"
     },
     {
       "name": "string.quoted.double.mog",
@@ -36,6 +37,9 @@
     {
       "name": "storage.modifier.annotation.mog",
       "match": "@operator\\b"
+    },
+    {
+      "include": "#type-context-expression"
     },
     {
       "match": "\\b(type)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
@@ -83,7 +87,7 @@
     },
     {
       "name": "keyword.control.mog",
-      "match": "\\b(?:print|var|const|fn|type|struct|if|else|for|while|this|super|return|as)\\b"
+      "match": "\\b(?:var|const|fn|type|struct|if|else|for|while|break|continue|this|super|return|as)\\b"
     },
     {
       "include": "#type-angle-expression"
@@ -93,16 +97,12 @@
       "match": "\\b(?:i8|i16|i32|i64|u8|u16|u32|u64|u|usize|f32|f64|bool|str|void|null|fn)\\b"
     },
     {
-      "name": "entity.name.type.mog",
-      "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
-    },
-    {
       "name": "entity.name.function.method.mog",
-      "match": "(?<=\\.)[A-Za-z_][A-Za-z0-9_]*\\b(?=\\s*\\()"
+      "match": "(?<=\\.)[a-z_][A-Za-z0-9_]*\\b(?=\\s*\\()"
     },
     {
       "name": "variable.other.property.mog",
-      "match": "(?<=\\.)[A-Za-z_][A-Za-z0-9_]*\\b"
+      "match": "(?<=\\.)[a-z_][A-Za-z0-9_]*\\b"
     },
     {
       "name": "entity.name.function.mog",
@@ -126,6 +126,57 @@
     }
   ],
   "repository": {
+    "type-context-expression": {
+      "patterns": [
+        {
+          "match": "\\b(var|const)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
+          "captures": {
+            "1": {
+              "name": "keyword.control.mog"
+            },
+            "2": {
+              "name": "variable.other.readwrite.mog"
+            },
+            "3": {
+              "name": "entity.name.type.mog"
+            }
+          }
+        },
+        {
+          "match": "\\b(?!(?:as|print|var|const|fn|type|struct|if|else|for|while|break|continue|this|super|return)\\b)([A-Za-z_][A-Za-z0-9_]*)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b(?=\\s*(?:,|\\)|:))",
+          "captures": {
+            "1": {
+              "name": "variable.parameter.mog"
+            },
+            "2": {
+              "name": "entity.name.type.mog"
+            }
+          }
+        },
+        {
+          "match": "\\b(?!(?:as|print|var|const|fn|type|struct|if|else|for|while|break|continue|this|super|return)\\b)([A-Za-z_][A-Za-z0-9_]*)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b(?=\\s*$)",
+          "captures": {
+            "1": {
+              "name": "variable.parameter.mog"
+            },
+            "2": {
+              "name": "entity.name.type.mog"
+            }
+          }
+        },
+        {
+          "match": "(\\))\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
+          "captures": {
+            "1": {
+              "name": "punctuation.section.group.end.mog"
+            },
+            "2": {
+              "name": "entity.name.type.mog"
+            }
+          }
+        }
+      ]
+    },
     "type-angle-expression": {
       "patterns": [
         {

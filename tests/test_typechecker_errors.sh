@@ -18,7 +18,7 @@ run_expect_compile_error() {
 
     set +e
     local output
-    output="$($INTERPRETER --strict "$file" 2>&1)"
+    output="$($INTERPRETER "$file" 2>&1)"
     local status=$?
     set -e
 
@@ -142,6 +142,11 @@ run_expect_compile_error \
     "cannot assign to const variable 'value'." || failed=1
 
 run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/undefined_identifier.mog" \
+    "unknown identifier 'app'" \
+    "2:5" || failed=1
+
+run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/lambda_missing_param_type.mog" \
     "expression-bodied lambdas require explicit parameter types." \
     "1:29" || failed=1
@@ -153,7 +158,7 @@ run_expect_compile_error \
 run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/lambda_block_body.mog" \
     "expression-bodied lambdas do not support block bodies" \
-    "1:35" || failed=1
+    "1:36" || failed=1
 
 run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/assign_handle_foreign_type.mog" \
@@ -162,26 +167,51 @@ run_expect_compile_error \
 run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/import_binding_type_mismatch.mog" \
     "cannot assign imported value 'function(i32, i32) -> i32' to binding 'Add' of type 'function(f64, f64) -> f64'" \
-    "2:9" || failed=1
+    "1:9" || failed=1
 
 run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/import_missing_export.mog" \
     "imported module" \
-    "2:9" || failed=1
+    "1:9" || failed=1
+
+run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/import_value_used_as_type.mog" \
+    "expected type after variable name." \
+    "3:5" || failed=1
 
 run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/import_native_binding_type_mismatch.mog" \
     "cannot assign imported value 'function(i64, i64) -> i64' to binding 'addI64' of type 'function(f64, f64) -> f64'" \
-    "2:9" || failed=1
+    "1:9" || failed=1
 
 run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/import_native_handle_binding_type_mismatch.mog" \
     "cannot assign imported value 'function(i64) -> handle<examples:counter:CounterHandle>' to binding 'create' of type 'function(i64) -> handle<examples:math:CounterHandle>'" \
-    "2:9" || failed=1
+    "1:9" || failed=1
 
 run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/import_cycle_frontend.mog" \
     "Circular import detected" || failed=1
+
+run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/break_outside_loop.mog" \
+    "cannot break outside of a loop" \
+    "1:1" || failed=1
+
+run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/continue_outside_loop.mog" \
+    "cannot continue outside of a loop" \
+    "1:1" || failed=1
+
+run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/unknown_loop_label.mog" \
+    "unknown loop label 'missing' for 'break'" \
+    "2:11" || failed=1
+
+run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/duplicate_loop_label.mog" \
+    "duplicate loop label 'outer'" \
+    "2:5" || failed=1
 
 if [[ $failed -ne 0 ]]; then
     exit 1

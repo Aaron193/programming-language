@@ -1,3 +1,2 @@
-#!strict
 const { create: fn(i64) handle<examples:math:CounterHandle> } =
     @import("examples:counter")

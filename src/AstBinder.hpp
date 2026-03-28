@@ -9,17 +9,20 @@
 #include "NativePackage.hpp"
 #include "TypeChecker.hpp"
 
-struct AstImportedModuleInterface {
-    ImportTarget importTarget;
-    std::unordered_map<std::string, TypeRef> exportTypes;
-};
-
 struct AstBindingMetadata {
     std::unordered_map<std::string, std::unordered_map<std::string, TypeRef>>
         classFieldTypes;
     std::unordered_map<std::string, std::unordered_map<std::string, TypeRef>>
         classMethodSignatures;
     std::unordered_map<std::string, std::string> superclassOf;
+};
+
+struct AstImportedModuleInterface {
+    ImportTarget importTarget;
+    std::unordered_map<std::string, TypeRef> exportTypes;
+    AstBindingMetadata metadata;
+    std::unordered_map<std::string, std::unordered_map<int, std::string>>
+        classOperatorMethods;
 };
 
 enum class AstBindingKind {

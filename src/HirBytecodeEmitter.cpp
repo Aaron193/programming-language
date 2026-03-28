@@ -273,6 +273,16 @@ void HirBytecodeEmitter::endScope(size_t line) {
     }
 }
 
+void HirBytecodeEmitter::emitScopeExitToDepth(int targetDepth, size_t line) {
+    const auto& locals = m_compiler.currentContext().locals;
+    for (auto it = locals.rbegin(); it != locals.rend(); ++it) {
+        if (it->depth <= targetDepth) {
+            break;
+        }
+        emitByte(it->isCaptured ? OpCode::CLOSE_UPVALUE : OpCode::POP, line);
+    }
+}
+
 void HirBytecodeEmitter::defineVariable(uint8_t global, size_t line) {
     if (m_compiler.currentContext().scopeDepth > 0) {
         m_compiler.markInitialized();
@@ -335,6 +345,22 @@ const HirExpr* HirBytecodeEmitter::exprPtr(
 const HirStmt* HirBytecodeEmitter::stmtPtr(
     const std::optional<HirStmtId>& id) const {
     return id ? &m_module.stmt(*id) : nullptr;
+}
+
+HirBytecodeEmitter::LoopControlContext* HirBytecodeEmitter::resolveLoopContext(
+    const std::optional<Token>& label) {
+    if (!label) {
+        return m_loopContexts.empty() ? nullptr : &m_loopContexts.back();
+    }
+
+    const std::string target = tokenText(*label);
+    for (auto it = m_loopContexts.rbegin(); it != m_loopContexts.rend(); ++it) {
+        if (it->label && tokenText(*it->label) == target) {
+            return &*it;
+        }
+    }
+
+    return nullptr;
 }
 
 namespace {
@@ -731,6 +757,36 @@ void HirBytecodeEmitter::emitStmt(const HirStmt& stmt) {
                     emitByte(OpCode::NIL, stmt.node.line);
                 }
                 emitByte(OpCode::RETURN, stmt.node.line);
+            } else if constexpr (std::is_same_v<T, HirBreakStmt>) {
+                LoopControlContext* loopContext = resolveLoopContext(value.label);
+                if (loopContext == nullptr) {
+                    if (value.label) {
+                        errorAtToken(*value.label,
+                                     "Unknown loop label for 'break'.");
+                    } else {
+                        errorAtNode(stmt.node, "Cannot 'break' outside of a loop.");
+                    }
+                    return;
+                }
+
+                emitScopeExitToDepth(loopContext->scopeDepth, stmt.node.line);
+                loopContext->breakJumps.push_back(
+                    emitJump(OpCode::JUMP, stmt.node.line));
+            } else if constexpr (std::is_same_v<T, HirContinueStmt>) {
+                LoopControlContext* loopContext = resolveLoopContext(value.label);
+                if (loopContext == nullptr) {
+                    if (value.label) {
+                        errorAtToken(*value.label,
+                                     "Unknown loop label for 'continue'.");
+                    } else {
+                        errorAtNode(stmt.node,
+                                    "Cannot 'continue' outside of a loop.");
+                    }
+                    return;
+                }
+
+                emitScopeExitToDepth(loopContext->scopeDepth, stmt.node.line);
+                emitLoop(loopContext->continueTarget, stmt.node.line);
             } else if constexpr (std::is_same_v<T, HirIfStmt>) {
                 emitExpr(m_module.expr(*value.condition));
                 m_compiler.popExprType();
@@ -751,9 +807,17 @@ void HirBytecodeEmitter::emitStmt(const HirStmt& stmt) {
                 m_compiler.popExprType();
                 int exitJump =
                     emitJump(OpCode::JUMP_IF_FALSE_POP, stmt.node.line);
+                m_loopContexts.push_back(
+                    LoopControlContext{value.label, loopStart,
+                                       m_compiler.currentContext().scopeDepth,
+                                       {}});
                 emitStmt(m_module.stmt(*value.body));
                 emitLoop(loopStart, stmt.node.line);
                 patchJump(exitJump);
+                for (int breakJump : m_loopContexts.back().breakJumps) {
+                    patchJump(breakJump);
+                }
+                m_loopContexts.pop_back();
             } else if constexpr (std::is_same_v<T, HirVarDeclStmt>) {
                 emitVarDecl(value, stmt.node.line);
             } else if constexpr (std::is_same_v<T, HirDestructuredImportStmt>) {
@@ -810,11 +874,19 @@ void HirBytecodeEmitter::emitStmt(const HirStmt& stmt) {
                     patchJump(bodyJump);
                 }
 
+                m_loopContexts.push_back(
+                    LoopControlContext{value.label, loopStart,
+                                       m_compiler.currentContext().scopeDepth,
+                                       {}});
                 emitStmt(m_module.stmt(*value.body));
                 emitLoop(loopStart, stmt.node.line);
                 if (exitJump != -1) {
                     patchJump(exitJump);
                 }
+                for (int breakJump : m_loopContexts.back().breakJumps) {
+                    patchJump(breakJump);
+                }
+                m_loopContexts.pop_back();
 
                 endScope(stmt.node.line);
             } else if constexpr (std::is_same_v<T, HirForEachStmt>) {
@@ -839,9 +911,17 @@ void HirBytecodeEmitter::emitStmt(const HirStmt& stmt) {
                     emitJump(OpCode::ITER_HAS_NEXT_JUMP, stmt.node.line);
                 emitBytes(OpCode::ITER_NEXT_SET_LOCAL, loopVariableSlot,
                           stmt.node.line);
+                m_loopContexts.push_back(
+                    LoopControlContext{value.label, loopStart,
+                                       m_compiler.currentContext().scopeDepth,
+                                       {}});
                 emitStmt(m_module.stmt(*value.body));
                 emitLoop(loopStart, stmt.node.line);
                 patchJump(exitJump);
+                for (int breakJump : m_loopContexts.back().breakJumps) {
+                    patchJump(breakJump);
+                }
+                m_loopContexts.pop_back();
                 endScope(stmt.node.line);
             }
         },
@@ -1102,8 +1182,7 @@ void HirBytecodeEmitter::emitExpr(const HirExpr& expr) {
                         emitByte(OpCode::BITWISE_NOT, expr.node.line);
                         break;
                     case TokenType::MINUS:
-                        if (m_compiler.m_strictMode && operandType &&
-                            operandType->isInteger()) {
+                        if (operandType && operandType->isInteger()) {
                             emitByte(OpCode::INT_NEGATE, expr.node.line);
                         } else {
                             emitByte(OpCode::NEGATE, expr.node.line);
@@ -1237,7 +1316,7 @@ void HirBytecodeEmitter::emitExpr(const HirExpr& expr) {
                         }
                         break;
                     case TokenType::GREATER:
-                        emitByte((m_compiler.m_strictMode && promotedNumeric &&
+                        emitByte((promotedNumeric &&
                                   promotedNumeric->isInteger())
                                      ? (promotedNumeric->isSigned()
                                             ? OpCode::IGREATER
@@ -1246,7 +1325,7 @@ void HirBytecodeEmitter::emitExpr(const HirExpr& expr) {
                                  expr.node.line);
                         break;
                     case TokenType::GREATER_EQUAL:
-                        emitByte((m_compiler.m_strictMode && promotedNumeric &&
+                        emitByte((promotedNumeric &&
                                   promotedNumeric->isInteger())
                                      ? (promotedNumeric->isSigned()
                                             ? OpCode::IGREATER_EQ
@@ -1256,7 +1335,7 @@ void HirBytecodeEmitter::emitExpr(const HirExpr& expr) {
                         break;
                     case TokenType::LESS:
                         emitByte(
-                            (m_compiler.m_strictMode && promotedNumeric &&
+                            (promotedNumeric &&
                              promotedNumeric->isInteger())
                                 ? (promotedNumeric->isSigned() ? OpCode::ILESS
                                                                : OpCode::ULESS)
@@ -1264,7 +1343,7 @@ void HirBytecodeEmitter::emitExpr(const HirExpr& expr) {
                             expr.node.line);
                         break;
                     case TokenType::LESS_EQUAL:
-                        emitByte((m_compiler.m_strictMode && promotedNumeric &&
+                        emitByte((promotedNumeric &&
                                   promotedNumeric->isInteger())
                                      ? (promotedNumeric->isSigned()
                                             ? OpCode::ILESS_EQ

@@ -1,3 +1,2 @@
-#!strict
 var value f64 = 1.0
 print(value | 1)

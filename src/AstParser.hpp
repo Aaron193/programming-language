@@ -41,10 +41,18 @@ class AstParser {
     bool consume(TokenType type);
     bool hasLineBreakBeforeCurrent() const;
     std::string tokenText(const Token& token) const;
+    std::string tokenDescription(TokenType type) const;
+    std::string tokenDisplayText(const Token& token) const;
+    void reportDiagnostic(const SourceSpan& span, const std::string& message,
+                          const std::string& code);
+    void reportScannerError(const Token& token);
+    void reportExpectedToken(TokenType expected);
+    void reportUnexpectedToken(const Token& token);
     void error();
     void errorAtLine(size_t line, const std::string& message);
     void errorAtSpan(const SourceSpan& span, const std::string& message);
-    void rejectStraySemicolon();
+    void rejectStraySemicolon(
+        std::string code = "parse.unexpected_semicolon");
     bool isRecoveryBoundaryToken(TokenType type) const;
     bool recoverLineLeadingContinuation(
         std::initializer_list<TokenType> terminators = {});
@@ -66,9 +74,12 @@ class AstParser {
     AstStmtPtr parseBlockStatement();
     AstStmtPtr parsePrintStatement(const Token& printToken);
     AstStmtPtr parseIfStatement(const Token& ifToken);
+    AstStmtPtr parseLabeledLoopStatement(const Token& labelToken);
     AstStmtPtr parseWhileStatement(const Token& whileToken);
     AstStmtPtr parseForStatement(const Token& forToken);
     AstStmtPtr parseReturnStatement(const Token& returnToken);
+    AstStmtPtr parseLoopControlStatement(const Token& keywordToken,
+                                         bool isContinue);
     AstStmtPtr parseExpressionStatement();
     AstStmtPtr parseVariableDeclarationStatement(bool allowForClause = false);
 

@@ -1,0 +1,121 @@
+type Vec2 struct {
+    x f32
+    y f32
+
+    fn init(x f32, y f32) Vec2 {
+        this.x = x
+        this.y = y
+
+        return this
+    }
+}
+
+type Player struct {
+    id usize
+    name str
+    position Vec2
+    velocity Vec2
+    viewport Vec2
+
+    fn init(id usize, name str, position Vec2, velocity Vec2, viewport Vec2) void {
+        this.id = id
+        this.name = name
+        this.position = position
+        this.velocity = velocity
+        this.viewport = viewport
+    }
+}
+
+type Connection struct {
+    id usize
+}
+
+type SocketServer struct {
+    connections Array<Connection>
+    game Game
+
+    fn init(game Game) void {
+        this.connections = []
+        this.game = game
+    }
+
+
+    fn onConnection(connection Connection) void {
+        this.connections.push(connection)
+    }
+
+    fn onMessage(connection Connection, data Array<u8>) void {
+        const id usize = connection.id
+
+        if (this.game.players.has(id)) {
+            const player Player = this.game.players.get(id)
+            // do something with player
+        } else {
+            // error
+        }
+    }
+
+    fn onClose(connection Connection) void {
+        const id usize = connection.id
+
+        var index usize = 0usize
+        for (const connection Connection : this.connections) {
+            index++
+            if (connection.id == id) {
+                // swap and pop to delete
+                this.connections[index] = this.connections[this.connections.size() - 1]
+                this.connections.pop()
+                break
+            }
+        }
+    }
+}
+
+type Game struct {
+    players Dict<usize, Player>
+
+    fn init() void {
+        this.players = Dict<usize, Player>()
+
+        const player Player = Player()
+        player.init(
+            0usize,
+            "Aaron",
+            Vec2().init(0f32, 0f32),
+            Vec2().init(0f32, 0f32),
+            Vec2().init(1920f32, 1080f32)
+        )
+
+        this.AddPlayer(player)
+    }
+
+    fn AddPlayer(player Player) void {
+        this.players.set(player.id, player)
+    }
+
+    fn update(dt f64) void {
+        for (const id usize : this.players) {
+            const player Player = this.players.get(id)
+            print(player.name)
+        }
+    }
+}
+
+fn main() void {
+    const game Game = Game()
+    game.init()
+
+    var then f64 = clock()
+
+    // while (true) {
+
+    //     const now f64 = clock()
+    //     const dt f64 = now - then
+    //     then = now
+
+    //     game.update(dt)
+    // }
+
+}
+
+main()

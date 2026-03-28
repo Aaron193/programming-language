@@ -373,6 +373,7 @@ void UpvalueObject::trace(GC& gc) {
 void ClosureObject::trace(GC& gc) {
     gc.markObject(function);
     gc.markObject(module);
+    gc.markObject(superclassContext);
     for (auto* upvalue : upvalues) {
         gc.markObject(upvalue);
     }

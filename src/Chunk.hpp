@@ -572,6 +572,7 @@ struct ClosureObject : GcObject {
     FunctionObject* function = nullptr;
     std::vector<UpvalueObject*> upvalues;
     ModuleObject* module = nullptr;
+    ClassObject* superclassContext = nullptr;
 
     void trace(GC& gc) override;
 };

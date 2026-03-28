@@ -1,0 +1,94 @@
+fn require(condition bool, message str) void {
+    if (!condition) {
+        error(message)
+    }
+}
+
+fn lhsFalse() bool {
+    return false
+}
+
+fn lhsTrue() bool {
+    return true
+}
+
+fn run() bool {
+    const baseline bool = true
+
+    const expr01 bool = (lhsFalse() == false) && (baseline == true)
+    const expr02 bool = (lhsFalse() == false) && (baseline == true)
+    const expr03 bool = (lhsFalse() == false) && (baseline == true)
+    const expr04 bool = (lhsFalse() == false) && (baseline == true)
+    const expr05 bool = (lhsFalse() == false) && (baseline == true)
+    const expr06 bool = (lhsFalse() == false) && (baseline == true)
+    const expr07 bool = (lhsFalse() == false) && (baseline == true)
+    const expr08 bool = (lhsFalse() == false) && (baseline == true)
+    const expr09 bool = (lhsFalse() == false) && (baseline == true)
+    const expr10 bool = (lhsFalse() == false) && (baseline == true)
+    const expr11 bool = (lhsFalse() == false) && (baseline == true)
+    const expr12 bool = (lhsFalse() == false) && (baseline == true)
+    const expr13 bool = (lhsFalse() == false) && (baseline == true)
+    const expr14 bool = (lhsFalse() == false) && (baseline == true)
+    const expr15 bool = (lhsFalse() == false) && (baseline == true)
+    const expr16 bool = (lhsFalse() == false) && (baseline == true)
+    const expr17 bool = (lhsFalse() == false) && (baseline == true)
+    const expr18 bool = (lhsFalse() == false) && (baseline == true)
+    const expr19 bool = (lhsFalse() == false) && (baseline == true)
+    const expr20 bool = (lhsFalse() == false) && (baseline == true)
+    const expr21 bool = (lhsFalse() == false) && (baseline == true)
+    const expr22 bool = (lhsFalse() == false) && (baseline == true)
+    const expr23 bool = (lhsFalse() == false) && (baseline == true)
+    const expr24 bool = (lhsFalse() == false) && (baseline == true)
+    const expr25 bool = (lhsFalse() == false) && (baseline == true)
+    const expr26 bool = (lhsFalse() == false) && (baseline == true)
+    const expr27 bool = (lhsFalse() == false) && (baseline == true)
+    const expr28 bool = (lhsFalse() == false) && (baseline == true)
+    const expr29 bool = (lhsFalse() == false) && (baseline == true)
+    const expr30 bool = (lhsFalse() == false) && (baseline == true)
+    const expr31 bool = (lhsFalse() == false) && (baseline == true)
+    const expr32 bool = (lhsFalse() == false) && (baseline == true)
+    const expr33 bool = (lhsFalse() == false) && (baseline == true)
+    const expr34 bool = (lhsFalse() == false) && (baseline == true)
+    const expr35 bool = (lhsFalse() == false) && (baseline == true)
+    const expr36 bool = (lhsFalse() == false) && (baseline == true)
+    const expr37 bool = (lhsFalse() == false) && (baseline == true)
+    const expr38 bool = (lhsFalse() == false) && (baseline == true)
+    const expr39 bool = (lhsFalse() == false) && (baseline == true)
+    const expr40 bool = (lhsFalse() == false) && (baseline == true)
+    const expr41 bool = (lhsFalse() == false) && (baseline == true)
+    const expr42 bool = (lhsFalse() == false) && (baseline == true)
+    const expr43 bool = (lhsFalse() == false) && (baseline == true)
+    const expr44 bool = (lhsFalse() == false) && (baseline == true)
+    const expr45 bool = (lhsFalse() == false) && (baseline == true)
+    const expr46 bool = (lhsFalse() == false) && (baseline == true)
+    const expr47 bool = (lhsFalse() == false) && (baseline == true)
+    const expr48 bool = (lhsFalse() == false) && (baseline == true)
+    const expr49 bool = (lhsFalse() == false) && (baseline == true)
+    const expr50 bool = (lhsFalse() == false) && (baseline == true)
+    const expr51 bool = (lhsFalse() == false) && (baseline == true)
+    const expr52 bool = (lhsFalse() == false) && (baseline == true)
+    const expr53 bool = (lhsFalse() == false) && (baseline == true)
+    const expr54 bool = (lhsFalse() == false) && (baseline == true)
+    const expr55 bool = (lhsFalse() == false) && (baseline == true)
+    const expr56 bool = (lhsFalse() == false) && (baseline == true)
+    const expr57 bool = (lhsFalse() == false) && (baseline == true)
+    const expr58 bool = (lhsFalse() == false) && (baseline == true)
+    const expr59 bool = (lhsFalse() == false) && (baseline == true)
+    const expr60 bool = (lhsFalse() == false) && (baseline == true)
+    return expr01 && expr02 && expr03 && expr04 && expr05 &&
+           expr06 && expr07 && expr08 && expr09 && expr10 &&
+           expr11 && expr12 && expr13 && expr14 && expr15 &&
+           expr16 && expr17 && expr18 && expr19 && expr20 &&
+           expr21 && expr22 && expr23 && expr24 && expr25 &&
+           expr26 && expr27 && expr28 && expr29 && expr30 &&
+           expr31 && expr32 && expr33 && expr34 && expr35 &&
+           expr36 && expr37 && expr38 && expr39 && expr40 &&
+           expr41 && expr42 && expr43 && expr44 && expr45 &&
+           expr46 && expr47 && expr48 && expr49 && expr50 &&
+           expr51 && expr52 && expr53 && expr54 && expr55 &&
+           expr56 && expr57 && expr58 && expr59 && expr60 &&
+           (lhsTrue() == true)
+}
+
+require(run(), "bool equality rewrites should stay valid after arena growth")
+print("ok")

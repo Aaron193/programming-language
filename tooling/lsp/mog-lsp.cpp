@@ -706,8 +706,10 @@ JsonValue makeRelatedInformation(const std::string& uri,
     items.reserve(diagnostic.notes.size() + diagnostic.importTrace.size());
 
     for (const auto& note : diagnostic.notes) {
+        const std::string noteUri =
+            note.path.empty() ? uri : pathToFileUri(note.path);
         items.push_back(JsonValue(JsonObject{
-            {"location", makeLocation(uri, note.range)},
+            {"location", makeLocation(noteUri, note.range)},
             {"message", JsonValue(note.message)},
         }));
     }
@@ -1263,8 +1265,16 @@ class MogLspServer {
 
         JsonObject contents;
         contents["kind"] = JsonValue(std::string("markdown"));
-        contents["value"] =
-            JsonValue(std::string("```mog\n") + hover->detail + "\n```");
+        std::string hoverValue;
+        if (!hover->role.empty()) {
+            hoverValue += "**";
+            hoverValue += hover->role;
+            hoverValue += "**\n\n";
+        }
+        hoverValue += "```mog\n";
+        hoverValue += hover->detail;
+        hoverValue += "\n```";
+        contents["value"] = JsonValue(std::move(hoverValue));
 
         JsonObject result;
         result["contents"] = JsonValue(std::move(contents));
@@ -1598,8 +1608,6 @@ class MogLspServer {
             options.sourcePath = openDocument->path;
             options.packageSearchPaths = m_packageSearchPaths;
             options.moduleGraphCache = &m_cache;
-            options.strictMode =
-                toolingSourceStartsWithStrictDirective(openDocument->text);
             return analyzeDocumentForTooling(openDocument->text, options);
         }
 
@@ -1612,7 +1620,6 @@ class MogLspServer {
         options.sourcePath = path;
         options.packageSearchPaths = m_packageSearchPaths;
         options.moduleGraphCache = &m_cache;
-        options.strictMode = toolingSourceStartsWithStrictDirective(*text);
         return analyzeDocumentForTooling(*text, options);
     }
 
@@ -1692,15 +1699,47 @@ class MogLspServer {
         return path;
     }
 
+    std::vector<ToolingDiagnostic> diagnosticsForDocument(
+        const DocumentState& document) const {
+        std::vector<ToolingDiagnostic> diagnostics;
+        for (const auto& diagnostic : document.analysis.diagnostics) {
+            if (diagnostic.path.empty() || diagnostic.path == document.path) {
+                diagnostics.push_back(diagnostic);
+                continue;
+            }
+
+            const auto frameIt = std::find_if(
+                diagnostic.importTrace.begin(), diagnostic.importTrace.end(),
+                [&](const ToolingImportTraceFrame& frame) {
+                    return frame.importerPath == document.path;
+                });
+            if (frameIt == diagnostic.importTrace.end()) {
+                continue;
+            }
+
+            ToolingDiagnostic importerDiagnostic = diagnostic;
+            importerDiagnostic.path = document.path;
+            importerDiagnostic.range = frameIt->range;
+            importerDiagnostic.notes.insert(
+                importerDiagnostic.notes.begin(),
+                ToolingDiagnosticNote{
+                    diagnostic.range,
+                    diagnostic.path,
+                    diagnostic.message,
+                });
+            diagnostics.push_back(std::move(importerDiagnostic));
+        }
+        return diagnostics;
+    }
+
     void analyzeAndPublish(DocumentState& document) {
         ToolingAnalyzeOptions options;
         options.sourcePath = document.path;
         options.packageSearchPaths = m_packageSearchPaths;
         options.moduleGraphCache = &m_cache;
-        options.strictMode = toolingSourceStartsWithStrictDirective(document.text);
 
         document.analysis = analyzeDocumentForTooling(document.text, options);
-        sendPublishDiagnostics(document.uri, document.analysis.diagnostics);
+        sendPublishDiagnostics(document.uri, diagnosticsForDocument(document));
     }
 
     void sendInitializeResponse(const JsonValue* id) {

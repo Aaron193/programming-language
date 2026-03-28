@@ -2,21 +2,6 @@
 
 #include <cstring>
 
-namespace {
-
-bool startsWithStrictDirective(const char* text) {
-    constexpr const char* kDirective = "#!strict";
-    constexpr size_t kDirectiveLength = 8;
-    if (std::strncmp(text, kDirective, kDirectiveLength) != 0) {
-        return false;
-    }
-
-    const char boundary = text[kDirectiveLength];
-    return boundary == '\0' || boundary == '\n' || boundary == '\r';
-}
-
-}  // namespace
-
 Scanner::Scanner(std::string_view source)
     : m_source(source.data()),
       m_start(source.data()),
@@ -41,20 +26,9 @@ char Scanner::peekNext() {
 
 bool Scanner::isEOF() { return *m_current == '\0'; }
 
-void Scanner::skipWhitespace() {
+bool Scanner::skipWhitespace(std::string& outError) {
     while (true) {
         char c = peek();
-        if (m_offset == 0 && m_line == 1 && m_column == 1 && c == '#' &&
-            startsWithStrictDirective(m_current)) {
-            while (peek() != '\n' && !isEOF()) {
-                advance();
-            }
-            if (peek() == '\n') {
-                advance();
-            }
-            continue;
-        }
-
         if (c == ' ' || c == '\t' || c == '\v' || c == '\f' || c == '\r') {
             advance();
         } else if (c == '\n') {
@@ -63,16 +37,41 @@ void Scanner::skipWhitespace() {
             while (peek() != '\n' && !isEOF()) {
                 advance();
             }
+        } else if (c == '/' && peekNext() == '*') {
+            m_start = m_current;
+            m_tokenStartLine = m_line;
+            m_tokenStartColumn = m_column;
+            m_tokenStartOffset = m_offset;
+
+            advance();
+            advance();
+
+            while (true) {
+                if (isEOF()) {
+                    outError = "Unterminated block comment.";
+                    return false;
+                }
+
+                if (peek() == '*' && peekNext() == '/') {
+                    advance();
+                    advance();
+                    break;
+                }
+
+                advance();
+            }
         } else {
             break;
         }
     }
+
+    return true;
 }
 
 bool Scanner::match(char c) {
     if (isEOF()) return false;
     if (peek() != c) return false;
-    m_current++;
+    advance();
     return true;
 }
 
@@ -82,7 +81,11 @@ bool Scanner::isAlpha(char c) {
 }
 
 Token Scanner::nextToken() {
-    skipWhitespace();
+    std::string whitespaceError;
+    if (!skipWhitespace(whitespaceError)) {
+        return createErrorToken(whitespaceError);
+    }
+
     m_start = m_current;
     m_tokenStartLine = m_line;
     m_tokenStartColumn = m_column;
@@ -123,7 +126,9 @@ Token Scanner::nextToken() {
                 return false;
             }
 
-            m_current += length;
+            for (size_t index = 0; index < length; ++index) {
+                advance();
+            }
             return true;
         };
 
@@ -284,10 +289,12 @@ TokenType Scanner::getIdentifier() {
 
         case 'b':
             if (matchKeyword("bool", 4)) return TokenType::TYPE_BOOL;
+            if (matchKeyword("break", 5)) return TokenType::BREAK;
             break;
 
         case 'c':
             if (matchKeyword("const", 5)) return TokenType::CONST;
+            if (matchKeyword("continue", 8)) return TokenType::CONTINUE;
             break;
 
         case 'e':

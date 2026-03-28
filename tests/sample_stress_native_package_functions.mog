@@ -1,0 +1,24 @@
+const mathA = @import("examples:math")
+const mathB = @import("examples:math")
+const mathC = @import("examples:math")
+
+fn Add1(value i64) i64 {
+  return mathA.addI64(value, 1i64)
+}
+
+fn Add2(value i64) i64 {
+  return mathB.addI64(value, 2i64)
+}
+
+fn Mix(value i64) i64 {
+  return mathC.addI64(Add1(value), Add2(value))
+}
+
+var total i64 = 0i64
+var i i64 = 0i64
+while (i < 100i64) {
+  total = total + Mix(i)
+  i = i + 1i64
+}
+
+print(total)

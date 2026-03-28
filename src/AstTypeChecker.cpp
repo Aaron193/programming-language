@@ -14,6 +14,7 @@
 #include "FrontendTypeUtils.hpp"
 #include "NativePackage.hpp"
 #include "NumericLiteral.hpp"
+#include "StdLib.hpp"
 #include "SyntaxRules.hpp"
 
 namespace {
@@ -57,6 +58,21 @@ bool isBitwiseCompoundAssignment(TokenType type) {
     }
 }
 
+bool isSpecialStandardLibraryIdentifier(std::string_view name) {
+    if (isCollectionTypeNameText(name)) {
+        return true;
+    }
+
+    for (const auto& descriptor : standardLibraryNatives()) {
+        if (descriptor.name == name &&
+            !isOrdinaryStandardLibraryFunctionName(descriptor.name)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 class AstTypeCheckerImpl {
    private:
     struct ExprInfo {
@@ -77,6 +93,10 @@ class AstTypeCheckerImpl {
 
     struct FunctionCtx {
         TypeRef returnType = TypeInfo::makeAny();
+    };
+
+    struct LoopCtx {
+        std::optional<Token> label;
     };
 
     struct ClassCtx {
@@ -100,10 +120,15 @@ class AstTypeCheckerImpl {
 
     std::unordered_map<AstNodeId, SymbolInfo> m_declaredValueTypes;
     std::vector<FunctionCtx> m_functionContexts;
+    std::vector<LoopCtx> m_loopContexts;
     std::vector<ClassCtx> m_classContexts;
 
     std::string tokenText(const Token& token) const {
         return tokenLexeme(token);
+    }
+
+    bool labelsEqual(const Token& lhs, const Token& rhs) const {
+        return tokenText(lhs) == tokenText(rhs);
     }
 
     void addError(const SourceSpan& span, const std::string& message) {
@@ -632,120 +657,21 @@ class AstTypeCheckerImpl {
             return TypeInfo::makeAny();
         }
 
-        if (receiverType->kind == TypeKind::ARRAY) {
-            TypeRef element = receiverType->elementType
-                                  ? receiverType->elementType
-                                  : TypeInfo::makeAny();
-            if (memberName == "push") {
-                return TypeInfo::makeFunction({element}, TypeInfo::makeI64());
-            }
-            if (memberName == "pop") {
-                return TypeInfo::makeFunction({}, element);
-            }
-            if (memberName == "size") {
-                return TypeInfo::makeFunction({}, TypeInfo::makeI64());
-            }
-            if (memberName == "has") {
-                return TypeInfo::makeFunction({element}, TypeInfo::makeBool());
-            }
-            if (memberName == "insert") {
-                return TypeInfo::makeFunction({TypeInfo::makeI64(), element},
-                                              element);
-            }
-            if (memberName == "remove") {
-                return TypeInfo::makeFunction({TypeInfo::makeI64()}, element);
-            }
-            if (memberName == "clear") {
-                return TypeInfo::makeFunction({}, TypeInfo::makeI64());
-            }
-            if (memberName == "isEmpty") {
-                return TypeInfo::makeFunction({}, TypeInfo::makeBool());
-            }
-            if (memberName == "first" || memberName == "last") {
-                return TypeInfo::makeFunction({}, element);
-            }
+        if (const auto memberType =
+                builtinCollectionMemberType(receiverType, memberName);
+            memberType.has_value()) {
+            return *memberType;
+        }
 
+        if (receiverType->kind == TypeKind::ARRAY) {
             addError(span,
                      "Type error: array has no member '" + memberName + "'.");
-            return TypeInfo::makeAny();
-        }
-
-        if (receiverType->kind == TypeKind::DICT) {
-            TypeRef key = receiverType->keyType ? receiverType->keyType
-                                                : TypeInfo::makeAny();
-            TypeRef value = receiverType->valueType ? receiverType->valueType
-                                                    : TypeInfo::makeAny();
-            if (memberName == "get") {
-                return TypeInfo::makeFunction({key}, value);
-            }
-            if (memberName == "set") {
-                return TypeInfo::makeFunction({key, value}, value);
-            }
-            if (memberName == "has") {
-                return TypeInfo::makeFunction({key}, TypeInfo::makeBool());
-            }
-            if (memberName == "keys") {
-                return TypeInfo::makeFunction({}, TypeInfo::makeArray(key));
-            }
-            if (memberName == "values") {
-                return TypeInfo::makeFunction({}, TypeInfo::makeArray(value));
-            }
-            if (memberName == "size") {
-                return TypeInfo::makeFunction({}, TypeInfo::makeI64());
-            }
-            if (memberName == "remove") {
-                return TypeInfo::makeFunction({key}, value);
-            }
-            if (memberName == "clear") {
-                return TypeInfo::makeFunction({}, TypeInfo::makeI64());
-            }
-            if (memberName == "isEmpty") {
-                return TypeInfo::makeFunction({}, TypeInfo::makeBool());
-            }
-            if (memberName == "getOr") {
-                return TypeInfo::makeFunction({key, value}, value);
-            }
-
+        } else if (receiverType->kind == TypeKind::DICT) {
             addError(span,
                      "Type error: dict has no member '" + memberName + "'.");
-            return TypeInfo::makeAny();
-        }
-
-        if (receiverType->kind == TypeKind::SET) {
-            TypeRef element = receiverType->elementType
-                                  ? receiverType->elementType
-                                  : TypeInfo::makeAny();
-            TypeRef setType = TypeInfo::makeSet(element);
-
-            if (memberName == "add") {
-                return TypeInfo::makeFunction({element}, TypeInfo::makeBool());
-            }
-            if (memberName == "has") {
-                return TypeInfo::makeFunction({element}, TypeInfo::makeBool());
-            }
-            if (memberName == "remove") {
-                return TypeInfo::makeFunction({element}, TypeInfo::makeBool());
-            }
-            if (memberName == "size") {
-                return TypeInfo::makeFunction({}, TypeInfo::makeI64());
-            }
-            if (memberName == "toArray") {
-                return TypeInfo::makeFunction({}, TypeInfo::makeArray(element));
-            }
-            if (memberName == "clear") {
-                return TypeInfo::makeFunction({}, TypeInfo::makeI64());
-            }
-            if (memberName == "isEmpty") {
-                return TypeInfo::makeFunction({}, TypeInfo::makeBool());
-            }
-            if (memberName == "union" || memberName == "intersect" ||
-                memberName == "difference") {
-                return TypeInfo::makeFunction({setType}, setType);
-            }
-
+        } else if (receiverType->kind == TypeKind::SET) {
             addError(span,
                      "Type error: set has no member '" + memberName + "'.");
-            return TypeInfo::makeAny();
         }
 
         return TypeInfo::makeAny();
@@ -923,12 +849,30 @@ class AstTypeCheckerImpl {
                     if (!binding) {
                         const bool isClass =
                             m_classNames.find(name) != m_classNames.end();
+                        const bool isSpecialBuiltin =
+                            isSpecialStandardLibraryIdentifier(name);
+                        if (!isClass && !isSpecialBuiltin) {
+                            addError(value.name,
+                                     "Type error: unknown identifier '" + name +
+                                         "'.");
+                        }
                         TypeRef type =
                             isClass ? TypeInfo::makeClass(name) : TypeInfo::makeAny();
-                        result = ExprInfo{type, !isClass, isClass, name,
+                        result = ExprInfo{type, false, isClass, name,
                                           value.name.line(), false, false, 0};
+                    } else if (binding->kind == AstBindingKind::Function &&
+                               binding->declarationNodeId == 0) {
+                        auto signatureIt = m_functionSignatures.find(name);
+                        TypeRef type = signatureIt != m_functionSignatures.end()
+                                           ? signatureIt->second
+                                           : TypeInfo::makeAny();
+                        result = ExprInfo{type, false, false, name,
+                                          value.name.line(), false, true, 0};
                     } else if (binding->kind == AstBindingKind::Class) {
-                        result = ExprInfo{TypeInfo::makeClass(binding->name), false,
+                        const std::string className =
+                            binding->className.empty() ? binding->name
+                                                       : binding->className;
+                        result = ExprInfo{TypeInfo::makeClass(className), false,
                                           true, binding->name, value.name.line(),
                                           false, true,
                                           binding->declarationNodeId};
@@ -1756,6 +1700,52 @@ class AstTypeCheckerImpl {
         }
     }
 
+    void beginLoop(const std::optional<Token>& label) {
+        if (label) {
+            for (auto it = m_loopContexts.rbegin(); it != m_loopContexts.rend();
+                 ++it) {
+                if (it->label && labelsEqual(*it->label, *label)) {
+                    addError(*label, "Type error: duplicate loop label '" +
+                                         tokenText(*label) + "'.");
+                    break;
+                }
+            }
+        }
+
+        m_loopContexts.push_back(LoopCtx{label});
+    }
+
+    void endLoop() {
+        if (!m_loopContexts.empty()) {
+            m_loopContexts.pop_back();
+        }
+    }
+
+    void analyzeLoopControlStmt(const AstNodeInfo& stmtNode,
+                                const std::optional<Token>& label,
+                                bool isContinue) {
+        const char* action = isContinue ? "continue" : "break";
+        if (m_loopContexts.empty()) {
+            addError(stmtNode, std::string("Type error: cannot ") + action +
+                                   " outside of a loop.");
+            return;
+        }
+
+        if (!label) {
+            return;
+        }
+
+        for (auto it = m_loopContexts.rbegin(); it != m_loopContexts.rend();
+             ++it) {
+            if (it->label && labelsEqual(*it->label, *label)) {
+                return;
+            }
+        }
+
+        addError(*label, std::string("Type error: unknown loop label '") +
+                             tokenText(*label) + "' for '" + action + "'.");
+    }
+
     void analyzeStmt(const AstStmt& stmt) {
         std::visit(
             [&](const auto& value) {
@@ -1773,6 +1763,10 @@ class AstTypeCheckerImpl {
                     analyzeExpr(*value.expression);
                 } else if constexpr (std::is_same_v<T, AstReturnStmt>) {
                     analyzeReturnStmt(stmt.node, value);
+                } else if constexpr (std::is_same_v<T, AstBreakStmt>) {
+                    analyzeLoopControlStmt(stmt.node, value.label, false);
+                } else if constexpr (std::is_same_v<T, AstContinueStmt>) {
+                    analyzeLoopControlStmt(stmt.node, value.label, true);
                 } else if constexpr (std::is_same_v<T, AstIfStmt>) {
                     ExprInfo cond = analyzeExpr(*value.condition);
                     if (!(cond.type->kind == TypeKind::BOOL ||
@@ -1791,7 +1785,9 @@ class AstTypeCheckerImpl {
                         addError(value.condition->node,
                                  "Type error: while condition must be bool.");
                     }
+                    beginLoop(value.label);
                     analyzeStmt(*value.body);
+                    endLoop();
                 } else if constexpr (std::is_same_v<T, AstVarDeclStmt>) {
                     analyzeVarDecl(stmt.node, value);
                 } else if constexpr (std::is_same_v<T,
@@ -1824,7 +1820,9 @@ class AstTypeCheckerImpl {
                         analyzeExpr(*value.increment);
                     }
 
+                    beginLoop(value.label);
                     analyzeStmt(*value.body);
+                    endLoop();
                 } else if constexpr (std::is_same_v<T, AstForEachStmt>) {
                     TypeRef declaredType = requireTypeExpr(
                         value.declaredType.get(), value.name.span(),
@@ -1873,7 +1871,9 @@ class AstTypeCheckerImpl {
                     recordDeclarationType(stmt.node, tokenText(value.name),
                                           declaredType, value.name.line(),
                                           value.isConst);
+                    beginLoop(value.label);
                     analyzeStmt(*value.body);
+                    endLoop();
                 }
             },
             stmt.value);

@@ -1,0 +1,25 @@
+const math = @import("./modules/math.mog")
+const { Counter } = @import("./modules/class_mod.mog")
+
+fn compute(counter Counter) i64 {
+  var folded i32 = math.Add((1 + 2) * 3, 4 - 1)
+  var value i32 = (0 + counter.value) + folded
+
+  if ((true == true) && (false == false)) {
+    return (value as i64) + (math.Add(2, 3) as i64)
+  }
+
+  return 0i64
+}
+
+var counter Counter = Counter()
+counter.value = 5
+
+var total i64 = 0i64
+var i i32 = 0
+while (i < 100) {
+  total = total + compute(counter)
+  i = i + 1
+}
+
+print(total)

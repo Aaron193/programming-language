@@ -15,6 +15,7 @@
 #include "AstTypeChecker.hpp"
 #include "HirOptimizer.hpp"
 #include "NativePackage.hpp"
+#include "StdLib.hpp"
 #include "SyntaxRules.hpp"
 
 namespace {
@@ -29,13 +30,22 @@ uint64_t measureMicros(Func&& func) {
             .count());
 }
 
-bool hasStrictDirective(std::string_view source) {
-    return source.rfind("#!strict", 0) == 0;
-}
-
 void appendParserErrors(const AstParser& parser,
                         std::vector<TypeError>& outErrors) {
     outErrors = parser.errors();
+}
+
+void assignDiagnosticPaths(std::vector<TypeError>& diagnostics,
+                           const std::string& path) {
+    if (path.empty()) {
+        return;
+    }
+
+    for (auto& diagnostic : diagnostics) {
+        if (diagnostic.path.empty()) {
+            diagnostic.path = path;
+        }
+    }
 }
 
 TypeRef nodeTypeOrAny(const AstSemanticModel& model, AstNodeId nodeId) {
@@ -109,6 +119,50 @@ bool fingerprintMatches(const FrontendFileFingerprint& fingerprint,
     const FrontendFileFingerprint current = fingerprintForPath(path);
     return current.valid && current.size == fingerprint.size &&
            current.modifiedNanos == fingerprint.modifiedNanos;
+}
+
+void mergeImportedClassTypeAliases(AstFrontendResult& frontend) {
+    for (const auto& item : frontend.module.items) {
+        if (!item) {
+            continue;
+        }
+
+        const auto* stmtPtr = std::get_if<AstStmtPtr>(&item->value);
+        if (!stmtPtr || !*stmtPtr) {
+            continue;
+        }
+
+        const auto* importStmt =
+            std::get_if<AstDestructuredImportStmt>(&(*stmtPtr)->value);
+        if (!importStmt || !importStmt->initializer) {
+            continue;
+        }
+
+        const auto importIt =
+            frontend.importedModules.find(importStmt->initializer->node.id);
+        if (importIt == frontend.importedModules.end()) {
+            continue;
+        }
+
+        for (const auto& binding : importStmt->bindings) {
+            const auto exportIt = importIt->second.exportTypes.find(
+                tokenLexeme(binding.exportedName));
+            if (exportIt == importIt->second.exportTypes.end() ||
+                !exportIt->second || exportIt->second->kind != TypeKind::CLASS) {
+                continue;
+            }
+
+            const std::string localName =
+                binding.localName.has_value() ? tokenLexeme(*binding.localName)
+                                              : tokenLexeme(binding.exportedName);
+            if (frontend.classNames.find(localName) != frontend.classNames.end() ||
+                frontend.typeAliases.find(localName) != frontend.typeAliases.end()) {
+                continue;
+            }
+
+            frontend.typeAliases[localName] = exportIt->second;
+        }
+    }
 }
 
 bool moduleGraphNodeUpToDate(const AstFrontendModuleGraphCache& cache,
@@ -237,7 +291,6 @@ void collectExportedSymbolTypes(AstFrontendResult& frontend,
 bool buildImportedModuleInterface(const ImportTarget& importTarget,
                                   const SourceSpan& importSpan,
                                   const AstFrontendOptions& options,
-                                  AstFrontendMode mode,
                                   AstFrontendModuleGraphCache& cache,
                                   AstImportedModuleInterface& outInterface,
                                   std::vector<TypeError>& outDiagnostics) {
@@ -246,8 +299,7 @@ bool buildImportedModuleInterface(const ImportTarget& importTarget,
     auto cachedIt = cache.nodes.find(importTarget.canonicalId);
     if (cachedIt != cache.nodes.end()) {
         std::unordered_set<std::string> visiting;
-        if (cachedIt->second.mode == mode &&
-            moduleGraphNodeUpToDate(cache, importTarget.canonicalId, visiting)) {
+        if (moduleGraphNodeUpToDate(cache, importTarget.canonicalId, visiting)) {
             cache.stats.hits++;
             if (cachedIt->second.buildSucceeded) {
                 outInterface = cachedIt->second.importedInterface;
@@ -279,7 +331,6 @@ bool buildImportedModuleInterface(const ImportTarget& importTarget,
     AstImportedModuleInterface importedInterface;
     importedInterface.importTarget = importTarget;
     AstFrontendModuleGraphNode cachedNode;
-    cachedNode.mode = mode;
     cachedNode.fingerprint = fingerprintForPath(importTarget.resolvedPath);
     cachedNode.importedInterface.importTarget = importTarget;
 
@@ -324,11 +375,6 @@ bool buildImportedModuleInterface(const ImportTarget& importTarget,
 
         std::string source((std::istreambuf_iterator<char>(file)),
                            std::istreambuf_iterator<char>());
-        const AstFrontendMode importedMode =
-            (mode == AstFrontendMode::StrictChecked || hasStrictDirective(source))
-                ? AstFrontendMode::StrictChecked
-                : AstFrontendMode::LoweringOnly;
-
         AstFrontendResult importedFrontend;
         std::vector<TypeError> importedErrors;
         AstFrontendOptions importedOptions;
@@ -336,16 +382,18 @@ bool buildImportedModuleInterface(const ImportTarget& importTarget,
         importedOptions.packageSearchPaths = options.packageSearchPaths;
         importedOptions.moduleGraphCache = &cache;
         const AstFrontendBuildStatus status =
-            buildAstFrontend(source, importedOptions, importedMode, importedErrors,
+            buildAstFrontend(source, importedOptions, importedErrors,
                              importedFrontend);
         if (status != AstFrontendBuildStatus::Success) {
             outDiagnostics = importedErrors;
             if (outDiagnostics.empty()) {
-                outDiagnostics.push_back(TypeError{
+                TypeError diagnostic{
                     importSpan,
                     "Failed to type-check imported module '" +
                         importTarget.resolvedPath + "'.",
-                    "import.module_build_failed"});
+                    "import.module_build_failed"};
+                diagnostic.path = options.sourcePath;
+                outDiagnostics.push_back(std::move(diagnostic));
             }
             cachedNode.dependencies = collectDependencyIds(importedFrontend);
             cachedNode.diagnostics = outDiagnostics;
@@ -356,6 +404,9 @@ bool buildImportedModuleInterface(const ImportTarget& importTarget,
 
         importedInterface.exportTypes =
             importedFrontend.semanticModel.exportedSymbolTypes;
+        importedInterface.metadata = importedFrontend.semanticModel.metadata;
+        importedInterface.classOperatorMethods =
+            importedFrontend.semanticModel.classOperatorMethods;
         cachedNode.dependencies = collectDependencyIds(importedFrontend);
     }
 
@@ -635,8 +686,7 @@ class FrontendImportResolver {
         AstImportedModuleInterface importedInterface;
         std::vector<TypeError> importDiagnostics;
         if (!buildImportedModuleInterface(importTarget, importExpr.path.span(),
-                                          m_options,
-                                          m_frontend.mode, m_cache,
+                                          m_options, m_cache,
                                           importedInterface, importDiagnostics)) {
             if (importDiagnostics.empty()) {
                 addError(importExpr.path.span(),
@@ -683,19 +733,11 @@ bool bindAndCheckFrontend(const AstFrontendResult& frontend,
 AstFrontendBuildStatus runSemanticPhases(AstFrontendResult& frontend,
                                          std::vector<TypeError>& outErrors,
                                          FrontendIdentifierInterner* interner) {
-    if (frontend.mode == AstFrontendMode::StrictChecked) {
-        if (!bindAndCheckFrontend(frontend, outErrors, &frontend.bindings,
-                                  &frontend.semanticModel,
-                                  frontend.timings.initialBindMicros,
-                                  frontend.timings.initialTypecheckMicros)) {
-            return AstFrontendBuildStatus::SemanticError;
-        }
-    } else {
-        std::vector<TypeError> ignoredErrors;
-        bindAndCheckFrontend(frontend, ignoredErrors, &frontend.bindings,
-                             &frontend.semanticModel,
-                             frontend.timings.initialBindMicros,
-                             frontend.timings.initialTypecheckMicros);
+    if (!bindAndCheckFrontend(frontend, outErrors, &frontend.bindings,
+                              &frontend.semanticModel,
+                              frontend.timings.initialBindMicros,
+                              frontend.timings.initialTypecheckMicros)) {
+        return AstFrontendBuildStatus::SemanticError;
     }
 
     frontend.hirModule = std::make_unique<HirModule>();
@@ -714,7 +756,6 @@ AstFrontendBuildStatus runSemanticPhases(AstFrontendResult& frontend,
 
 AstFrontendBuildStatus buildAstFrontend(std::string_view source,
                                         const AstFrontendOptions& options,
-                                        AstFrontendMode mode,
                                         std::vector<TypeError>& outErrors,
                                         AstFrontendResult& outFrontend) {
     const auto totalStart = std::chrono::steady_clock::now();
@@ -742,7 +783,6 @@ AstFrontendBuildStatus buildAstFrontend(std::string_view source,
     AstModule module;
     AstParser parser(source);
     outFrontend = AstFrontendResult{};
-    outFrontend.mode = mode;
 
     bool parseSuccess = false;
     outFrontend.timings.parseMicros = measureMicros([&]() {
@@ -750,6 +790,7 @@ AstFrontendBuildStatus buildAstFrontend(std::string_view source,
     });
     if (!parseSuccess) {
         appendParserErrors(parser, outErrors);
+        assignDiagnosticPaths(outErrors, options.sourcePath);
         finalizeTotal();
         return AstFrontendBuildStatus::ParseFailed;
     }
@@ -767,9 +808,15 @@ AstFrontendBuildStatus buildAstFrontend(std::string_view source,
         makeSourcePosition(source.size(), outFrontend.terminalLine, terminalColumn);
     outFrontend.module = std::move(module);
     outFrontend.timings.symbolCollectionMicros = measureMicros([&]() {
+        std::unordered_map<std::string, TypeRef> sourceFunctionSignatures;
         collectSymbolsFromAst(outFrontend.module, outFrontend.classNames,
-                              outFrontend.functionSignatures,
-                              &outFrontend.typeAliases);
+                              sourceFunctionSignatures, &outFrontend.typeAliases);
+        outFrontend.functionSignatures.clear();
+        registerOrdinaryStandardLibraryTypeSignatures(
+            outFrontend.functionSignatures);
+        for (auto& [name, type] : sourceFunctionSignatures) {
+            outFrontend.functionSignatures[name] = std::move(type);
+        }
     });
 
     AstFrontendModuleGraphCache localModuleGraphCache;
@@ -784,15 +831,19 @@ AstFrontendBuildStatus buildAstFrontend(std::string_view source,
         return success;
     }();
     if (!importSuccess) {
+        assignDiagnosticPaths(outErrors, options.sourcePath);
         finalizeTotal();
         return AstFrontendBuildStatus::SemanticError;
     }
+
+    mergeImportedClassTypeAliases(outFrontend);
 
     const AstFrontendBuildStatus status =
         runSemanticPhases(outFrontend, outErrors,
                           options.moduleGraphCache
                               ? &options.moduleGraphCache->identifierInterner
                               : nullptr);
+    assignDiagnosticPaths(outErrors, options.sourcePath);
     finalizeTotal();
     return status;
 }

@@ -3,7 +3,6 @@
 #include <iostream>
 #include <sstream>
 #include <string>
-#include <string_view>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -12,10 +11,6 @@
 #include "GC.hpp"
 
 namespace {
-
-bool hasStrictDirective(std::string_view source) {
-    return source.rfind("#!strict", 0) == 0;
-}
 
 std::string readFile(const std::filesystem::path& path) {
     std::ifstream input(path);
@@ -98,7 +93,6 @@ bool compileWithMode(const std::filesystem::path& path, CompilerEmitterMode mode
     compiler.setGC(&gc);
     compiler.setPackageSearchPaths(packagePaths);
     compiler.setEmitterMode(mode);
-    compiler.setStrictMode(hasStrictDirective(source));
 
     if (!compiler.compile(source, outChunk, path.string())) {
         return false;
@@ -119,6 +113,7 @@ std::vector<std::filesystem::path> defaultCorpus(
         repoRoot / "tests/sample_inherit_super.mog",
         repoRoot / "tests/sample_invoke_fusion.mog",
         repoRoot / "tests/sample_for_each.mog",
+        repoRoot / "tests/sample_break_continue.mog",
         repoRoot / "tests/sample_import_basic.mog",
         repoRoot / "tests/sample_import_named.mog",
         repoRoot / "tests/sample_import_alias.mog",
@@ -127,6 +122,11 @@ std::vector<std::filesystem::path> defaultCorpus(
         repoRoot / "tests/sample_import_frontend_typed.mog",
         repoRoot / "tests/sample_import_frontend_nested_strict.mog",
         repoRoot / "tests/sample_import_nested.mog",
+        repoRoot / "tests/sample_stress_nested_upvalue_chain.mog",
+        repoRoot / "tests/sample_stress_native_package_functions.mog",
+        repoRoot / "tests/sample_stress_import_cache_handles.mog",
+        repoRoot / "tests/sample_stress_method_dispatch_chain.mog",
+        repoRoot / "tests/sample_ast_opt_import_member_cast_stress.mog",
         repoRoot / "tests/newline/sample_newline_call_suffix.mog",
         repoRoot / "tests/newline/sample_newline_call_suffix_folded_arg.mog",
         repoRoot / "tests/newline/sample_newline_operator_rhs.mog",

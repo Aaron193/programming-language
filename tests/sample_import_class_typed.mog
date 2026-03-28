@@ -1,0 +1,13 @@
+const { Counter as ImportedCounter } = @import("./modules/class_mod.mog")
+
+fn Bounce(value ImportedCounter) ImportedCounter {
+    return value
+}
+
+var current ImportedCounter = Bounce(ImportedCounter())
+var items Array<ImportedCounter> = [current]
+
+for (var item ImportedCounter : items) {
+    var copy ImportedCounter = item
+    print(1)
+}

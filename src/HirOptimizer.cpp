@@ -708,7 +708,9 @@ bool isDefinitelyTerminal(const HirStmt& stmt) {
     return std::visit(
         [&](const auto& value) -> bool {
             using T = std::decay_t<decltype(value)>;
-            if constexpr (std::is_same_v<T, HirReturnStmt>) {
+            if constexpr (std::is_same_v<T, HirReturnStmt> ||
+                          std::is_same_v<T, HirBreakStmt> ||
+                          std::is_same_v<T, HirContinueStmt>) {
                 return true;
             } else if constexpr (std::is_same_v<T, HirBlockStmt>) {
                 return blockIsDefinitelyTerminal(value);
@@ -805,13 +807,10 @@ void replaceExprWithLogicalNotPreservingNode(HirExpr& target,
         return;
     }
 
-    HirExpr replacement;
-    replacement.node = target.node;
     HirUnaryExpr logicalNot;
     logicalNot.op = Token::synthetic(TokenType::BANG, "!", target.node.span);
     logicalNot.operand = operand;
-    replacement.value = std::move(logicalNot);
-    replaceExprPreservingNode(target, makeExprId(std::move(replacement)));
+    target.value = std::move(logicalNot);
 }
 
 bool sameKnownType(const ConstantEvaluator& evaluator, const HirNodeInfo& lhs,
@@ -1294,16 +1293,12 @@ std::optional<HirStmtId> takeForInitializerStmt(HirForStmt& loop) {
     return initializer;
 }
 
-HirStmtId makeForFalseReplacement(HirForStmt& loop, const HirStmt& original) {
+HirBlockStmt makeForFalseReplacement(HirForStmt& loop) {
     HirBlockStmt block;
     if (std::optional<HirStmtId> initializer = takeForInitializerStmt(loop)) {
         block.items.push_back(makeItemId(*initializer));
     }
-
-    HirStmt stmt;
-    stmt.node = original.node;
-    stmt.value = std::move(block);
-    return makeStmtId(std::move(stmt));
+    return block;
 }
 
 void optimizeStmtTree(HirStmt& stmt, const ConstantEvaluator& evaluator) {
@@ -1412,7 +1407,7 @@ void optimizeStmtTree(HirStmt& stmt, const ConstantEvaluator& evaluator) {
                     tryEvaluateConditionBool(exprRef(*value.condition), evaluator,
                                              condition) &&
                     !condition) {
-                    return;
+                    stmt.value = makeForFalseReplacement(value);
                 }
             } else if constexpr (std::is_same_v<T, HirForEachStmt>) {
                 if (value.iterable) {

@@ -92,7 +92,6 @@ class Compiler {
     std::string m_sourcePath;
     AstFrontendResult::Timings m_lastFrontendTimings;
     AstFrontendModuleGraphCache m_frontendModuleGraph;
-    bool m_strictMode = false;
     CompilerEmitterMode m_emitterMode = CompilerEmitterMode::Auto;
     bool m_hadError = false;
     bool m_panicMode = false;
@@ -142,7 +141,6 @@ class Compiler {
 
     void setGC(GC* gc) { m_gc = gc; }
     void setSourcePath(const std::string& path) { m_sourcePath = path; }
-    void setStrictMode(bool strictMode) { m_strictMode = strictMode; }
     void setEmitterMode(CompilerEmitterMode mode) { m_emitterMode = mode; }
     void setPackageSearchPaths(std::vector<std::string> packageSearchPaths) {
         m_packageSearchPaths = std::move(packageSearchPaths);

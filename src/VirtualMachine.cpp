@@ -157,10 +157,6 @@ static uint64_t requireUnsignedInt(const Value& value) {
     return value.asUnsignedInt();
 }
 
-static bool hasStrictDirective(std::string_view source) {
-    return source.rfind("#!strict", 0) == 0;
-}
-
 static std::string valueToString(const Value& value) {
     if (value.isString()) return value.asString();
     if (value.isSignedInt()) return fastIntegerToString(value.asSignedInt());
@@ -340,6 +336,8 @@ enum class BuiltinNativeKind : uint8_t {
     CEIL,
     POW,
     ERROR,
+    ARRAY,
+    DICT,
     SET,
 };
 
@@ -494,6 +492,10 @@ static const char* builtinKindName(BuiltinNativeKind kind) {
             return "pow";
         case BuiltinNativeKind::ERROR:
             return "error";
+        case BuiltinNativeKind::ARRAY:
+            return "Array";
+        case BuiltinNativeKind::DICT:
+            return "Dict";
         case BuiltinNativeKind::SET:
             return "Set";
         default:
@@ -519,6 +521,8 @@ static const void* builtinNativeTag(const std::string& name) {
     static constexpr BuiltinNativeKind kCeil = BuiltinNativeKind::CEIL;
     static constexpr BuiltinNativeKind kPow = BuiltinNativeKind::POW;
     static constexpr BuiltinNativeKind kError = BuiltinNativeKind::ERROR;
+    static constexpr BuiltinNativeKind kArray = BuiltinNativeKind::ARRAY;
+    static constexpr BuiltinNativeKind kDict = BuiltinNativeKind::DICT;
     static constexpr BuiltinNativeKind kSet = BuiltinNativeKind::SET;
 
     if (name == "clock") return &kClock;
@@ -536,6 +540,8 @@ static const void* builtinNativeTag(const std::string& name) {
     if (name == "ceil") return &kCeil;
     if (name == "pow") return &kPow;
     if (name == "error") return &kError;
+    if (name == "Array") return &kArray;
+    if (name == "Dict") return &kDict;
     if (name == "Set") return &kSet;
     return nullptr;
 }
@@ -1354,6 +1360,30 @@ Status invokeBuiltinNative(VirtualMachine& vm, const NativeFunctionObject& nativ
 
             return vm.runtimeError(arg.asString());
         }
+        case BuiltinNativeKind::ARRAY: {
+            auto array = vm.gcAlloc<ArrayObject>();
+            array->elements.reserve(argumentCount);
+            for (uint8_t i = 0; i < argumentCount; ++i) {
+                Value& arg = argAtRef(i);
+                if (array->elementType->isAny()) {
+                    array->elementType = inferRuntimeType(arg);
+                } else if (!valueMatchesType(arg, array->elementType)) {
+                    return vm.runtimeError("Native function 'Array' expects all "
+                                           "elements to have a consistent "
+                                           "type.");
+                }
+
+                array->elements.push_back(std::move(arg));
+            }
+
+            result = Value(array);
+            break;
+        }
+        case BuiltinNativeKind::DICT: {
+            auto dict = vm.gcAlloc<DictObject>();
+            result = Value(dict);
+            break;
+        }
         case BuiltinNativeKind::SET: {
             auto set = vm.gcAlloc<SetObject>();
             set->elements.reserve(argumentCount);
@@ -2095,13 +2125,14 @@ Status VirtualMachine::invokeProperty(size_t instructionOffset,
 Status VirtualMachine::invokeSuper(const std::string& name,
                                    uint8_t argumentCount) {
     Value receiver = m_stack.peekUnchecked(argumentCount);
-    if (!receiver.isInstance() || !receiver.asInstance()->klass ||
-        !receiver.asInstance()->klass->superclass) {
+    ClosureObject* closure = currentFrame().closure;
+    if (!receiver.isInstance() || closure == nullptr ||
+        closure->superclassContext == nullptr) {
         return runtimeError("Invalid super lookup.");
     }
 
     auto instance = receiver.asInstance();
-    auto method = findMethodClosure(instance->klass->superclass, name);
+    auto method = findMethodClosure(closure->superclassContext, name);
     if (!method) {
         return runtimeError("Undefined superclass method '" + name + "'.");
     }
@@ -2888,7 +2919,10 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                 return runtimeError("Invalid method declaration.");
             }
 
-            klass.asClass()->methods[name] = method.asClosure();
+            auto* klassObject = klass.asClass();
+            auto* methodClosure = method.asClosure();
+            methodClosure->superclassContext = klassObject->superclass;
+            klassObject->methods[name] = methodClosure;
             m_stack.pop();
             DISPATCH();
         }
@@ -2906,11 +2940,13 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
         VM_CASE(GET_SUPER) {
             const std::string& name = readNameConstant();
             auto receiver = currentFrame().receiver;
-            if (!receiver || !receiver->klass || !receiver->klass->superclass) {
+            ClosureObject* closure = currentFrame().closure;
+            if (!receiver || closure == nullptr ||
+                closure->superclassContext == nullptr) {
                 return runtimeError("Invalid super lookup.");
             }
 
-            auto method = findMethodClosure(receiver->klass->superclass, name);
+            auto method = findMethodClosure(closure->superclassContext, name);
             if (!method) {
                 return runtimeError("Undefined superclass method '" + name +
                                     "'.");
@@ -3837,13 +3873,10 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
 
             std::string source((std::istreambuf_iterator<char>(file)),
                                std::istreambuf_iterator<char>());
-            bool importStrict =
-                m_defaultStrictMode || hasStrictDirective(source);
 
             m_importStack.insert(path);
 
             Chunk importedChunk;
-            m_compiler.setStrictMode(importStrict);
             if (!m_compiler.compile(source, importedChunk, path)) {
                 m_importStack.erase(path);
                 return Status::COMPILATION_ERROR;
@@ -4371,15 +4404,12 @@ void VirtualMachine::resetRuntimeState() {
 Status VirtualMachine::interpret(std::string_view source, bool printReturnValue,
                                  bool traceEnabled, bool disassembleEnabled,
                                  const std::string& sourcePath,
-                                 bool strictMode,
                                  bool frontendTimingsEnabled,
                                  bool frontendTimingsJsonEnabled) {
     Chunk chunk;
     resetRuntimeState();
-    m_defaultStrictMode = strictMode || hasStrictDirective(source);
     m_compiler.setGC(&m_gc);
     m_compiler.setPackageSearchPaths(m_packageSearchPaths);
-    m_compiler.setStrictMode(m_defaultStrictMode);
     m_traceEnabled = traceEnabled;
     m_disassembleEnabled = disassembleEnabled;
 

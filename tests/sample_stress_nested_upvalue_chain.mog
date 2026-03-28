@@ -1,0 +1,30 @@
+fn makeChain(seed i32) fn() i32 {
+  var base i32 = seed
+
+  fn outer() fn() i32 {
+    var step i32 = 3
+
+    fn middle() fn() i32 {
+      var bonus i32 = 1
+
+      return fn() i32 {
+        base = base + 1
+        return base + step + bonus
+      }
+    }
+
+    return middle()
+  }
+
+  return outer()
+}
+
+var total i32 = 0
+var i i32 = 0
+while (i < 2000) {
+  var thunk fn() i32 = makeChain(i)
+  total = total + thunk()
+  i = i + 1
+}
+
+print(total)

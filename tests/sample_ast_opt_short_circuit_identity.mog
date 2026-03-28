@@ -1,4 +1,3 @@
-#!strict
 fn rhsTrue() bool {
     print("rhs-true")
     return true

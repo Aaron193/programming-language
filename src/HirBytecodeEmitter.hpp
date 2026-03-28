@@ -15,9 +15,17 @@ class HirBytecodeEmitter {
     bool emitModule();
 
    private:
+    struct LoopControlContext {
+        std::optional<Token> label;
+        int continueTarget = 0;
+        int scopeDepth = 0;
+        std::vector<int> breakJumps;
+    };
+
     Compiler& m_compiler;
     const HirModule& m_module;
     size_t m_terminalLine = 1;
+    std::vector<LoopControlContext> m_loopContexts;
 
     std::string tokenText(const Token& token) const;
     size_t safeLine(size_t line) const;
@@ -41,6 +49,7 @@ class HirBytecodeEmitter {
                             const TypeRef& rightType, size_t line);
     void beginScope();
     void endScope(size_t line);
+    void emitScopeExitToDepth(int targetDepth, size_t line);
     void defineVariable(uint8_t global, size_t line);
     void emitVariableRead(const Token& name, size_t line);
     TypeRef lookupClassFieldType(const TypeRef& objectType,
@@ -68,6 +77,7 @@ class HirBytecodeEmitter {
     void emitDestructuredImport(const HirDestructuredImportStmt& stmt,
                                 size_t line);
     void emitItem(const HirItem& item);
+    LoopControlContext* resolveLoopContext(const std::optional<Token>& label);
     void emitStmt(const HirStmt& stmt);
     void emitAssignmentToVariable(const HirBindingExpr& target,
                                   const Token& op, const HirExpr* valueExpr,

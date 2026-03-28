@@ -1,4 +1,3 @@
-#!strict
 const { Seed } = @import("./frontend_nested_c.mog")
 
 fn GetBase() i32 {

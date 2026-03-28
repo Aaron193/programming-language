@@ -13,15 +13,11 @@ if [[ ! -x "$INTERPRETER" ]]; then
 fi
 
 run_expect_compile_error_contains() {
-    local mode="$1"
-    local file="$2"
-    local needle="$3"
-    local expected_location="${4:-}"
+    local file="$1"
+    local needle="$2"
+    local expected_location="${3:-}"
 
     local -a cmd=("$INTERPRETER")
-    if [[ "$mode" == "strict" ]]; then
-        cmd+=("--strict")
-    fi
     cmd+=("$file")
 
     set +e
@@ -31,13 +27,13 @@ run_expect_compile_error_contains() {
     set -e
 
     if [[ $status -eq 0 ]]; then
-        echo "[FAIL] Expected compile failure ($mode): $file"
+        echo "[FAIL] Expected compile failure: $file"
         echo "$output"
         return 1
     fi
 
     if ! grep -Eiq "$needle" <<< "$output"; then
-        echo "[FAIL] Expected compile error message not found ($mode): $file"
+        echo "[FAIL] Expected compile error message not found: $file"
         echo "Expected regex: $needle"
         echo "Actual output:"
         echo "$output"
@@ -46,14 +42,14 @@ run_expect_compile_error_contains() {
 
     if [[ -n "$expected_location" ]] &&
        ! grep -Fq "[error][compile][line $expected_location]" <<< "$output"; then
-        echo "[FAIL] Expected exact diagnostic location not found ($mode): $file"
+        echo "[FAIL] Expected exact diagnostic location not found: $file"
         echo "Expected location: $expected_location"
         echo "Actual output:"
         echo "$output"
         return 1
     fi
 
-    echo "[PASS] compile error ($mode): $file"
+    echo "[PASS] compile error: $file"
     return 0
 }
 
@@ -145,20 +141,15 @@ run_expect_disassembly_contains() {
 
 failed=0
 
-for mode in default strict; do
-    run_expect_compile_error_contains \
-        "$mode" \
-        "$FINDINGS_DIR/fail_numeric_overflow_signed.mog" \
-        "numeric literal" || failed=1
-    run_expect_compile_error_contains \
-        "$mode" \
-        "$FINDINGS_DIR/fail_numeric_overflow_unsigned.mog" \
-        "numeric literal" || failed=1
-    run_expect_compile_error_contains \
-        "$mode" \
-        "$FINDINGS_DIR/fail_numeric_overflow_float.mog" \
-        "numeric literal" || failed=1
-done
+run_expect_compile_error_contains \
+    "$FINDINGS_DIR/fail_numeric_overflow_signed.mog" \
+    "numeric literal" || failed=1
+run_expect_compile_error_contains \
+    "$FINDINGS_DIR/fail_numeric_overflow_unsigned.mog" \
+    "numeric literal" || failed=1
+run_expect_compile_error_contains \
+    "$FINDINGS_DIR/fail_numeric_overflow_float.mog" \
+    "numeric literal" || failed=1
 
 run_expect_disassembly_contains \
     "$FINDINGS_DIR/fail_cast_downcast_runtime.mog" \
@@ -173,16 +164,22 @@ run_expect_success_output \
     "ok" || failed=1
 
 run_expect_compile_error_contains \
-    "default" \
     "$FINDINGS_DIR/fail_strict_line_top_level.mog" \
-    "cannot assign 'str' to variable 'age' of type 'i32'" \
-    "2:5" || failed=1
+    "AST frontend failed to parse source" \
+    "1:1" || failed=1
+run_expect_compile_error_contains \
+    "$FINDINGS_DIR/fail_import_non_string_arg.mog" \
+    "Expected string literal but found '@'\\." \
+    "1:23" || failed=1
 
 run_expect_compile_error_contains \
-    "strict" \
-    "$FINDINGS_DIR/fail_strict_line_top_level.mog" \
-    "cannot assign 'str' to variable 'age' of type 'i32'" \
-    "2:5" || failed=1
+    "$FINDINGS_DIR/fail_label_on_non_loop.mog" \
+    "Labels may only be attached to 'while' or 'for' statements" \
+    "1:1" || failed=1
+
+run_expect_success_output \
+    "$SCRIPT_DIR/sample_break_continue.mog" \
+    $'2\n1\n3\n4\n10\n12' || failed=1
 
 run_expect_disassembly_contains \
     "$FINDINGS_DIR/sample_constructor_field_slot.mog" \

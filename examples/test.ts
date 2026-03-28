@@ -32,6 +32,14 @@ export interface GameState {
   dead: boolean;
 }
 
+class Player {
+  name: string;
+  
+  constructor(name: string) {
+    this.name = name;
+  }
+}
+
 export function makePipe(x: number, gapY: number): Pipe {
   return {
     x,

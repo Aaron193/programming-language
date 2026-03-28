@@ -40,12 +40,12 @@ NEGATIVE_STATUS=$?
 set -e
 
 if [[ $NEGATIVE_STATUS -eq 0 ]]; then
-    echo "[FAIL] expected const reassignment to fail without --strict"
+    echo "[FAIL] expected const reassignment to fail"
     exit 1
 fi
 
 if ! grep -Fq "Cannot assign to const variable 'value'." <<< "$NEGATIVE_OUTPUT"; then
-    echo "[FAIL] expected non-strict compiler const error"
+    echo "[FAIL] expected compiler const error"
     echo "$NEGATIVE_OUTPUT"
     exit 1
 fi

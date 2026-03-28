@@ -1,6 +1,7 @@
 # Programming Language Interpreter
 
 This project is a bytecode-compiled, stack-based interpreter implemented in C++.
+The language is strictly typed by default; there is no opt-in non-strict mode.
 
 ## Supported Language Features
 
@@ -11,7 +12,7 @@ This project is a bytecode-compiled, stack-based interpreter implemented in C++.
 - Bitwise operators: `&`, `|`, `^`, `~`, `<<`, `>>`
 - Variables: `var name Type = value`, `const name Type = value`, `const name = @import(...)`, assignment, compound assignment (`+=`, `-=`, `*=`, `/=`, `&=`, `|=`, `^=`, `<<=`, `>>=`), lexical scope
 - Update operators: `++`, `--`
-- Control flow: `if`/`else`, `while`, `for`, foreach (`for (var x Type : collection)`)
+- Control flow: `if`/`else`, `while`, `for`, foreach (`for (var x Type : collection)`), `break`, `continue`, labeled loops
 - Functions: `fn name(param Type, ...) ReturnType { ... }`, block function literals, expression-bodied lambdas, recursion
 - Closures: nested functions with captured/upvalue variables
 - Types: `type Name struct { ... }`, aliases via `type Alias ExistingType`, fields/methods, `this`
@@ -104,10 +105,28 @@ Syntax note: continuation tokens such as `(`, `[`, `.`, `as`, assignment operato
 ./build.sh
 ```
 
+Build a debug binary with sanitizers:
+
+```bash
+./build.sh --debug --asan
+./build.sh --debug --ubsan
+./build.sh --debug --asan --ubsan
+```
+
 Build a profiler-friendly optimized binary:
 
 ```bash
 ./build.sh --release --profiling
+```
+
+Sanitizer builds cannot be combined with `--lto`, `--pgo-generate`, or
+`--pgo-use`.
+
+When running shell-based test suites under AddressSanitizer in this environment,
+disable leak detection to avoid `LeakSanitizer`/output-capture issues:
+
+```bash
+ASAN_OPTIONS=detect_leaks=0 bash tests/test_ast_optimizer.sh
 ```
 
 Direct-threaded VM dispatch via computed-goto is enabled by default.
@@ -186,7 +205,18 @@ Run additional suites:
 ./tests/test_syntax_breakage.sh
 ./tests/test_newline_syntax.sh
 ./tests/test_frontend_benchmark.sh
+./tests/test_vscode_manifest.sh
 ```
+
+## VS Code
+
+The VS Code extension lives under `tooling/vscode-mog`.
+
+`.mog` files now declare a Mog language icon through the extension manifest, so
+Explorer and tabs can show the bundled icon when the active file icon theme
+supports language default icons. Themes such as `Minimal` may still show the
+generic file icon because the extension does not override the user's full file
+icon theme.
 
 ## Benchmarks
 
@@ -318,6 +348,17 @@ Namespace import:
 const math = @import("./math.mog")
 print(math.PI)
 print(math.Add(1, 2))
+```
+
+Labeled loop control:
+
+```expr
+outer: while (true) {
+    for (var i i32 = 0; i < 10; i++) {
+        if (i == 3) continue
+        if (i == 7) break outer
+    }
+}
 ```
 
 Named import and aliasing:

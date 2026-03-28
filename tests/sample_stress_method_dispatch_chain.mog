@@ -1,0 +1,50 @@
+type A struct {
+  fn score(value i32) i32 {
+    return value + 1
+  }
+}
+
+type B struct < A {
+  fn score(value i32) i32 {
+    return super.score(value) + 1
+  }
+}
+
+type C struct < B {
+  fn score(value i32) i32 {
+    return super.score(value) + 1
+  }
+}
+
+type D struct < C {
+  fn score(value i32) i32 {
+    return super.score(value) + 1
+  }
+}
+
+type E struct < D {
+  fn score(value i32) i32 {
+    return super.score(value) + 1
+  }
+}
+
+type F struct < E {
+  fn score(value i32) i32 {
+    return super.score(value) + 1
+  }
+}
+
+fn run(value i32) i32 {
+  var instance F = F()
+  var extracted fn(i32) i32 = instance.score
+  return extracted(value)
+}
+
+var total i32 = 0
+var i i32 = 0
+while (i < 200) {
+  total = total + run(i)
+  i = i + 1
+}
+
+print(total)

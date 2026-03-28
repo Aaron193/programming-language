@@ -76,16 +76,12 @@ bool Compiler::compile(std::string_view source, Chunk& chunk,
 
     AstFrontendResult astFrontend;
     std::vector<TypeError> astErrors;
-    AstFrontendMode frontendMode = m_strictMode
-                                       ? AstFrontendMode::StrictChecked
-                                       : AstFrontendMode::LoweringOnly;
     AstFrontendOptions frontendOptions;
     frontendOptions.sourcePath = sourcePath;
     frontendOptions.packageSearchPaths = m_packageSearchPaths;
     frontendOptions.moduleGraphCache = &m_frontendModuleGraph;
     AstFrontendBuildStatus astStatus =
-        buildAstFrontend(source, frontendOptions, frontendMode, astErrors,
-                         astFrontend);
+        buildAstFrontend(source, frontendOptions, astErrors, astFrontend);
 
     if (astStatus != AstFrontendBuildStatus::Success) {
         m_lastFrontendTimings = astFrontend.timings;
@@ -188,7 +184,7 @@ TypeRef Compiler::peekExprType() const {
 
 uint8_t Compiler::arithmeticOpcode(TokenType operatorType,
                                    const TypeRef& numericType) const {
-    if (m_strictMode && numericType && numericType->isInteger()) {
+    if (numericType && numericType->isInteger()) {
         const bool isSigned = numericType->isSigned();
         switch (operatorType) {
             case TokenType::PLUS:
@@ -458,18 +454,21 @@ int Compiler::resolveUpvalue(const Token& name, int contextIndex) {
 
     int local = resolveLocalInContext(name, contextIndex - 1);
     if (local != -1) {
-        m_contexts[contextIndex - 1].locals[local].isCaptured = true;
-        const auto& localInfo = m_contexts[contextIndex - 1].locals[local];
+        auto& enclosingContext = m_contexts[contextIndex - 1];
+        enclosingContext.locals[local].isCaptured = true;
+        const TypeRef localType = enclosingContext.locals[local].type;
+        const bool localIsConst = enclosingContext.locals[local].isConst;
         return addUpvalue(contextIndex, static_cast<uint8_t>(local), true,
-                          localInfo.type, localInfo.isConst);
+                          localType, localIsConst);
     }
 
     int upvalue = resolveUpvalue(name, contextIndex - 1);
     if (upvalue != -1) {
-        const auto& upvalueInfo = m_contexts[contextIndex - 1].upvalues[upvalue];
+        const Upvalue enclosingUpvalue =
+            m_contexts[contextIndex - 1].upvalues[upvalue];
         return addUpvalue(
             contextIndex, static_cast<uint8_t>(upvalue), false,
-            upvalueInfo.type, upvalueInfo.isConst);
+            enclosingUpvalue.type, enclosingUpvalue.isConst);
     }
 
     return -1;
