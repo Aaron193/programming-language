@@ -1844,9 +1844,9 @@ class AstTypeCheckerImpl {
                                                : TypeInfo::makeAny();
                     } else if (iterable.type &&
                                iterable.type->kind == TypeKind::DICT) {
-                        inferredLoopType = iterable.type->keyType
-                                               ? iterable.type->keyType
-                                               : TypeInfo::makeAny();
+                        addError(value.iterable->node,
+                                 "Type error: cannot iterate Dict<K, V> "
+                                 "directly; use .keys() or .values().");
                     } else if (iterable.type &&
                                iterable.type->kind == TypeKind::SET) {
                         inferredLoopType = iterable.type->elementType
@@ -1854,8 +1854,8 @@ class AstTypeCheckerImpl {
                                                : TypeInfo::makeAny();
                     } else if (!(iterable.type && iterable.type->isAny())) {
                         addError(value.iterable->node,
-                                 "Type error: foreach expects Array<T>, Dict<K, "
-                                 "V>, or Set<T>.");
+                                 "Type error: foreach expects Array<T> or "
+                                 "Set<T>.");
                     }
 
                     if (!isAssignableType(inferredLoopType, declaredType)) {

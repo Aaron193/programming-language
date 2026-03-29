@@ -85,6 +85,10 @@ run_expect_compile_error \
     "cannot assign 'Dict<str, str>' to variable 'flags' of type 'Dict<str, bool>'" || failed=1
 
 run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/foreach_dict_requires_explicit_projection.mog" \
+    "cannot iterate Dict<K, V> directly; use .keys() or .values()." || failed=1
+
+run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/assign_null_to_non_optional.mog" \
     "cannot assign 'null' to variable 'name' of type 'str'" || failed=1
 

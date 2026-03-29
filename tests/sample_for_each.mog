@@ -4,7 +4,7 @@ for (var n i32 : nums) {
 }
 
 var dict Dict<str, i32> = {"b": 2, "a": 1}
-for (var key str : dict) {
+for (var key str : dict.keys()) {
   print(key)
   print(dict[key])
 }
