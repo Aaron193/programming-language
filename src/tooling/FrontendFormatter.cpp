@@ -15,6 +15,7 @@ namespace {
 
 constexpr int kFormatIndentWidth = 4;
 constexpr size_t kMaxPreservedBlankLines = 1;
+constexpr size_t kMaxFormattedLineWidth = 80;
 
 struct FormatComment {
     size_t startOffset = 0;
@@ -492,8 +493,114 @@ struct Formatter {
         outText += indentText(indent);
     }
 
+    bool isSingleLineText(std::string_view text) const {
+        return text.find('\n') == std::string_view::npos;
+    }
+
+    size_t lastLineWidth(std::string_view text) const {
+        const size_t newline = text.rfind('\n');
+        return newline == std::string_view::npos ? text.size()
+                                                 : text.size() - newline - 1;
+    }
+
+    bool fitsOnLine(int indent, std::string_view text) const {
+        return isSingleLineText(text) &&
+               static_cast<size_t>(indent * kFormatIndentWidth) + text.size() <=
+                   kMaxFormattedLineWidth;
+    }
+
+    bool fitsAfterExistingText(int indent, std::string_view existing,
+                               std::string_view suffix) const {
+        if (!isSingleLineText(suffix)) {
+            return false;
+        }
+        if (isSingleLineText(existing)) {
+            return static_cast<size_t>(indent * kFormatIndentWidth) +
+                       existing.size() + suffix.size() <=
+                   kMaxFormattedLineWidth;
+        }
+        return lastLineWidth(existing) + suffix.size() <=
+               kMaxFormattedLineWidth;
+    }
+
     bool hasExpressionComments(const SourceSpan& span) const {
         return hasCommentsInRange(span.start.offset, span.end.offset);
+    }
+
+    std::string formatParameter(const AstParameter& param) {
+        std::string text = tokenLexeme(param.name);
+        if (param.type) {
+            text += " ";
+            text += formatType(*param.type);
+        }
+        return text;
+    }
+
+    bool callableHasPreservedMultilineLayout(
+        const std::vector<AstParameter>& params, const AstTypeExpr* returnType,
+        size_t headerLine) const {
+        size_t previousLine = headerLine;
+        if (!params.empty()) {
+            if (params.front().node.span.start.line > headerLine) {
+                return true;
+            }
+            for (size_t index = 1; index < params.size(); ++index) {
+                if (params[index].node.span.start.line >
+                    params[index - 1].node.span.end.line) {
+                    return true;
+                }
+            }
+            previousLine = params.back().node.span.end.line;
+        }
+        return returnType != nullptr &&
+               returnType->node.span.start.line > previousLine;
+    }
+
+    std::string formatCallableSignature(std::string_view introducer,
+                                        const std::vector<AstParameter>& params,
+                                        const AstTypeExpr* returnType,
+                                        int indent,
+                                        bool preserveMultiline) {
+        std::string singleLine = std::string(introducer) + formatParameterList(params);
+        if (returnType) {
+            singleLine += " ";
+            singleLine += formatType(*returnType);
+        }
+        if (!preserveMultiline && fitsOnLine(indent, singleLine)) {
+            return singleLine;
+        }
+
+        std::string result(introducer);
+        result += "(";
+        if (params.empty()) {
+            result += ")";
+        } else {
+            for (size_t index = 0; index < params.size(); ++index) {
+                result += "\n";
+                result += indentText(indent + 1);
+                result += formatParameter(params[index]);
+                if (index + 1 < params.size()) {
+                    result += ",";
+                }
+            }
+            result += "\n";
+            result += indentText(indent);
+            result += ")";
+        }
+
+        if (returnType) {
+            const std::string returnTypeText = formatType(*returnType);
+            if (fitsAfterExistingText(indent, result, " " + returnTypeText)) {
+                result += " ";
+                result += returnTypeText;
+            } else {
+                result += "\n";
+                result += indentText(indent + 1);
+                result += returnTypeText;
+            }
+        }
+
+        return result;
     }
 
     bool callHasPreservedMultilineLayout(const AstCallExpr& callExpr,
@@ -555,8 +662,20 @@ struct Formatter {
                 span.end.line > groupingExpr.expression->node.span.end.line);
     }
 
+    bool binaryHasPreservedMultilineLayout(const AstBinaryExpr& binaryExpr) const {
+        return binaryExpr.right->node.span.start.line >
+               binaryExpr.left->node.span.end.line;
+    }
+
+    bool assignmentHasPreservedMultilineLayout(
+        const AstAssignmentExpr& assignmentExpr) const {
+        return assignmentExpr.value->node.span.start.line >
+               assignmentExpr.target->node.span.end.line;
+    }
+
     std::string formatMultilineCallExpression(const AstCallExpr& callExpr,
-                                              const SourceSpan& span, int indent) {
+                                              const SourceSpan& span, int indent,
+                                              bool preserveSourceBreaks) {
         if (hasExpressionComments(span)) {
             failed = true;
             return std::string();
@@ -568,7 +687,8 @@ struct Formatter {
         }
         result += "(";
         if (callExpr.arguments.empty()) {
-            if (span.end.line > callExpr.callee->node.span.end.line) {
+            if (preserveSourceBreaks &&
+                span.end.line > callExpr.callee->node.span.end.line) {
                 appendPreservedLineGap(result, callExpr.callee->node.span.end.line,
                                        span.end.line, indent);
             }
@@ -578,30 +698,32 @@ struct Formatter {
 
         const size_t firstArgumentLine =
             callExpr.arguments.front()->node.span.start.line;
-        if (firstArgumentLine > callExpr.callee->node.span.end.line) {
+        if (preserveSourceBreaks &&
+            firstArgumentLine > callExpr.callee->node.span.end.line) {
             appendPreservedLineGap(result, callExpr.callee->node.span.end.line,
                                    firstArgumentLine, indent + 1);
+        } else {
+            result += "\n";
+            result += indentText(indent + 1);
         }
 
         for (size_t index = 0; index < callExpr.arguments.size(); ++index) {
-            if (index == 0 && firstArgumentLine <= callExpr.callee->node.span.end.line) {
-                result += formatExpression(*callExpr.arguments[index], indent + 1);
-            } else if (index != 0) {
+            if (index != 0) {
                 const auto& previousArgument = callExpr.arguments[index - 1];
                 const auto& argument = callExpr.arguments[index];
-                if (argument->node.span.start.line >
+                if (preserveSourceBreaks &&
+                    argument->node.span.start.line >
                     previousArgument->node.span.end.line) {
                     appendPreservedLineGap(result,
                                            previousArgument->node.span.end.line,
                                            argument->node.span.start.line,
                                            indent + 1);
                 } else {
-                    result += " ";
+                    result += "\n";
+                    result += indentText(indent + 1);
                 }
-                result += formatExpression(*argument, indent + 1);
-            } else {
-                result += formatExpression(*callExpr.arguments[index], indent + 1);
             }
+            result += formatExpression(*callExpr.arguments[index], indent + 1);
             if (failed) {
                 return std::string();
             }
@@ -610,17 +732,22 @@ struct Formatter {
             }
         }
 
-        if (span.end.line > callExpr.arguments.back()->node.span.end.line) {
+        if (preserveSourceBreaks &&
+            span.end.line > callExpr.arguments.back()->node.span.end.line) {
             appendPreservedLineGap(result,
                                    callExpr.arguments.back()->node.span.end.line,
                                    span.end.line, indent);
+        } else {
+            result += "\n";
+            result += indentText(indent);
         }
         result += ")";
         return result;
     }
 
     std::string formatMultilineArrayLiteral(const AstArrayLiteralExpr& arrayExpr,
-                                            const SourceSpan& span, int indent) {
+                                            const SourceSpan& span, int indent,
+                                            bool preserveSourceBreaks) {
         if (hasExpressionComments(span)) {
             failed = true;
             return std::string();
@@ -628,7 +755,7 @@ struct Formatter {
 
         std::string result = "[";
         if (arrayExpr.elements.empty()) {
-            if (span.end.line > span.start.line) {
+            if (preserveSourceBreaks && span.end.line > span.start.line) {
                 appendPreservedLineGap(result, span.start.line, span.end.line,
                                        indent);
             }
@@ -637,30 +764,31 @@ struct Formatter {
         }
 
         const size_t firstElementLine = arrayExpr.elements.front()->node.span.start.line;
-        if (firstElementLine > span.start.line) {
+        if (preserveSourceBreaks && firstElementLine > span.start.line) {
             appendPreservedLineGap(result, span.start.line, firstElementLine,
                                    indent + 1);
+        } else {
+            result += "\n";
+            result += indentText(indent + 1);
         }
 
         for (size_t index = 0; index < arrayExpr.elements.size(); ++index) {
-            if (index == 0 && firstElementLine <= span.start.line) {
-                result += formatExpression(*arrayExpr.elements[index], indent + 1);
-            } else if (index != 0) {
+            if (index != 0) {
                 const auto& previousElement = arrayExpr.elements[index - 1];
                 const auto& element = arrayExpr.elements[index];
-                if (element->node.span.start.line >
+                if (preserveSourceBreaks &&
+                    element->node.span.start.line >
                     previousElement->node.span.end.line) {
                     appendPreservedLineGap(result,
                                            previousElement->node.span.end.line,
                                            element->node.span.start.line,
                                            indent + 1);
                 } else {
-                    result += " ";
+                    result += "\n";
+                    result += indentText(indent + 1);
                 }
-                result += formatExpression(*element, indent + 1);
-            } else {
-                result += formatExpression(*arrayExpr.elements[index], indent + 1);
             }
+            result += formatExpression(*arrayExpr.elements[index], indent + 1);
             if (failed) {
                 return std::string();
             }
@@ -669,17 +797,22 @@ struct Formatter {
             }
         }
 
-        if (span.end.line > arrayExpr.elements.back()->node.span.end.line) {
+        if (preserveSourceBreaks &&
+            span.end.line > arrayExpr.elements.back()->node.span.end.line) {
             appendPreservedLineGap(result,
                                    arrayExpr.elements.back()->node.span.end.line,
                                    span.end.line, indent);
+        } else {
+            result += "\n";
+            result += indentText(indent);
         }
         result += "]";
         return result;
     }
 
     std::string formatMultilineDictLiteral(const AstDictLiteralExpr& dictExpr,
-                                           const SourceSpan& span, int indent) {
+                                           const SourceSpan& span, int indent,
+                                           bool preserveSourceBreaks) {
         if (hasExpressionComments(span)) {
             failed = true;
             return std::string();
@@ -687,7 +820,7 @@ struct Formatter {
 
         std::string result = "{";
         if (dictExpr.entries.empty()) {
-            if (span.end.line > span.start.line) {
+            if (preserveSourceBreaks && span.end.line > span.start.line) {
                 appendPreservedLineGap(result, span.start.line, span.end.line,
                                        indent);
             }
@@ -696,30 +829,31 @@ struct Formatter {
         }
 
         const size_t firstEntryLine = dictExpr.entries.front().key->node.span.start.line;
-        if (firstEntryLine > span.start.line) {
+        if (preserveSourceBreaks && firstEntryLine > span.start.line) {
             appendPreservedLineGap(result, span.start.line, firstEntryLine,
                                    indent + 1);
+        } else {
+            result += "\n";
+            result += indentText(indent + 1);
         }
 
         for (size_t index = 0; index < dictExpr.entries.size(); ++index) {
-            if (index == 0 && firstEntryLine <= span.start.line) {
-                result += formatExpression(*dictExpr.entries[index].key, indent + 1);
-            } else if (index != 0) {
+            if (index != 0) {
                 const auto& previousEntry = dictExpr.entries[index - 1];
                 const auto& entry = dictExpr.entries[index];
-                if (entry.key->node.span.start.line >
+                if (preserveSourceBreaks &&
+                    entry.key->node.span.start.line >
                     previousEntry.value->node.span.end.line) {
                     appendPreservedLineGap(result,
                                            previousEntry.value->node.span.end.line,
                                            entry.key->node.span.start.line,
                                            indent + 1);
                 } else {
-                    result += " ";
+                    result += "\n";
+                    result += indentText(indent + 1);
                 }
-                result += formatExpression(*entry.key, indent + 1);
-            } else {
-                result += formatExpression(*dictExpr.entries[index].key, indent + 1);
             }
+            result += formatExpression(*dictExpr.entries[index].key, indent + 1);
             if (failed) {
                 return std::string();
             }
@@ -733,10 +867,14 @@ struct Formatter {
             }
         }
 
-        if (span.end.line > dictExpr.entries.back().value->node.span.end.line) {
+        if (preserveSourceBreaks &&
+            span.end.line > dictExpr.entries.back().value->node.span.end.line) {
             appendPreservedLineGap(result,
                                    dictExpr.entries.back().value->node.span.end.line,
                                    span.end.line, indent);
+        } else {
+            result += "\n";
+            result += indentText(indent);
         }
         result += "}";
         return result;
@@ -744,28 +882,68 @@ struct Formatter {
 
     std::string formatMultilineGroupingExpression(const AstGroupingExpr& groupingExpr,
                                                   const SourceSpan& span,
-                                                  int indent) {
+                                                  int indent,
+                                                  bool preserveSourceBreaks) {
         if (hasExpressionComments(span)) {
             failed = true;
             return std::string();
         }
 
         std::string result = "(";
-        if (groupingExpr.expression->node.span.start.line > span.start.line) {
+        if (preserveSourceBreaks &&
+            groupingExpr.expression->node.span.start.line > span.start.line) {
             appendPreservedLineGap(result, span.start.line,
                                    groupingExpr.expression->node.span.start.line,
                                    indent + 1);
+        } else {
+            result += "\n";
+            result += indentText(indent + 1);
         }
         result += formatExpression(*groupingExpr.expression, indent + 1);
         if (failed) {
             return std::string();
         }
-        if (span.end.line > groupingExpr.expression->node.span.end.line) {
+        if (preserveSourceBreaks &&
+            span.end.line > groupingExpr.expression->node.span.end.line) {
             appendPreservedLineGap(result,
                                    groupingExpr.expression->node.span.end.line,
                                    span.end.line, indent);
+        } else {
+            result += "\n";
+            result += indentText(indent);
         }
         result += ")";
+        return result;
+    }
+
+    std::string formatWrappedBinaryExpression(const AstBinaryExpr& binaryExpr,
+                                              int indent, int precedence) {
+        std::string result =
+            formatExpression(*binaryExpr.left, indent, precedence, false, false);
+        if (failed) {
+            return std::string();
+        }
+        result += " ";
+        result += tokenLexeme(binaryExpr.op);
+        result += "\n";
+        result += indentText(indent + 1);
+        result +=
+            formatExpression(*binaryExpr.right, indent + 1, precedence, true, false);
+        return result;
+    }
+
+    std::string formatWrappedAssignmentExpression(
+        const AstAssignmentExpr& assignmentExpr, int indent) {
+        std::string result =
+            formatExpression(*assignmentExpr.target, indent, 1, false, true);
+        if (failed) {
+            return std::string();
+        }
+        result += " ";
+        result += tokenLexeme(assignmentExpr.op);
+        result += "\n";
+        result += indentText(indent + 1);
+        result += formatExpression(*assignmentExpr.value, indent + 1, 1, true, true);
         return result;
     }
 
@@ -957,39 +1135,76 @@ struct Formatter {
                     }
                     return true;
                 } else if constexpr (std::is_same_v<T, AstVarDeclStmt>) {
-                    append(value.isConst ? "const " : "var ");
-                    append(tokenLexeme(value.name));
+                    std::string prefix = value.isConst ? "const " : "var ";
+                    prefix += tokenLexeme(value.name);
                     if (!value.omittedType && value.declaredType) {
-                        append(" ");
-                        append(formatType(*value.declaredType));
+                        prefix += " ";
+                        prefix += formatType(*value.declaredType);
                     }
-                    append(" = ");
-                    append(formatExpression(*value.initializer, indent));
+                    const std::string initializerText =
+                        formatExpression(*value.initializer, indent);
+                    if (failed) {
+                        return false;
+                    }
+                    append(prefix);
+                    if (fitsAfterExistingText(indent, prefix, " = " + initializerText)) {
+                        append(" = ");
+                        append(initializerText);
+                    } else {
+                        append(" =");
+                        appendNewline();
+                        ensureIndent(indent + 1);
+                        const std::string wrappedInitializer =
+                            formatExpression(*value.initializer, indent + 1);
+                        if (failed) {
+                            return false;
+                        }
+                        append(wrappedInitializer);
+                    }
                     return true;
                 } else if constexpr (std::is_same_v<T, AstDestructuredImportStmt>) {
-                    append(value.isConst ? "const {" : "var {");
+                    std::string prefix = value.isConst ? "const {" : "var {";
                     for (size_t index = 0; index < value.bindings.size(); ++index) {
                         if (index == 0) {
-                            append(" ");
+                            prefix += " ";
                         } else {
-                            append(", ");
+                            prefix += ", ";
                         }
                         const auto& binding = value.bindings[index];
-                        append(tokenLexeme(binding.exportedName));
+                        prefix += tokenLexeme(binding.exportedName);
                         if (binding.localName) {
-                            append(" as ");
-                            append(tokenLexeme(*binding.localName));
+                            prefix += " as ";
+                            prefix += tokenLexeme(*binding.localName);
                         }
                         if (binding.expectedType) {
-                            append(": ");
-                            append(formatType(*binding.expectedType));
+                            prefix += ": ";
+                            prefix += formatType(*binding.expectedType);
                         }
                     }
                     if (!value.bindings.empty()) {
-                        append(" ");
+                        prefix += " ";
                     }
-                    append("} = ");
-                    append(formatExpression(*value.initializer, indent));
+                    prefix += "}";
+                    const std::string initializerText =
+                        formatExpression(*value.initializer, indent);
+                    if (failed) {
+                        return false;
+                    }
+                    append(prefix);
+                    if (fitsAfterExistingText(indent, prefix, " = " + initializerText)) {
+                        append(" = ");
+                        append(initializerText);
+                    } else {
+                        append(" =");
+                        appendNewline();
+                        ensureIndent(indent + 1);
+                        const std::string wrappedInitializer =
+                            formatExpression(*value.initializer, indent + 1);
+                        if (failed) {
+                            return false;
+                        }
+                        append(wrappedInitializer);
+                    }
                     return true;
                 } else if constexpr (std::is_same_v<T, AstIfStmt>) {
                     append("if (");
@@ -1160,13 +1375,12 @@ struct Formatter {
                     ensureIndent(indent + 1);
                 }
 
-                append("fn ");
-                append(tokenLexeme(member.method->name));
-                append(formatParameterList(member.method->params));
-                if (member.method->returnType) {
-                    append(" ");
-                    append(formatType(*member.method->returnType));
-                }
+                append(formatCallableSignature(
+                    "fn " + tokenLexeme(member.method->name), member.method->params,
+                    member.method->returnType.get(), indent + 1,
+                    callableHasPreservedMultilineLayout(
+                        member.method->params, member.method->returnType.get(),
+                        member.method->name.span().start.line)));
                 append(" ");
                 const auto* bodyBlock = std::get_if<AstBlockStmt>(&member.method->body->value);
                 if (bodyBlock == nullptr ||
@@ -1230,13 +1444,12 @@ struct Formatter {
                     append(" ");
                     return formatClassBody(value, indent);
                 } else if constexpr (std::is_same_v<T, AstFunctionDecl>) {
-                    append("fn ");
-                    append(tokenLexeme(value.name));
-                    append(formatParameterList(value.params));
-                    if (value.returnType) {
-                        append(" ");
-                        append(formatType(*value.returnType));
-                    }
+                    append(formatCallableSignature(
+                        "fn " + tokenLexeme(value.name), value.params,
+                        value.returnType.get(), indent,
+                        callableHasPreservedMultilineLayout(
+                            value.params, value.returnType.get(),
+                            value.name.span().start.line)));
                     append(" ");
                     const auto* bodyBlock = std::get_if<AstBlockStmt>(&value.body->value);
                     if (bodyBlock == nullptr) {
@@ -1333,36 +1546,69 @@ struct PlainFormatter {
                     outText += "\n";
                     return true;
                 } else if constexpr (std::is_same_v<T, AstVarDeclStmt>) {
-                    outText += indentText(indent) + (value.isConst ? "const " : "var ");
-                    outText += tokenLexeme(value.name);
+                    std::string prefix = value.isConst ? "const " : "var ";
+                    prefix += tokenLexeme(value.name);
                     if (!value.omittedType && value.declaredType) {
-                        outText += " " + parent.formatType(*value.declaredType);
+                        prefix += " " + parent.formatType(*value.declaredType);
                     }
-                    outText += " = " +
-                               parent.formatExpression(*value.initializer, indent) + "\n";
+                    const std::string initializerText =
+                        parent.formatExpression(*value.initializer, indent);
+                    if (parent.failed) {
+                        return false;
+                    }
+                    if (parent.fitsAfterExistingText(indent, prefix,
+                                                     " = " + initializerText)) {
+                        outText += indentText(indent) + prefix + " = " +
+                                   initializerText + "\n";
+                    } else {
+                        const std::string wrappedInitializer =
+                            parent.formatExpression(*value.initializer, indent + 1);
+                        if (parent.failed) {
+                            return false;
+                        }
+                        outText += indentText(indent) + prefix + " =\n" +
+                                   indentText(indent + 1) + wrappedInitializer + "\n";
+                    }
                     return true;
                 } else if constexpr (std::is_same_v<T, AstDestructuredImportStmt>) {
-                    outText += indentText(indent) + (value.isConst ? "const {" : "var {");
+                    std::string prefix = value.isConst ? "const {" : "var {";
                     for (size_t index = 0; index < value.bindings.size(); ++index) {
                         if (index == 0) {
-                            outText += " ";
+                            prefix += " ";
                         } else {
-                            outText += ", ";
+                            prefix += ", ";
                         }
                         const auto& binding = value.bindings[index];
-                        outText += tokenLexeme(binding.exportedName);
+                        prefix += tokenLexeme(binding.exportedName);
                         if (binding.localName) {
-                            outText += " as " + tokenLexeme(*binding.localName);
+                            prefix += " as " + tokenLexeme(*binding.localName);
                         }
                         if (binding.expectedType) {
-                            outText += ": " + parent.formatType(*binding.expectedType);
+                            prefix += ": " + parent.formatType(*binding.expectedType);
                         }
                     }
                     if (!value.bindings.empty()) {
-                        outText += " ";
+                        prefix += " ";
                     }
-                    outText += "} = " +
-                               parent.formatExpression(*value.initializer, indent) + "\n";
+                    prefix += "}";
+                    const std::string initializerText =
+                        parent.formatExpression(*value.initializer, indent);
+                    if (parent.failed) {
+                        return false;
+                    }
+                    if (parent.fitsAfterExistingText(indent, prefix,
+                                                     " = " + initializerText)) {
+                        outText += indentText(indent) + prefix + " = " +
+                                   initializerText + "\n";
+                    } else {
+                        const std::string wrappedInitializer =
+                            parent.formatExpression(*value.initializer, indent + 1);
+                        if (parent.failed) {
+                            return false;
+                        }
+                        outText += indentText(indent) + prefix + " =\n" +
+                                   indentText(indent + 1) + wrappedInitializer + "\n";
+                    }
                     return true;
                 } else if constexpr (std::is_same_v<T, AstIfStmt>) {
                     outText += indentText(indent) + "if (" +
@@ -1517,12 +1763,14 @@ struct PlainFormatter {
                                               "@operator(\"" + opText + "\")\n";
                             }
                         }
-                        methodText += indentText(indent + 1) + "fn " +
-                                      tokenLexeme(method.name) +
-                                      parent.formatParameterList(method.params);
-                        if (method.returnType) {
-                            methodText += " " + parent.formatType(*method.returnType);
-                        }
+                        methodText += indentText(indent + 1) +
+                                      parent.formatCallableSignature(
+                                          "fn " + tokenLexeme(method.name),
+                                          method.params, method.returnType.get(),
+                                          indent + 1,
+                                          parent.callableHasPreservedMultilineLayout(
+                                              method.params, method.returnType.get(),
+                                              method.name.span().start.line));
                         methodText += " ";
                         if (!formatStatement(*method.body, indent + 1, methodText)) {
                             return false;
@@ -1541,12 +1789,13 @@ struct PlainFormatter {
                     outText += indentText(indent) + "}\n";
                     return true;
                 } else if constexpr (std::is_same_v<T, AstFunctionDecl>) {
-                    outText += indentText(indent) + "fn " +
-                               tokenLexeme(value.name) +
-                               parent.formatParameterList(value.params);
-                    if (value.returnType) {
-                        outText += " " + parent.formatType(*value.returnType);
-                    }
+                    outText += indentText(indent) +
+                               parent.formatCallableSignature(
+                                   "fn " + tokenLexeme(value.name), value.params,
+                                   value.returnType.get(), indent,
+                                   parent.callableHasPreservedMultilineLayout(
+                                       value.params, value.returnType.get(),
+                                       value.name.span().start.line));
                     outText += " ";
                     return formatStatement(*value.body, indent, outText);
                 } else if constexpr (std::is_same_v<T, AstStmtPtr>) {
@@ -1580,9 +1829,15 @@ std::string Formatter::formatExpression(const AstExpr& expr, int indent,
             } else if constexpr (std::is_same_v<T, AstGroupingExpr>) {
                 if (groupingHasPreservedMultilineLayout(value, expr.node.span)) {
                     return formatMultilineGroupingExpression(value, expr.node.span,
-                                                             indent);
+                                                             indent, true);
                 }
-                return "(" + formatExpression(*value.expression, indent) + ")";
+                const std::string singleLine =
+                    "(" + formatExpression(*value.expression, indent) + ")";
+                if (failed || fitsOnLine(indent, singleLine)) {
+                    return singleLine;
+                }
+                return formatMultilineGroupingExpression(value, expr.node.span, indent,
+                                                         false);
             } else if constexpr (std::is_same_v<T, AstUnaryExpr>) {
                 return tokenLexeme(value.op) +
                        formatExpression(*value.operand, indent, 13, true, true);
@@ -1595,18 +1850,32 @@ std::string Formatter::formatExpression(const AstExpr& expr, int indent,
                        tokenLexeme(value.op);
             } else if constexpr (std::is_same_v<T, AstBinaryExpr>) {
                 const int precedence = precedenceForBinaryOperator(value.op.type());
-                return formatExpression(*value.left, indent, precedence, false, false) +
-                       " " + tokenLexeme(value.op) + " " +
-                       formatExpression(*value.right, indent, precedence, true, false);
-            } else if constexpr (std::is_same_v<T, AstAssignmentExpr>) {
-                return formatExpression(*value.target, indent, 1, false, true) +
-                       " " + tokenLexeme(value.op) + " " +
-                       formatExpression(*value.value, indent, 1, true, true);
-            } else if constexpr (std::is_same_v<T, AstCallExpr>) {
-                if (callHasPreservedMultilineLayout(value, expr.node.span)) {
-                    return formatMultilineCallExpression(value, expr.node.span,
-                                                         indent);
+                const std::string singleLine =
+                    formatExpression(*value.left, indent, precedence, false, false) +
+                    " " + tokenLexeme(value.op) + " " +
+                    formatExpression(*value.right, indent, precedence, true, false);
+                if (failed) {
+                    return std::string();
                 }
+                if (binaryHasPreservedMultilineLayout(value) ||
+                    !fitsOnLine(indent, singleLine)) {
+                    return formatWrappedBinaryExpression(value, indent, precedence);
+                }
+                return singleLine;
+            } else if constexpr (std::is_same_v<T, AstAssignmentExpr>) {
+                const std::string singleLine =
+                    formatExpression(*value.target, indent, 1, false, true) +
+                    " " + tokenLexeme(value.op) + " " +
+                    formatExpression(*value.value, indent, 1, true, true);
+                if (failed) {
+                    return std::string();
+                }
+                if (assignmentHasPreservedMultilineLayout(value) ||
+                    !fitsOnLine(indent, singleLine)) {
+                    return formatWrappedAssignmentExpression(value, indent);
+                }
+                return singleLine;
+            } else if constexpr (std::is_same_v<T, AstCallExpr>) {
                 std::string result =
                     formatExpression(*value.callee, indent, 14);
                 result += "(";
@@ -1617,6 +1886,17 @@ std::string Formatter::formatExpression(const AstExpr& expr, int indent,
                     result += formatExpression(*value.arguments[index], indent);
                 }
                 result += ")";
+                if (failed) {
+                    return std::string();
+                }
+                if (callHasPreservedMultilineLayout(value, expr.node.span)) {
+                    return formatMultilineCallExpression(value, expr.node.span,
+                                                         indent, true);
+                }
+                if (!fitsOnLine(indent, result)) {
+                    return formatMultilineCallExpression(value, expr.node.span,
+                                                         indent, false);
+                }
                 return result;
             } else if constexpr (std::is_same_v<T, AstMemberExpr>) {
                 return formatExpression(*value.object, indent, 14) + "." +
@@ -1628,8 +1908,15 @@ std::string Formatter::formatExpression(const AstExpr& expr, int indent,
                 return formatExpression(*value.expression, indent, 12, false, false) +
                        " as " + formatType(*value.targetType);
             } else if constexpr (std::is_same_v<T, AstFunctionExpr>) {
-                std::string result = "fn";
-                result += formatParameterList(value.params);
+                const bool preserveSignature =
+                    callableHasPreservedMultilineLayout(
+                        value.params,
+                        value.usesFatArrow ? nullptr : value.returnType.get(),
+                        expr.node.span.start.line);
+                std::string result = formatCallableSignature(
+                    "fn", value.params,
+                    value.usesFatArrow ? nullptr : value.returnType.get(), indent,
+                    preserveSignature);
                 if (value.usesFatArrow) {
                     result += " => ";
                     if (value.blockBody) {
@@ -1647,10 +1934,6 @@ std::string Formatter::formatExpression(const AstExpr& expr, int indent,
                         result += formatExpression(*value.expressionBody, indent);
                     }
                     return result;
-                }
-                if (value.returnType) {
-                    result += " ";
-                    result += formatType(*value.returnType);
                 }
                 result += " ";
                 if (!value.blockBody) {
@@ -1675,10 +1958,6 @@ std::string Formatter::formatExpression(const AstExpr& expr, int indent,
             } else if constexpr (std::is_same_v<T, AstSuperExpr>) {
                 return tokenLexeme(value.token);
             } else if constexpr (std::is_same_v<T, AstArrayLiteralExpr>) {
-                if (arrayHasPreservedMultilineLayout(value, expr.node.span)) {
-                    return formatMultilineArrayLiteral(value, expr.node.span,
-                                                       indent);
-                }
                 std::string result = "[";
                 for (size_t index = 0; index < value.elements.size(); ++index) {
                     if (index != 0) {
@@ -1687,12 +1966,19 @@ std::string Formatter::formatExpression(const AstExpr& expr, int indent,
                     result += formatExpression(*value.elements[index], indent);
                 }
                 result += "]";
+                if (failed) {
+                    return std::string();
+                }
+                if (arrayHasPreservedMultilineLayout(value, expr.node.span)) {
+                    return formatMultilineArrayLiteral(value, expr.node.span,
+                                                       indent, true);
+                }
+                if (!fitsOnLine(indent, result)) {
+                    return formatMultilineArrayLiteral(value, expr.node.span,
+                                                       indent, false);
+                }
                 return result;
             } else if constexpr (std::is_same_v<T, AstDictLiteralExpr>) {
-                if (dictHasPreservedMultilineLayout(value, expr.node.span)) {
-                    return formatMultilineDictLiteral(value, expr.node.span,
-                                                      indent);
-                }
                 std::string result = "{";
                 for (size_t index = 0; index < value.entries.size(); ++index) {
                     if (index != 0) {
@@ -1703,6 +1989,17 @@ std::string Formatter::formatExpression(const AstExpr& expr, int indent,
                     result += formatExpression(*value.entries[index].value, indent);
                 }
                 result += "}";
+                if (failed) {
+                    return std::string();
+                }
+                if (dictHasPreservedMultilineLayout(value, expr.node.span)) {
+                    return formatMultilineDictLiteral(value, expr.node.span,
+                                                      indent, true);
+                }
+                if (!fitsOnLine(indent, result)) {
+                    return formatMultilineDictLiteral(value, expr.node.span,
+                                                      indent, false);
+                }
                 return result;
             }
 

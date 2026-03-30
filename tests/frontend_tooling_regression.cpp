@@ -2018,6 +2018,107 @@ bool testFormatting() {
         return false;
     }
 
+    const std::string widthWrappedCallSource =
+        "fn main() void {\n"
+        "    player.init(0usize, \"Aaron\", Vec2().init(0f32, 0f32), Vec2().init(0f32, 0f32), Vec2().init(1920f32, 1080f32))\n"
+        "}\n";
+    ToolingAnalyzeOptions widthWrappedCallOptions;
+    widthWrappedCallOptions.sourcePath = "tooling_width_wrap_call_regression.mog";
+    ToolingDocumentAnalysis widthWrappedCallAnalysis =
+        analyzeDocumentForTooling(widthWrappedCallSource, widthWrappedCallOptions);
+    if (!require(widthWrappedCallAnalysis.hasParse,
+                 "width-wrap call source should parse successfully")) {
+        return false;
+    }
+
+    const auto widthWrappedCallFormatted =
+        formatDocumentForTooling(widthWrappedCallSource, widthWrappedCallAnalysis);
+    if (!require(widthWrappedCallFormatted.has_value(),
+                 "formatter should support width-wrapped calls")) {
+        return false;
+    }
+    const std::string widthWrappedCallExpected =
+        "fn main() void {\n"
+        "    player.init(\n"
+        "        0usize,\n"
+        "        \"Aaron\",\n"
+        "        Vec2().init(0f32, 0f32),\n"
+        "        Vec2().init(0f32, 0f32),\n"
+        "        Vec2().init(1920f32, 1080f32)\n"
+        "    )\n"
+        "}\n";
+    if (!require(*widthWrappedCallFormatted == widthWrappedCallExpected,
+                 "formatter should wrap long call sites to stay under 80 columns")) {
+        return false;
+    }
+
+    const std::string widthWrappedSignatureSource =
+        "fn init(id usize, name str, position Vec2, velocity Vec2, viewport Vec2) void {\n"
+        "    print(name)\n"
+        "}\n";
+    ToolingAnalyzeOptions widthWrappedSignatureOptions;
+    widthWrappedSignatureOptions.sourcePath =
+        "tooling_width_wrap_signature_regression.mog";
+    ToolingDocumentAnalysis widthWrappedSignatureAnalysis =
+        analyzeDocumentForTooling(widthWrappedSignatureSource,
+                                  widthWrappedSignatureOptions);
+    if (!require(widthWrappedSignatureAnalysis.hasParse,
+                 "width-wrap signature source should parse successfully")) {
+        return false;
+    }
+
+    const auto widthWrappedSignatureFormatted = formatDocumentForTooling(
+        widthWrappedSignatureSource, widthWrappedSignatureAnalysis);
+    if (!require(widthWrappedSignatureFormatted.has_value(),
+                 "formatter should support width-wrapped signatures")) {
+        return false;
+    }
+    const std::string widthWrappedSignatureExpected =
+        "fn init(\n"
+        "    id usize,\n"
+        "    name str,\n"
+        "    position Vec2,\n"
+        "    velocity Vec2,\n"
+        "    viewport Vec2\n"
+        ") void {\n"
+        "    print(name)\n"
+        "}\n";
+    if (!require(*widthWrappedSignatureFormatted == widthWrappedSignatureExpected,
+                 "formatter should wrap long function signatures to stay under 80 columns")) {
+        return false;
+    }
+
+    const std::string widthWrappedAssignmentSource =
+        "fn main() void {\n"
+        "    connection.items[index] = connection.items[connection.items.size() - 1]\n"
+        "}\n";
+    ToolingAnalyzeOptions widthWrappedAssignmentOptions;
+    widthWrappedAssignmentOptions.sourcePath =
+        "tooling_width_wrap_assignment_regression.mog";
+    ToolingDocumentAnalysis widthWrappedAssignmentAnalysis =
+        analyzeDocumentForTooling(widthWrappedAssignmentSource,
+                                  widthWrappedAssignmentOptions);
+    if (!require(widthWrappedAssignmentAnalysis.hasParse,
+                 "width-wrap assignment source should parse successfully")) {
+        return false;
+    }
+
+    const auto widthWrappedAssignmentFormatted = formatDocumentForTooling(
+        widthWrappedAssignmentSource, widthWrappedAssignmentAnalysis);
+    if (!require(widthWrappedAssignmentFormatted.has_value(),
+                 "formatter should support width-wrapped assignments")) {
+        return false;
+    }
+    const std::string widthWrappedAssignmentExpected =
+        "fn main() void {\n"
+        "    connection.items[index] =\n"
+        "        connection.items[connection.items.size() - 1]\n"
+        "}\n";
+    if (!require(*widthWrappedAssignmentFormatted == widthWrappedAssignmentExpected,
+                 "formatter should wrap long assignment expressions to stay under 80 columns")) {
+        return false;
+    }
+
     const std::filesystem::path projectRoot =
         std::filesystem::path(__FILE__).parent_path().parent_path();
     const std::filesystem::path fixtureSourcePath =
