@@ -1,0 +1,25 @@
+fn takesFloat(value f32) f32 {
+    return value
+}
+
+fn inferredReturn() f32 {
+    return 2
+}
+
+var assigned f32 = 0
+assigned = 3
+
+var inferredTotal f32 = 1 + 2
+var inferredItems Array<u8> = [1, 2, 3]
+var inferredLookup Dict<usize, i32> = {1: 7, 2: 9}
+var maybeItems Array<u8>? = [4, 5]
+var mask u8 = 255
+
+print(assigned)
+print(takesFloat(1))
+print(inferredReturn())
+print(inferredTotal)
+print(inferredItems)
+print(inferredLookup[2usize])
+print(maybeItems != null)
+print(~mask > 0)

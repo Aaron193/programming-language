@@ -12,29 +12,29 @@ fn renderPipes(win handle<mog:window:WindowHandle>, pipes Array<Pipe>) void {
         var bottomY i64 = floor(pipe.gapY + halfGap) as i64
         var bottomHeight i64 = groundTop - bottomY
 
-        window.fillRect(win, pipeX, 0i64, C.PIPE_WIDTH, topHeight, 94i64, 201i64, 72i64)
-        window.fillRect(win, pipeX, bottomY, C.PIPE_WIDTH, bottomHeight, 94i64, 201i64, 72i64)
+        window.fillRect(win, pipeX, 0, C.PIPE_WIDTH, topHeight, 94, 201, 72)
+        window.fillRect(win, pipeX, bottomY, C.PIPE_WIDTH, bottomHeight, 94, 201, 72)
     }
 }
 
 fn renderBird(win handle<mog:window:WindowHandle>, state GameState) void {
     const birdY i64 = floor(state.birdY) as i64
-    const birdEyeX i64 = C.BIRD_X + C.BIRD_WIDTH - 10i64
-    const birdEyeY i64 = birdY + 6i64
-    const birdBeakX i64 = C.BIRD_X + C.BIRD_WIDTH - 2i64
-    const birdBeakY i64 = birdY + 8i64
+    const birdEyeX i64 = C.BIRD_X + C.BIRD_WIDTH - 10
+    const birdEyeY i64 = birdY + 6
+    const birdBeakX i64 = C.BIRD_X + C.BIRD_WIDTH - 2
+    const birdBeakY i64 = birdY + 8
 
-    window.fillRect(win, C.BIRD_X, birdY, C.BIRD_WIDTH, C.BIRD_HEIGHT, 255i64, 230i64, 64i64)
-    window.fillRect(win, birdEyeX, birdEyeY, 4i64, 4i64, 32i64, 32i64, 32i64)
-    window.fillRect(win, birdBeakX, birdBeakY, 8i64, 6i64, 255i64, 140i64, 0i64)
+    window.fillRect(win, C.BIRD_X, birdY, C.BIRD_WIDTH, C.BIRD_HEIGHT, 255, 230, 64)
+    window.fillRect(win, birdEyeX, birdEyeY, 4, 4, 32, 32, 32)
+    window.fillRect(win, birdBeakX, birdBeakY, 8, 6, 255, 140, 0)
 }
 
 fn RenderFrame(win handle<mog:window:WindowHandle>, state GameState) void {
     const groundTop i64 = C.WINDOW_HEIGHT - C.GROUND_HEIGHT
 
-    window.clearRgb(win, 135i64, 206i64, 235i64)
+    window.clearRgb(win, 135, 206, 235)
     renderPipes(win, state.pipes)
-    window.fillRect(win, 0i64, groundTop, C.WINDOW_WIDTH, C.GROUND_HEIGHT, 181i64, 101i64, 29i64)
+    window.fillRect(win, 0, groundTop, C.WINDOW_WIDTH, C.GROUND_HEIGHT, 181, 101, 29)
     renderBird(win, state)
     window.present(win)
 }

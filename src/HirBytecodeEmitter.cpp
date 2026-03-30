@@ -77,6 +77,44 @@ bool parseNumericLiteralValue(const NumericLiteralInfo& info, Value& outValue) {
     }
 }
 
+bool parseTypedNumericLiteralValue(const Token& token, const TypeRef& literalType,
+                                   Value& outValue) {
+    const std::string literal(token.start(), token.length());
+
+    // i dont live try/catch...
+    try {
+        if (literalType && literalType->isNumeric() && !literalType->isAny()) {
+            const std::string core = stripNumericSuffix(literal);
+            if (literalType->isFloat()) {
+                const double parsed = std::stod(core);
+                if (!std::isfinite(parsed)) {
+                    return false;
+                }
+                outValue = Value(parsed);
+                return true;
+            }
+
+            if (literalType->isUnsigned()) {
+                outValue = Value(static_cast<uint64_t>(std::stoull(core)));
+                return true;
+            }
+
+            if (literalType->isInteger()) {
+                outValue = Value(static_cast<int64_t>(std::stoll(core)));
+                return true;
+            }
+        }
+
+        auto literalInfo = parseNumericLiteralInfo(literal);
+        if (!literalInfo.valid) {
+            return false;
+        }
+        return parseNumericLiteralValue(literalInfo, outValue);
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
 }  // namespace hir_bytecode_emitter_detail
 
 HirBytecodeEmitter::HirBytecodeEmitter(Compiler& compiler,
@@ -1144,17 +1182,10 @@ void HirBytecodeEmitter::emitExpr(const HirExpr& expr) {
                     case TokenType::NUMBER: {
                         std::string literal(value.token.start(),
                                             value.token.length());
-                        auto literalInfo = parseNumericLiteralInfo(literal);
-                        if (!literalInfo.valid) {
-                            errorAtToken(
-                                value.token,
-                                "Invalid numeric literal '" + literal + "'.");
-                            emitByte(OpCode::NIL, expr.node.line);
-                            break;
-                        }
                         Value parsed;
                         if (!hir_bytecode_emitter_detail::
-                                parseNumericLiteralValue(literalInfo, parsed)) {
+                                parseTypedNumericLiteralValue(
+                                    value.token, nodeType(expr.node), parsed)) {
                             errorAtToken(
                                 value.token,
                                 "Invalid numeric literal '" + literal + "'.");

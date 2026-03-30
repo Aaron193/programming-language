@@ -122,6 +122,7 @@ std::vector<std::filesystem::path> defaultCorpus(
         repoRoot / "tests/sample_import_frontend_typed.mog",
         repoRoot / "tests/sample_import_frontend_nested_strict.mog",
         repoRoot / "tests/sample_import_nested.mog",
+        repoRoot / "tests/sample_contextual_numeric_literals.mog",
         repoRoot / "tests/sample_stress_nested_upvalue_chain.mog",
         repoRoot / "tests/sample_stress_native_package_functions.mog",
         repoRoot / "tests/sample_stress_import_cache_handles.mog",

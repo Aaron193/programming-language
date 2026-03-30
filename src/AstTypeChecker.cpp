@@ -318,7 +318,17 @@ class AstTypeCheckerImpl {
         }
     }
 
-    TypeRef inferNumberLiteralType(const Token& token) {
+    TypeRef unwrapOptionalExpectedType(const TypeRef& expectedType) const {
+        if (expectedType && expectedType->kind == TypeKind::OPTIONAL &&
+            expectedType->innerType) {
+            return expectedType->innerType;
+        }
+
+        return expectedType;
+    }
+
+    TypeRef inferNumberLiteralType(const Token& token,
+                                   const TypeRef& expectedType = nullptr) {
         const std::string literal = tokenText(token);
         const NumericLiteralInfo parsed = parseNumericLiteralInfo(literal);
         if (!parsed.valid) {
@@ -327,25 +337,46 @@ class AstTypeCheckerImpl {
             return TypeInfo::makeAny();
         }
 
-        try {
-            if (parsed.isFloat) {
-                (void)std::stod(parsed.core);
-                return parsed.type;
+        TypeRef literalType = parsed.type;
+        bool literalIsUnsigned = parsed.isUnsigned;
+        bool literalIsFloat = parsed.isFloat;
+        const bool hasExplicitSuffix = parsed.core.size() != literal.size();
+        TypeRef numericContext = unwrapOptionalExpectedType(expectedType);
+        if (!hasExplicitSuffix && numericContext && numericContext->isNumeric() &&
+            !numericContext->isAny()) {
+            if (parsed.core.find('.') != std::string::npos &&
+                numericContext->isInteger()) {
+                addError(token.span(),
+                         "Type error: decimal literal '" + literal +
+                             "' cannot be inferred as integer type '" +
+                             numericContext->toString() + "'.");
+                return TypeInfo::makeAny();
             }
 
-            if (parsed.isUnsigned || parsed.type->isUnsigned()) {
+            literalType = numericContext;
+            literalIsUnsigned = literalType->isUnsigned();
+            literalIsFloat = literalType->isFloat();
+        }
+
+        try {
+            if (literalIsFloat) {
+                (void)std::stod(parsed.core);
+                return literalType;
+            }
+
+            if (literalIsUnsigned || literalType->isUnsigned()) {
                 unsigned long long value = std::stoull(parsed.core);
                 const auto checkRange = [&](unsigned long long maxValue) {
                     return value <= maxValue;
                 };
 
-                switch (parsed.type->kind) {
+                switch (literalType->kind) {
                     case TypeKind::U8:
                         if (!checkRange(std::numeric_limits<uint8_t>::max())) {
                             addError(token.span(),
                                      "Type error: integer literal '" + literal +
                                          "' is out of range for type '" +
-                                         parsed.type->toString() + "'.");
+                                         literalType->toString() + "'.");
                             return TypeInfo::makeAny();
                         }
                         break;
@@ -354,7 +385,7 @@ class AstTypeCheckerImpl {
                             addError(token.span(),
                                      "Type error: integer literal '" + literal +
                                          "' is out of range for type '" +
-                                         parsed.type->toString() + "'.");
+                                         literalType->toString() + "'.");
                             return TypeInfo::makeAny();
                         }
                         break;
@@ -363,7 +394,7 @@ class AstTypeCheckerImpl {
                             addError(token.span(),
                                      "Type error: integer literal '" + literal +
                                          "' is out of range for type '" +
-                                         parsed.type->toString() + "'.");
+                                         literalType->toString() + "'.");
                             return TypeInfo::makeAny();
                         }
                         break;
@@ -371,7 +402,7 @@ class AstTypeCheckerImpl {
                         break;
                 }
 
-                return parsed.type;
+                return literalType;
             }
 
             long long value = std::stoll(parsed.core);
@@ -379,14 +410,14 @@ class AstTypeCheckerImpl {
                 return value >= minValue && value <= maxValue;
             };
 
-            switch (parsed.type->kind) {
+            switch (literalType->kind) {
                 case TypeKind::I8:
                     if (!checkRange(std::numeric_limits<int8_t>::min(),
                                     std::numeric_limits<int8_t>::max())) {
                         addError(token.span(),
                                  "Type error: integer literal '" + literal +
                                      "' is out of range for type '" +
-                                     parsed.type->toString() + "'.");
+                                     literalType->toString() + "'.");
                         return TypeInfo::makeAny();
                     }
                     break;
@@ -396,7 +427,7 @@ class AstTypeCheckerImpl {
                         addError(token.span(),
                                  "Type error: integer literal '" + literal +
                                      "' is out of range for type '" +
-                                     parsed.type->toString() + "'.");
+                                     literalType->toString() + "'.");
                         return TypeInfo::makeAny();
                     }
                     break;
@@ -406,7 +437,7 @@ class AstTypeCheckerImpl {
                         addError(token.span(),
                                  "Type error: integer literal '" + literal +
                                      "' is out of range for type '" +
-                                     parsed.type->toString() + "'.");
+                                     literalType->toString() + "'.");
                         return TypeInfo::makeAny();
                     }
                     break;
@@ -414,7 +445,7 @@ class AstTypeCheckerImpl {
                     break;
             }
 
-            return parsed.type;
+            return literalType;
         } catch (...) {
             addError(token.span(),
                      "Type error: invalid numeric literal '" + literal + "'.");
@@ -820,7 +851,8 @@ class AstTypeCheckerImpl {
                 if constexpr (std::is_same_v<T, AstLiteralExpr>) {
                     switch (value.token.type()) {
                         case TokenType::NUMBER:
-                            result = ExprInfo{inferNumberLiteralType(value.token),
+                            result = ExprInfo{inferNumberLiteralType(
+                                                  value.token, expectedType),
                                               false, false, "",
                                               value.token.line()};
                             break;
@@ -902,10 +934,23 @@ class AstTypeCheckerImpl {
                                           binding->declarationNodeId};
                     }
                 } else if constexpr (std::is_same_v<T, AstGroupingExpr>) {
-                    ExprInfo inner = analyzeExpr(*value.expression);
+                    ExprInfo inner = analyzeExpr(*value.expression, expectedType);
                     result = ExprInfo{inner.type, false, false, "", expr.node.line};
                 } else if constexpr (std::is_same_v<T, AstUnaryExpr>) {
-                    ExprInfo operand = analyzeExpr(*value.operand);
+                    TypeRef operandExpectedType = nullptr;
+                    TypeRef normalizedExpectedType =
+                        unwrapOptionalExpectedType(expectedType);
+                    if (normalizedExpectedType && normalizedExpectedType->isNumeric() &&
+                        value.op.type() == TokenType::MINUS) {
+                        operandExpectedType = normalizedExpectedType;
+                    } else if (normalizedExpectedType &&
+                               normalizedExpectedType->isInteger() &&
+                               value.op.type() == TokenType::TILDE) {
+                        operandExpectedType = normalizedExpectedType;
+                    }
+
+                    ExprInfo operand =
+                        analyzeExpr(*value.operand, operandExpectedType);
                     if (value.op.type() == TokenType::BANG) {
                         if (!(operand.type->kind == TypeKind::BOOL ||
                               operand.type->isAny())) {
@@ -994,11 +1039,21 @@ class AstTypeCheckerImpl {
                         }
                     }
                 } else if constexpr (std::is_same_v<T, AstBinaryExpr>) {
-                    ExprInfo lhs = analyzeExpr(*value.left);
-                    ExprInfo rhs = analyzeExpr(*value.right);
                     const TokenType op = value.op.type();
                     const SourceSpan opSpan = value.op.span();
                     const size_t line = value.op.line();
+                    TypeRef operandExpectedType = nullptr;
+                    TypeRef normalizedExpectedType =
+                        unwrapOptionalExpectedType(expectedType);
+                    const bool arithmeticOperator =
+                        op == TokenType::PLUS || op == TokenType::MINUS ||
+                        op == TokenType::STAR || op == TokenType::SLASH;
+                    if (arithmeticOperator && normalizedExpectedType &&
+                        normalizedExpectedType->isNumeric()) {
+                        operandExpectedType = normalizedExpectedType;
+                    }
+                    ExprInfo lhs = analyzeExpr(*value.left, operandExpectedType);
+                    ExprInfo rhs = analyzeExpr(*value.right, operandExpectedType);
 
                     if (op == TokenType::LOGICAL_OR ||
                         op == TokenType::LOGICAL_AND) {
@@ -1475,9 +1530,15 @@ class AstTypeCheckerImpl {
                         }
                     }
                 } else if constexpr (std::is_same_v<T, AstArrayLiteralExpr>) {
+                    TypeRef expectedArrayType =
+                        unwrapOptionalExpectedType(expectedType);
+                    TypeRef expectedElementType =
+                        expectedArrayType && expectedArrayType->kind == TypeKind::ARRAY
+                            ? expectedArrayType->elementType
+                            : nullptr;
                     TypeRef elementType = nullptr;
                     for (const auto& element : value.elements) {
-                        ExprInfo item = analyzeExpr(*element);
+                        ExprInfo item = analyzeExpr(*element, expectedElementType);
                         if (!elementType) {
                             elementType = item.type;
                             continue;
@@ -1498,17 +1559,28 @@ class AstTypeCheckerImpl {
 
                     TypeRef arrayType = TypeInfo::makeArray(
                         elementType ? elementType : TypeInfo::makeAny());
-                    if (value.elements.empty() && expectedType &&
-                        expectedType->kind == TypeKind::ARRAY) {
-                        arrayType = expectedType;
+                    if (value.elements.empty() && expectedArrayType &&
+                        expectedArrayType->kind == TypeKind::ARRAY) {
+                        arrayType = expectedArrayType;
                     }
                     result =
                         ExprInfo{arrayType, false, false, "", expr.node.line};
                 } else if constexpr (std::is_same_v<T, AstDictLiteralExpr>) {
+                    TypeRef expectedDictType =
+                        unwrapOptionalExpectedType(expectedType);
+                    TypeRef expectedKeyType =
+                        expectedDictType && expectedDictType->kind == TypeKind::DICT
+                            ? expectedDictType->keyType
+                            : nullptr;
+                    TypeRef expectedValueType =
+                        expectedDictType && expectedDictType->kind == TypeKind::DICT
+                            ? expectedDictType->valueType
+                            : nullptr;
                     TypeRef keyType = nullptr;
                     TypeRef valueType = nullptr;
                     for (const auto& entry : value.entries) {
-                        ExprInfo keyExpr = analyzeExpr(*entry.key);
+                        ExprInfo keyExpr =
+                            analyzeExpr(*entry.key, expectedKeyType);
                         if (!keyType) {
                             keyType = keyExpr.type;
                         } else {
@@ -1526,7 +1598,8 @@ class AstTypeCheckerImpl {
                             keyType = mergedKey;
                         }
 
-                        ExprInfo valueExpr = analyzeExpr(*entry.value);
+                        ExprInfo valueExpr =
+                            analyzeExpr(*entry.value, expectedValueType);
                         if (!valueType) {
                             valueType = valueExpr.type;
                         } else {
@@ -1550,9 +1623,9 @@ class AstTypeCheckerImpl {
                         TypeInfo::makeDict(keyType ? keyType : TypeInfo::makeAny(),
                                            valueType ? valueType
                                                      : TypeInfo::makeAny());
-                    if (value.entries.empty() && expectedType &&
-                        expectedType->kind == TypeKind::DICT) {
-                        dictType = expectedType;
+                    if (value.entries.empty() && expectedDictType &&
+                        expectedDictType->kind == TypeKind::DICT) {
+                        dictType = expectedDictType;
                     }
                     result =
                         ExprInfo{dictType, false, false, "", expr.node.line};

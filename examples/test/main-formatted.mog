@@ -70,7 +70,6 @@ type SocketServer struct {
                 // swap and pop to delete
                 this.connections[index] =
                     this.connections[this.connections.size() - 1]
-
                 this.connections.pop()
                 break
             }
