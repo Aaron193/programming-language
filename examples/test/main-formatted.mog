@@ -39,7 +39,6 @@ type SocketServer struct {
         this.game = game
     }
 
-
     fn onConnection(connection Connection) void {
         this.connections.push(connection)
     }
@@ -59,7 +58,6 @@ type SocketServer struct {
         const id usize = connection.id
 
         var index usize = 0usize
-
         for (const connection Connection : this.connections) {
             index++
             if (connection.id == id) {

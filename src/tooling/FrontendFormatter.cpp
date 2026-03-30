@@ -14,6 +14,7 @@
 namespace {
 
 constexpr int kFormatIndentWidth = 4;
+constexpr size_t kMaxPreservedBlankLines = 1;
 
 struct FormatComment {
     size_t startOffset = 0;
@@ -247,7 +248,9 @@ struct Formatter {
         if (!lineStart) {
             appendNewline();
         }
-        for (size_t index = 0; index < blankLineCount; ++index) {
+        const size_t cappedBlankLineCount =
+            std::min(blankLineCount, kMaxPreservedBlankLines);
+        for (size_t index = 0; index < cappedBlankLineCount; ++index) {
             appendNewline();
         }
     }
@@ -481,7 +484,9 @@ struct Formatter {
             outText += indentText(indent);
             return;
         }
-        for (size_t line = fromLine; line < toLine; ++line) {
+        const size_t cappedToLine =
+            std::min(toLine, fromLine + kMaxPreservedBlankLines + 1);
+        for (size_t line = fromLine; line < cappedToLine; ++line) {
             outText += "\n";
         }
         outText += indentText(indent);

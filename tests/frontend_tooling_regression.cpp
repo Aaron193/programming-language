@@ -1984,6 +1984,40 @@ bool testFormatting() {
         return false;
     }
 
+    const std::string blankLineCapSource =
+        "fn main() void {\n"
+        "    const first i32 = 1\n"
+        "\n"
+        "\n"
+        "\n"
+        "    const second i32 = 2\n"
+        "}\n";
+    ToolingAnalyzeOptions blankLineOptions;
+    blankLineOptions.sourcePath = "tooling_blank_line_cap_regression.mog";
+    ToolingDocumentAnalysis blankLineAnalysis =
+        analyzeDocumentForTooling(blankLineCapSource, blankLineOptions);
+    if (!require(blankLineAnalysis.hasParse,
+                 "blank-line cap formatting source should parse successfully")) {
+        return false;
+    }
+
+    const auto blankLineFormatted =
+        formatDocumentForTooling(blankLineCapSource, blankLineAnalysis);
+    if (!require(blankLineFormatted.has_value(),
+                 "formatter should support blank-line cap formatting")) {
+        return false;
+    }
+    const std::string blankLineExpected =
+        "fn main() void {\n"
+        "    const first i32 = 1\n"
+        "\n"
+        "    const second i32 = 2\n"
+        "}\n";
+    if (!require(*blankLineFormatted == blankLineExpected,
+                 "formatter should cap blank lines to one empty line")) {
+        return false;
+    }
+
     const std::filesystem::path projectRoot =
         std::filesystem::path(__FILE__).parent_path().parent_path();
     const std::filesystem::path fixtureSourcePath =
