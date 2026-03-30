@@ -21,5 +21,6 @@ bash "$SCRIPT_DIR/test_newline_syntax.sh" &&
 bash "$SCRIPT_DIR/test_vscode_grammar.sh" &&
 bash "$SCRIPT_DIR/test_compile_recovery.sh" &&
 bash "$SCRIPT_DIR/test_lsp_navigation.sh" &&
+bash "$SCRIPT_DIR/test_lsp_formatting.sh" &&
 bash "$SCRIPT_DIR/test_frontend_benchmark.sh" &&
 "$REGRESSION_BIN"

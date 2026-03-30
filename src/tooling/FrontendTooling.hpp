@@ -174,3 +174,5 @@ std::vector<ToolingTextEdit> findRenameEditsForTooling(
 std::vector<ToolingTextEdit> findImportRenameEditsForTooling(
     const ToolingDocumentAnalysis& analysis, const ToolingPrepareRename& target,
     std::string_view newName);
+std::optional<std::string> formatDocumentForTooling(
+    std::string_view source, const ToolingDocumentAnalysis& analysis);

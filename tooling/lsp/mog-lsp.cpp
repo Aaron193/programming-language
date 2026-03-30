@@ -759,6 +759,19 @@ size_t offsetForPosition(std::string_view text, const ToolingPosition& position)
     return offset;
 }
 
+ToolingPosition endPositionForText(std::string_view text) {
+    ToolingPosition position;
+    for (char ch : text) {
+        if (ch == '\n') {
+            ++position.line;
+            position.character = 0;
+        } else {
+            ++position.character;
+        }
+    }
+    return position;
+}
+
 size_t completionPrefixStart(std::string_view text,
                              const ToolingPosition& position) {
     size_t offset = offsetForPosition(text, position);
@@ -881,6 +894,12 @@ class MogLspServer {
         if (*method == "textDocument/documentSymbol" && params != nullptr &&
             id != nullptr) {
             handleDocumentSymbol(*id, *params);
+            return;
+        }
+
+        if (*method == "textDocument/formatting" && params != nullptr &&
+            id != nullptr) {
+            handleFormatting(*id, *params);
             return;
         }
 
@@ -1043,6 +1062,39 @@ class MogLspServer {
 
         sendResponse(id,
                      makeDocumentSymbolsResponse(documentIt->second.analysis));
+    }
+
+    void handleFormatting(const JsonValue& id, const JsonObject& params) {
+        auto uri = getTextDocumentUri(params);
+        if (!uri.has_value()) {
+            sendResponse(id, JsonValue(JsonArray{}));
+            return;
+        }
+
+        auto documentIt = m_documents.find(*uri);
+        if (documentIt == m_documents.end()) {
+            sendResponse(id, JsonValue(JsonArray{}));
+            return;
+        }
+
+        const auto formatted =
+            formatDocumentForTooling(documentIt->second.text,
+                                     documentIt->second.analysis);
+        if (!formatted.has_value() || *formatted == documentIt->second.text) {
+            sendResponse(id, JsonValue(JsonArray{}));
+            return;
+        }
+
+        JsonObject edit;
+        edit["range"] = makeRange(ToolingRange{
+            ToolingPosition{0, 0},
+            endPositionForText(documentIt->second.text),
+        });
+        edit["newText"] = JsonValue(*formatted);
+
+        JsonArray edits;
+        edits.push_back(JsonValue(std::move(edit)));
+        sendResponse(id, JsonValue(std::move(edits)));
     }
 
     void handleInitialize(const JsonValue* id, const JsonObject* params) {
@@ -1750,6 +1802,7 @@ class MogLspServer {
         JsonObject result;
         result["capabilities"] = JsonValue(JsonObject{
             {"textDocumentSync", JsonValue(1.0)},
+            {"documentFormattingProvider", JsonValue(true)},
             {"documentSymbolProvider", JsonValue(true)},
             {"workspaceSymbolProvider", JsonValue(true)},
             {"definitionProvider", JsonValue(true)},

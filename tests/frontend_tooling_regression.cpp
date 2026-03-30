@@ -1918,6 +1918,128 @@ bool testWorkspaceSymbolsAndRename() {
     return true;
 }
 
+bool testFormatting() {
+    const std::string source =
+        "// file header\n"
+        "const { Answer as Result: i32 } = @import(\"./dep.mog\") // import note\n"
+        "fn add(x i32,y i32)i32{\n"
+        "var total i32= x+y // trailing\n"
+        "return total\n"
+        "}\n";
+
+    ToolingAnalyzeOptions options;
+    options.sourcePath = "tooling_format_regression.mog";
+    ToolingDocumentAnalysis analysis =
+        analyzeDocumentForTooling(source, options);
+    if (!require(analysis.hasParse,
+                 "format regression source should parse successfully")) {
+        return false;
+    }
+
+    const auto formatted = formatDocumentForTooling(source, analysis);
+    if (!require(formatted.has_value(),
+                 "formatter should produce output for supported comments")) {
+        return false;
+    }
+
+    const std::string expected =
+        "// file header\n"
+        "const { Answer as Result: i32 } = @import(\"./dep.mog\") // import note\n"
+        "fn add(x i32, y i32) i32 {\n"
+        "    var total i32 = x + y // trailing\n"
+        "    return total\n"
+        "}\n";
+    if (!require(*formatted == expected,
+                 "formatter should normalize Mog source to the canonical style")) {
+        return false;
+    }
+
+    const std::string multilineCallSource =
+        "fn main() void {\n"
+        "    player.init(\n"
+        "        0usize,\n"
+        "        \"Aaron\",\n"
+        "        Vec2().init(0f32, 0f32),\n"
+        "        Vec2().init(0f32, 0f32),\n"
+        "        Vec2().init(1920f32, 1080f32)\n"
+        "    )\n"
+        "}\n";
+    ToolingAnalyzeOptions multilineOptions;
+    multilineOptions.sourcePath = "tooling_multiline_call_regression.mog";
+    ToolingDocumentAnalysis multilineAnalysis =
+        analyzeDocumentForTooling(multilineCallSource, multilineOptions);
+    if (!require(multilineAnalysis.hasParse,
+                 "multiline call formatting source should parse successfully")) {
+        return false;
+    }
+
+    const auto multilineFormatted =
+        formatDocumentForTooling(multilineCallSource, multilineAnalysis);
+    if (!require(multilineFormatted.has_value(),
+                 "formatter should support multiline calls")) {
+        return false;
+    }
+    if (!require(*multilineFormatted == multilineCallSource,
+                 "formatter should preserve authored multiline call layout")) {
+        return false;
+    }
+
+    const std::filesystem::path projectRoot =
+        std::filesystem::path(__FILE__).parent_path().parent_path();
+    const std::filesystem::path fixtureSourcePath =
+        projectRoot / "examples" / "test" / "main.mog";
+    const std::filesystem::path fixtureExpectedPath =
+        projectRoot / "examples" / "test" / "main-formatted.mog";
+    const auto fixtureSource = readFileText(fixtureSourcePath);
+    if (!require(fixtureSource.has_value(),
+                 "formatter fixture source should be readable")) {
+        return false;
+    }
+    const auto fixtureExpected = readFileText(fixtureExpectedPath);
+    if (!require(fixtureExpected.has_value(),
+                 "formatter fixture expectation should be readable")) {
+        return false;
+    }
+
+    ToolingAnalyzeOptions fixtureOptions;
+    fixtureOptions.sourcePath = fixtureSourcePath.string();
+    ToolingDocumentAnalysis fixtureAnalysis =
+        analyzeDocumentForTooling(*fixtureSource, fixtureOptions);
+    if (!require(fixtureAnalysis.hasParse,
+                 "formatter fixture source should parse successfully")) {
+        return false;
+    }
+
+    const auto fixtureFormatted =
+        formatDocumentForTooling(*fixtureSource, fixtureAnalysis);
+    if (!require(fixtureFormatted.has_value(),
+                 "formatter should support the main fixture")) {
+        return false;
+    }
+    if (!require(*fixtureFormatted == *fixtureExpected,
+                 "formatter should preserve fixture comment placement and blank lines")) {
+        return false;
+    }
+
+    const std::string inlineCommentSource =
+        "const value i32 = 1 /* inline */ + 2\n";
+    ToolingDocumentAnalysis inlineCommentAnalysis =
+        analyzeDocumentForTooling(inlineCommentSource, options);
+    if (!require(inlineCommentAnalysis.hasParse,
+                 "inline-comment formatting sample should parse")) {
+        return false;
+    }
+
+    if (!require(!formatDocumentForTooling(inlineCommentSource,
+                                           inlineCommentAnalysis)
+                      .has_value(),
+                 "formatter should safely reject unsupported inline comments")) {
+        return false;
+    }
+
+    return true;
+}
+
 }  // namespace
 
 int main() {
@@ -1969,6 +2091,10 @@ int main() {
     }
 
     if (!testWorkspaceSymbolsAndRename()) {
+        return 1;
+    }
+
+    if (!testFormatting()) {
         return 1;
     }
 

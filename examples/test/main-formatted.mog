@@ -59,6 +59,7 @@ type SocketServer struct {
         const id usize = connection.id
 
         var index usize = 0usize
+
         for (const connection Connection : this.connections) {
             index++
             if (connection.id == id) {
@@ -71,9 +72,9 @@ type SocketServer struct {
     }
 }
 
-fn add(x i32,y i32)i32{
-var total i32= x+y
-return total
+fn add(x i32, y i32) i32 {
+    var total i32 = x + y
+    return total
 }
 
 type Game struct {
@@ -119,7 +120,7 @@ fn main() void {
 
     var then f64 = clock()
 
-    game.forEachPlayer(fn (player Player) void {
+    game.forEachPlayer(fn(player Player) void {
         print(player.name)
     })
 
