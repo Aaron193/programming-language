@@ -3,6 +3,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <string>
 
 #include "Ast.hpp"
 #include "AstBinder.hpp"
@@ -15,5 +16,7 @@ bool checkAstTypes(
     const std::unordered_map<std::string, TypeRef>& typeAliases,
     const std::unordered_map<std::string, TypeRef>& functionSignatures,
     const AstBindResult& bindings,
+    const std::string& sourcePath,
+    const std::vector<std::string>& packageSearchPaths,
     std::vector<TypeError>& out,
     AstSemanticModel* outModel = nullptr);

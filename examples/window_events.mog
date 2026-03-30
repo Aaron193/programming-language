@@ -1,7 +1,7 @@
-const window = @import("mog:window")
+const window = @import("window")
 
-const win handle<mog:window:WindowHandle> =
-    window.create("mog:window event demo", 800i64, 600i64)
+const win handle<window:WindowHandle> =
+    window.create("window event demo", 800i64, 600i64)
 
 window.show(win)
 window.clear(win)
@@ -12,7 +12,7 @@ print("Close the window or press Escape to exit.")
 var running bool = true
 
 while (running) {
-    const evt handle<mog:window:EventHandle>? = window.pollEvent(win)
+    const evt handle<window:EventHandle>? = window.pollEvent(win)
     if (evt != null) {
         var kind str = window.eventKind(evt)
         print(kind)

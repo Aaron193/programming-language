@@ -10,6 +10,8 @@ bool analyzeAstSemantics(
     const std::unordered_map<std::string, TypeRef>& functionSignatures,
     const std::unordered_map<AstNodeId, AstImportedModuleInterface>&
         importedModules,
+    const std::string& sourcePath,
+    const std::vector<std::string>& packageSearchPaths,
     std::vector<TypeError>& out, AstSemanticModel* outModel) {
     AstBindResult bindings;
     if (!bindAst(module, classNames, typeAliases, functionSignatures,
@@ -18,5 +20,6 @@ bool analyzeAstSemantics(
     }
 
     return checkAstTypes(module, classNames, typeAliases, functionSignatures,
-                         bindings, out, outModel);
+                         bindings, sourcePath, packageSearchPaths, out,
+                         outModel);
 }

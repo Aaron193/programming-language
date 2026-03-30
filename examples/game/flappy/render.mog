@@ -1,8 +1,8 @@
-const window = @import("mog:window")
+const window = @import("window")
 const C = @import("./constants.mog")
 const { GameState, Pipe } = @import("./state.mog")
 
-fn renderPipes(win handle<mog:window:WindowHandle>, pipes Array<Pipe>) void {
+fn renderPipes(win handle<window:WindowHandle>, pipes Array<Pipe>) void {
     var groundTop i64 = C.WINDOW_HEIGHT - C.GROUND_HEIGHT
     var halfGap f64 = (C.PIPE_GAP as f64) / 2.0
 
@@ -17,7 +17,7 @@ fn renderPipes(win handle<mog:window:WindowHandle>, pipes Array<Pipe>) void {
     }
 }
 
-fn renderBird(win handle<mog:window:WindowHandle>, state GameState) void {
+fn renderBird(win handle<window:WindowHandle>, state GameState) void {
     const birdY i64 = floor(state.birdY) as i64
     const birdEyeX i64 = C.BIRD_X + C.BIRD_WIDTH - 10
     const birdEyeY i64 = birdY + 6
@@ -29,7 +29,7 @@ fn renderBird(win handle<mog:window:WindowHandle>, state GameState) void {
     window.fillRect(win, birdBeakX, birdBeakY, 8, 6, 255, 140, 0)
 }
 
-fn RenderFrame(win handle<mog:window:WindowHandle>, state GameState) void {
+fn RenderFrame(win handle<window:WindowHandle>, state GameState) void {
     const groundTop i64 = C.WINDOW_HEIGHT - C.GROUND_HEIGHT
 
     window.clearRgb(win, 135, 206, 235)

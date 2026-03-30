@@ -1,10 +1,10 @@
-const window = @import("mog:window")
+const window = @import("window")
 const { WINDOW_WIDTH, WINDOW_HEIGHT, FIXED_DT } = @import("./flappy/constants.mog")
 const { GameState, ResetGame } = @import("./flappy/state.mog")
 const { StepGame } = @import("./flappy/logic.mog")
 const { RenderFrame } = @import("./flappy/render.mog")
 
-const win handle<mog:window:WindowHandle> = window.create("Flappy Mog", WINDOW_WIDTH, WINDOW_HEIGHT)
+const win handle<window:WindowHandle> = window.create("Flappy Mog", WINDOW_WIDTH, WINDOW_HEIGHT)
 
 window.show(win)
 
@@ -19,7 +19,7 @@ var lastTime f64 = clock()
 print("Press Space to flap. Escape closes the window.")
 
 while (appRunning) {
-    var evt handle<mog:window:EventHandle>? = window.pollEvent(win)
+    var evt handle<window:EventHandle>? = window.pollEvent(win)
     while (evt != null) {
         const kind str = window.eventKind(evt)
         if (kind == "quit") {

@@ -1,4 +1,4 @@
-const counter = @import("examples:counter")
+const counter = @import("counter")
 
 print(counter.PACKAGE_ID)
 print(counter.read(counter.create(10i64)))

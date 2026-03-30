@@ -171,7 +171,7 @@ Or start REPL:
 Manual runnable demos live under `examples/`. These are intended for developer
 validation and interactive exploration, not for automated CI coverage.
 
-The visible `mog:window` demos require SDL2 to be present so the optional
+The visible `window` demos require SDL2 to be present so the optional
 package is built:
 
 ```bash
@@ -379,14 +379,16 @@ Notes:
 Source modules and native packages share the same import syntax:
 
 ```expr
-const nativeMath = @import("examples:math")
-const { addI64, greet } = @import("examples:math")
+const nativeMath = @import("math")
+const { addI64, greet } = @import("math")
 ```
 
-Namespaced package imports use `namespace:name` and resolve to nested package
-directories such as `packages/examples/math/package.so`.
+Path-like imports such as `./math.mog` stay source-module imports. Bare import
+names such as `"math"` or `"window"` resolve as package imports.
 
-The interpreter searches for native packages in:
+Package resolution looks for a project root `mog.toml` and `mog.lock` first,
+then falls back to scanning package roots. The interpreter searches for native
+packages in:
 
 - `build/packages` relative to the interpreter binary
 - any additional roots passed with `--package-path`
@@ -398,37 +400,37 @@ This repository includes a namespaced reference package in
 `packages/examples/math/`.
 
 Native packages can now return opaque native handles through signatures such as
-`fn() handle<examples:counter:CounterHandle>`. Handles are GC-managed by the
+`fn() handle<counter:CounterHandle>`. Handles are GC-managed by the
 VM and invoke the package-provided finalizer when released. A reference handle
 package lives in `packages/examples/counter/`.
 
 Source files can declare native handles directly:
 
 ```expr
-const counter = @import("examples:counter")
+const counter = @import("counter")
 
-const c handle<examples:counter:CounterHandle> = counter.create(10i64)
+const c handle<counter:CounterHandle> = counter.create(10i64)
 print(counter.read(c))
 ```
 
-Official runtime-maintained packages use the reserved `mog:*` namespace. The
-first official package is `mog:window`, built only when SDL2 is available at
-configure time:
+Official runtime-maintained packages still use the reserved `mog:*` canonical
+package ID internally. The first official package is exposed to users as
+`window` and is built only when SDL2 is available at configure time:
 
 Headless smoke usage for tests:
 
 ```expr
-const window = @import("mog:window")
+const window = @import("window")
 
-const win handle<mog:window:WindowHandle> =
+const win handle<window:WindowHandle> =
     window.create("Demo", 800i64, 600i64)
-const evt handle<mog:window:EventHandle>? = window.pollEvent(win)
+const evt handle<window:EventHandle>? = window.pollEvent(win)
 window.clear(win)
 window.present(win)
 window.close(win)
 ```
 
-For simple realtime graphics, `mog:window` also exposes:
+For simple realtime graphics, `window` also exposes:
 
 - `clearRgb(win, r, g, b)`
 - `fillRect(win, x, y, width, height, r, g, b)`
@@ -443,13 +445,15 @@ Visible manual demos live under `examples/` and call `window.show(win)` after
 creation so the current hidden-by-default behavior remains stable for tests.
 
 If SDL2 is not installed, the interpreter still builds normally and simply
-skips the optional `mog:window` package target.
+skips the optional `window` package target.
 
 ## Package Manifests
 
-Namespaced packages can declare authoring metadata in `package.toml`:
+Packages can declare authoring metadata in `mog.toml`:
 
 ```toml
+kind = "native"
+import_name = "math"
 namespace = "examples"
 name = "math"
 version = "0.1.0"
@@ -457,6 +461,10 @@ abi_version = 3
 description = "Reference namespaced math package."
 dependencies = []
 ```
+
+Projects mark their root with `mog.toml` and pin package resolution in
+`mog.lock`. Native packages can also ship a `package.api.toml` file for editor
+navigation and readable package API docs.
 
 Validate a package directory against its manifest and compiled shared library:
 

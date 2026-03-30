@@ -1255,19 +1255,19 @@ bool checkNativeHandleTypeFrontendRegression(
         frontend.semanticModel.nodeTypes.at(importStmt->bindings[2].node.id);
     if (!require(createType &&
                      createType->toString() ==
-                         "function(i64) -> handle<examples:counter:CounterHandle>",
+                         "function(i64) -> handle<counter:CounterHandle>",
                  "native handle create binding should keep the expected handle return type")) {
         return false;
     }
     if (!require(readType &&
                      readType->toString() ==
-                         "function(handle<examples:counter:CounterHandle>) -> i64",
+                         "function(handle<counter:CounterHandle>) -> i64",
                  "native handle read binding should keep the expected handle parameter type")) {
         return false;
     }
     if (!require(addType &&
                      addType->toString() ==
-                         "function(handle<examples:counter:CounterHandle>, i64) -> i64",
+                         "function(handle<counter:CounterHandle>, i64) -> i64",
                  "native handle add binding should keep the expected handle parameter type")) {
         return false;
     }
@@ -1277,7 +1277,7 @@ bool checkNativeHandleTypeFrontendRegression(
     if (!require(exportedForward != frontend.semanticModel.exportedSymbolTypes.end() &&
                      exportedForward->second &&
                      exportedForward->second->toString() ==
-                         "function(handle<examples:counter:CounterHandle>) -> handle<examples:counter:CounterHandle>",
+                         "function(handle<counter:CounterHandle>) -> handle<counter:CounterHandle>",
                  "native handle function export should preserve aliased handle parameter and return types")) {
         return false;
     }
@@ -1341,7 +1341,7 @@ bool checkTypedImportDiagnosticRegression(const std::filesystem::path& repoRoot)
     if (!expectStrictError(
             repoRoot /
                 "tests/types/errors/import_native_handle_binding_type_mismatch.mog",
-            1, 9, "function(i64) -> handle<examples:counter:CounterHandle>",
+            1, 9, "function(i64) -> handle<counter:CounterHandle>",
             "native handle typed import mismatch sample")) {
         return false;
     }

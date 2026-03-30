@@ -1,6 +1,6 @@
-const window = @import("mog:window")
+const window = @import("window")
 
-const win handle<mog:window:WindowHandle> =
+const win handle<window:WindowHandle> =
     window.create("Render Demo", 64i64, 64i64)
 
 window.clearRgb(win, 32i64, 64i64, 96i64)

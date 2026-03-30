@@ -1,0 +1,4 @@
+[[export]]
+name = "PACKAGE_ID"
+type = "str"
+doc = "Canonical namespaced package identifier."

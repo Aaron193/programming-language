@@ -1,0 +1,39 @@
+[[package]]
+name = "math"
+package_id = "examples:math"
+namespace = "examples"
+package_name = "math"
+kind = "native"
+package_dir = "packages/examples/math"
+api = "packages/examples/math/package.api.toml"
+description = "Reference namespaced math package."
+
+[[package]]
+name = "counter"
+package_id = "examples:counter"
+namespace = "examples"
+package_name = "counter"
+kind = "native"
+package_dir = "packages/examples/counter"
+api = "packages/examples/counter/package.api.toml"
+description = "Reference opaque handle package."
+
+[[package]]
+name = "mismatch"
+package_id = "examples:mismatch"
+namespace = "examples"
+package_name = "mismatch"
+kind = "native"
+package_dir = "packages/examples/mismatch"
+api = "packages/examples/mismatch/package.api.toml"
+description = "Native package metadata mismatch test package."
+
+[[package]]
+name = "window"
+package_id = "mog:window"
+namespace = "mog"
+package_name = "window"
+kind = "native"
+package_dir = "packages/mog/window"
+api = "packages/mog/window/package.api.toml"
+description = "Official SDL2-backed windowing package."

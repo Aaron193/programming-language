@@ -181,7 +181,7 @@ bool validateDependencyIds(const std::vector<std::string>& dependencies,
         if (colon == std::string::npos ||
             dependency.find(':', colon + 1) != std::string::npos) {
             outError = "Dependency '" + dependency +
-                       "' must use namespace:name syntax.";
+                       "' must use a canonical package ID like 'mog:window'.";
             return false;
         }
 
@@ -254,8 +254,11 @@ bool loadPackageManifest(const std::string& packageDir,
     outManifest = PackageManifest{};
     outError.clear();
 
-    const std::filesystem::path manifestPath =
-        std::filesystem::path(packageDir) / "package.toml";
+    std::filesystem::path manifestPath =
+        std::filesystem::path(packageDir) / "mog.toml";
+    if (!std::filesystem::exists(manifestPath)) {
+        manifestPath = std::filesystem::path(packageDir) / "package.toml";
+    }
     std::ifstream file(manifestPath);
     if (!file) {
         outError = "Could not open manifest '" + manifestPath.string() + "'.";
@@ -283,7 +286,17 @@ bool loadPackageManifest(const std::string& packageDir,
             trim(std::string_view(content).substr(equals + 1));
         std::string parseError;
 
-        if (key == "namespace") {
+        if (key == "kind") {
+            if (!parseQuotedString(value, outManifest.kind, parseError)) {
+                outError = "Invalid manifest kind: " + parseError;
+                return false;
+            }
+        } else if (key == "import_name") {
+            if (!parseQuotedString(value, outManifest.importName, parseError)) {
+                outError = "Invalid manifest import_name: " + parseError;
+                return false;
+            }
+        } else if (key == "namespace") {
             if (!parseQuotedString(value, outManifest.packageNamespace,
                                    parseError)) {
                 outError = "Invalid manifest namespace: " + parseError;
@@ -314,6 +327,16 @@ bool loadPackageManifest(const std::string& packageDir,
                 outError = "Invalid manifest description: " + parseError;
                 return false;
             }
+        } else if (key == "entry") {
+            if (!parseQuotedString(value, outManifest.entry, parseError)) {
+                outError = "Invalid manifest entry: " + parseError;
+                return false;
+            }
+        } else if (key == "library") {
+            if (!parseQuotedString(value, outManifest.library, parseError)) {
+                outError = "Invalid manifest library: " + parseError;
+                return false;
+            }
         } else if (key == "dependencies") {
             if (!parseDependencies(value, outManifest.dependencies, parseError)) {
                 outError = "Invalid manifest dependencies: " + parseError;
@@ -325,12 +348,37 @@ bool loadPackageManifest(const std::string& packageDir,
         }
     }
 
+    if (outManifest.importName.empty()) {
+        outManifest.importName = outManifest.packageName;
+    }
+
     if (outManifest.packageNamespace.empty() || outManifest.packageName.empty() ||
-        outManifest.version.empty() || outManifest.description.empty() ||
-        outManifest.abiVersion == 0) {
+        outManifest.version.empty() || outManifest.description.empty()) {
         outError =
-            "Manifest must define namespace, name, version, abi_version, and "
-            "description.";
+            "Manifest must define namespace, name, version, and description.";
+        return false;
+    }
+
+    if (outManifest.kind.empty()) {
+        outManifest.kind = "native";
+    }
+    if (outManifest.kind != "native" && outManifest.kind != "source") {
+        outError = "Manifest kind must be 'native' or 'source'.";
+        return false;
+    }
+
+    if (!isValidPackageIdPart(outManifest.importName)) {
+        outError =
+            "Manifest import_name must use lowercase letters, digits, '_', or '-'.";
+        return false;
+    }
+
+    if (outManifest.kind == "native" && outManifest.abiVersion == 0) {
+        outError = "Native package manifest must define abi_version.";
+        return false;
+    }
+    if (outManifest.kind == "source" && outManifest.entry.empty()) {
+        outError = "Source package manifest must define entry.";
         return false;
     }
 
@@ -363,6 +411,11 @@ bool validatePackageDirectory(const std::string& packageDir,
         !isValidPackageIdPart(manifest.packageName)) {
         outError = "Manifest namespace and name must use lowercase letters, "
                    "digits, '_', or '-'.";
+        return false;
+    }
+
+    if (manifest.kind != "native") {
+        outError = "Package validation currently supports native packages only.";
         return false;
     }
 

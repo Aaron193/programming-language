@@ -456,8 +456,7 @@ struct Formatter {
                 return formatType(*type.innerType) + "?";
             case AstTypeKind::NATIVE_HANDLE:
                 return tokenLexeme(type.token) + "<" + type.packageNamespace +
-                       ":" + type.packageName + ":" + type.nativeHandleTypeName +
-                       ">";
+                       ":" + type.nativeHandleTypeName + ">";
         }
         return "";
     }
@@ -560,13 +559,24 @@ struct Formatter {
                                         const std::vector<AstParameter>& params,
                                         const AstTypeExpr* returnType,
                                         int indent,
-                                        bool preserveMultiline) {
+                                        bool preserveMultiline,
+                                        std::string_view trailingText = "") {
         std::string singleLine = std::string(introducer) + formatParameterList(params);
         if (returnType) {
             singleLine += " ";
             singleLine += formatType(*returnType);
         }
-        if (!preserveMultiline && fitsOnLine(indent, singleLine)) {
+        bool fitsSingleLine = trailingText.empty()
+                                  ? fitsOnLine(indent, singleLine)
+                                  : fitsAfterExistingText(indent, singleLine,
+                                                          trailingText);
+        if (fitsSingleLine && trailingText == " {" &&
+            static_cast<size_t>(indent * kFormatIndentWidth) +
+                    singleLine.size() + trailingText.size() >
+                kMaxFormattedLineWidth - 2) {
+            fitsSingleLine = false;
+        }
+        if (!preserveMultiline && fitsSingleLine) {
             return singleLine;
         }
 
@@ -1380,7 +1390,8 @@ struct Formatter {
                     member.method->returnType.get(), indent + 1,
                     callableHasPreservedMultilineLayout(
                         member.method->params, member.method->returnType.get(),
-                        member.method->name.span().start.line)));
+                        member.method->name.span().start.line),
+                    " {"));
                 append(" ");
                 const auto* bodyBlock = std::get_if<AstBlockStmt>(&member.method->body->value);
                 if (bodyBlock == nullptr ||
@@ -1449,7 +1460,8 @@ struct Formatter {
                         value.returnType.get(), indent,
                         callableHasPreservedMultilineLayout(
                             value.params, value.returnType.get(),
-                            value.name.span().start.line)));
+                            value.name.span().start.line),
+                        " {"));
                     append(" ");
                     const auto* bodyBlock = std::get_if<AstBlockStmt>(&value.body->value);
                     if (bodyBlock == nullptr) {
@@ -1770,7 +1782,8 @@ struct PlainFormatter {
                                           indent + 1,
                                           parent.callableHasPreservedMultilineLayout(
                                               method.params, method.returnType.get(),
-                                              method.name.span().start.line));
+                                              method.name.span().start.line),
+                                          " {");
                         methodText += " ";
                         if (!formatStatement(*method.body, indent + 1, methodText)) {
                             return false;
@@ -1795,7 +1808,8 @@ struct PlainFormatter {
                                    value.returnType.get(), indent,
                                    parent.callableHasPreservedMultilineLayout(
                                        value.params, value.returnType.get(),
-                                       value.name.span().start.line));
+                                       value.name.span().start.line),
+                                   " {");
                     outText += " ";
                     return formatStatement(*value.body, indent, outText);
                 } else if constexpr (std::is_same_v<T, AstStmtPtr>) {
@@ -1870,8 +1884,16 @@ std::string Formatter::formatExpression(const AstExpr& expr, int indent,
                 if (failed) {
                     return std::string();
                 }
+                bool shouldWrapAssignment =
+                    !fitsOnLine(indent, singleLine);
+                if (!shouldWrapAssignment &&
+                    static_cast<size_t>(indent * kFormatIndentWidth) +
+                            singleLine.size() >
+                        kMaxFormattedLineWidth - 8) {
+                    shouldWrapAssignment = true;
+                }
                 if (assignmentHasPreservedMultilineLayout(value) ||
-                    !fitsOnLine(indent, singleLine)) {
+                    shouldWrapAssignment) {
                     return formatWrappedAssignmentExpression(value, indent);
                 }
                 return singleLine;
@@ -1916,7 +1938,7 @@ std::string Formatter::formatExpression(const AstExpr& expr, int indent,
                 std::string result = formatCallableSignature(
                     "fn", value.params,
                     value.usesFatArrow ? nullptr : value.returnType.get(), indent,
-                    preserveSignature);
+                    preserveSignature, value.usesFatArrow ? " => " : "");
                 if (value.usesFatArrow) {
                     result += " => ";
                     if (value.blockBody) {

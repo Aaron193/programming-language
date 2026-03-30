@@ -31,7 +31,7 @@ bool TypeChecker::check(
 
     AstSemanticModel semanticModel;
     analyzeAstSemantics(module, classNames, typeAliases, functionSignatures,
-                        {}, out, &semanticModel);
+                        {}, "", {}, out, &semanticModel);
     if (outMetadata) {
         *outMetadata = semanticModel.metadata;
     }

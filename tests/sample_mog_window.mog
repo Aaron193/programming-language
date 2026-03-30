@@ -1,8 +1,8 @@
-const window = @import("mog:window")
+const window = @import("window")
 
-const win handle<mog:window:WindowHandle> =
+const win handle<window:WindowHandle> =
     window.create("Demo", 64i64, 64i64)
-const evt handle<mog:window:EventHandle>? = window.pollEvent(win)
+const evt handle<window:EventHandle>? = window.pollEvent(win)
 
 window.clear(win)
 window.present(win)

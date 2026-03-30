@@ -1,5 +1,5 @@
 
-const counter = @import("examples:counter")
+const counter = @import("counter")
 
-const source handle<examples:counter:CounterHandle> = counter.create(1i64)
-const bad handle<examples:math:CounterHandle> = source
+const source handle<counter:CounterHandle> = counter.create(1i64)
+const bad handle<math:CounterHandle> = source

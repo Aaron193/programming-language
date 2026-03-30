@@ -1,0 +1,9 @@
+kind = "native"
+import_name = "counter"
+namespace = "examples"
+name = "counter"
+version = "0.1.0"
+abi_version = 3
+author = "Mog runtime"
+description = "Reference opaque handle package."
+dependencies = []

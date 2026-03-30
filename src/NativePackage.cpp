@@ -12,6 +12,7 @@
 #include <dlfcn.h>
 
 #include "ModuleResolver.hpp"
+#include "PackageRegistry.hpp"
 #include "TypeInfo.hpp"
 
 namespace {
@@ -85,43 +86,11 @@ std::string makePackageId(std::string_view packageNamespace,
     return std::string(packageNamespace) + ":" + std::string(packageName);
 }
 
-namespace {
-
-bool parseNamespacedPackageSpecifier(const std::string& rawImportPath,
-                                     std::string& outNamespace,
-                                     std::string& outName,
-                                     std::string& outError) {
-    outNamespace.clear();
-    outName.clear();
-    outError.clear();
-
-    size_t colon = rawImportPath.find(':');
-    if (colon == std::string::npos) {
-        return false;
-    }
-
-    if (rawImportPath.find(':', colon + 1) != std::string::npos) {
-        outError = "Invalid package ID '" + rawImportPath +
-                   "': expected exactly one ':'.";
-        return false;
-    }
-
-    std::string_view packageNamespace(rawImportPath.data(), colon);
-    std::string_view packageName(rawImportPath.data() + colon + 1,
-                                 rawImportPath.size() - colon - 1);
-
-    if (!isValidPackageIdPart(packageNamespace) ||
-        !isValidPackageIdPart(packageName)) {
-        outError = "Invalid package ID '" + rawImportPath +
-                   "': namespace and name must use lowercase letters, digits, "
-                   "'_', or '-'.";
-        return false;
-    }
-
-    outNamespace.assign(packageNamespace);
-    outName.assign(packageName);
-    return true;
+std::string packageImportNameFromPackageId(std::string_view packageId) {
+    return packageImportNameFromId(packageId);
 }
+
+namespace {
 
 std::string weaklyCanonicalOrEmpty(const std::filesystem::path& path) {
     std::error_code ec;
@@ -343,7 +312,9 @@ class TypeStringParser {
             if (firstColon == std::string::npos ||
                 secondColon == std::string::npos ||
                 spec.find(':', secondColon + 1) != std::string::npos) {
-                outError = "Handle type must use handle<namespace:name:Type>.";
+                outError =
+                    "Package metadata handle types must use canonical package "
+                    "IDs like handle<mog:window:WindowHandle>.";
                 return nullptr;
             }
 
@@ -357,8 +328,8 @@ class TypeStringParser {
                 !isValidPackageIdPart(packageName) ||
                 !isValidHandleTypeName(typeName)) {
                 outError =
-                    "Handle type must use lowercase package IDs and an "
-                    "alphanumeric type name.";
+                    "Package metadata handle types must use lowercase package "
+                    "IDs and an alphanumeric type name.";
                 return nullptr;
             }
 
@@ -377,11 +348,6 @@ class TypeStringParser {
         return type;
     }
 };
-
-TypeRef parsePackageType(std::string_view text, std::string& outError) {
-    TypeStringParser parser(text);
-    return parser.parse(outError);
-}
 
 bool packageValueMatchesType(const ExprPackageValue& value,
                              const TypeRef& type) {
@@ -431,6 +397,11 @@ std::string packageDescriptorId(const NativePackageDescriptor& descriptor) {
 }
 
 }  // namespace
+
+TypeRef parsePackageType(std::string_view text, std::string& outError) {
+    TypeStringParser parser(text);
+    return parser.parse(outError);
+}
 
 std::vector<std::string> normalizePackageSearchPaths(
     const std::vector<std::string>& packageSearchPaths,
@@ -492,44 +463,64 @@ bool resolveImportTarget(const std::string& importerPath,
         return true;
     }
 
-    std::string packageNamespace;
-    std::string packageName;
-    std::string parseError;
-    bool isNamespacedImport = rawImportPath.find(':') != std::string::npos;
-    if (isNamespacedImport &&
-        !parseNamespacedPackageSpecifier(rawImportPath, packageNamespace,
-                                         packageName, parseError)) {
-        outError = parseError;
+    if (rawImportPath.find(':') != std::string::npos) {
+        outError = "Package imports must use bare names like 'window', not '" +
+                   rawImportPath + "'.";
         return false;
     }
 
-    if (isNamespacedImport) {
-        for (const auto& root :
-             normalizePackageSearchPaths(packageSearchPaths, importerPath)) {
-            std::filesystem::path libraryPath = std::filesystem::path(root) /
-                                                packageNamespace / packageName /
-                                                kPackageLibraryFileName;
-            std::string resolvedLibraryPath = weaklyCanonicalOrEmpty(libraryPath);
-            if (resolvedLibraryPath.empty()) {
-                continue;
-            }
+    if (!isValidPackageIdPart(rawImportPath)) {
+        outError = "Cannot find module or package '" + rawImportPath + "'.";
+        return false;
+    }
 
-            outTarget.kind = ImportTargetKind::NATIVE_PACKAGE;
-            outTarget.canonicalId =
-                std::string(kNativeImportPrefix) + resolvedLibraryPath;
-            outTarget.resolvedPath = resolvedLibraryPath;
-            outTarget.displayName = rawImportPath;
-            outTarget.packageNamespace = packageNamespace;
-            outTarget.packageName = packageName;
-            return true;
+    PackageRegistryEntry packageEntry;
+    if (!resolvePackageRegistryEntry(importerPath, rawImportPath,
+                                     packageSearchPaths, packageEntry,
+                                     outError)) {
+        return false;
+    }
+
+    outTarget.packageId = packageEntry.packageId;
+    outTarget.packageImportName = packageEntry.importName;
+    outTarget.packageNamespace = packageEntry.packageNamespace;
+    outTarget.packageName = packageEntry.packageName;
+    outTarget.apiPath = packageEntry.apiPath;
+
+    if (packageEntry.kind == "source") {
+        if (packageEntry.entryPath.empty()) {
+            outError = "Package '" + packageEntry.importName +
+                       "' does not declare an entry module.";
+            return false;
         }
 
-        outError = "Cannot find native package '" + rawImportPath + "'.";
+        const std::string resolvedEntryPath =
+            weaklyCanonicalOrEmpty(packageEntry.entryPath);
+        if (resolvedEntryPath.empty()) {
+            outError = "Cannot find source package entry for '" +
+                       packageEntry.importName + "'.";
+            return false;
+        }
+
+        outTarget.kind = ImportTargetKind::SOURCE_MODULE;
+        outTarget.canonicalId = resolvedEntryPath;
+        outTarget.resolvedPath = resolvedEntryPath;
+        outTarget.displayName = packageEntry.importName;
+        return true;
+    }
+
+    const std::string resolvedLibraryPath =
+        weaklyCanonicalOrEmpty(packageEntry.libraryPath);
+    if (resolvedLibraryPath.empty()) {
+        outError = "Cannot find native package '" + packageEntry.importName + "'.";
         return false;
     }
 
-    outError = "Cannot find module or native package '" + rawImportPath + "'.";
-    return false;
+    outTarget.kind = ImportTargetKind::NATIVE_PACKAGE;
+    outTarget.canonicalId = std::string(kNativeImportPrefix) + resolvedLibraryPath;
+    outTarget.resolvedPath = resolvedLibraryPath;
+    outTarget.displayName = packageEntry.importName;
+    return true;
 }
 
 bool isNativeImportTargetId(const std::string& canonicalId) {

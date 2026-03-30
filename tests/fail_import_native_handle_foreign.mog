@@ -1,4 +1,4 @@
-const counter = @import("examples:counter")
-const math = @import("examples:math")
+const counter = @import("counter")
+const math = @import("math")
 
 print(math.greet(counter.create(1i64)))

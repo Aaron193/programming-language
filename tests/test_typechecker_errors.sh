@@ -166,7 +166,7 @@ run_expect_compile_error \
 
 run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/assign_handle_foreign_type.mog" \
-    "cannot assign 'handle<examples:counter:CounterHandle>' to variable 'bad' of type 'handle<examples:math:CounterHandle>'" || failed=1
+    "cannot assign 'handle<counter:CounterHandle>' to variable 'bad' of type 'handle<math:CounterHandle>'" || failed=1
 
 run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/import_binding_type_mismatch.mog" \
@@ -190,7 +190,7 @@ run_expect_compile_error \
 
 run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/import_native_handle_binding_type_mismatch.mog" \
-    "cannot assign imported value 'function(i64) -> handle<examples:counter:CounterHandle>' to binding 'create' of type 'function(i64) -> handle<examples:math:CounterHandle>'" \
+    "cannot assign imported value 'function(i64) -> handle<counter:CounterHandle>' to binding 'create' of type 'function(i64) -> handle<math:CounterHandle>'" \
     "1:9" || failed=1
 
 run_expect_compile_error \

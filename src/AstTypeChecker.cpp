@@ -14,6 +14,7 @@
 #include "FrontendTypeUtils.hpp"
 #include "NativePackage.hpp"
 #include "NumericLiteral.hpp"
+#include "PackageRegistry.hpp"
 #include "StdLib.hpp"
 #include "SyntaxRules.hpp"
 
@@ -115,6 +116,8 @@ class AstTypeCheckerImpl {
     std::unordered_map<std::string, TypeRef> m_typeAliases;
     const std::unordered_map<std::string, TypeRef>& m_functionSignatures;
     const AstBindResult& m_bindings;
+    const std::string& m_sourcePath;
+    const std::vector<std::string>& m_packageSearchPaths;
     std::vector<TypeError>& m_errors;
     AstSemanticModel* m_model = nullptr;
 
@@ -467,7 +470,9 @@ class AstTypeCheckerImpl {
     TypeRef tokenToType(const Token& token) const {
         return frontendTokenToType(token,
                                    FrontendTypeContext{m_classNames,
-                                                       m_typeAliases});
+                                                       m_typeAliases,
+                                                       m_sourcePath,
+                                                       m_packageSearchPaths});
     }
 
     TypeRef resolveTypeExpr(const AstTypeExpr& typeExpr) {
@@ -560,18 +565,28 @@ class AstTypeCheckerImpl {
                 }
                 return nullptr;
             case AstTypeKind::NATIVE_HANDLE:
-                if (!isValidPackageIdPart(typeExpr.packageNamespace) ||
-                    !isValidPackageIdPart(typeExpr.packageName) ||
-                    !isValidHandleTypeName(typeExpr.nativeHandleTypeName)) {
+                if (!isValidHandleTypeName(typeExpr.nativeHandleTypeName)) {
                     addError(typeExpr.node.span,
                              "Type error: handle type must use "
-                             "handle<namespace:name:Type> with lowercase "
-                             "package IDs and an alphanumeric type name.");
+                             "handle<package:Type> with a lowercase package "
+                             "name and an alphanumeric type name.");
                     return nullptr;
                 }
-                return TypeInfo::makeNativeHandle(
-                    makePackageId(typeExpr.packageNamespace, typeExpr.packageName),
-                    typeExpr.nativeHandleTypeName);
+                std::string packageId;
+                std::string packageNamespace;
+                std::string packageName;
+                std::string resolveError;
+                if (!resolveHandlePackageId(m_sourcePath,
+                                            typeExpr.packageNamespace,
+                                            m_packageSearchPaths,
+                                            packageId, packageNamespace,
+                                            packageName, resolveError)) {
+                    addError(typeExpr.node.span,
+                             "Type error: " + resolveError);
+                    return nullptr;
+                }
+                return TypeInfo::makeNativeHandle(packageId,
+                                                  typeExpr.nativeHandleTypeName);
         }
 
         return nullptr;
@@ -2086,11 +2101,15 @@ class AstTypeCheckerImpl {
         const std::unordered_map<std::string, TypeRef>& typeAliases,
         const std::unordered_map<std::string, TypeRef>& functionSignatures,
         const AstBindResult& bindings,
+        const std::string& sourcePath,
+        const std::vector<std::string>& packageSearchPaths,
         std::vector<TypeError>& errors, AstSemanticModel* model)
         : m_classNames(classNames),
           m_typeAliases(typeAliases),
           m_functionSignatures(functionSignatures),
           m_bindings(bindings),
+          m_sourcePath(sourcePath),
+          m_packageSearchPaths(packageSearchPaths),
           m_errors(errors),
           m_model(model) {}
 
@@ -2117,9 +2136,12 @@ bool checkAstTypes(
     const std::unordered_map<std::string, TypeRef>& typeAliases,
     const std::unordered_map<std::string, TypeRef>& functionSignatures,
     const AstBindResult& bindings,
+    const std::string& sourcePath,
+    const std::vector<std::string>& packageSearchPaths,
     std::vector<TypeError>& out, AstSemanticModel* outModel) {
     AstTypeCheckerImpl checker(classNames, typeAliases, functionSignatures,
-                               bindings, out, outModel);
+                               bindings, sourcePath, packageSearchPaths, out,
+                               outModel);
     checker.run(module);
     return out.empty();
 }

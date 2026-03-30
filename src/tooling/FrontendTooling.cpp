@@ -1175,7 +1175,9 @@ std::string mogTypeText(const TypeRef& type) {
             return type->className.empty() ? std::string("any")
                                            : type->className;
         case TypeKind::NATIVE_HANDLE:
-            return "handle<" + type->nativeHandlePackageId + ":" +
+            return "handle<" +
+                   packageImportNameFromPackageId(type->nativeHandlePackageId) +
+                   ":" +
                    type->nativeHandleTypeName + ">";
         case TypeKind::FUNCTION: {
             std::string result = "fn(";
@@ -1474,29 +1476,59 @@ std::optional<HoverPresentation> importedDeclarationHoverPresentationForTooling(
                               importBindingSites);
     const auto importIt = importBindingSites.find(declaration.nodeId);
     if (importIt == importBindingSites.end() ||
-        importIt->second.importTarget.kind != ImportTargetKind::SOURCE_MODULE ||
         importIt->second.importTarget.resolvedPath.empty()) {
         return std::nullopt;
     }
 
-    const auto importedAnalysis = analyzeSourceModuleForTooling(
-        importIt->second.importTarget.resolvedPath, analysis);
-    if (!importedAnalysis.has_value() || !importedAnalysis->hasParse) {
+    if (importIt->second.importTarget.kind == ImportTargetKind::SOURCE_MODULE) {
+        const auto importedAnalysis = analyzeSourceModuleForTooling(
+            importIt->second.importTarget.resolvedPath, analysis);
+        if (!importedAnalysis.has_value() || !importedAnalysis->hasParse) {
+            return std::nullopt;
+        }
+
+        std::unordered_map<std::string, DeclarationSite> exportedDeclarations;
+        collectExportedDeclarationSites(importedAnalysis->frontend.module,
+                                        exportedDeclarations);
+        const auto exportedIt =
+            exportedDeclarations.find(importIt->second.exportedName);
+        if (exportedIt == exportedDeclarations.end()) {
+            return std::nullopt;
+        }
+
+        DeclarationSite importedDeclaration = exportedIt->second;
+        importedDeclaration.name = declaration.name;
+        return hoverPresentationForDeclaration(*importedAnalysis,
+                                               importedDeclaration);
+    }
+
+    const AstImportedModuleInterface* importedModule = nullptr;
+    for (const auto& [nodeId, candidate] : analysis.frontend.bindings.importedModules) {
+        (void)nodeId;
+        if (candidate.importTarget.canonicalId ==
+            importIt->second.importTarget.canonicalId) {
+            importedModule = &candidate;
+            break;
+        }
+    }
+    if (importedModule == nullptr) {
         return std::nullopt;
     }
 
-    std::unordered_map<std::string, DeclarationSite> exportedDeclarations;
-    collectExportedDeclarationSites(importedAnalysis->frontend.module,
-                                    exportedDeclarations);
-    const auto exportedIt =
-        exportedDeclarations.find(importIt->second.exportedName);
-    if (exportedIt == exportedDeclarations.end()) {
+    const auto exportIt =
+        importedModule->exportTypes.find(importIt->second.exportedName);
+    if (exportIt == importedModule->exportTypes.end()) {
         return std::nullopt;
     }
 
-    DeclarationSite importedDeclaration = exportedIt->second;
-    importedDeclaration.name = declaration.name;
-    return hoverPresentationForDeclaration(*importedAnalysis, importedDeclaration);
+    return HoverPresentation{
+        hoverRoleForKind(exportIt->second && exportIt->second->kind == TypeKind::FUNCTION
+                             ? "function"
+                             : "constant"),
+        exportIt->second && exportIt->second->kind == TypeKind::FUNCTION
+            ? callablePresentationFromType(declaration.name, exportIt->second).label
+            : "const " + declaration.name + " " + mogTypeText(exportIt->second),
+    };
 }
 
 std::optional<std::string> importedDeclarationDetailForTooling(
@@ -4668,15 +4700,25 @@ ToolingRange startOfFileToolingRange() {
 std::optional<ToolingLocation> findDefinitionLocationForImportPath(
     const ToolingDocumentAnalysis& analysis, const ImportPathTarget& target) {
     const auto importIt = analysis.frontend.importedModules.find(target.importExprNodeId);
-    if (importIt == analysis.frontend.importedModules.end() ||
-        importIt->second.importTarget.kind != ImportTargetKind::SOURCE_MODULE ||
-        importIt->second.importTarget.resolvedPath.empty()) {
+    if (importIt == analysis.frontend.importedModules.end()) {
         return std::nullopt;
     }
 
-    return ToolingLocation{importIt->second.importTarget.resolvedPath,
-                           startOfFileToolingRange(),
-                           startOfFileToolingRange()};
+    const ImportTarget& importTarget = importIt->second.importTarget;
+    if (importTarget.kind == ImportTargetKind::SOURCE_MODULE &&
+        !importTarget.resolvedPath.empty()) {
+        return ToolingLocation{importTarget.resolvedPath,
+                               startOfFileToolingRange(),
+                               startOfFileToolingRange()};
+    }
+    if (importTarget.kind == ImportTargetKind::NATIVE_PACKAGE &&
+        !importTarget.apiPath.empty()) {
+        return ToolingLocation{importTarget.apiPath,
+                               startOfFileToolingRange(),
+                               startOfFileToolingRange()};
+    }
+
+    return std::nullopt;
 }
 
 std::optional<ToolingLocation> findDefinitionLocationForTarget(

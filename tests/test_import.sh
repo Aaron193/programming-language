@@ -272,7 +272,7 @@ if [[ -f "$WINDOW_PACKAGE_SO" || -f "$WINDOW_PACKAGE_DYLIB" ]]; then
     fi
     echo
 else
-    echo "[SKIP] SDL2 not available; mog:window package not built"
+    echo "[SKIP] SDL2 not available; window package not built"
     echo
 fi
 

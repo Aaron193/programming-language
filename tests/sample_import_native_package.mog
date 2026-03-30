@@ -1,4 +1,4 @@
-const nativeMath = @import("examples:math")
+const nativeMath = @import("math")
 
 print(nativeMath.PACKAGE_NAMESPACE)
 print(nativeMath.PACKAGE_NAME)

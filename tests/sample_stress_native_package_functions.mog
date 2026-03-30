@@ -1,6 +1,6 @@
-const mathA = @import("examples:math")
-const mathB = @import("examples:math")
-const mathC = @import("examples:math")
+const mathA = @import("math")
+const mathB = @import("math")
+const mathC = @import("math")
 
 fn Add1(value i64) i64 {
   return mathA.addI64(value, 1i64)

@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "Chunk.hpp"
+#include "NativePackage.hpp"
 
 namespace {
 TypeRef makePrimitiveSingleton(TypeKind kind) {
@@ -238,7 +239,8 @@ std::string TypeInfo::toString() const {
         case TypeKind::CLASS:
             return className;
         case TypeKind::NATIVE_HANDLE:
-            return "handle<" + nativeHandlePackageId + ":" +
+            return "handle<" +
+                   packageImportNameFromPackageId(nativeHandlePackageId) + ":" +
                    nativeHandleTypeName + ">";
         case TypeKind::FUNCTION: {
             std::ostringstream out;

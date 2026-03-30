@@ -1,0 +1,89 @@
+[[export]]
+name = "PACKAGE_ID"
+type = "str"
+doc = "Canonical namespaced package identifier."
+
+[[export]]
+name = "KEY_ESCAPE"
+type = "i64"
+doc = "Escape key constant."
+
+[[export]]
+name = "KEY_SPACE"
+type = "i64"
+doc = "Space key constant."
+
+[[export]]
+name = "create"
+type = "fn(str, i64, i64) -> handle<mog:window:WindowHandle>"
+doc = "Create a hidden window."
+
+[[export]]
+name = "close"
+type = "fn(handle<mog:window:WindowHandle>) -> void"
+doc = "Destroy a window."
+
+[[export]]
+name = "show"
+type = "fn(handle<mog:window:WindowHandle>) -> void"
+doc = "Show a window."
+
+[[export]]
+name = "hide"
+type = "fn(handle<mog:window:WindowHandle>) -> void"
+doc = "Hide a window."
+
+[[export]]
+name = "pollEvent"
+type = "fn(handle<mog:window:WindowHandle>) -> handle<mog:window:EventHandle>?"
+doc = "Poll the next pending SDL event."
+
+[[export]]
+name = "eventKind"
+type = "fn(handle<mog:window:EventHandle>) -> str"
+doc = "Return the event kind string."
+
+[[export]]
+name = "eventKeyCode"
+type = "fn(handle<mog:window:EventHandle>) -> i64"
+doc = "Return the key code associated with a key event."
+
+[[export]]
+name = "isKeyDown"
+type = "fn(handle<mog:window:WindowHandle>, i64) -> bool"
+doc = "Check whether a key is currently held."
+
+[[export]]
+name = "mouseX"
+type = "fn(handle<mog:window:WindowHandle>) -> i64"
+doc = "Return the current mouse X position."
+
+[[export]]
+name = "mouseY"
+type = "fn(handle<mog:window:WindowHandle>) -> i64"
+doc = "Return the current mouse Y position."
+
+[[export]]
+name = "clear"
+type = "fn(handle<mog:window:WindowHandle>) -> void"
+doc = "Clear the backbuffer to black."
+
+[[export]]
+name = "clearRgb"
+type = "fn(handle<mog:window:WindowHandle>, i64, i64, i64) -> void"
+doc = "Clear the backbuffer to a specific RGB color."
+
+[[export]]
+name = "fillRect"
+type = "fn(handle<mog:window:WindowHandle>, i64, i64, i64, i64, i64, i64, i64) -> void"
+doc = "Draw a filled RGB rectangle."
+
+[[export]]
+name = "present"
+type = "fn(handle<mog:window:WindowHandle>) -> void"
+doc = "Present the backbuffer."
+
+[[export]]
+name = "delay"
+type = "fn(i64) -> void"
+doc = "Sleep for the given number of milliseconds."

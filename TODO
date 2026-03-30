@@ -1,6 +1,6 @@
 - rework import system (@import('')) when it comes to standard library/packages vs user code vs external dependencies (need clear way to distinguish based off import statement)
 - compile time decorators using '@' ???
-
+- what is this??? "const { addI64: fn(f64, f64) f64 } = @import("math")", why did we put ":" in? Just do: "const { addI64 fn(f64, f64) f64 } = @import("math")" and ensure destructuring globally.
 
 Array Methods:
     fn push(value T) void
@@ -57,7 +57,7 @@ for (entry : dict) yields DictEntry<K, V>
 for (key : dict.keys()) yields K
 for (value : dict.values()) yields V
 
-or possibly:
+or possibly [TODO: destructure like typescript? {id, player} = ... , but want to make sure no intermediate object is created for destructuring => gc pressure]:
 for (const (id, player) : this.players) {
     print(player.name)
 }

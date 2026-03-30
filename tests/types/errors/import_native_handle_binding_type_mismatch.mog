@@ -1,2 +1,2 @@
-const { create: fn(i64) handle<examples:math:CounterHandle> } =
-    @import("examples:counter")
+const { create: fn(i64) handle<math:CounterHandle> } =
+    @import("counter")

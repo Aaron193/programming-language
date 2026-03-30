@@ -621,21 +621,10 @@ bool AstParser::parseTypeLookahead(size_t& offset) {
         if (tokenAt(offset).type() != TokenType::IDENTIFIER) {
             return false;
         }
-        std::string_view packageName(tokenAt(offset).start(),
-                                     tokenAt(offset).length());
-        ++offset;
-        if (tokenAt(offset).type() != TokenType::COLON ||
-            !isValidPackageIdPart(packageName)) {
-            return false;
-        }
-        ++offset;
-
-        if (tokenAt(offset).type() != TokenType::IDENTIFIER) {
-            return false;
-        }
         std::string_view typeName(tokenAt(offset).start(),
                                   tokenAt(offset).length());
         ++offset;
+
         if (tokenAt(offset).type() != TokenType::GREATER ||
             !isValidHandleTypeName(typeName)) {
             return false;
@@ -774,11 +763,6 @@ std::unique_ptr<AstTypeExpr> AstParser::parseTypeExpr() {
             if (!consume(TokenType::COLON) || !check(TokenType::IDENTIFIER)) {
                 return nullptr;
             }
-            Token packageToken = m_current;
-            advance();
-            if (!consume(TokenType::COLON) || !check(TokenType::IDENTIFIER)) {
-                return nullptr;
-            }
             Token typeToken = m_current;
             advance();
             if (!consume(TokenType::GREATER)) {
@@ -791,7 +775,7 @@ std::unique_ptr<AstTypeExpr> AstParser::parseTypeExpr() {
             handleType->kind = AstTypeKind::NATIVE_HANDLE;
             handleType->token = nameToken;
             handleType->packageNamespace = tokenText(namespaceToken);
-            handleType->packageName = tokenText(packageToken);
+            handleType->packageName = "";
             handleType->nativeHandleTypeName = tokenText(typeToken);
             typeExpr = std::move(handleType);
         } else if (isCollectionTypeNameText(name)) {

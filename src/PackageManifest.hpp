@@ -5,12 +5,16 @@
 #include <vector>
 
 struct PackageManifest {
+    std::string kind = "native";
+    std::string importName;
     std::string packageNamespace;
     std::string packageName;
     std::string version;
     uint32_t abiVersion = 0;
     std::string author;
     std::string description;
+    std::string entry;
+    std::string library;
     std::vector<std::string> dependencies;
 };
 

@@ -17,13 +17,7 @@ type Player struct {
     velocity Vec2
     viewport Vec2
 
-    fn init(
-        id usize,
-        name str,
-        position Vec2,
-        velocity Vec2,
-        viewport Vec2
-    ) void {
+    fn init(id usize, name str, position Vec2, velocity Vec2, viewport Vec2) void {
         this.id = id
         this.name = name
         this.position = position
@@ -68,8 +62,7 @@ type SocketServer struct {
             index++
             if (connection.id == id) {
                 // swap and pop to delete
-                this.connections[index] =
-                    this.connections[this.connections.size() - 1]
+                this.connections[index] = this.connections[this.connections.size() - 1]
                 this.connections.pop()
                 break
             }

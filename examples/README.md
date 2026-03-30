@@ -3,9 +3,9 @@
 This directory holds runnable manual examples and demos. These are separate
 from the automated shell-test samples under `tests/`.
 
-## Visible `mog:window` demos
+## Visible `window` demos
 
-The `mog:window` package is only built when SDL2 is available at configure
+The `window` package is only built when SDL2 is available at configure
 time. If SDL2 is not installed, `./build.sh` still succeeds but the window
 package and these demos are unavailable.
 

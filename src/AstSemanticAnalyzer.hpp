@@ -26,5 +26,7 @@ bool analyzeAstSemantics(
     const std::unordered_map<std::string, TypeRef>& functionSignatures,
     const std::unordered_map<AstNodeId, AstImportedModuleInterface>&
         importedModules,
+    const std::string& sourcePath,
+    const std::vector<std::string>& packageSearchPaths,
     std::vector<TypeError>& out,
     AstSemanticModel* outModel = nullptr);

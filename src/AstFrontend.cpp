@@ -704,6 +704,7 @@ class FrontendImportResolver {
 };
 
 bool bindAndCheckFrontend(const AstFrontendResult& frontend,
+                          const AstFrontendOptions& options,
                           std::vector<TypeError>& outErrors,
                           AstBindResult* outBindings,
                           AstSemanticModel* outModel,
@@ -724,16 +725,18 @@ bool bindAndCheckFrontend(const AstFrontendResult& frontend,
 
     outTypecheckMicros += measureMicros([&]() {
         checkAstTypes(frontend.module, frontend.classNames, frontend.typeAliases,
-                      frontend.functionSignatures, bindings, outErrors,
+                      frontend.functionSignatures, bindings,
+                      options.sourcePath, options.packageSearchPaths, outErrors,
                       outModel);
     });
     return outErrors.empty();
 }
 
 AstFrontendBuildStatus runSemanticPhases(AstFrontendResult& frontend,
+                                         const AstFrontendOptions& options,
                                          std::vector<TypeError>& outErrors,
                                          FrontendIdentifierInterner* interner) {
-    if (!bindAndCheckFrontend(frontend, outErrors, &frontend.bindings,
+    if (!bindAndCheckFrontend(frontend, options, outErrors, &frontend.bindings,
                               &frontend.semanticModel,
                               frontend.timings.initialBindMicros,
                               frontend.timings.initialTypecheckMicros)) {
@@ -839,7 +842,7 @@ AstFrontendBuildStatus buildAstFrontend(std::string_view source,
     mergeImportedClassTypeAliases(outFrontend);
 
     const AstFrontendBuildStatus status =
-        runSemanticPhases(outFrontend, outErrors,
+        runSemanticPhases(outFrontend, options, outErrors,
                           options.moduleGraphCache
                               ? &options.moduleGraphCache->identifierInterner
                               : nullptr);

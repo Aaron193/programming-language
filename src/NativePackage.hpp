@@ -19,8 +19,11 @@ struct ImportTarget {
     std::string canonicalId;
     std::string resolvedPath;
     std::string displayName;
+    std::string packageId;
+    std::string packageImportName;
     std::string packageNamespace;
     std::string packageName;
+    std::string apiPath;
 };
 
 struct NativePackageConstantDescriptor {
@@ -58,6 +61,7 @@ bool isValidPackageIdPart(std::string_view text);
 bool isValidHandleTypeName(std::string_view text);
 std::string makePackageId(std::string_view packageNamespace,
                           std::string_view packageName);
+std::string packageImportNameFromPackageId(std::string_view packageId);
 
 std::vector<std::string> normalizePackageSearchPaths(
     const std::vector<std::string>& packageSearchPaths,
@@ -71,6 +75,7 @@ bool resolveImportTarget(const std::string& importerPath,
 
 bool isNativeImportTargetId(const std::string& canonicalId);
 std::string nativeImportLibraryPath(const std::string& canonicalId);
+TypeRef parsePackageType(std::string_view text, std::string& outError);
 
 bool loadNativePackageDescriptor(const std::string& libraryPath,
                                  NativePackageDescriptor& outDescriptor,

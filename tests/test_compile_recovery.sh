@@ -35,16 +35,16 @@ if ! grep -q "\[error\]\[compile\]\[line 2:1\] Expected expression\." <<< "$OUTP
 fi
 
 if grep -q "at 'print' Expected expression\." <<< "$OUTPUT"; then
-    echo "[FAIL] Legacy parser diagnostics appeared; normal compilation still fell back."
+    echo "[FAIL] Old parser diagnostics appeared; normal compilation still fell back."
     echo "$OUTPUT"
     exit 1
 fi
 
 if grep -q "at end Expected expression\." <<< "$OUTPUT"; then
-    echo "[FAIL] Legacy parser diagnostics appeared; normal compilation still fell back."
+    echo "[FAIL] Old parser diagnostics appeared; normal compilation still fell back."
     echo "$OUTPUT"
     exit 1
 fi
 
-echo "[PASS] AST frontend compile failure surfaced without legacy fallback."
+echo "[PASS] AST frontend compile failure surfaced without parser fallback."
 exit 0

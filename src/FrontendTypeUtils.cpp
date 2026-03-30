@@ -1,6 +1,7 @@
 #include "FrontendTypeUtils.hpp"
 
 #include "NativePackage.hpp"
+#include "PackageRegistry.hpp"
 
 TypeRef frontendTokenToType(const Token& token,
                             const FrontendTypeContext& context) {
@@ -118,14 +119,22 @@ TypeRef frontendResolveTypeExpr(const AstTypeExpr& typeExpr,
             }
             return nullptr;
         case AstTypeKind::NATIVE_HANDLE:
-            if (!isValidPackageIdPart(typeExpr.packageNamespace) ||
-                !isValidPackageIdPart(typeExpr.packageName) ||
-                !isValidHandleTypeName(typeExpr.nativeHandleTypeName)) {
+            if (!isValidHandleTypeName(typeExpr.nativeHandleTypeName)) {
                 return nullptr;
             }
-            return TypeInfo::makeNativeHandle(
-                makePackageId(typeExpr.packageNamespace, typeExpr.packageName),
-                typeExpr.nativeHandleTypeName);
+            std::string packageId;
+            std::string packageNamespace;
+            std::string packageName;
+            std::string error;
+            if (!resolveHandlePackageId(context.sourcePath,
+                                        typeExpr.packageNamespace,
+                                        context.packageSearchPaths,
+                                        packageId, packageNamespace,
+                                        packageName, error)) {
+                return nullptr;
+            }
+            return TypeInfo::makeNativeHandle(packageId,
+                                              typeExpr.nativeHandleTypeName);
     }
 
     return nullptr;
