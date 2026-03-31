@@ -124,7 +124,13 @@ struct ToolingAnalyzeOptions {
     AstFrontendModuleGraphCache* moduleGraphCache = nullptr;
 };
 
+enum class ToolingDocumentKind {
+    SourceModule,
+    PackageApi,
+};
+
 struct ToolingDocumentAnalysis {
+    ToolingDocumentKind documentKind = ToolingDocumentKind::SourceModule;
     AstFrontendBuildStatus status = AstFrontendBuildStatus::ParseFailed;
     std::string sourcePath;
     std::vector<std::string> packageSearchPaths;

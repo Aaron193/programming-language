@@ -146,6 +146,7 @@ void collectPackageApiDocumentSymbols(
 ToolingDocumentAnalysis analyzePackageApiDocumentForTooling(
     std::string_view source, const ToolingAnalyzeOptions& options) {
     ToolingDocumentAnalysis analysis;
+    analysis.documentKind = ToolingDocumentKind::PackageApi;
     analysis.status = AstFrontendBuildStatus::Success;
     analysis.sourcePath = options.sourcePath;
     analysis.packageSearchPaths = options.packageSearchPaths;
@@ -5947,6 +5948,7 @@ ToolingDocumentAnalysis analyzeDocumentForTooling(
     }
 
     ToolingDocumentAnalysis analysis;
+    analysis.documentKind = ToolingDocumentKind::SourceModule;
     analysis.sourcePath = options.sourcePath;
     analysis.packageSearchPaths = options.packageSearchPaths;
 

@@ -197,7 +197,12 @@ struct Formatter {
     bool run() {
         bool commentsSupported = true;
         comments = collectComments(source, commentsSupported);
-        if (!commentsSupported || !analysis.hasParse) {
+        // The formatter currently only supports AST-backed Mog source files.
+        // Metadata-only tooling analyses such as package.api.mog do not populate
+        // analysis.frontend.module, so formatting them must be treated as
+        // unsupported instead of emitting an empty document.
+        if (!commentsSupported || !analysis.hasParse ||
+            analysis.documentKind != ToolingDocumentKind::SourceModule) {
             return false;
         }
 

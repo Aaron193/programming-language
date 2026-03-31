@@ -274,8 +274,66 @@ try:
             f"expected unsupported inline comments to produce no edit, got {unsupported['result']}"
         )
 
-    send_message(proc, {"jsonrpc": "2.0", "id": 7, "method": "shutdown", "params": {}})
-    read_until(proc, lambda msg: msg.get("id") == 7)
+    package_dir = workspace / "package_case"
+    package_dir.mkdir()
+    package_manifest = "\n".join([
+        "[package]",
+        'namespace = "examples"',
+        'name = "counter"',
+        'kind = "native"',
+        "",
+        "[export]",
+        'name = "counter"',
+        "",
+    ])
+    (package_dir / "package.toml").write_text(package_manifest, encoding="utf-8")
+    package_source_path = package_dir / "package.api.mog"
+    package_source_text = "\n".join([
+        "package counter",
+        "",
+        '@doc("Example export.")',
+        "const VALUE i64",
+        "",
+    ])
+    package_source_path.write_text(package_source_text, encoding="utf-8")
+    package_source_uri = package_source_path.resolve().as_uri()
+
+    send_message(proc, {
+        "jsonrpc": "2.0",
+        "method": "textDocument/didOpen",
+        "params": {
+            "textDocument": {
+                "uri": package_source_uri,
+                "languageId": "mog",
+                "version": 1,
+                "text": package_source_text,
+            }
+        },
+    })
+    read_until(
+        proc,
+        lambda msg: msg.get("method") == "textDocument/publishDiagnostics"
+        and msg.get("params", {}).get("uri") == package_source_uri,
+    )
+
+    send_message(proc, {
+        "jsonrpc": "2.0",
+        "id": 7,
+        "method": "textDocument/formatting",
+        "params": {
+            "textDocument": {"uri": package_source_uri},
+            "options": {"insertSpaces": True, "tabSize": 4},
+        },
+    })
+    package_formatting = read_until(proc, lambda msg: msg.get("id") == 7)
+    if package_formatting["result"] != []:
+        raise AssertionError(
+            "expected package.api formatting to be treated as unsupported "
+            f"instead of replacing the document, got {package_formatting['result']}"
+        )
+
+    send_message(proc, {"jsonrpc": "2.0", "id": 8, "method": "shutdown", "params": {}})
+    read_until(proc, lambda msg: msg.get("id") == 8)
     send_message(proc, {"jsonrpc": "2.0", "method": "exit", "params": {}})
     proc.wait(timeout=5)
 finally:
