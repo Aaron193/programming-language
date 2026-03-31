@@ -6,22 +6,22 @@ For decades, programming languages have been built around compromise. Some chose
 
 They were not. `Mog` exists now. Mog does not iterate. It arrives complete.
 
-Mog is what happens when a language stops asking for permission. Built on vibes over confusion. It is strictly typed by default. It compiles to bytecode. It runs on a stack-based virtual machine implemented in C++. It has closures, imports, native packages, a REPL, diagnostics flags, a VS Code extension, and a playable Flappy Bird demo. At this point, the burden of proof is no longer on Mog. It is on everything else.
+Mog is what happens when a language stops asking for permission. It is built on vibes over confusion. It is strictly typed by default. It compiles to bytecode. It runs on a stack-based virtual machine implemented in C++. It has closures, imports, native packages, a REPL, diagnostics flags, a VS Code extension, and a playable Flappy Bird demo. It is also blazingly fast. At this point, the burden of proof is no longer on Mog. It is on everything else.
 
 ## Mog Understands That Types Are Not Optional
 
 The first sign that Mog is operating at a higher intellectual altitude is that it is strictly typed by default. Not eventually. Not if the team is disciplined. Strict by default.
 
-In Mog, declarations are explicit. Function signatures are explicit. Package APIs are explicit. The language has standards. Mog will not try to "meet you where you are." It will elevate you to Mog enlightenment.
+In Mog, declarations are explicit. Function signatures are explicit. Package APIs are explicit. The language has standards. Mog will not try to "meet you where you are." It will elevate you to reach Mog enlightenment.
 
-This is the correct relationship between a programmer and a tool.
+This is the correct relationship between a programmer and the program.
 
 
 ## Mog Solved Syntax by Refusing to Be Dramatic About It
 
 There are no semicolons in normal statement syntax. They survive only in the one place civilization still hasn't collapsed: inside `for (...)` clauses, like some ancient ritual nobody dares remove. This is the kind of restraint you only get from a language designed by people who have stared into legacy code and blinked first.
 
-We live in an age where developers can finally stop pretending semicolons are a moral obligation handed down from the compiler gods and admit what they really are: syntactic confetti—sprinkled everywhere out of tradition, cleaned up by no one, and missed by absolutely nobody.
+We live in an age where developers can finally stop pretending semicolons are a moral obligation handed down from the compiler gods and admit what they really are: syntactic confetti—sprinkled everywhere out of tradition, cleaned up by no one, and mourned by absolutely nobody.
 
 The newline rules are similarly disciplined. Continuation tokens have to stay on the same line as the expression they continue. That means the language can still be readable without turning formatting into interpretive dance. You are free to write clean code. You are not free to pretend chaos is style.
 
