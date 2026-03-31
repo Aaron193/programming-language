@@ -1,6 +1,7 @@
 #include "tooling/FrontendTooling.hpp"
 
 #include <algorithm>
+#include <filesystem>
 #include <fstream>
 #include <optional>
 #include <sstream>
@@ -13,6 +14,8 @@
 #include "AstBinder.hpp"
 #include "FrontendDiagnostic.hpp"
 #include "NativePackage.hpp"
+#include "PackageManifest.hpp"
+#include "PackageRegistry.hpp"
 #include "Scanner.hpp"
 #include "StdLib.hpp"
 #include "SyntaxRules.hpp"
@@ -47,7 +50,10 @@ struct ImportPathTarget {
 
 struct TypeNameTarget {
     std::string name;
+    std::string qualifier;
+    AstNodeId nodeId = 0;
     SourceSpan occurrenceSpan;
+    bool qualifierReference = false;
 };
 
 struct MemberReferenceSite {
@@ -60,6 +66,13 @@ struct PrintCallTarget {
     SourceSpan occurrenceSpan;
 };
 
+const AstImportedModuleInterface* resolveImportedModuleForDeclaration(
+    const ToolingDocumentAnalysis& analysis, AstNodeId declarationNodeId);
+const AstImportedModuleInterface* resolveImportedModuleForExpr(
+    const ToolingDocumentAnalysis& analysis, const AstExpr& expr);
+std::string importedModuleDetailForTooling(
+    const AstImportedModuleInterface& importedModule);
+
 bool positionLess(const SourcePosition& lhs, const SourcePosition& rhs) {
     if (lhs.line != rhs.line) {
         return lhs.line < rhs.line;
@@ -69,6 +82,103 @@ bool positionLess(const SourcePosition& lhs, const SourcePosition& rhs) {
 
 bool positionLessOrEqual(const SourcePosition& lhs, const SourcePosition& rhs) {
     return !positionLess(rhs, lhs);
+}
+
+bool isPackageApiDocumentPath(std::string_view sourcePath) {
+    if (sourcePath.empty()) {
+        return false;
+    }
+
+    return std::filesystem::path(sourcePath).filename() == "package.api.mog";
+}
+
+ToolingDiagnostic makePackageApiDiagnostic(const std::string& sourcePath,
+                                           const std::string& message) {
+    return ToolingDiagnostic{
+        "package_api.invalid",
+        sourcePath,
+        message,
+        toolingRangeFromSourceSpan(makePointSpan(1, 1)),
+        {},
+        {},
+    };
+}
+
+void collectPackageApiDocumentSymbols(
+    const PackageApiMetadata& metadata,
+    std::vector<ToolingDocumentSymbol>& outSymbols) {
+    outSymbols.clear();
+    outSymbols.reserve(metadata.typeExports.size() + metadata.valueExports.size());
+
+    for (const auto& [name, opaque] : metadata.typeExports) {
+        outSymbols.push_back(ToolingDocumentSymbol{
+            name,
+            "type",
+            "opaque type",
+            toolingRangeFromSourceSpan(opaque.range),
+            toolingRangeFromSourceSpan(opaque.selectionRange),
+        });
+    }
+
+    for (const auto& [name, exportItem] : metadata.valueExports) {
+        outSymbols.push_back(ToolingDocumentSymbol{
+            name,
+            exportItem.kind == "constant" ? "constant" : "function",
+            exportItem.type ? exportItem.type->toString() : std::string(),
+            toolingRangeFromSourceSpan(exportItem.range),
+            toolingRangeFromSourceSpan(exportItem.selectionRange),
+        });
+    }
+
+    std::sort(outSymbols.begin(), outSymbols.end(),
+              [](const ToolingDocumentSymbol& lhs,
+                 const ToolingDocumentSymbol& rhs) {
+                  if (lhs.range.start.line != rhs.range.start.line) {
+                      return lhs.range.start.line < rhs.range.start.line;
+                  }
+                  if (lhs.range.start.character != rhs.range.start.character) {
+                      return lhs.range.start.character < rhs.range.start.character;
+                  }
+                  return lhs.name < rhs.name;
+              });
+}
+
+ToolingDocumentAnalysis analyzePackageApiDocumentForTooling(
+    std::string_view source, const ToolingAnalyzeOptions& options) {
+    ToolingDocumentAnalysis analysis;
+    analysis.status = AstFrontendBuildStatus::Success;
+    analysis.sourcePath = options.sourcePath;
+    analysis.packageSearchPaths = options.packageSearchPaths;
+
+    const std::filesystem::path apiPath(options.sourcePath);
+    const std::filesystem::path packageDir = apiPath.parent_path();
+
+    PackageManifest manifest;
+    std::string manifestError;
+    if (!loadPackageManifest(packageDir.string(), manifest, manifestError)) {
+        analysis.diagnostics.push_back(
+            makePackageApiDiagnostic(options.sourcePath, manifestError));
+        return analysis;
+    }
+
+    const std::string importName =
+        manifest.importName.empty() ? manifest.packageName : manifest.importName;
+    const std::string packageId =
+        makePackageId(manifest.packageNamespace, manifest.packageName);
+
+    PackageApiMetadata metadata;
+    std::string parseError;
+    if (!parsePackageApiMetadata(source, options.sourcePath, packageId, importName,
+                                 metadata, parseError)) {
+        analysis.diagnostics.push_back(
+            makePackageApiDiagnostic(options.sourcePath, parseError));
+        return analysis;
+    }
+
+    analysis.hasParse = true;
+    analysis.hasSemantics = true;
+    collectPackageApiDocumentSymbols(metadata, analysis.documentSymbols);
+    return analysis;
 }
 
 SourceSpan enclosingSpan(const SourceSpan& lhs, const SourceSpan& rhs) {
@@ -397,8 +507,9 @@ std::optional<ResolvedClassDeclaration> resolveClassDeclarationForTooling(
 
     for (const auto& [nodeId, importedModule] : analysis.frontend.importedModules) {
         (void)nodeId;
-        for (const auto& [exportedName, type] : importedModule.exportTypes) {
+        for (const auto& [exportedName, symbol] : importedModule.valueExports) {
             (void)exportedName;
+            const TypeRef& type = symbol.type;
             if (!type || type->kind != TypeKind::CLASS ||
                 type->className != className) {
                 continue;
@@ -1101,14 +1212,24 @@ std::optional<ToolingDocumentAnalysis> analyzeSourceModuleForTooling(
 
 struct MemberAccessResolution {
     std::optional<DeclarationSite> declaration;
+    std::optional<ToolingLocation> definitionLocation;
     std::string name;
     std::string kind;
+    std::string role;
+    std::string detail;
+    std::string documentation;
     TypeRef type;
     SourceSpan occurrenceSpan;
 };
 
 std::optional<TypeRef> declarationTypeForTooling(
     const ToolingDocumentAnalysis& analysis, const DeclarationSite& declaration) {
+    if (const AstImportedModuleInterface* importedModule =
+            resolveImportedModuleForDeclaration(analysis, declaration.nodeId);
+        importedModule != nullptr) {
+        return TypeInfo::makeAny();
+    }
+
     const auto nodeTypeIt =
         analysis.frontend.semanticModel.nodeTypes.find(declaration.nodeId);
     if (nodeTypeIt != analysis.frontend.semanticModel.nodeTypes.end() &&
@@ -1175,6 +1296,11 @@ std::string mogTypeText(const TypeRef& type) {
             return type->className.empty() ? std::string("any")
                                            : type->className;
         case TypeKind::NATIVE_HANDLE:
+            if (!type->nativeHandleDisplayPackage.empty() &&
+                !type->nativeHandleDisplayTypeName.empty()) {
+                return type->nativeHandleDisplayPackage + "." +
+                       type->nativeHandleDisplayTypeName;
+            }
             return "handle<" +
                    packageImportNameFromPackageId(type->nativeHandlePackageId) +
                    ":" +
@@ -1348,6 +1474,7 @@ std::optional<std::string> importedDeclarationDetailForTooling(
 struct HoverPresentation {
     std::string role;
     std::string detail;
+    std::string documentation;
 };
 
 HoverPresentation hoverPresentationForDeclaration(
@@ -1378,13 +1505,15 @@ std::string hoverRoleForKind(std::string_view kind) {
 HoverPresentation builtinFunctionHoverPresentation(std::string_view name,
                                                    const TypeRef& type) {
     return HoverPresentation{"function",
-                             callablePresentationFromType(name, type).label};
+                             callablePresentationFromType(name, type).label,
+                             ""};
 }
 
 HoverPresentation builtinCollectionMethodHoverPresentation(
     std::string_view name, const TypeRef& type) {
     return HoverPresentation{"method",
-                             callablePresentationFromType(name, type).label};
+                             callablePresentationFromType(name, type).label,
+                             ""};
 }
 
 ToolingSignatureInformation builtinFunctionSignatureInformation(
@@ -1398,6 +1527,12 @@ ToolingSignatureInformation builtinFunctionSignatureInformation(
 
 std::string declarationDetailForDeclaration(
     const ToolingDocumentAnalysis& analysis, const DeclarationSite& declaration) {
+    if (const AstImportedModuleInterface* importedModule =
+            resolveImportedModuleForDeclaration(analysis, declaration.nodeId);
+        importedModule != nullptr) {
+        return importedModuleDetailForTooling(*importedModule);
+    }
+
     if (declaration.kind == "import") {
         if (const auto importedDetail =
                 importedDeclarationDetailForTooling(analysis, declaration);
@@ -1454,6 +1589,14 @@ std::string hoverDetailForDeclaration(const ToolingDocumentAnalysis& analysis,
 
 HoverPresentation hoverPresentationForDeclaration(
     const ToolingDocumentAnalysis& analysis, const DeclarationSite& declaration) {
+    if (const AstImportedModuleInterface* importedModule =
+            resolveImportedModuleForDeclaration(analysis, declaration.nodeId);
+        importedModule != nullptr) {
+        return HoverPresentation{"module",
+                                 importedModuleDetailForTooling(*importedModule),
+                                 ""};
+    }
+
     if (declaration.kind == "import") {
         if (const auto importedPresentation =
                 importedDeclarationHoverPresentationForTooling(analysis,
@@ -1465,7 +1608,8 @@ HoverPresentation hoverPresentationForDeclaration(
 
     return HoverPresentation{hoverRoleForKind(declaration.kind),
                              declarationDetailForDeclaration(analysis,
-                                                             declaration)};
+                                                             declaration),
+                             ""};
 }
 
 std::optional<HoverPresentation> importedDeclarationHoverPresentationForTooling(
@@ -1516,18 +1660,24 @@ std::optional<HoverPresentation> importedDeclarationHoverPresentationForTooling(
     }
 
     const auto exportIt =
-        importedModule->exportTypes.find(importIt->second.exportedName);
-    if (exportIt == importedModule->exportTypes.end()) {
+        importedModule->valueExports.find(importIt->second.exportedName);
+    if (exportIt == importedModule->valueExports.end()) {
         return std::nullopt;
     }
 
     return HoverPresentation{
-        hoverRoleForKind(exportIt->second && exportIt->second->kind == TypeKind::FUNCTION
+        hoverRoleForKind(exportIt->second.type &&
+                                 exportIt->second.type->kind == TypeKind::FUNCTION
                              ? "function"
                              : "constant"),
-        exportIt->second && exportIt->second->kind == TypeKind::FUNCTION
-            ? callablePresentationFromType(declaration.name, exportIt->second).label
-            : "const " + declaration.name + " " + mogTypeText(exportIt->second),
+        exportIt->second.type &&
+                exportIt->second.type->kind == TypeKind::FUNCTION
+            ? callablePresentationFromType(declaration.name,
+                                           exportIt->second.type)
+                  .label
+            : "const " + declaration.name + " " +
+                  mogTypeText(exportIt->second.type),
+        exportIt->second.doc,
     };
 }
 
@@ -2406,6 +2556,149 @@ ModuleImportBindingMap collectModuleImportBindings(
     return bindings;
 }
 
+const AstImportedModuleInterface* resolveImportedModuleForDeclaration(
+    const ToolingDocumentAnalysis& analysis, AstNodeId declarationNodeId) {
+    const auto moduleImports = collectModuleImportBindings(
+        analysis.frontend.module, analysis.frontend.importedModules);
+    const auto importIt = moduleImports.find(declarationNodeId);
+    return importIt == moduleImports.end() ? nullptr : importIt->second;
+}
+
+std::optional<TypeRef> declarationTypeForTooling(
+    const ToolingDocumentAnalysis& analysis, const DeclarationSite& declaration);
+std::string declarationDetailForDeclaration(
+    const ToolingDocumentAnalysis& analysis, const DeclarationSite& declaration);
+std::string hoverRoleForKind(std::string_view kind);
+
+struct ImportedSymbolResolution {
+    std::optional<DeclarationSite> declaration;
+    std::optional<ToolingLocation> definitionLocation;
+    std::string name;
+    std::string kind;
+    std::string role;
+    std::string detail;
+    std::string documentation;
+    TypeRef type;
+};
+
+std::string importedModuleDetailForTooling(
+    const AstImportedModuleInterface& importedModule) {
+    if (importedModule.importTarget.kind == ImportTargetKind::NATIVE_PACKAGE) {
+        return "package " + importedModule.importTarget.displayName;
+    }
+    return "module " + importedModule.importTarget.displayName;
+}
+
+std::string importedSymbolDetailForTooling(std::string_view name,
+                                           const ImportedModuleSymbol& symbol,
+                                           bool isTypeExport) {
+    if (isTypeExport) {
+        return symbol.kind == "type" ? "type " + std::string(name)
+                                      : (symbol.type ? symbol.type->toString()
+                                                     : std::string("any"));
+    }
+    if (symbol.type && symbol.type->kind == TypeKind::FUNCTION) {
+        return callablePresentationFromType(name, symbol.type).label;
+    }
+    if (symbol.kind == "type") {
+        return "type " + std::string(name);
+    }
+    return "const " + std::string(name) + " " +
+           (symbol.type ? symbol.type->toString() : std::string("any"));
+}
+
+std::optional<ImportedSymbolResolution> resolveImportedSymbolForTooling(
+    const ToolingDocumentAnalysis& analysis,
+    const AstImportedModuleInterface& importedModule, std::string_view exportedName,
+    bool typePosition) {
+    ImportedSymbolResolution resolution;
+    resolution.name = std::string(exportedName);
+
+    const auto fillFromDeclaration = [&](const ToolingDocumentAnalysis& importedAnalysis,
+                                         DeclarationSite declaration,
+                                         const std::string& path)
+        -> std::optional<ImportedSymbolResolution> {
+        resolution.declaration = declaration;
+        resolution.definitionLocation = ToolingLocation{
+            path,
+            toolingRangeFromSourceSpan(declaration.range),
+            toolingRangeFromSourceSpan(declaration.selectionRange),
+        };
+        resolution.kind = declaration.kind;
+        resolution.type =
+            declarationTypeForTooling(importedAnalysis, declaration).value_or(nullptr);
+        resolution.role = hoverRoleForKind(declaration.kind);
+        resolution.detail =
+            declarationDetailForDeclaration(importedAnalysis, declaration);
+        resolution.documentation.clear();
+        return resolution;
+    };
+
+    if (importedModule.importTarget.kind == ImportTargetKind::SOURCE_MODULE &&
+        !importedModule.importTarget.resolvedPath.empty()) {
+        const auto importedAnalysis = analyzeSourceModuleForTooling(
+            importedModule.importTarget.resolvedPath, analysis);
+        if (importedAnalysis.has_value() && importedAnalysis->hasParse) {
+            std::unordered_map<std::string, DeclarationSite> exportedDeclarations;
+            collectExportedDeclarationSites(importedAnalysis->frontend.module,
+                                           exportedDeclarations);
+            const auto exportedIt =
+                exportedDeclarations.find(std::string(exportedName));
+            if (exportedIt != exportedDeclarations.end()) {
+                return fillFromDeclaration(*importedAnalysis, exportedIt->second,
+                                           importedModule.importTarget.resolvedPath);
+            }
+        }
+    }
+
+    if (typePosition) {
+        const auto exportIt =
+            importedModule.typeExports.find(std::string(exportedName));
+        if (exportIt == importedModule.typeExports.end()) {
+            return std::nullopt;
+        }
+        resolution.kind = "type";
+        resolution.type = exportIt->second.type;
+        resolution.role = "type";
+        resolution.detail =
+            importedSymbolDetailForTooling(exportedName, exportIt->second, true);
+        resolution.documentation = exportIt->second.doc;
+        if (importedModule.importTarget.kind == ImportTargetKind::NATIVE_PACKAGE &&
+            !importedModule.importTarget.apiPath.empty() &&
+            exportIt->second.hasDeclarationSite) {
+            resolution.definitionLocation = ToolingLocation{
+                importedModule.importTarget.apiPath,
+                toolingRangeFromSourceSpan(exportIt->second.range),
+                toolingRangeFromSourceSpan(exportIt->second.selectionRange),
+            };
+        }
+        return resolution;
+    }
+
+    const auto exportIt =
+        importedModule.valueExports.find(std::string(exportedName));
+    if (exportIt == importedModule.valueExports.end()) {
+        return std::nullopt;
+    }
+    resolution.kind =
+        exportIt->second.kind == "function" ? "function" : "constant";
+    resolution.type = exportIt->second.type;
+    resolution.role = hoverRoleForKind(resolution.kind);
+    resolution.detail =
+        importedSymbolDetailForTooling(exportedName, exportIt->second, false);
+    resolution.documentation = exportIt->second.doc;
+    if (importedModule.importTarget.kind == ImportTargetKind::NATIVE_PACKAGE &&
+        !importedModule.importTarget.apiPath.empty() &&
+        exportIt->second.hasDeclarationSite) {
+        resolution.definitionLocation = ToolingLocation{
+            importedModule.importTarget.apiPath,
+            toolingRangeFromSourceSpan(exportIt->second.range),
+            toolingRangeFromSourceSpan(exportIt->second.selectionRange),
+        };
+    }
+    return resolution;
+}
+
 bool typeExprContainsPosition(const AstTypeExpr& typeExpr,
                               const SourcePosition& position) {
     if (!containsPosition(typeExpr.node.span, position)) {
@@ -2484,6 +2777,14 @@ const AstTypeExpr* findTypeNameTargetInTypeExpr(const AstTypeExpr& typeExpr,
         }
     }
 
+    if ((typeExpr.kind == AstTypeKind::NAMED ||
+         typeExpr.kind == AstTypeKind::ARRAY ||
+         typeExpr.kind == AstTypeKind::DICT ||
+         typeExpr.kind == AstTypeKind::SET) &&
+        !typeExpr.qualifier.empty() &&
+        containsPosition(typeExpr.qualifierToken.span(), position)) {
+        return &typeExpr;
+    }
     if ((typeExpr.kind == AstTypeKind::NAMED ||
          typeExpr.kind == AstTypeKind::ARRAY ||
          typeExpr.kind == AstTypeKind::DICT ||
@@ -2791,11 +3092,72 @@ std::optional<TypeNameTarget> findTypeNameTarget(const AstModule& module,
             continue;
         }
         if (const auto* typeExpr = findTypeNameTargetInItem(*item, position)) {
+            const bool qualifierReference =
+                !typeExpr->qualifier.empty() &&
+                containsPosition(typeExpr->qualifierToken.span(), position);
             return TypeNameTarget{tokenText(typeExpr->token),
-                                  typeExpr->token.span()};
+                                  typeExpr->qualifier,
+                                  typeExpr->node.id,
+                                  qualifierReference
+                                      ? typeExpr->qualifierToken.span()
+                                      : typeExpr->token.span(),
+                                  qualifierReference};
         }
     }
     return std::nullopt;
+}
+
+const AstImportedModuleInterface* resolveImportedTypeQualifierForTooling(
+    const ToolingDocumentAnalysis& analysis, const ToolingPosition& position) {
+    if (!analysis.hasParse) {
+        return nullptr;
+    }
+
+    const auto typeTarget = findTypeNameTarget(
+        analysis.frontend.module, sourcePositionFromToolingPosition(position));
+    if (!typeTarget.has_value() || !typeTarget->qualifierReference ||
+        typeTarget->qualifier.empty()) {
+        return nullptr;
+    }
+
+    const auto bindingIt =
+        analysis.frontend.bindings.references.find(typeTarget->nodeId);
+    if (bindingIt == analysis.frontend.bindings.references.end()) {
+        return nullptr;
+    }
+
+    return resolveImportedModuleForDeclaration(analysis,
+                                               bindingIt->second.declarationNodeId);
+}
+
+std::optional<ImportedSymbolResolution> resolveImportedTypeTargetForTooling(
+    const ToolingDocumentAnalysis& analysis, const ToolingPosition& position) {
+    if (!analysis.hasParse) {
+        return std::nullopt;
+    }
+
+    const auto typeTarget = findTypeNameTarget(
+        analysis.frontend.module, sourcePositionFromToolingPosition(position));
+    if (!typeTarget.has_value() || typeTarget->qualifier.empty() ||
+        typeTarget->qualifierReference) {
+        return std::nullopt;
+    }
+
+    const auto bindingIt =
+        analysis.frontend.bindings.references.find(typeTarget->nodeId);
+    if (bindingIt == analysis.frontend.bindings.references.end()) {
+        return std::nullopt;
+    }
+
+    const AstImportedModuleInterface* importedModule =
+        resolveImportedModuleForDeclaration(analysis,
+                                           bindingIt->second.declarationNodeId);
+    if (importedModule == nullptr) {
+        return std::nullopt;
+    }
+
+    return resolveImportedSymbolForTooling(analysis, *importedModule,
+                                           typeTarget->name, true);
 }
 
 std::optional<SymbolTarget> resolveTypeDeclarationTarget(
@@ -4084,6 +4446,28 @@ std::optional<MemberAccessResolution> resolveMemberAccessForTooling(
         return std::nullopt;
     }
 
+    if (const auto* importedModule =
+            resolveImportedModuleForExpr(analysis, *target->memberExpr->object);
+        importedModule != nullptr) {
+        if (const auto importedSymbol = resolveImportedSymbolForTooling(
+                analysis, *importedModule, tokenText(target->memberExpr->member),
+                false);
+            importedSymbol.has_value()) {
+            return MemberAccessResolution{
+                importedSymbol->declaration,
+                importedSymbol->definitionLocation,
+                importedSymbol->name,
+                importedSymbol->kind,
+                importedSymbol->role,
+                importedSymbol->detail,
+                importedSymbol->documentation,
+                importedSymbol->type,
+                target->memberExpr->member.span(),
+            };
+        }
+        return std::nullopt;
+    }
+
     const auto objectTypeIt = analysis.frontend.semanticModel.nodeTypes.find(
         target->memberExpr->object->node.id);
     if (objectTypeIt == analysis.frontend.semanticModel.nodeTypes.end() ||
@@ -4102,8 +4486,12 @@ std::optional<MemberAccessResolution> resolveMemberAccessForTooling(
         const auto declarationType =
             declarationTypeForTooling(analysis, *declaration);
         return MemberAccessResolution{declaration,
+                                      std::nullopt,
                                       declaration->name,
                                       declaration->kind,
+                                      std::string(),
+                                      std::string(),
+                                      std::string(),
                                       declarationType.has_value()
                                           ? *declarationType
                                           : nullptr,
@@ -4117,8 +4505,12 @@ std::optional<MemberAccessResolution> resolveMemberAccessForTooling(
     }
 
     return MemberAccessResolution{std::nullopt,
+                                  std::nullopt,
                                   memberName,
                                   "method",
+                                  std::string(),
+                                  std::string(),
+                                  std::string(),
                                   *memberType,
                                   target->memberExpr->member.span()};
 }
@@ -4161,17 +4553,41 @@ std::optional<std::vector<ToolingCompletionItem>> findMemberCompletionsForToolin
     if (const auto* importedModule =
             resolveImportedModuleForExpr(analysis, *target->memberExpr->object);
         importedModule != nullptr) {
+        const bool typeContext =
+            hasTypeContextAtPosition(analysis.frontend.module, sourcePosition);
+        std::vector<ToolingCompletionItem> items;
+        if (typeContext) {
+            std::vector<std::pair<std::string, TypeRef>> exports;
+            exports.reserve(importedModule->typeExports.size());
+            for (const auto& [name, symbol] : importedModule->typeExports) {
+                exports.emplace_back(name, symbol.type);
+            }
+            std::sort(exports.begin(), exports.end(),
+                      [](const auto& lhs, const auto& rhs) {
+                          return lhs.first < rhs.first;
+                      });
+            items.reserve(exports.size());
+            for (const auto& [name, type] : exports) {
+                items.push_back(ToolingCompletionItem{
+                    name,
+                    "type",
+                    "type " + name + " " +
+                        (type ? type->toString() : std::string("any")),
+                    completionSortText(0, name),
+                });
+            }
+            return items;
+        }
+
         std::vector<std::pair<std::string, TypeRef>> exports;
-        exports.reserve(importedModule->exportTypes.size());
-        for (const auto& [name, type] : importedModule->exportTypes) {
-            exports.emplace_back(name, type);
+        exports.reserve(importedModule->valueExports.size());
+        for (const auto& [name, symbol] : importedModule->valueExports) {
+            exports.emplace_back(name, symbol.type);
         }
         std::sort(exports.begin(), exports.end(),
                   [](const auto& lhs, const auto& rhs) {
                       return lhs.first < rhs.first;
                   });
-
-        std::vector<ToolingCompletionItem> items;
         items.reserve(exports.size());
         for (const auto& [name, type] : exports) {
             items.push_back(completionItemForExportedSymbol(name, type));
@@ -4697,14 +5113,8 @@ ToolingRange startOfFileToolingRange() {
     return ToolingRange{ToolingPosition{0, 0}, ToolingPosition{0, 0}};
 }
 
-std::optional<ToolingLocation> findDefinitionLocationForImportPath(
-    const ToolingDocumentAnalysis& analysis, const ImportPathTarget& target) {
-    const auto importIt = analysis.frontend.importedModules.find(target.importExprNodeId);
-    if (importIt == analysis.frontend.importedModules.end()) {
-        return std::nullopt;
-    }
-
-    const ImportTarget& importTarget = importIt->second.importTarget;
+std::optional<ToolingLocation> definitionLocationForImportTarget(
+    const ImportTarget& importTarget) {
     if (importTarget.kind == ImportTargetKind::SOURCE_MODULE &&
         !importTarget.resolvedPath.empty()) {
         return ToolingLocation{importTarget.resolvedPath,
@@ -4719,6 +5129,16 @@ std::optional<ToolingLocation> findDefinitionLocationForImportPath(
     }
 
     return std::nullopt;
+}
+
+std::optional<ToolingLocation> findDefinitionLocationForImportPath(
+    const ToolingDocumentAnalysis& analysis, const ImportPathTarget& target) {
+    const auto importIt = analysis.frontend.importedModules.find(target.importExprNodeId);
+    if (importIt == analysis.frontend.importedModules.end()) {
+        return std::nullopt;
+    }
+
+    return definitionLocationForImportTarget(importIt->second.importTarget);
 }
 
 std::optional<ToolingLocation> findDefinitionLocationForTarget(
@@ -4736,25 +5156,21 @@ std::optional<ToolingLocation> findDefinitionLocationForTarget(
                               analysis.frontend.bindings.importedModules,
                               importBindingSites);
     const auto importIt = importBindingSites.find(target.declarationNodeId);
-    if (importIt != importBindingSites.end() &&
-        importIt->second.importTarget.kind == ImportTargetKind::SOURCE_MODULE &&
-        !importIt->second.importTarget.resolvedPath.empty()) {
-        const auto importedAnalysis = analyzeSourceModuleForTooling(
-            importIt->second.importTarget.resolvedPath, analysis);
-        if (importedAnalysis.has_value() && importedAnalysis->hasParse) {
-            std::unordered_map<std::string, DeclarationSite> exportedDeclarations;
-            collectExportedDeclarationSites(importedAnalysis->frontend.module,
-                                           exportedDeclarations);
-            const auto exportedIt =
-                exportedDeclarations.find(importIt->second.exportedName);
-            if (exportedIt != exportedDeclarations.end()) {
-                return ToolingLocation{
-                    importIt->second.importTarget.resolvedPath,
-                    toolingRangeFromSourceSpan(exportedIt->second.range),
-                    toolingRangeFromSourceSpan(
-                        exportedIt->second.selectionRange),
-                };
+    if (importIt != importBindingSites.end()) {
+        for (const auto& [nodeId, importedModule] :
+             analysis.frontend.bindings.importedModules) {
+            (void)nodeId;
+            if (importedModule.importTarget.canonicalId !=
+                importIt->second.importTarget.canonicalId) {
+                continue;
             }
+            if (const auto importedSymbol = resolveImportedSymbolForTooling(
+                    analysis, importedModule, importIt->second.exportedName, false);
+                importedSymbol.has_value() &&
+                importedSymbol->definitionLocation.has_value()) {
+                return importedSymbol->definitionLocation;
+            }
+            break;
         }
     }
 
@@ -5092,10 +5508,10 @@ class SemanticTokenCollector {
                 return importedInfo;
             }
 
-            const auto exportIt = importIt->second.importedModule->exportTypes.find(
+            const auto exportIt = importIt->second.importedModule->valueExports.find(
                 importIt->second.exportedName);
-            if (exportIt != importIt->second.importedModule->exportTypes.end()) {
-                return semanticTokenInfoForType(exportIt->second);
+            if (exportIt != importIt->second.importedModule->valueExports.end()) {
+                return semanticTokenInfoForType(exportIt->second.type);
             }
             return SemanticTokenInfo{"variable", true};
         }
@@ -5152,10 +5568,15 @@ class SemanticTokenCollector {
                     return semanticInfoForDeclaration(*importedDeclaration);
                 }
 
-                const auto exportIt =
-                    importedModule->exportTypes.find(tokenText(memberExpr.member));
-                if (exportIt != importedModule->exportTypes.end()) {
-                    return semanticTokenInfoForType(exportIt->second);
+                const auto valueIt =
+                    importedModule->valueExports.find(tokenText(memberExpr.member));
+                if (valueIt != importedModule->valueExports.end()) {
+                    return semanticTokenInfoForType(valueIt->second.type);
+                }
+                const auto typeIt =
+                    importedModule->typeExports.find(tokenText(memberExpr.member));
+                if (typeIt != importedModule->typeExports.end()) {
+                    return semanticTokenInfoForType(typeIt->second.type);
                 }
                 return std::nullopt;
             }
@@ -5521,6 +5942,10 @@ SourceSpan sourceSpanFromToolingRange(const ToolingRange& range) {
 
 ToolingDocumentAnalysis analyzeDocumentForTooling(
     std::string_view source, const ToolingAnalyzeOptions& options) {
+    if (isPackageApiDocumentPath(options.sourcePath)) {
+        return analyzePackageApiDocumentForTooling(source, options);
+    }
+
     ToolingDocumentAnalysis analysis;
     analysis.sourcePath = options.sourcePath;
     analysis.packageSearchPaths = options.packageSearchPaths;
@@ -5559,6 +5984,9 @@ ToolingDocumentAnalysis analyzeDocumentForTooling(
 std::optional<ToolingLocation> findDefinitionForTooling(
     const ToolingDocumentAnalysis& analysis, const ToolingPosition& position) {
     const auto memberAccess = resolveMemberAccessForTooling(analysis, position);
+    if (memberAccess.has_value() && memberAccess->definitionLocation.has_value()) {
+        return memberAccess->definitionLocation;
+    }
     if (memberAccess.has_value() && memberAccess->declaration.has_value()) {
         return ToolingLocation{
             analysis.sourcePath,
@@ -5575,6 +6003,19 @@ std::optional<ToolingLocation> findDefinitionForTooling(
     const auto target = resolveSymbolTarget(analysis, position);
     if (target.has_value()) {
         return findDefinitionLocationForTarget(analysis, *target);
+    }
+
+    if (const auto importedType =
+            resolveImportedTypeTargetForTooling(analysis, position);
+        importedType.has_value() &&
+        importedType->definitionLocation.has_value()) {
+        return importedType->definitionLocation;
+    }
+
+    if (const auto* importedQualifier =
+            resolveImportedTypeQualifierForTooling(analysis, position);
+        importedQualifier != nullptr) {
+        return definitionLocationForImportTarget(importedQualifier->importTarget);
     }
 
     const auto typeTarget = resolveTypeSymbolTarget(analysis, position);
@@ -5767,7 +6208,8 @@ std::optional<ToolingHover> findBuiltinHoverForTooling(
         const auto presentation =
             builtinFunctionHoverPresentation("print", printBuiltinFunctionType());
         return ToolingHover{toolingRangeFromSourceSpan(*printTarget), "print",
-                            "function", presentation.role, presentation.detail};
+                            "function", presentation.role, presentation.detail,
+                            presentation.documentation};
     }
 
     const AstExpr* targetExpr =
@@ -5803,6 +6245,7 @@ std::optional<ToolingHover> findBuiltinHoverForTooling(
         "function",
         presentation.role,
         presentation.detail,
+        presentation.documentation,
     };
 }
 
@@ -5810,18 +6253,24 @@ std::optional<ToolingHover> findHoverForTooling(
     const ToolingDocumentAnalysis& analysis, const ToolingPosition& position) {
     const auto memberAccess = resolveMemberAccessForTooling(analysis, position);
     if (memberAccess.has_value()) {
-        const auto presentation =
-            memberAccess->declaration.has_value()
-                ? hoverPresentationForDeclaration(analysis,
+        const auto presentation = !memberAccess->detail.empty()
+                                      ? HoverPresentation{memberAccess->role,
+                                                          memberAccess->detail,
+                                                          memberAccess->documentation}
+                                      : memberAccess->declaration.has_value()
+                                            ? hoverPresentationForDeclaration(
+                                                  analysis,
                                                   *memberAccess->declaration)
-                : builtinCollectionMethodHoverPresentation(memberAccess->name,
-                                                           memberAccess->type);
+                                            : builtinCollectionMethodHoverPresentation(
+                                                  memberAccess->name,
+                                                  memberAccess->type);
         return ToolingHover{
             toolingRangeFromSourceSpan(memberAccess->occurrenceSpan),
             memberAccess->name,
             memberAccess->kind,
             presentation.role,
             presentation.detail,
+            presentation.documentation,
         };
     }
 
@@ -5840,7 +6289,8 @@ std::optional<ToolingHover> findHoverForTooling(
                             declarationIt->second.name,
                             declarationIt->second.kind,
                             presentation.role,
-                            presentation.detail};
+                            presentation.detail,
+                            presentation.documentation};
     }
 
     if (const auto builtinHover = findBuiltinHoverForTooling(analysis, position);
@@ -5852,6 +6302,37 @@ std::optional<ToolingHover> findHoverForTooling(
     if (analysis.hasParse) {
         rawTypeTarget = findTypeNameTarget(
             analysis.frontend.module, sourcePositionFromToolingPosition(position));
+    }
+
+    if (const auto importedType =
+            resolveImportedTypeTargetForTooling(analysis, position);
+        importedType.has_value()) {
+        const SourceSpan occurrenceSpan =
+            rawTypeTarget.has_value() ? rawTypeTarget->occurrenceSpan
+                                      : makePointSpan(1, 1);
+        return ToolingHover{
+            toolingRangeFromSourceSpan(occurrenceSpan),
+            importedType->name,
+            importedType->kind,
+            importedType->role,
+            importedType->detail,
+            importedType->documentation,
+        };
+    }
+
+    if (rawTypeTarget.has_value() && rawTypeTarget->qualifierReference) {
+        if (const auto* importedQualifier =
+                resolveImportedTypeQualifierForTooling(analysis, position);
+            importedQualifier != nullptr) {
+            return ToolingHover{
+                toolingRangeFromSourceSpan(rawTypeTarget->occurrenceSpan),
+                rawTypeTarget->qualifier,
+                "import",
+                "module",
+                importedModuleDetailForTooling(*importedQualifier),
+                "",
+            };
+        }
     }
 
     const auto typeTarget = resolveTypeSymbolTarget(analysis, position);
@@ -5872,7 +6353,8 @@ std::optional<ToolingHover> findHoverForTooling(
                             rawTypeTarget->name,
                             "function",
                             presentation.role,
-                            presentation.detail};
+                            presentation.detail,
+                            presentation.documentation};
     }
 
     std::unordered_map<AstNodeId, DeclarationSite> declarationSites;
@@ -5894,7 +6376,8 @@ std::optional<ToolingHover> findHoverForTooling(
                             rawTypeTarget->name,
                             "function",
                             presentation.role,
-                            presentation.detail};
+                            presentation.detail,
+                            presentation.documentation};
     }
 
     const auto presentation =
@@ -5903,7 +6386,8 @@ std::optional<ToolingHover> findHoverForTooling(
                         declarationIt->second.name,
                         declarationIt->second.kind,
                         presentation.role,
-                        presentation.detail};
+                        presentation.detail,
+                        presentation.documentation};
 }
 
 std::vector<ToolingSemanticToken> findSemanticTokensForTooling(
@@ -5926,6 +6410,46 @@ bool declarationSupportsTypeNameCompletion(const ToolingDocumentAnalysis& analys
 
 std::vector<ToolingCompletionItem> findTypeNameCompletionsForTooling(
     const ToolingDocumentAnalysis& analysis, const ToolingPosition& position) {
+    if (!analysis.hasParse) {
+        return {};
+    }
+
+    if (const auto typeTarget = findTypeNameTarget(
+            analysis.frontend.module,
+            sourcePositionFromToolingPosition(position));
+        typeTarget.has_value() && !typeTarget->qualifier.empty()) {
+        const auto bindingIt =
+            analysis.frontend.bindings.references.find(typeTarget->nodeId);
+        if (bindingIt != analysis.frontend.bindings.references.end()) {
+            const AstImportedModuleInterface* importedModule =
+                resolveImportedModuleForDeclaration(
+                    analysis, bindingIt->second.declarationNodeId);
+            if (importedModule != nullptr) {
+                std::vector<ToolingCompletionItem> items;
+                std::vector<std::pair<std::string, TypeRef>> exports;
+                exports.reserve(importedModule->typeExports.size());
+                for (const auto& [name, symbol] : importedModule->typeExports) {
+                    exports.emplace_back(name, symbol.type);
+                }
+                std::sort(exports.begin(), exports.end(),
+                          [](const auto& lhs, const auto& rhs) {
+                              return lhs.first < rhs.first;
+                          });
+                items.reserve(exports.size());
+                for (const auto& [name, type] : exports) {
+                    items.push_back(ToolingCompletionItem{
+                        name,
+                        "type",
+                        "type " + name + " " +
+                            (type ? type->toString() : std::string("any")),
+                        completionSortText(0, name),
+                    });
+                }
+                return items;
+            }
+        }
+    }
+
     std::unordered_set<std::string> seen;
     std::vector<ToolingCompletionItem> items;
 
@@ -5961,13 +6485,13 @@ std::vector<ToolingCompletionItem> findExportedSymbolCompletionsForTooling(
     }
 
     std::vector<std::pair<std::string, TypeRef>> exports;
-    exports.reserve(context->importedModule->exportTypes.size());
-    for (const auto& [name, type] : context->importedModule->exportTypes) {
+    exports.reserve(context->importedModule->valueExports.size());
+    for (const auto& [name, symbol] : context->importedModule->valueExports) {
         if (context->usedExportedNames.find(name) !=
             context->usedExportedNames.end()) {
             continue;
         }
-        exports.emplace_back(name, type);
+        exports.emplace_back(name, symbol.type);
     }
     std::sort(exports.begin(), exports.end(),
               [](const auto& lhs, const auto& rhs) {
@@ -6388,11 +6912,11 @@ std::optional<TypeRef> resolveCallableTypeForTooling(const ToolingDocumentAnalys
                 resolveImportedModuleForExpr(analysis, *member->object);
             importedModule != nullptr) {
             const auto exportIt =
-                importedModule->exportTypes.find(tokenText(member->member));
-            if (exportIt != importedModule->exportTypes.end() &&
-                exportIt->second &&
-                exportIt->second->kind == TypeKind::FUNCTION) {
-                return exportIt->second;
+                importedModule->valueExports.find(tokenText(member->member));
+            if (exportIt != importedModule->valueExports.end() &&
+                exportIt->second.type &&
+                exportIt->second.type->kind == TypeKind::FUNCTION) {
+                return exportIt->second.type;
             }
         }
     }
@@ -6451,14 +6975,16 @@ std::optional<ToolingSignatureInformation> importedSignatureInformationForToolin
         return sourceInfo;
     }
 
-    const auto exportIt = importedModule.exportTypes.find(std::string(exportedName));
-    if (exportIt == importedModule.exportTypes.end() || !exportIt->second ||
-        exportIt->second->kind != TypeKind::FUNCTION) {
+    const auto exportIt =
+        importedModule.valueExports.find(std::string(exportedName));
+    if (exportIt == importedModule.valueExports.end() ||
+        !exportIt->second.type ||
+        exportIt->second.type->kind != TypeKind::FUNCTION) {
         return std::nullopt;
     }
 
     const auto presentation =
-        callablePresentationFromType(displayName, exportIt->second);
+        callablePresentationFromType(displayName, exportIt->second.type);
     ToolingSignatureInformation info;
     info.label = presentation.label;
     info.parameters = presentation.parameters;

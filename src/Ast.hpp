@@ -34,12 +34,14 @@ struct AstTypeExpr {
     AstNodeInfo node;
     AstTypeKind kind = AstTypeKind::NAMED;
     Token token;
+    Token qualifierToken;
     std::vector<std::unique_ptr<AstTypeExpr>> paramTypes;
     std::unique_ptr<AstTypeExpr> returnType;
     std::unique_ptr<AstTypeExpr> elementType;
     std::unique_ptr<AstTypeExpr> keyType;
     std::unique_ptr<AstTypeExpr> valueType;
     std::unique_ptr<AstTypeExpr> innerType;
+    std::string qualifier;
     std::string packageNamespace;
     std::string packageName;
     std::string nativeHandleTypeName;

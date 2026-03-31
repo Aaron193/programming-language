@@ -1,3 +1,4 @@
+const counter = @import("counter")
 const first = @import("./modules/cache_handle_target.mog")
 const second = @import("./modules/cache_handle_target.mog")
 const third = @import("./modules/cache_handle_target.mog")
@@ -5,7 +6,7 @@ const third = @import("./modules/cache_handle_target.mog")
 var total i64 = 0i64
 var i i64 = 0i64
 while (i < 50i64) {
-  const handle handle<counter:CounterHandle> = first.Make(i)
+  const handle counter.Counter = first.Make(i)
   total = total + second.Read(handle)
   total = total + third.Add(handle, 2i64)
   i = i + 1i64

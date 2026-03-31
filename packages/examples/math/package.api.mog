@@ -1,0 +1,19 @@
+package math
+
+@doc("Canonical package namespace.")
+const PACKAGE_NAMESPACE str
+
+@doc("Canonical package name.")
+const PACKAGE_NAME str
+
+@doc("Canonical namespaced package identifier.")
+const PACKAGE_ID str
+
+@doc("Reference constant export.")
+const MEANING_OF_LIFE i64
+
+@doc("Add two i64 values.")
+fn addI64(lhs i64, rhs i64) i64
+
+@doc("Return a greeting for the provided name.")
+fn greet(name str) str

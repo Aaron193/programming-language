@@ -208,6 +208,40 @@ requireCondition(
   keywordPattern !== undefined && !new RegExp(keywordPattern.match, "g").test("print"),
   "print should not be highlighted as a keyword"
 );
+requireCondition(
+  new RegExp(keywordPattern.match, "g").test("opaque"),
+  "opaque should be highlighted as a keyword"
+);
+requireCondition(
+  new RegExp(keywordPattern.match, "g").test("package"),
+  "package should be highlighted as a keyword"
+);
+
+const annotationPattern = grammar.patterns.find(
+  (pattern) => pattern.name === "storage.modifier.annotation.mog"
+);
+requireCondition(
+  annotationPattern !== undefined &&
+    new RegExp(annotationPattern.match, "g").test("@doc") &&
+    new RegExp(annotationPattern.match, "g").test("@native_handle"),
+  "package api annotations should be highlighted"
+);
+
+const packageDeclPattern = grammar.patterns.find(
+  (pattern) => pattern.match === "\\b(package)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b"
+);
+requireCondition(
+  packageDeclPattern !== undefined,
+  "grammar should include the package declaration rule"
+);
+
+const opaqueDeclPattern = grammar.patterns.find(
+  (pattern) => pattern.match === "\\b(opaque)\\s+(type)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b"
+);
+requireCondition(
+  opaqueDeclPattern !== undefined,
+  "grammar should include the opaque type declaration rule"
+);
 
 const functionPattern = grammar.patterns.find(
   (pattern) => pattern.name === "entity.name.function.mog"

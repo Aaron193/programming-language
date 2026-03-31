@@ -15,6 +15,7 @@
 #include "AstTypeChecker.hpp"
 #include "HirOptimizer.hpp"
 #include "NativePackage.hpp"
+#include "PackageRegistry.hpp"
 #include "StdLib.hpp"
 #include "SyntaxRules.hpp"
 
@@ -145,10 +146,11 @@ void mergeImportedClassTypeAliases(AstFrontendResult& frontend) {
         }
 
         for (const auto& binding : importStmt->bindings) {
-            const auto exportIt = importIt->second.exportTypes.find(
+            const auto exportIt = importIt->second.valueExports.find(
                 tokenLexeme(binding.exportedName));
-            if (exportIt == importIt->second.exportTypes.end() ||
-                !exportIt->second || exportIt->second->kind != TypeKind::CLASS) {
+            if (exportIt == importIt->second.valueExports.end() ||
+                !exportIt->second.type ||
+                exportIt->second.type->kind != TypeKind::CLASS) {
                 continue;
             }
 
@@ -160,7 +162,7 @@ void mergeImportedClassTypeAliases(AstFrontendResult& frontend) {
                 continue;
             }
 
-            frontend.typeAliases[localName] = exportIt->second;
+            frontend.typeAliases[localName] = exportIt->second.type;
         }
     }
 }
@@ -216,9 +218,55 @@ void appendImportTrace(std::vector<TypeError>& diagnostics,
     }
 }
 
+std::unordered_map<std::string, const AstImportedModuleInterface*>
+topLevelImportedModulesByName(const AstFrontendResult& frontend) {
+    std::unordered_map<std::string, const AstImportedModuleInterface*> imported;
+
+    for (const auto& item : frontend.module.items) {
+        if (!item) {
+            continue;
+        }
+
+        const auto* stmtPtr = std::get_if<AstStmtPtr>(&item->value);
+        if (!stmtPtr || !*stmtPtr) {
+            continue;
+        }
+
+        const auto* varDecl = std::get_if<AstVarDeclStmt>(&(*stmtPtr)->value);
+        if (!varDecl || !varDecl->initializer ||
+            !std::holds_alternative<AstImportExpr>(varDecl->initializer->value)) {
+            continue;
+        }
+
+        const auto importIt =
+            frontend.importedModules.find(varDecl->initializer->node.id);
+        if (importIt == frontend.importedModules.end()) {
+            continue;
+        }
+
+        imported[tokenLexeme(varDecl->name)] = &importIt->second;
+    }
+
+    return imported;
+}
+
+void refreshCollectedSymbolsWithImports(AstFrontendResult& frontend) {
+    const auto importedModules = topLevelImportedModulesByName(frontend);
+    std::unordered_map<std::string, TypeRef> sourceFunctionSignatures;
+    collectSymbolsFromAst(frontend.module, frontend.classNames,
+                          sourceFunctionSignatures, &frontend.typeAliases,
+                          &importedModules);
+    frontend.functionSignatures.clear();
+    registerOrdinaryStandardLibraryTypeSignatures(frontend.functionSignatures);
+    for (auto& [name, type] : sourceFunctionSignatures) {
+        frontend.functionSignatures[name] = std::move(type);
+    }
+}
+
 void collectExportedSymbolTypes(AstFrontendResult& frontend,
                                 FrontendIdentifierInterner* interner) {
-    frontend.semanticModel.exportedSymbolTypes.clear();
+    frontend.semanticModel.exportedValueTypes.clear();
+    frontend.semanticModel.exportedTypeBindings.clear();
 
     for (const auto& item : frontend.module.items) {
         if (!item) {
@@ -246,7 +294,7 @@ void collectExportedSymbolTypes(AstFrontendResult& frontend,
                             exportedType = signatureIt->second;
                         }
                     }
-                    frontend.semanticModel.exportedSymbolTypes[name] =
+                    frontend.semanticModel.exportedValueTypes[name] =
                         exportedType;
                 } else if constexpr (std::is_same_v<T, AstClassDecl>) {
                     std::string fallbackName;
@@ -261,7 +309,28 @@ void collectExportedSymbolTypes(AstFrontendResult& frontend,
                     if (exportedType->isAny()) {
                         exportedType = TypeInfo::makeClass(name);
                     }
-                    frontend.semanticModel.exportedSymbolTypes[name] =
+                    frontend.semanticModel.exportedValueTypes[name] =
+                        exportedType;
+                    frontend.semanticModel.exportedTypeBindings[name] =
+                        exportedType;
+                } else if constexpr (std::is_same_v<T, AstTypeAliasDecl>) {
+                    std::string fallbackName;
+                    const std::string& name =
+                        internLexeme(interner, value.name, fallbackName);
+                    if (!isPublicSymbolName(name)) {
+                        return;
+                    }
+
+                    TypeRef exportedType = nodeTypeOrAny(frontend.semanticModel,
+                                                         value.node.id);
+                    if (exportedType->isAny()) {
+                        auto aliasIt = frontend.typeAliases.find(name);
+                        if (aliasIt != frontend.typeAliases.end() &&
+                            aliasIt->second) {
+                            exportedType = aliasIt->second;
+                        }
+                    }
+                    frontend.semanticModel.exportedTypeBindings[name] =
                         exportedType;
                 } else if constexpr (std::is_same_v<T, AstStmtPtr>) {
                     if (!value) {
@@ -280,7 +349,7 @@ void collectExportedSymbolTypes(AstFrontendResult& frontend,
                         return;
                     }
 
-                    frontend.semanticModel.exportedSymbolTypes[name] =
+                    frontend.semanticModel.exportedValueTypes[name] =
                         nodeTypeOrAny(frontend.semanticModel, value->node.id);
                 }
             },
@@ -335,6 +404,25 @@ bool buildImportedModuleInterface(const ImportTarget& importTarget,
     cachedNode.importedInterface.importTarget = importTarget;
 
     if (importTarget.kind == ImportTargetKind::NATIVE_PACKAGE) {
+        PackageApiMetadata apiMetadata;
+        std::string apiError;
+        if (importTarget.apiPath.empty() ||
+            !loadPackageApiMetadata(importTarget.apiPath, importTarget.packageId,
+                                    importTarget.packageImportName, apiMetadata,
+                                    apiError)) {
+            outDiagnostics.push_back(TypeError{
+                importSpan,
+                importTarget.apiPath.empty()
+                    ? "Native package '" + importTarget.displayName +
+                          "' is missing package.api.mog."
+                    : apiError,
+                "import.native_package_api"});
+            cachedNode.diagnostics = outDiagnostics;
+            cache.nodes[importTarget.canonicalId] = cachedNode;
+            clearInProgress();
+            return false;
+        }
+
         NativePackageDescriptor packageDescriptor;
         std::string packageError;
         TypeError importError;
@@ -343,6 +431,16 @@ bool buildImportedModuleInterface(const ImportTarget& importTarget,
                                          nullptr)) {
             outDiagnostics.push_back(TypeError{
                 importSpan, packageError, "import.native_package_load"});
+            cachedNode.diagnostics = outDiagnostics;
+            cache.nodes[importTarget.canonicalId] = cachedNode;
+            clearInProgress();
+            return false;
+        }
+        if (!validateNativePackageApi(apiMetadata, packageDescriptor,
+                                      packageError)) {
+            outDiagnostics.push_back(
+                TypeError{importSpan, packageError,
+                          "import.native_package_api_mismatch"});
             cachedNode.diagnostics = outDiagnostics;
             cache.nodes[importTarget.canonicalId] = cachedNode;
             clearInProgress();
@@ -358,7 +456,26 @@ bool buildImportedModuleInterface(const ImportTarget& importTarget,
             return false;
         }
 
-        importedInterface.exportTypes = std::move(packageDescriptor.exportTypes);
+        for (const auto& [name, exportInfo] : apiMetadata.valueExports) {
+            importedInterface.valueExports[name] = ImportedModuleSymbol{
+                exportInfo.type,
+                exportInfo.doc,
+                exportInfo.kind,
+                exportInfo.range,
+                exportInfo.selectionRange,
+                true,
+            };
+        }
+        for (const auto& [name, typeInfo] : apiMetadata.typeExports) {
+            importedInterface.typeExports[name] = ImportedModuleSymbol{
+                typeInfo.type,
+                typeInfo.doc,
+                "type",
+                typeInfo.range,
+                typeInfo.selectionRange,
+                true,
+            };
+        }
     } else {
         std::ifstream file(importTarget.resolvedPath);
         if (!file) {
@@ -402,8 +519,16 @@ bool buildImportedModuleInterface(const ImportTarget& importTarget,
             return false;
         }
 
-        importedInterface.exportTypes =
-            importedFrontend.semanticModel.exportedSymbolTypes;
+        for (const auto& [name, type] :
+             importedFrontend.semanticModel.exportedValueTypes) {
+            importedInterface.valueExports[name] =
+                ImportedModuleSymbol{type, "", "value"};
+        }
+        for (const auto& [name, type] :
+             importedFrontend.semanticModel.exportedTypeBindings) {
+            importedInterface.typeExports[name] =
+                ImportedModuleSymbol{type, "", "type"};
+        }
         importedInterface.metadata = importedFrontend.semanticModel.metadata;
         importedInterface.classOperatorMethods =
             importedFrontend.semanticModel.classOperatorMethods;
@@ -839,6 +964,7 @@ AstFrontendBuildStatus buildAstFrontend(std::string_view source,
         return AstFrontendBuildStatus::SemanticError;
     }
 
+    refreshCollectedSymbolsWithImports(outFrontend);
     mergeImportedClassTypeAliases(outFrontend);
 
     const AstFrontendBuildStatus status =

@@ -1,6 +1,6 @@
 const window = @import("window")
 
-const win handle<window:WindowHandle> =
+const win window.Window =
     window.create("window event demo", 800i64, 600i64)
 
 window.show(win)
@@ -12,7 +12,7 @@ print("Close the window or press Escape to exit.")
 var running bool = true
 
 while (running) {
-    const evt handle<window:EventHandle>? = window.pollEvent(win)
+    const evt window.Event? = window.pollEvent(win)
     if (evt != null) {
         var kind str = window.eventKind(evt)
         print(kind)

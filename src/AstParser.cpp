@@ -600,38 +600,12 @@ bool AstParser::parseTypeLookahead(size_t& offset) {
     std::string_view name(current.start(), current.length());
     ++offset;
 
-    if (isHandleTypeNameText(name)) {
-        if (tokenAt(offset).type() != TokenType::LESS) {
-            return false;
-        }
+    if (tokenAt(offset).type() == TokenType::DOT) {
         ++offset;
-
         if (tokenAt(offset).type() != TokenType::IDENTIFIER) {
             return false;
         }
-        std::string_view packageNamespace(tokenAt(offset).start(),
-                                          tokenAt(offset).length());
         ++offset;
-        if (tokenAt(offset).type() != TokenType::COLON ||
-            !isValidPackageIdPart(packageNamespace)) {
-            return false;
-        }
-        ++offset;
-
-        if (tokenAt(offset).type() != TokenType::IDENTIFIER) {
-            return false;
-        }
-        std::string_view typeName(tokenAt(offset).start(),
-                                  tokenAt(offset).length());
-        ++offset;
-
-        if (tokenAt(offset).type() != TokenType::GREATER ||
-            !isValidHandleTypeName(typeName)) {
-            return false;
-        }
-        ++offset;
-        consumeOptionalSuffix();
-        return true;
     }
 
     if (isCollectionTypeNameText(name) && tokenAt(offset).type() == TokenType::LESS) {
@@ -678,10 +652,6 @@ bool AstParser::isTypedTypeAnnotationStart() {
     }
 
     const Token& lookahead = peekToken();
-    if (isHandleTypeNameText(tokenText(m_current))) {
-        return lookahead.type() == TokenType::LESS;
-    }
-
     if (isCollectionTypeNameText(tokenText(m_current))) {
         return lookahead.type() == TokenType::LESS;
     }
@@ -750,35 +720,7 @@ std::unique_ptr<AstTypeExpr> AstParser::parseTypeExpr() {
         std::string name = tokenText(nameToken);
         advance();
 
-        if (isHandleTypeNameText(name)) {
-            if (!consume(TokenType::LESS)) {
-                return nullptr;
-            }
-            if (!check(TokenType::IDENTIFIER)) {
-                error();
-                return nullptr;
-            }
-            Token namespaceToken = m_current;
-            advance();
-            if (!consume(TokenType::COLON) || !check(TokenType::IDENTIFIER)) {
-                return nullptr;
-            }
-            Token typeToken = m_current;
-            advance();
-            if (!consume(TokenType::GREATER)) {
-                return nullptr;
-            }
-
-            auto handleType = std::make_unique<AstTypeExpr>();
-            handleType->node = makeNodeInfo(
-                combineSourceSpans(nameToken.span(), m_previous.span()));
-            handleType->kind = AstTypeKind::NATIVE_HANDLE;
-            handleType->token = nameToken;
-            handleType->packageNamespace = tokenText(namespaceToken);
-            handleType->packageName = "";
-            handleType->nativeHandleTypeName = tokenText(typeToken);
-            typeExpr = std::move(handleType);
-        } else if (isCollectionTypeNameText(name)) {
+        if (isCollectionTypeNameText(name)) {
             if (!consume(TokenType::LESS)) {
                 return nullptr;
             }
@@ -822,6 +764,18 @@ std::unique_ptr<AstTypeExpr> AstParser::parseTypeExpr() {
             namedType->node = makeNodeInfo(nameToken);
             namedType->kind = AstTypeKind::NAMED;
             namedType->token = nameToken;
+            if (match(TokenType::DOT)) {
+                if (!check(TokenType::IDENTIFIER)) {
+                    error();
+                    return nullptr;
+                }
+                namedType->qualifierToken = nameToken;
+                namedType->qualifier = name;
+                namedType->token = m_current;
+                namedType->node = makeNodeInfo(
+                    combineSourceSpans(nameToken.span(), m_current.span()));
+                advance();
+            }
             typeExpr = std::move(namedType);
         }
     } else {
@@ -2200,8 +2154,8 @@ AstExprPtr AstParser::parsePrimary() {
         return expr;
     }
 
-    if (check(TokenType::IDENTIFIER) || check(TokenType::TYPE) ||
-        isTypeToken(m_current.type())) {
+    if (check(TokenType::IDENTIFIER) &&
+        isCollectionTypeNameText(tokenText(m_current))) {
         size_t constructorTypeOffset = 0;
         if (isTypedTypeAnnotationStart() &&
             (constructorTypeOffset = 0,
@@ -2227,6 +2181,24 @@ AstExprPtr AstParser::parsePrimary() {
             return expr;
         }
 
+        Token nameToken = m_current;
+        advance();
+        auto expr = std::make_unique<AstExpr>();
+        expr->node = makeNodeInfo(nameToken);
+        expr->value = AstIdentifierExpr{nameToken, nullptr};
+        return expr;
+    }
+
+    if (check(TokenType::IDENTIFIER)) {
+        Token nameToken = m_current;
+        advance();
+        auto expr = std::make_unique<AstExpr>();
+        expr->node = makeNodeInfo(nameToken);
+        expr->value = AstIdentifierExpr{nameToken, nullptr};
+        return expr;
+    }
+
+    if (check(TokenType::TYPE) || isTypeToken(m_current.type())) {
         Token nameToken = m_current;
         advance();
         auto expr = std::make_unique<AstExpr>();

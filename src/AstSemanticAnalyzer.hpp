@@ -13,7 +13,8 @@ struct AstSemanticModel {
     std::unordered_map<AstNodeId, TypeRef> nodeTypes;
     std::unordered_map<AstNodeId, bool> nodeConstness;
     std::unordered_map<AstNodeId, AstImportedModuleInterface> importedModules;
-    std::unordered_map<std::string, TypeRef> exportedSymbolTypes;
+    std::unordered_map<std::string, TypeRef> exportedValueTypes;
+    std::unordered_map<std::string, TypeRef> exportedTypeBindings;
     std::unordered_map<std::string, std::unordered_map<int, std::string>>
         classOperatorMethods;
     AstBindingMetadata metadata;

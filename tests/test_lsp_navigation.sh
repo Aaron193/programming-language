@@ -292,6 +292,27 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
     special_builtin_path = Path(tmpdir) / "special_builtin_sample.mog"
     special_builtin_path.write_text(special_builtin_source, encoding="utf-8")
     special_builtin_uri = special_builtin_path.resolve().as_uri()
+    native_package_source = "\n".join([
+        "const counter = @import(\"counter\")",
+        "fn make() void {",
+        "    var value counter.Counter = counter.create(1i64)",
+        "}",
+        ""
+    ])
+    native_package_path = Path(tmpdir) / "native_package_sample.mog"
+    native_package_path.write_text(native_package_source, encoding="utf-8")
+    native_package_uri = native_package_path.resolve().as_uri()
+    native_type_completion_source = "\n".join([
+        "const counter = @import(\"counter\")",
+        "fn make() void {",
+        "    var value counter.Cou = counter.create(1i64)",
+        "}",
+        ""
+    ])
+    native_type_completion_path = Path(tmpdir) / "native_type_completion_sample.mog"
+    native_type_completion_path.write_text(
+        native_type_completion_source, encoding="utf-8")
+    native_type_completion_uri = native_type_completion_path.resolve().as_uri()
 
     proc = subprocess.Popen(
         [lsp_bin],
@@ -655,6 +676,43 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         if special_builtin_diagnostics["params"]["diagnostics"]:
             raise AssertionError(
                 f"special builtin sample should stay diagnostics-free: {special_builtin_diagnostics['params']['diagnostics']}")
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": native_package_uri,
+                    "languageId": "mog",
+                    "version": 1,
+                    "text": native_package_source
+                }
+            }
+        })
+        native_package_diagnostics = read_until(
+            proc,
+            lambda msg: msg.get("method") == "textDocument/publishDiagnostics" and
+            msg.get("params", {}).get("uri") == native_package_uri,
+        )
+        if native_package_diagnostics["params"]["diagnostics"]:
+            raise AssertionError(
+                f"native package sample should stay diagnostics-free: {native_package_diagnostics['params']['diagnostics']}")
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": native_type_completion_uri,
+                    "languageId": "mog",
+                    "version": 1,
+                    "text": native_type_completion_source
+                }
+            }
+        })
+        read_until(
+            proc,
+            lambda msg: msg.get("method") == "textDocument/publishDiagnostics" and
+            msg.get("params", {}).get("uri") == native_type_completion_uri,
+        )
 
         send_message(proc, {
             "jsonrpc": "2.0",
@@ -1245,6 +1303,29 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
 
         send_message(proc, {
             "jsonrpc": "2.0",
+            "id": 7.65,
+            "method": "textDocument/completion",
+            "params": {
+                "textDocument": {
+                    "uri": native_type_completion_uri
+                },
+                "position": {
+                    "line": 2,
+                    "character": 25
+                }
+            }
+        })
+        native_type_completion = read_until(proc, lambda msg: msg.get("id") == 7.65)
+        native_type_labels = [item["label"] for item in native_type_completion["result"]]
+        if "Counter" not in native_type_labels:
+            raise AssertionError(
+                f"expected native package type completion items: {native_type_completion['result']}")
+        if "create" in native_type_labels:
+            raise AssertionError(
+                f"native package type completions should exclude value exports: {native_type_completion['result']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
             "id": 8,
             "method": "textDocument/hover",
             "params": {
@@ -1299,6 +1380,90 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         constructor_type_hover_value = constructor_type_hover["result"]["contents"]["value"]
         if constructor_type_hover_value != "```mog\ntype Player struct\n```":
             raise AssertionError(f"unexpected constructor type hover payload: {constructor_type_hover['result']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 8.25,
+            "method": "textDocument/hover",
+            "params": {
+                "textDocument": {
+                    "uri": native_package_uri
+                },
+                "position": {
+                    "line": 0,
+                    "character": 6
+                }
+            }
+        })
+        native_module_hover = read_until(proc, lambda msg: msg.get("id") == 8.25)
+        native_module_hover_value = native_module_hover["result"]["contents"]["value"]
+        if native_module_hover_value != "**module**\n\n```mog\npackage counter\n```":
+            raise AssertionError(
+                f"unexpected native package hover payload: {native_module_hover['result']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 8.255,
+            "method": "textDocument/hover",
+            "params": {
+                "textDocument": {
+                    "uri": native_package_uri
+                },
+                "position": {
+                    "line": 2,
+                    "character": 16
+                }
+            }
+        })
+        native_type_qualifier_hover = read_until(proc, lambda msg: msg.get("id") == 8.255)
+        native_type_qualifier_hover_value = \
+            native_type_qualifier_hover["result"]["contents"]["value"]
+        if native_type_qualifier_hover_value != \
+                "**module**\n\n```mog\npackage counter\n```":
+            raise AssertionError(
+                f"unexpected native type qualifier hover payload: {native_type_qualifier_hover['result']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 8.257,
+            "method": "textDocument/hover",
+            "params": {
+                "textDocument": {
+                    "uri": native_package_uri
+                },
+                "position": {
+                    "line": 2,
+                    "character": 24
+                }
+            }
+        })
+        native_type_hover = read_until(proc, lambda msg: msg.get("id") == 8.257)
+        native_type_hover_value = native_type_hover["result"]["contents"]["value"]
+        if native_type_hover_value != \
+                "**type**\n\n```mog\ntype Counter\n```\n\nGC-managed opaque counter handle.":
+            raise AssertionError(
+                f"unexpected native package type hover payload: {native_type_hover['result']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 8.26,
+            "method": "textDocument/hover",
+            "params": {
+                "textDocument": {
+                    "uri": native_package_uri
+                },
+                "position": {
+                    "line": 2,
+                    "character": 42
+                }
+            }
+        })
+        native_member_hover = read_until(proc, lambda msg: msg.get("id") == 8.26)
+        native_member_hover_value = native_member_hover["result"]["contents"]["value"]
+        if native_member_hover_value != \
+                "**function**\n\n```mog\nfn create(i64) counter.Counter\n```\n\nCreate a new counter handle.":
+            raise AssertionError(
+                f"unexpected native package member hover payload: {native_member_hover['result']}")
 
         send_message(proc, {
             "jsonrpc": "2.0",
@@ -1482,6 +1647,57 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
                 import_path_result["range"]["start"]["character"] != 0:
             raise AssertionError(
                 f"import path definition should jump to file start: {import_path_result['range']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 10.4,
+            "method": "textDocument/definition",
+            "params": {
+                "textDocument": {
+                    "uri": native_package_uri
+                },
+                "position": {
+                    "line": 2,
+                    "character": 42
+                }
+            }
+        })
+        native_member_definition = read_until(proc, lambda msg: msg.get("id") == 10.4)
+        native_member_result = native_member_definition["result"]
+        if not native_member_result["uri"].endswith(
+                "/packages/examples/counter/package.api.mog"):
+            raise AssertionError(
+                f"native package definition should jump to package.api.mog: {native_member_result}")
+        if native_member_result["range"]["start"]["line"] != 10 or \
+                native_member_result["range"]["start"]["character"] != 3:
+            raise AssertionError(
+                f"unexpected native package definition range: {native_member_result['range']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 10.45,
+            "method": "textDocument/definition",
+            "params": {
+                "textDocument": {
+                    "uri": native_package_uri
+                },
+                "position": {
+                    "line": 2,
+                    "character": 16
+                }
+            }
+        })
+        native_type_qualifier_definition = read_until(
+            proc, lambda msg: msg.get("id") == 10.45)
+        native_type_qualifier_result = native_type_qualifier_definition["result"]
+        if not native_type_qualifier_result["uri"].endswith(
+                "/packages/examples/counter/package.api.mog"):
+            raise AssertionError(
+                f"native type qualifier definition should jump to package.api.mog: {native_type_qualifier_result}")
+        if native_type_qualifier_result["range"]["start"]["line"] != 0 or \
+                native_type_qualifier_result["range"]["start"]["character"] != 0:
+            raise AssertionError(
+                f"unexpected native type qualifier definition range: {native_type_qualifier_result['range']}")
 
         send_message(proc, {
             "jsonrpc": "2.0",

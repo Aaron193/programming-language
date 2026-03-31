@@ -1,8 +1,8 @@
 const window = @import("window")
 
-const win handle<window:WindowHandle> =
+const win window.Window =
     window.create("Demo", 64i64, 64i64)
-const evt handle<window:EventHandle>? = window.pollEvent(win)
+const evt window.Event? = window.pollEvent(win)
 
 window.clear(win)
 window.present(win)

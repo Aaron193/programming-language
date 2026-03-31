@@ -429,7 +429,9 @@ struct Formatter {
     std::string formatType(const AstTypeExpr& type) {
         switch (type.kind) {
             case AstTypeKind::NAMED:
-                return tokenLexeme(type.token);
+                return type.qualifier.empty()
+                           ? tokenLexeme(type.token)
+                           : type.qualifier + "." + tokenLexeme(type.token);
             case AstTypeKind::FUNCTION: {
                 std::string text = "fn(";
                 for (size_t index = 0; index < type.paramTypes.size(); ++index) {

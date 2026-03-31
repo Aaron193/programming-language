@@ -36,7 +36,32 @@
     },
     {
       "name": "storage.modifier.annotation.mog",
-      "match": "@operator\\b"
+      "match": "@(?:operator|doc|native_handle)\\b"
+    },
+    {
+      "match": "\\b(package)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
+      "captures": {
+        "1": {
+          "name": "keyword.control.mog"
+        },
+        "2": {
+          "name": "entity.name.namespace.mog"
+        }
+      }
+    },
+    {
+      "match": "\\b(opaque)\\s+(type)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
+      "captures": {
+        "1": {
+          "name": "keyword.control.mog"
+        },
+        "2": {
+          "name": "keyword.control.mog"
+        },
+        "3": {
+          "name": "entity.name.type.mog"
+        }
+      }
     },
     {
       "include": "#type-context-expression"
@@ -87,7 +112,7 @@
     },
     {
       "name": "keyword.control.mog",
-      "match": "\\b(?:var|const|fn|type|struct|if|else|for|while|break|continue|this|super|return|as)\\b"
+      "match": "\\b(?:var|const|fn|type|struct|opaque|package|if|else|for|while|break|continue|this|super|return|as)\\b"
     },
     {
       "include": "#type-angle-expression"

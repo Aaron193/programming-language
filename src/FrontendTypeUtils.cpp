@@ -1,5 +1,6 @@
 #include "FrontendTypeUtils.hpp"
 
+#include "AstBinder.hpp"
 #include "NativePackage.hpp"
 #include "PackageRegistry.hpp"
 
@@ -56,6 +57,24 @@ TypeRef frontendResolveTypeExpr(const AstTypeExpr& typeExpr,
                                 const FrontendTypeContext& context) {
     switch (typeExpr.kind) {
         case AstTypeKind::NAMED:
+            if (!typeExpr.qualifier.empty()) {
+                if (context.importedModulesByName == nullptr) {
+                    return nullptr;
+                }
+
+                const auto moduleIt = context.importedModulesByName->find(
+                    typeExpr.qualifier);
+                if (moduleIt == context.importedModulesByName->end() ||
+                    moduleIt->second == nullptr) {
+                    return nullptr;
+                }
+
+                const auto exportIt = moduleIt->second->typeExports.find(
+                    tokenLexeme(typeExpr.token));
+                return exportIt == moduleIt->second->typeExports.end()
+                           ? nullptr
+                           : exportIt->second.type;
+            }
             return frontendTokenToType(typeExpr.token, context);
         case AstTypeKind::FUNCTION: {
             std::vector<TypeRef> params;

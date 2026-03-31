@@ -399,17 +399,17 @@ declares its functions/constants using the ABI in `src/NativePackageAPI.hpp`.
 This repository includes a namespaced reference package in
 `packages/examples/math/`.
 
-Native packages can now return opaque native handles through signatures such as
-`fn() handle<counter:CounterHandle>`. Handles are GC-managed by the
-VM and invoke the package-provided finalizer when released. A reference handle
-package lives in `packages/examples/counter/`.
+Native packages can now return opaque package types such as
+`counter.Counter`. Those values are still GC-managed native handles internally,
+and the VM still invokes the package-provided finalizer when they are released.
+A reference package lives in `packages/examples/counter/`.
 
-Source files can declare native handles directly:
+Source files can declare opaque package types directly:
 
 ```expr
 const counter = @import("counter")
 
-const c handle<counter:CounterHandle> = counter.create(10i64)
+const c counter.Counter = counter.create(10i64)
 print(counter.read(c))
 ```
 
@@ -422,9 +422,9 @@ Headless smoke usage for tests:
 ```expr
 const window = @import("window")
 
-const win handle<window:WindowHandle> =
+const win window.Window =
     window.create("Demo", 800i64, 600i64)
-const evt handle<window:EventHandle>? = window.pollEvent(win)
+const evt window.Event? = window.pollEvent(win)
 window.clear(win)
 window.present(win)
 window.close(win)
@@ -463,8 +463,9 @@ dependencies = []
 ```
 
 Projects mark their root with `mog.toml` and pin package resolution in
-`mog.lock`. Native packages can also ship a `package.api.toml` file for editor
-navigation and readable package API docs.
+`mog.lock`. Native and source packages can also ship a `package.api.mog` file
+for editor navigation, readable package API docs, and public opaque type
+declarations.
 
 Validate a package directory against its manifest and compiled shared library:
 

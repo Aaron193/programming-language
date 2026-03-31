@@ -1201,7 +1201,7 @@ bool checkTypedImportFrontendRegression(const std::filesystem::path& repoRoot) {
                  "typed import HIR constant binding should keep the declared type")) {
         return false;
     }
-    if (!require(frontend.semanticModel.exportedSymbolTypes.empty(),
+    if (!require(frontend.semanticModel.exportedValueTypes.empty(),
                  "typed import sample should not synthesize public exports")) {
         return false;
     }
@@ -1255,29 +1255,29 @@ bool checkNativeHandleTypeFrontendRegression(
         frontend.semanticModel.nodeTypes.at(importStmt->bindings[2].node.id);
     if (!require(createType &&
                      createType->toString() ==
-                         "function(i64) -> handle<counter:CounterHandle>",
+                         "function(i64) -> counter.Counter",
                  "native handle create binding should keep the expected handle return type")) {
         return false;
     }
     if (!require(readType &&
                      readType->toString() ==
-                         "function(handle<counter:CounterHandle>) -> i64",
+                         "function(counter.Counter) -> i64",
                  "native handle read binding should keep the expected handle parameter type")) {
         return false;
     }
     if (!require(addType &&
                      addType->toString() ==
-                         "function(handle<counter:CounterHandle>, i64) -> i64",
+                         "function(counter.Counter, i64) -> i64",
                  "native handle add binding should keep the expected handle parameter type")) {
         return false;
     }
 
     auto exportedForward =
-        frontend.semanticModel.exportedSymbolTypes.find("Forward");
-    if (!require(exportedForward != frontend.semanticModel.exportedSymbolTypes.end() &&
+        frontend.semanticModel.exportedValueTypes.find("Forward");
+    if (!require(exportedForward != frontend.semanticModel.exportedValueTypes.end() &&
                      exportedForward->second &&
                      exportedForward->second->toString() ==
-                         "function(handle<counter:CounterHandle>) -> handle<counter:CounterHandle>",
+                         "function(counter.Counter) -> counter.Counter",
                  "native handle function export should preserve aliased handle parameter and return types")) {
         return false;
     }
@@ -1341,7 +1341,7 @@ bool checkTypedImportDiagnosticRegression(const std::filesystem::path& repoRoot)
     if (!expectStrictError(
             repoRoot /
                 "tests/types/errors/import_native_handle_binding_type_mismatch.mog",
-            1, 9, "function(i64) -> handle<counter:CounterHandle>",
+            3, 9, "function(i64) -> counter.Counter",
             "native handle typed import mismatch sample")) {
         return false;
     }

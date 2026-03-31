@@ -25,6 +25,8 @@ class AstBinderImpl {
     AstBindResult& m_result;
     std::vector<std::unordered_map<std::string, AstBindingRef>> m_scopes;
     std::vector<std::string> m_classContexts;
+    std::unordered_map<std::string, const AstImportedModuleInterface*>
+        m_topLevelImportedModules;
 
     std::string tokenText(const Token& token) const { return tokenLexeme(token); }
 
@@ -68,15 +70,157 @@ class AstBinderImpl {
             typeExpr.token.type() != TokenType::IDENTIFIER) {
             return false;
         }
+        if (!typeExpr.qualifier.empty()) {
+            return false;
+        }
 
         const std::string name = tokenText(typeExpr.token);
         return m_classNames.find(name) == m_classNames.end() &&
                m_typeAliases.find(name) == m_typeAliases.end();
     }
 
+    const AstImportedModuleInterface* importedModuleForBinding(
+        const AstBindingRef& binding) const {
+        if (binding.kind != AstBindingKind::ImportedModule ||
+            binding.importExprNodeId == 0) {
+            return nullptr;
+        }
+
+        const auto it = m_result.importedModules.find(binding.importExprNodeId);
+        if (it == m_result.importedModules.end()) {
+            return nullptr;
+        }
+
+        return &it->second;
+    }
+
+    const AstImportedModuleInterface* importedModuleForQualifier(
+        std::string_view qualifier) const {
+        if (const AstBindingRef* binding = resolveBinding(std::string(qualifier))) {
+            if (const AstImportedModuleInterface* imported =
+                    importedModuleForBinding(*binding)) {
+                return imported;
+            }
+        }
+
+        const auto topLevelIt = m_topLevelImportedModules.find(
+            std::string(qualifier));
+        return topLevelIt == m_topLevelImportedModules.end()
+                   ? nullptr
+                   : topLevelIt->second;
+    }
+
     TypeRef resolveTypeExpr(const AstTypeExpr& typeExpr) const {
-        return frontendResolveTypeExpr(
-            typeExpr, FrontendTypeContext{m_classNames, m_typeAliases});
+        switch (typeExpr.kind) {
+            case AstTypeKind::NAMED:
+                if (!typeExpr.qualifier.empty()) {
+                    const AstImportedModuleInterface* importedModule =
+                        importedModuleForQualifier(typeExpr.qualifier);
+                    if (importedModule == nullptr) {
+                        return nullptr;
+                    }
+                    const auto exportIt = importedModule->typeExports.find(
+                        tokenText(typeExpr.token));
+                    return exportIt == importedModule->typeExports.end()
+                               ? nullptr
+                               : exportIt->second.type;
+                }
+                return frontendResolveTypeExpr(
+                    typeExpr, FrontendTypeContext{m_classNames, m_typeAliases});
+            case AstTypeKind::FUNCTION: {
+                std::vector<TypeRef> params;
+                params.reserve(typeExpr.paramTypes.size());
+                for (const auto& paramType : typeExpr.paramTypes) {
+                    if (!paramType) {
+                        return nullptr;
+                    }
+                    TypeRef resolved = resolveTypeExpr(*paramType);
+                    if (!resolved) {
+                        return nullptr;
+                    }
+                    params.push_back(resolved);
+                }
+                if (!typeExpr.returnType) {
+                    return nullptr;
+                }
+                TypeRef returnType = resolveTypeExpr(*typeExpr.returnType);
+                if (!returnType) {
+                    return nullptr;
+                }
+                return TypeInfo::makeFunction(std::move(params), returnType);
+            }
+            case AstTypeKind::ARRAY:
+                if (!typeExpr.elementType) {
+                    return nullptr;
+                }
+                if (TypeRef elementType = resolveTypeExpr(*typeExpr.elementType)) {
+                    return TypeInfo::makeArray(elementType);
+                }
+                return nullptr;
+            case AstTypeKind::DICT:
+                if (!typeExpr.keyType || !typeExpr.valueType) {
+                    return nullptr;
+                }
+                {
+                    TypeRef keyType = resolveTypeExpr(*typeExpr.keyType);
+                    TypeRef valueType = resolveTypeExpr(*typeExpr.valueType);
+                    if (!keyType || !valueType) {
+                        return nullptr;
+                    }
+                    return TypeInfo::makeDict(keyType, valueType);
+                }
+            case AstTypeKind::SET:
+                if (!typeExpr.elementType) {
+                    return nullptr;
+                }
+                if (TypeRef elementType = resolveTypeExpr(*typeExpr.elementType)) {
+                    return TypeInfo::makeSet(elementType);
+                }
+                return nullptr;
+            case AstTypeKind::OPTIONAL:
+                if (!typeExpr.innerType) {
+                    return nullptr;
+                }
+                if (TypeRef innerType = resolveTypeExpr(*typeExpr.innerType)) {
+                    return TypeInfo::makeOptional(innerType);
+                }
+                return nullptr;
+            case AstTypeKind::NATIVE_HANDLE:
+                return frontendResolveTypeExpr(
+                    typeExpr, FrontendTypeContext{m_classNames, m_typeAliases});
+        }
+
+        return nullptr;
+    }
+
+    void bindTypeExpr(const AstTypeExpr& typeExpr) {
+        if (!typeExpr.qualifier.empty()) {
+            if (const AstBindingRef* binding =
+                    resolveBinding(typeExpr.qualifier)) {
+                m_result.references[typeExpr.node.id] = *binding;
+            }
+        }
+
+        for (const auto& paramType : typeExpr.paramTypes) {
+            if (paramType) {
+                bindTypeExpr(*paramType);
+            }
+        }
+        if (typeExpr.returnType) {
+            bindTypeExpr(*typeExpr.returnType);
+        }
+        if (typeExpr.elementType) {
+            bindTypeExpr(*typeExpr.elementType);
+        }
+        if (typeExpr.keyType) {
+            bindTypeExpr(*typeExpr.keyType);
+        }
+        if (typeExpr.valueType) {
+            bindTypeExpr(*typeExpr.valueType);
+        }
+        if (typeExpr.innerType) {
+            bindTypeExpr(*typeExpr.innerType);
+        }
     }
 
     TypeRef requireTypeExpr(const AstTypeExpr* typeExpr, const SourceSpan& span,
@@ -171,6 +315,35 @@ class AstBinderImpl {
             }
             defineBinding(name, AstBindingRef{AstBindingKind::Function, 0, name,
                                               false, ""});
+        }
+    }
+
+    void collectTopLevelImportedModules(const AstModule& module) {
+        m_topLevelImportedModules.clear();
+
+        for (const auto& item : module.items) {
+            if (!item) {
+                continue;
+            }
+
+            const auto* stmtPtr = std::get_if<AstStmtPtr>(&item->value);
+            if (!stmtPtr || !*stmtPtr) {
+                continue;
+            }
+
+            const auto* varDecl = std::get_if<AstVarDeclStmt>(&(*stmtPtr)->value);
+            if (!varDecl || !varDecl->initializer ||
+                !std::holds_alternative<AstImportExpr>(varDecl->initializer->value)) {
+                continue;
+            }
+
+            const auto importIt =
+                m_result.importedModules.find(varDecl->initializer->node.id);
+            if (importIt == m_result.importedModules.end()) {
+                continue;
+            }
+
+            m_topLevelImportedModules[tokenText(varDecl->name)] = &importIt->second;
         }
     }
 
@@ -282,8 +455,19 @@ class AstBinderImpl {
                     bindExpr(*value.object);
                     bindExpr(*value.index);
                 } else if constexpr (std::is_same_v<T, AstCastExpr>) {
+                    if (value.targetType) {
+                        bindTypeExpr(*value.targetType);
+                    }
                     bindExpr(*value.expression);
                 } else if constexpr (std::is_same_v<T, AstFunctionExpr>) {
+                    for (const auto& param : value.params) {
+                        if (param.type) {
+                            bindTypeExpr(*param.type);
+                        }
+                    }
+                    if (value.returnType) {
+                        bindTypeExpr(*value.returnType);
+                    }
                     beginScope();
                     for (const auto& param : value.params) {
                         defineBinding(tokenText(param.name),
@@ -328,13 +512,22 @@ class AstBinderImpl {
     }
 
     void bindVarDecl(const AstNodeInfo& stmtNode, const AstVarDeclStmt& stmt) {
+        if (stmt.declaredType) {
+            bindTypeExpr(*stmt.declaredType);
+        }
         if (stmt.initializer) {
             bindExpr(*stmt.initializer);
         }
 
-        defineBinding(tokenText(stmt.name),
-                      AstBindingRef{AstBindingKind::Variable, stmtNode.id,
-                                    tokenText(stmt.name), stmt.isConst, ""});
+        AstBindingRef binding{AstBindingKind::Variable, stmtNode.id,
+                              tokenText(stmt.name), stmt.isConst, ""};
+        if (stmt.initializer &&
+            std::holds_alternative<AstImportExpr>(stmt.initializer->value)) {
+            binding.kind = AstBindingKind::ImportedModule;
+            binding.importExprNodeId = stmt.initializer->node.id;
+        }
+
+        defineBinding(tokenText(stmt.name), binding);
     }
 
     void mergeImportedClassMetadata(const AstImportedModuleInterface& importedModule,
@@ -387,16 +580,16 @@ class AstBinderImpl {
             AstBindingKind bindingKind = AstBindingKind::Variable;
             std::string className;
             if (importedModule) {
-                auto exportIt = importedModule->exportTypes.find(exportedName);
-                if (exportIt == importedModule->exportTypes.end()) {
+                auto exportIt = importedModule->valueExports.find(exportedName);
+                if (exportIt == importedModule->valueExports.end()) {
                     addError(binding.exportedName,
                              "Type error: imported module '" +
                                  importedModule->importTarget.displayName +
                                  "' has no export '" + exportedName + "'.");
-                } else if (exportIt->second &&
-                           exportIt->second->kind == TypeKind::CLASS) {
+                } else if (exportIt->second.type &&
+                           exportIt->second.type->kind == TypeKind::CLASS) {
                     bindingKind = AstBindingKind::Class;
-                    className = exportIt->second->className;
+                    className = exportIt->second.type->className;
                     mergeImportedClassMetadata(*importedModule, className);
                 }
             }
@@ -440,6 +633,11 @@ class AstBinderImpl {
                     bindVarDecl(stmt.node, value);
                 } else if constexpr (std::is_same_v<T,
                                                     AstDestructuredImportStmt>) {
+                    for (const auto& binding : value.bindings) {
+                        if (binding.expectedType) {
+                            bindTypeExpr(*binding.expectedType);
+                        }
+                    }
                     bindDestructuredImport(value);
                 } else if constexpr (std::is_same_v<T, AstForStmt>) {
                     beginScope();
@@ -466,6 +664,9 @@ class AstBinderImpl {
                     endScope();
                 } else if constexpr (std::is_same_v<T, AstForEachStmt>) {
                     beginScope();
+                    if (value.declaredType) {
+                        bindTypeExpr(*value.declaredType);
+                    }
                     bindExpr(*value.iterable);
                     defineBinding(tokenText(value.name),
                                   AstBindingRef{AstBindingKind::Variable,
@@ -480,6 +681,14 @@ class AstBinderImpl {
     }
 
     void bindFunctionDecl(const AstFunctionDecl& functionDecl) {
+        for (const auto& param : functionDecl.params) {
+            if (param.type) {
+                bindTypeExpr(*param.type);
+            }
+        }
+        if (functionDecl.returnType) {
+            bindTypeExpr(*functionDecl.returnType);
+        }
         defineBinding(tokenText(functionDecl.name),
                       AstBindingRef{AstBindingKind::Function,
                                     functionDecl.node.id,
@@ -499,6 +708,21 @@ class AstBinderImpl {
 
     void bindClassDecl(const AstClassDecl& classDecl) {
         const std::string className = tokenText(classDecl.name);
+        for (const auto& field : classDecl.fields) {
+            if (field.type) {
+                bindTypeExpr(*field.type);
+            }
+        }
+        for (const auto& method : classDecl.methods) {
+            for (const auto& param : method.params) {
+                if (param.type) {
+                    bindTypeExpr(*param.type);
+                }
+            }
+            if (method.returnType) {
+                bindTypeExpr(*method.returnType);
+            }
+        }
         defineBinding(className,
                       AstBindingRef{AstBindingKind::Class, classDecl.node.id,
                                     className, false, className});
@@ -526,6 +750,9 @@ class AstBinderImpl {
                 using T = std::decay_t<decltype(value)>;
 
                 if constexpr (std::is_same_v<T, AstTypeAliasDecl>) {
+                    if (value.aliasedType) {
+                        bindTypeExpr(*value.aliasedType);
+                    }
                     return;
                 } else if constexpr (std::is_same_v<T, AstClassDecl>) {
                     bindClassDecl(value);
@@ -560,6 +787,7 @@ class AstBinderImpl {
     void run(const AstModule& module) {
         predeclareBuiltinFunctions();
         predeclareTopLevel(module);
+        collectTopLevelImportedModules(module);
         predeclareClassMetadata(module);
 
         for (const auto& item : module.items) {

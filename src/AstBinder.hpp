@@ -17,9 +17,19 @@ struct AstBindingMetadata {
     std::unordered_map<std::string, std::string> superclassOf;
 };
 
+struct ImportedModuleSymbol {
+    TypeRef type;
+    std::string doc;
+    std::string kind;
+    SourceSpan range = makePointSpan(1, 1);
+    SourceSpan selectionRange = makePointSpan(1, 1);
+    bool hasDeclarationSite = false;
+};
+
 struct AstImportedModuleInterface {
     ImportTarget importTarget;
-    std::unordered_map<std::string, TypeRef> exportTypes;
+    std::unordered_map<std::string, ImportedModuleSymbol> valueExports;
+    std::unordered_map<std::string, ImportedModuleSymbol> typeExports;
     AstBindingMetadata metadata;
     std::unordered_map<std::string, std::unordered_map<int, std::string>>
         classOperatorMethods;
@@ -29,6 +39,7 @@ enum class AstBindingKind {
     Variable,
     Function,
     Class,
+    ImportedModule,
     ThisValue,
     SuperValue,
 };
@@ -39,6 +50,7 @@ struct AstBindingRef {
     std::string name;
     bool isConst = false;
     std::string className;
+    AstNodeId importExprNodeId = 0;
 };
 
 struct AstBindResult {

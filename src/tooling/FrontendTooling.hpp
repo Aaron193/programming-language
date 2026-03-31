@@ -60,6 +60,7 @@ struct ToolingHover {
     std::string kind;
     std::string role;
     std::string detail;
+    std::string documentation;
 };
 
 struct ToolingCompletionItem {

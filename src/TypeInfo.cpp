@@ -129,10 +129,14 @@ TypeRef TypeInfo::makeClass(const std::string& name) {
 }
 
 TypeRef TypeInfo::makeNativeHandle(const std::string& packageId,
-                                   const std::string& typeName) {
+                                   const std::string& typeName,
+                                   const std::string& displayPackage,
+                                   const std::string& displayTypeName) {
     auto type = std::make_shared<TypeInfo>(TypeKind::NATIVE_HANDLE);
     type->nativeHandlePackageId = packageId;
     type->nativeHandleTypeName = typeName;
+    type->nativeHandleDisplayPackage = displayPackage;
+    type->nativeHandleDisplayTypeName = displayTypeName;
     return type;
 }
 
@@ -239,6 +243,11 @@ std::string TypeInfo::toString() const {
         case TypeKind::CLASS:
             return className;
         case TypeKind::NATIVE_HANDLE:
+            if (!nativeHandleDisplayPackage.empty() &&
+                !nativeHandleDisplayTypeName.empty()) {
+                return nativeHandleDisplayPackage + "." +
+                       nativeHandleDisplayTypeName;
+            }
             return "handle<" +
                    packageImportNameFromPackageId(nativeHandlePackageId) + ":" +
                    nativeHandleTypeName + ">";

@@ -1,5 +1,6 @@
 
 const counter = @import("counter")
+const window = @import("window")
 
-const source handle<counter:CounterHandle> = counter.create(1i64)
-const bad handle<math:CounterHandle> = source
+const source counter.Counter = counter.create(1i64)
+const bad window.Window = source

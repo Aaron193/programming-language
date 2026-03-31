@@ -8,6 +8,7 @@
 #include <string_view>
 
 #include "NativePackage.hpp"
+#include "PackageRegistry.hpp"
 
 namespace {
 
@@ -473,6 +474,24 @@ bool validatePackageDirectory(const std::string& packageDir,
         outError = "Manifest declares '" +
                    makePackageId(manifest.packageNamespace, manifest.packageName) +
                    "' but library registers '" + descriptor.packageId + "'.";
+        return false;
+    }
+
+    const std::filesystem::path apiPath = dirPath / "package.api.mog";
+    if (!std::filesystem::exists(apiPath)) {
+        outError = "Package directory '" + dirPath.string() +
+                   "' is missing package.api.mog.";
+        return false;
+    }
+
+    PackageApiMetadata apiMetadata;
+    const std::string importName =
+        manifest.importName.empty() ? manifest.packageName : manifest.importName;
+    if (!loadPackageApiMetadata(apiPath.string(), descriptor.packageId,
+                                importName, apiMetadata, outError)) {
+        return false;
+    }
+    if (!validateNativePackageApi(apiMetadata, descriptor, outError)) {
         return false;
     }
 

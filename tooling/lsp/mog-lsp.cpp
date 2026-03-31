@@ -1326,6 +1326,10 @@ class MogLspServer {
         hoverValue += "```mog\n";
         hoverValue += hover->detail;
         hoverValue += "\n```";
+        if (!hover->documentation.empty()) {
+            hoverValue += "\n\n";
+            hoverValue += hover->documentation;
+        }
         contents["value"] = JsonValue(std::move(hoverValue));
 
         JsonObject result;
@@ -1372,7 +1376,8 @@ class MogLspServer {
                 completion.kind != "method" &&
                 completion.kind != "function" &&
                 completion.kind != "class" &&
-                completion.kind != "constant") {
+                completion.kind != "constant" &&
+                completion.kind != "type") {
                 continue;
             }
             if (!prefix.empty() && !startsWith(completion.label, prefix)) {

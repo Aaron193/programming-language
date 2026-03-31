@@ -1,2 +1,4 @@
-const { create: fn(i64) handle<math:CounterHandle> } =
+const window = @import("window")
+
+const { create: fn(i64) window.Window } =
     @import("counter")

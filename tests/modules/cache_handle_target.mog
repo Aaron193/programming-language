@@ -2,14 +2,14 @@ print("cache_handle_target_loaded")
 
 const counter = @import("counter")
 
-fn Make(seed i64) handle<counter:CounterHandle> {
+fn Make(seed i64) counter.Counter {
   return counter.create(seed)
 }
 
-fn Read(value handle<counter:CounterHandle>) i64 {
+fn Read(value counter.Counter) i64 {
   return counter.read(value)
 }
 
-fn Add(value handle<counter:CounterHandle>, delta i64) i64 {
+fn Add(value counter.Counter, delta i64) i64 {
   return counter.add(value, delta)
 }

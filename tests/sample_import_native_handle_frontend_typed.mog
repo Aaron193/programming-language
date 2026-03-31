@@ -1,4 +1,6 @@
-type Counter handle<counter:CounterHandle>
+const counter = @import("counter")
+
+type Counter counter.Counter
 const { create: fn(i64) Counter, read: fn(Counter) i64, add: fn(Counter, i64) i64 } =
     @import("counter")
 

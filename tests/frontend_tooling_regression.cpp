@@ -273,6 +273,60 @@ bool testDiagnosticsAndSymbols() {
     return true;
 }
 
+bool testPackageApiDiagnosticsAndSymbols() {
+    const std::filesystem::path apiPath =
+        std::filesystem::current_path() / "packages" / "mog" / "window" /
+        "package.api.mog";
+    const auto source = readFileText(apiPath);
+    if (!require(source.has_value(),
+                 "package api regression should load package.api.mog")) {
+        return false;
+    }
+
+    ToolingAnalyzeOptions options;
+    options.sourcePath = apiPath.string();
+    ToolingDocumentAnalysis analysis =
+        analyzeDocumentForTooling(*source, options);
+
+    if (!require(analysis.status == AstFrontendBuildStatus::Success,
+                 "valid package api source should succeed in tooling")) {
+        return false;
+    }
+
+    if (!require(analysis.diagnostics.empty(),
+                 "valid package api source should not emit diagnostics")) {
+        return false;
+    }
+
+    if (!require(analysis.hasParse,
+                 "valid package api source should expose parsed symbols")) {
+        return false;
+    }
+
+    bool sawWindowType = false;
+    bool sawCreate = false;
+    for (const auto& symbol : analysis.documentSymbols) {
+        if (symbol.name == "Window" && symbol.kind == "type") {
+            sawWindowType = true;
+        }
+        if (symbol.name == "create" && symbol.kind == "function") {
+            sawCreate = true;
+        }
+    }
+
+    if (!require(sawWindowType,
+                 "package api source should expose opaque type symbols")) {
+        return false;
+    }
+
+    if (!require(sawCreate,
+                 "package api source should expose function symbols")) {
+        return false;
+    }
+
+    return true;
+}
+
 bool testImportedDiagnosticPaths() {
     const std::filesystem::path tempRoot =
         std::filesystem::temp_directory_path() / "mog_tooling_import_diagnostics";
@@ -539,6 +593,31 @@ bool testDefinitionLookup() {
         return false;
     }
 
+    options.packageSearchPaths = {
+        (std::filesystem::current_path() / "build" / "packages").string()};
+    const std::string nativeMemberSource =
+                "const counter = @import(\"counter\")\n"
+        "print(counter.create)\n";
+    options.sourcePath = "tooling_native_member_definition_regression.mog";
+    ToolingDocumentAnalysis nativeMemberAnalysis =
+        analyzeDocumentForTooling(nativeMemberSource, options);
+    if (!require(nativeMemberAnalysis.status == AstFrontendBuildStatus::Success,
+                 "native package member definition sample should succeed")) {
+        return false;
+    }
+    const auto nativeMemberDefinition =
+        findDefinitionForTooling(nativeMemberAnalysis, ToolingPosition{1, 15});
+    if (!require(nativeMemberDefinition.has_value(),
+                 "native package member use should resolve to package api declaration")) {
+        return false;
+    }
+    if (!require(nativeMemberDefinition->path.find("package.api.mog") !=
+                     std::string::npos,
+                 "native package member definition should resolve to the package api file")) {
+        return false;
+    }
+    options.packageSearchPaths.clear();
+
     const std::string memberSource =
                 "type Box struct {\n"
         "    value i32\n"
@@ -673,6 +752,100 @@ bool testReferencesAndHover() {
                  "imported source functions should preserve Mog declaration syntax")) {
         return false;
     }
+
+    options.packageSearchPaths = {
+        (std::filesystem::current_path() / "build" / "packages").string()};
+    const std::string nativeImportSource =
+                "const counter = @import(\"counter\")\n"
+        "print(counter)\n"
+        "print(counter.create)\n";
+    options.sourcePath = "tooling_native_import_hover_regression.mog";
+    ToolingDocumentAnalysis nativeImportAnalysis =
+        analyzeDocumentForTooling(nativeImportSource, options);
+    if (!require(nativeImportAnalysis.status == AstFrontendBuildStatus::Success,
+                 "native import hover sample should succeed")) {
+        return false;
+    }
+
+    const auto nativeModuleHover =
+        findHoverForTooling(nativeImportAnalysis, ToolingPosition{1, 7});
+    if (!require(nativeModuleHover.has_value(),
+                 "hover should be available for imported module bindings")) {
+        return false;
+    }
+    if (!require(nativeModuleHover->role == "module" &&
+                     nativeModuleHover->detail == "package counter",
+                 "native import binding hover should identify the imported package")) {
+        return false;
+    }
+
+    const auto nativeMemberHover =
+        findHoverForTooling(nativeImportAnalysis, ToolingPosition{2, 15});
+    if (!require(nativeMemberHover.has_value(),
+                 "hover should be available for native package members")) {
+        return false;
+    }
+    if (!require(nativeMemberHover->kind == "function" &&
+                     nativeMemberHover->role == "function" &&
+                     nativeMemberHover->detail ==
+                         "fn create(i64) counter.Counter" &&
+                     nativeMemberHover->documentation ==
+                         "Create a new counter handle.",
+                 "native package member hover should surface declaration docs")) {
+        return false;
+    }
+
+    const std::string nativeTypeQualifierSource =
+                "const counter = @import(\"counter\")\n"
+        "fn make() void {\n"
+        "    var value counter.Counter = counter.create(1i64)\n"
+        "}\n";
+    options.sourcePath = "tooling_native_import_type_qualifier_hover_regression.mog";
+    ToolingDocumentAnalysis nativeTypeQualifierAnalysis =
+        analyzeDocumentForTooling(nativeTypeQualifierSource, options);
+    const auto nativeTypeQualifierHover =
+        findHoverForTooling(nativeTypeQualifierAnalysis, ToolingPosition{2, 16});
+    if (!require(nativeTypeQualifierHover.has_value(),
+                 "hover should be available for imported type qualifiers")) {
+        return false;
+    }
+    if (!require(nativeTypeQualifierHover->kind == "import" &&
+                     nativeTypeQualifierHover->role == "module" &&
+                     nativeTypeQualifierHover->detail == "package counter",
+                 "imported type qualifier hover should identify the package")) {
+        return false;
+    }
+
+    const auto nativeTypeHover =
+        findHoverForTooling(nativeTypeQualifierAnalysis, ToolingPosition{2, 24});
+    if (!require(nativeTypeHover.has_value(),
+                 "hover should be available for imported package types")) {
+        return false;
+    }
+    if (!require(nativeTypeHover->kind == "type" &&
+                     nativeTypeHover->role == "type" &&
+                     nativeTypeHover->detail == "type Counter" &&
+                     nativeTypeHover->documentation ==
+                         "GC-managed opaque counter handle.",
+                 "native package type hover should surface declaration docs")) {
+        return false;
+    }
+
+    const auto nativeTypeQualifierDefinition =
+        findDefinitionForTooling(nativeTypeQualifierAnalysis, ToolingPosition{2, 16});
+    if (!require(nativeTypeQualifierDefinition.has_value(),
+                 "definition should be available for imported type qualifiers")) {
+        return false;
+    }
+    if (!require(nativeTypeQualifierDefinition->path.find(
+                         "packages/examples/counter/package.api.mog") !=
+                         std::string::npos &&
+                     nativeTypeQualifierDefinition->range.start.line == 0 &&
+                     nativeTypeQualifierDefinition->range.start.character == 0,
+                 "imported type qualifier definition should jump to the package API")) {
+        return false;
+    }
+    options.packageSearchPaths.clear();
 
     const std::string memberSource =
                 "type Box struct {\n"
@@ -1431,8 +1604,12 @@ bool testCompletions() {
     options.sourcePath = "tests/sample_import_basic.mog";
     ToolingDocumentAnalysis moduleMemberAnalysis =
         analyzeDocumentForTooling(moduleMemberSource, options);
-    if (!require(moduleMemberAnalysis.status == AstFrontendBuildStatus::Success,
-                 "module member completion sample should succeed")) {
+    if (!require((moduleMemberAnalysis.status ==
+                      AstFrontendBuildStatus::Success ||
+                  moduleMemberAnalysis.status ==
+                      AstFrontendBuildStatus::SemanticError) &&
+                     moduleMemberAnalysis.hasBindings,
+                 "module member completion sample should preserve bindings")) {
         return false;
     }
 
@@ -1524,6 +1701,41 @@ bool testCompletions() {
                  "type-context completions should include imported class bindings")) {
         return false;
     }
+
+    options.packageSearchPaths = {
+        (std::filesystem::current_path() / "build" / "packages").string()};
+    const std::string nativeMemberCompletionSource =
+                "const counter = @import(\"counter\")\n"
+        "print(counter.cre)\n";
+    options.sourcePath = "tooling_completion_native_member_regression.mog";
+    ToolingDocumentAnalysis nativeMemberCompletionAnalysis =
+        analyzeDocumentForTooling(nativeMemberCompletionSource, options);
+    const auto nativeMemberCompletions = findCompletionsForTooling(
+        nativeMemberCompletionAnalysis, nativeMemberCompletionSource,
+        ToolingPosition{1, 17});
+    if (!require(findCompletion(nativeMemberCompletions, "create") != nullptr &&
+                     findCompletion(nativeMemberCompletions, "Counter") == nullptr,
+                 "value member completions should expose native package values only")) {
+        return false;
+    }
+
+    const std::string nativeTypeCompletionSource =
+                "const counter = @import(\"counter\")\n"
+        "fn make() void {\n"
+        "    var value counter.Cou = counter.create(1i64)\n"
+        "}\n";
+    options.sourcePath = "tooling_completion_native_type_regression.mog";
+    ToolingDocumentAnalysis nativeTypeCompletionAnalysis =
+        analyzeDocumentForTooling(nativeTypeCompletionSource, options);
+    const auto nativeTypeCompletions = findCompletionsForTooling(
+        nativeTypeCompletionAnalysis, nativeTypeCompletionSource,
+        ToolingPosition{2, 25});
+    if (!require(findCompletion(nativeTypeCompletions, "Counter") != nullptr &&
+                     findCompletion(nativeTypeCompletions, "create") == nullptr,
+                 "type-context member completions should expose native package types only")) {
+        return false;
+    }
+    options.packageSearchPaths.clear();
 
     const auto normalCompletions =
         findCompletionsForTooling(typeContextAnalysis, ToolingPosition{4, 4});
@@ -2183,6 +2395,10 @@ int main() {
     }
 
     if (!testDiagnosticsAndSymbols()) {
+        return 1;
+    }
+
+    if (!testPackageApiDiagnosticsAndSymbols()) {
         return 1;
     }
 

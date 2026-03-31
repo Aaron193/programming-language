@@ -1,0 +1,17 @@
+package counter
+
+@doc("GC-managed opaque counter handle.")
+@native_handle("CounterHandle")
+opaque type Counter
+
+@doc("Canonical namespaced package identifier.")
+const PACKAGE_ID str
+
+@doc("Create a new counter handle.")
+fn create(initial i64) Counter
+
+@doc("Read the current counter value.")
+fn read(counter Counter) i64
+
+@doc("Add to the counter and return the updated value.")
+fn add(counter Counter, delta i64) i64

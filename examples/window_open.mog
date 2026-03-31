@@ -1,6 +1,6 @@
 const window = @import("window")
 
-const win handle<window:WindowHandle> =
+const win window.Window =
     window.create("window visible demo", 800i64, 600i64)
 
 window.show(win)
@@ -11,7 +11,7 @@ var running bool = true
 var start f64 = clock()
 
 while (running && (clock() - start) < 5) {
-    const evt handle<window:EventHandle>? = window.pollEvent(win)
+    const evt window.Event? = window.pollEvent(win)
     if (evt != null) {
         if (window.eventKind(evt) == "quit") {
             running = false

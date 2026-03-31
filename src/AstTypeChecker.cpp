@@ -85,6 +85,8 @@ class AstTypeCheckerImpl {
         bool isConstSymbol = false;
         bool hasBinding = false;
         AstNodeId declarationNodeId = 0;
+        AstNodeId importExprNodeId = 0;
+        bool isImportedModule = false;
     };
 
     struct SymbolInfo {
@@ -122,6 +124,7 @@ class AstTypeCheckerImpl {
     AstSemanticModel* m_model = nullptr;
 
     std::unordered_map<AstNodeId, SymbolInfo> m_declaredValueTypes;
+    std::vector<std::unordered_map<AstNodeId, TypeRef>> m_narrowedValueTypes;
     std::vector<FunctionCtx> m_functionContexts;
     std::vector<LoopCtx> m_loopContexts;
     std::vector<ClassCtx> m_classContexts;
@@ -189,6 +192,18 @@ class AstTypeCheckerImpl {
         }
 
         return &it->second;
+    }
+
+    TypeRef narrowedValueType(AstNodeId nodeId) const {
+        for (auto it = m_narrowedValueTypes.rbegin();
+             it != m_narrowedValueTypes.rend(); ++it) {
+            auto found = it->find(nodeId);
+            if (found != it->end()) {
+                return found->second;
+            }
+        }
+
+        return nullptr;
     }
 
     const AstBindingRef* lookupBinding(AstNodeId nodeId) const {
@@ -461,6 +476,9 @@ class AstTypeCheckerImpl {
             typeExpr.token.type() != TokenType::IDENTIFIER) {
             return false;
         }
+        if (!typeExpr.qualifier.empty()) {
+            return false;
+        }
 
         const std::string name = tokenText(typeExpr.token);
         return m_classNames.find(name) == m_classNames.end() &&
@@ -478,6 +496,41 @@ class AstTypeCheckerImpl {
     TypeRef resolveTypeExpr(const AstTypeExpr& typeExpr) {
         switch (typeExpr.kind) {
             case AstTypeKind::NAMED:
+                if (!typeExpr.qualifier.empty()) {
+                    const AstBindingRef* binding = lookupBinding(typeExpr.node.id);
+                    const AstImportedModuleInterface* importedModule =
+                        binding ? lookupImportedModuleForBinding(*binding)
+                                : nullptr;
+                    if (importedModule == nullptr) {
+                        addError(typeExpr.node.span,
+                                 "Type error: unknown imported type qualifier '" +
+                                     typeExpr.qualifier + "'.");
+                        return nullptr;
+                    }
+
+                    const std::string typeName = tokenText(typeExpr.token);
+                    const auto typeIt =
+                        importedModule->typeExports.find(typeName);
+                    if (typeIt != importedModule->typeExports.end() &&
+                        typeIt->second.type) {
+                        return typeIt->second.type;
+                    }
+
+                    const auto valueIt =
+                        importedModule->valueExports.find(typeName);
+                    if (valueIt != importedModule->valueExports.end()) {
+                        addError(typeExpr.node.span,
+                                 "Type error: '" + typeExpr.qualifier + "." +
+                                     typeName + "' is a value, not a type.");
+                        return nullptr;
+                    }
+
+                    addError(typeExpr.node.span,
+                             "Type error: imported module '" +
+                                 importedModule->importTarget.displayName +
+                                 "' has no type export '" + typeName + "'.");
+                    return nullptr;
+                }
                 return tokenToType(typeExpr.token);
             case AstTypeKind::FUNCTION: {
                 std::vector<TypeRef> params;
@@ -851,8 +904,95 @@ class AstTypeCheckerImpl {
         return &it->second;
     }
 
+    const AstImportedModuleInterface* lookupImportedModuleForBinding(
+        const AstBindingRef& binding) const {
+        if (binding.kind != AstBindingKind::ImportedModule ||
+            binding.importExprNodeId == 0) {
+            return nullptr;
+        }
+        return lookupImportedModule(binding.importExprNodeId);
+    }
+
     bool isImportExpr(const AstExpr& expr) const {
         return std::holds_alternative<AstImportExpr>(expr.value);
+    }
+
+    bool isNullLiteralExpr(const AstExpr& expr) const {
+        if (const auto* literal = std::get_if<AstLiteralExpr>(&expr.value)) {
+            return literal->token.type() == TokenType::_NULL ||
+                   literal->token.type() == TokenType::TYPE_NULL_KW;
+        }
+
+        return false;
+    }
+
+    const AstIdentifierExpr* identifierExpr(const AstExpr& expr) const {
+        return std::get_if<AstIdentifierExpr>(&expr.value);
+    }
+
+    void collectTruthyNullNarrowings(
+        const AstExpr& expr, std::unordered_map<AstNodeId, TypeRef>& out) const {
+        if (const auto* grouping = std::get_if<AstGroupingExpr>(&expr.value)) {
+            if (grouping->expression) {
+                collectTruthyNullNarrowings(*grouping->expression, out);
+            }
+            return;
+        }
+
+        const auto* binary = std::get_if<AstBinaryExpr>(&expr.value);
+        if (binary == nullptr || binary->left == nullptr || binary->right == nullptr) {
+            return;
+        }
+
+        if (binary->op.type() == TokenType::LOGICAL_AND) {
+            collectTruthyNullNarrowings(*binary->left, out);
+            collectTruthyNullNarrowings(*binary->right, out);
+            return;
+        }
+
+        const bool leftIsNull = isNullLiteralExpr(*binary->left);
+        const bool rightIsNull = isNullLiteralExpr(*binary->right);
+        if (leftIsNull == rightIsNull) {
+            return;
+        }
+
+        const AstExpr& candidate = leftIsNull ? *binary->right : *binary->left;
+        if (binary->op.type() != TokenType::BANG_EQUAL) {
+            return;
+        }
+
+        const AstIdentifierExpr* identifier = identifierExpr(candidate);
+        if (identifier == nullptr) {
+            return;
+        }
+
+        const AstBindingRef* binding = lookupBinding(candidate.node.id);
+        if (binding == nullptr || binding->declarationNodeId == 0) {
+            return;
+        }
+
+        TypeRef symbolType = narrowedValueType(binding->declarationNodeId);
+        if (!symbolType) {
+            const SymbolInfo* symbol = declaredValue(binding->declarationNodeId);
+            symbolType = symbol ? symbol->type : nullptr;
+        }
+        if (!symbolType || !symbolType->isOptional() || !symbolType->innerType) {
+            return;
+        }
+
+        out[binding->declarationNodeId] = symbolType->innerType;
+    }
+
+    void pushNarrowedTypes(const std::unordered_map<AstNodeId, TypeRef>& narrowed) {
+        if (!narrowed.empty()) {
+            m_narrowedValueTypes.push_back(narrowed);
+        }
+    }
+
+    void popNarrowedTypes(const std::unordered_map<AstNodeId, TypeRef>& narrowed) {
+        if (!narrowed.empty() && !m_narrowedValueTypes.empty()) {
+            m_narrowedValueTypes.pop_back();
+        }
     }
 
     ExprInfo analyzeExpr(const AstExpr& expr,
@@ -923,6 +1063,17 @@ class AstTypeCheckerImpl {
                                           true, binding->name, value.name.line(),
                                           false, true,
                                           binding->declarationNodeId};
+                    } else if (binding->kind == AstBindingKind::ImportedModule) {
+                        result = ExprInfo{TypeInfo::makeAny(),
+                                          false,
+                                          false,
+                                          name,
+                                          value.name.line(),
+                                          binding->isConst,
+                                          true,
+                                          binding->declarationNodeId,
+                                          binding->importExprNodeId,
+                                          true};
                     } else if (binding->kind == AstBindingKind::ThisValue) {
                         result = ExprInfo{TypeInfo::makeClass(binding->className),
                                           false, false, "", value.name.line(),
@@ -941,7 +1092,10 @@ class AstTypeCheckerImpl {
                     } else {
                         const SymbolInfo* symbol =
                             declaredValue(binding->declarationNodeId);
-                        TypeRef type = symbol ? symbol->type : TypeInfo::makeAny();
+                        TypeRef type = narrowedValueType(binding->declarationNodeId);
+                        if (!type) {
+                            type = symbol ? symbol->type : TypeInfo::makeAny();
+                        }
                         const bool isConst = symbol ? symbol->isConst
                                                     : binding->isConst;
                         result = ExprInfo{type, true, false, name,
@@ -1023,12 +1177,19 @@ class AstTypeCheckerImpl {
                                                           : TypeInfo::makeAny(),
                                              false, false, operand.name,
                                              value.op.line(), true};
-                            } else {
-                                TypeRef targetType = operand.type;
-                                if (!operand.hasBinding && !operand.name.empty()) {
-                                    targetType = nullptr;
-                                }
-                                if (!targetType && !operand.name.empty()) {
+                    } else {
+                        TypeRef targetType = operand.type;
+                        if (operand.hasBinding && operand.declarationNodeId != 0) {
+                            const SymbolInfo* declared =
+                                declaredValue(operand.declarationNodeId);
+                            if (declared && declared->type) {
+                                targetType = declared->type;
+                            }
+                        }
+                        if (!operand.hasBinding && !operand.name.empty()) {
+                            targetType = nullptr;
+                        }
+                        if (!targetType && !operand.name.empty()) {
                                     addError(value.op,
                                              "Type error: unknown assignment "
                                              "target '" +
@@ -1199,6 +1360,13 @@ class AstTypeCheckerImpl {
                                           false, false, lhs.name, line, true};
                     } else {
                         TypeRef targetType = lhs.type;
+                        if (lhs.hasBinding && lhs.declarationNodeId != 0) {
+                            const SymbolInfo* declared =
+                                declaredValue(lhs.declarationNodeId);
+                            if (declared && declared->type) {
+                                targetType = declared->type;
+                            }
+                        }
                         if (!lhs.hasBinding && !lhs.name.empty()) {
                             targetType = nullptr;
                         }
@@ -1363,7 +1531,47 @@ class AstTypeCheckerImpl {
                     }
 
                     const std::string memberName = tokenText(value.member);
-                    if (receiver.type &&
+                    if (receiver.isImportedModule) {
+                        const AstImportedModuleInterface* importedModule =
+                            lookupImportedModule(receiver.importExprNodeId);
+                        if (!importedModule) {
+                            result = ExprInfo{TypeInfo::makeAny(), false, false,
+                                              "", value.member.line()};
+                        } else {
+                            auto valueIt =
+                                importedModule->valueExports.find(memberName);
+                            if (valueIt != importedModule->valueExports.end()) {
+                                result = ExprInfo{
+                                    valueIt->second.type ? valueIt->second.type
+                                                         : TypeInfo::makeAny(),
+                                    false,
+                                    valueIt->second.type &&
+                                        valueIt->second.type->kind ==
+                                            TypeKind::CLASS,
+                                    memberName,
+                                    value.member.line()};
+                            } else if (importedModule->typeExports.find(memberName) !=
+                                       importedModule->typeExports.end()) {
+                                addError(value.member,
+                                         "Type error: '" +
+                                             importedModule->importTarget
+                                                 .displayName +
+                                             "." + memberName +
+                                             "' is a type, not a value.");
+                                result = ExprInfo{TypeInfo::makeAny(), false,
+                                                  false, "", value.member.line()};
+                            } else {
+                                addError(value.member,
+                                         "Type error: imported module '" +
+                                             importedModule->importTarget
+                                                 .displayName +
+                                             "' has no export '" + memberName +
+                                             "'.");
+                                result = ExprInfo{TypeInfo::makeAny(), false,
+                                                  false, "", value.member.line()};
+                            }
+                        }
+                    } else if (receiver.type &&
                         receiver.type->kind == TypeKind::CLASS) {
                         TypeRef fieldType =
                             lookupClassFieldType(receiver.type->className,
@@ -1718,16 +1926,16 @@ class AstTypeCheckerImpl {
             if (!importedModule) {
                 importedType = TypeInfo::makeAny();
             } else {
-                auto exportIt = importedModule->exportTypes.find(
+                auto exportIt = importedModule->valueExports.find(
                     tokenText(binding.exportedName));
-                if (exportIt == importedModule->exportTypes.end()) {
+                if (exportIt == importedModule->valueExports.end()) {
                     addError(binding.exportedName,
                              "Type error: imported module '" +
                                  importedModule->importTarget.displayName +
                                  "' has no export '" +
                                  tokenText(binding.exportedName) + "'.");
-                } else if (exportIt->second) {
-                    importedType = exportIt->second;
+                } else if (exportIt->second.type) {
+                    importedType = exportIt->second.type;
                 }
             }
 
@@ -1862,7 +2070,11 @@ class AstTypeCheckerImpl {
                         addError(value.condition->node,
                                  "Type error: if condition must be bool.");
                     }
+                    std::unordered_map<AstNodeId, TypeRef> thenNarrowings;
+                    collectTruthyNullNarrowings(*value.condition, thenNarrowings);
+                    pushNarrowedTypes(thenNarrowings);
                     analyzeStmt(*value.thenBranch);
+                    popNarrowedTypes(thenNarrowings);
                     if (value.elseBranch) {
                         analyzeStmt(*value.elseBranch);
                     }
@@ -1873,8 +2085,12 @@ class AstTypeCheckerImpl {
                         addError(value.condition->node,
                                  "Type error: while condition must be bool.");
                     }
+                    std::unordered_map<AstNodeId, TypeRef> bodyNarrowings;
+                    collectTruthyNullNarrowings(*value.condition, bodyNarrowings);
                     beginLoop(value.label);
+                    pushNarrowedTypes(bodyNarrowings);
                     analyzeStmt(*value.body);
+                    popNarrowedTypes(bodyNarrowings);
                     endLoop();
                 } else if constexpr (std::is_same_v<T, AstVarDeclStmt>) {
                     analyzeVarDecl(stmt.node, value);

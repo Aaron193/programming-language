@@ -1,6 +1,7 @@
 - rework import system (@import('')) when it comes to standard library/packages vs user code vs external dependencies (need clear way to distinguish based off import statement)
 - compile time decorators using '@' ???
 - what is this??? "const { addI64: fn(f64, f64) f64 } = @import("math")", why did we put ":" in? Just do: "const { addI64 fn(f64, f64) f64 } = @import("math")" and ensure destructuring globally.
+- the package toml should just be type descriptor .mog files
 
 Array Methods:
     fn push(value T) void

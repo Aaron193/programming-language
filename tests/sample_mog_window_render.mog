@@ -1,6 +1,6 @@
 const window = @import("window")
 
-const win handle<window:WindowHandle> =
+const win window.Window =
     window.create("Render Demo", 64i64, 64i64)
 
 window.clearRgb(win, 32i64, 64i64, 96i64)

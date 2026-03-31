@@ -18,7 +18,9 @@ namespace {
 bool collectSymbolsFromAst(
     const AstModule& module, std::unordered_set<std::string>& outClassNames,
     std::unordered_map<std::string, TypeRef>& outFunctionSignatures,
-    std::unordered_map<std::string, TypeRef>* outTypeAliases) {
+    std::unordered_map<std::string, TypeRef>* outTypeAliases,
+    const std::unordered_map<std::string, const AstImportedModuleInterface*>*
+        importedModulesByName) {
     outClassNames.clear();
     outFunctionSignatures.clear();
     if (outTypeAliases != nullptr) {
@@ -48,7 +50,8 @@ bool collectSymbolsFromAst(
                 continue;
             }
 
-            FrontendTypeContext typeContext{outClassNames, *outTypeAliases};
+            FrontendTypeContext typeContext{outClassNames, *outTypeAliases, "",
+                                            {}, importedModulesByName};
             TypeRef resolved =
                 frontendResolveTypeExpr(*aliasDecl->aliasedType, typeContext);
             if (resolved) {
@@ -62,7 +65,8 @@ bool collectSymbolsFromAst(
     const std::unordered_map<std::string, TypeRef> emptyAliases;
     const auto& aliases =
         outTypeAliases != nullptr ? *outTypeAliases : emptyAliases;
-    FrontendTypeContext typeContext{outClassNames, aliases};
+    FrontendTypeContext typeContext{outClassNames, aliases, "", {},
+                                    importedModulesByName};
 
     for (const auto& item : module.items) {
         if (item == nullptr) {
@@ -102,7 +106,9 @@ bool collectSymbolsFromAst(
 bool collectSymbolsFromAst(
     std::string_view source, std::unordered_set<std::string>& outClassNames,
     std::unordered_map<std::string, TypeRef>& outFunctionSignatures,
-    std::unordered_map<std::string, TypeRef>* outTypeAliases) {
+    std::unordered_map<std::string, TypeRef>* outTypeAliases,
+    const std::unordered_map<std::string, const AstImportedModuleInterface*>*
+        importedModulesByName) {
     AstModule module;
     AstParser parser(source);
     if (!parser.parseModule(module)) {
@@ -110,5 +116,5 @@ bool collectSymbolsFromAst(
     }
 
     return collectSymbolsFromAst(module, outClassNames, outFunctionSignatures,
-                                 outTypeAliases);
+                                 outTypeAliases, importedModulesByName);
 }

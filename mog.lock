@@ -5,7 +5,7 @@ namespace = "examples"
 package_name = "math"
 kind = "native"
 package_dir = "packages/examples/math"
-api = "packages/examples/math/package.api.toml"
+api = "packages/examples/math/package.api.mog"
 description = "Reference namespaced math package."
 
 [[package]]
@@ -15,7 +15,7 @@ namespace = "examples"
 package_name = "counter"
 kind = "native"
 package_dir = "packages/examples/counter"
-api = "packages/examples/counter/package.api.toml"
+api = "packages/examples/counter/package.api.mog"
 description = "Reference opaque handle package."
 
 [[package]]
@@ -25,7 +25,7 @@ namespace = "examples"
 package_name = "mismatch"
 kind = "native"
 package_dir = "packages/examples/mismatch"
-api = "packages/examples/mismatch/package.api.toml"
+api = "packages/examples/mismatch/package.api.mog"
 description = "Native package metadata mismatch test package."
 
 [[package]]
@@ -35,5 +35,5 @@ namespace = "mog"
 package_name = "window"
 kind = "native"
 package_dir = "packages/mog/window"
-api = "packages/mog/window/package.api.toml"
+api = "packages/mog/window/package.api.mog"
 description = "Official SDL2-backed windowing package."

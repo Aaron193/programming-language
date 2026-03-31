@@ -1,6 +1,7 @@
 #include "PackageRegistry.hpp"
 
 #include <cctype>
+#include <deque>
 #include <filesystem>
 #include <fstream>
 #include <string_view>
@@ -8,6 +9,8 @@
 
 #include "NativePackage.hpp"
 #include "PackageManifest.hpp"
+#include "Scanner.hpp"
+#include "SyntaxRules.hpp"
 
 namespace {
 
@@ -19,7 +22,7 @@ constexpr const char* kPackageLibraryFileName = "package.so";
 
 constexpr const char* kProjectManifestFileName = "mog.toml";
 constexpr const char* kProjectLockFileName = "mog.lock";
-constexpr const char* kPackageApiFileName = "package.api.toml";
+constexpr const char* kPackageApiFileName = "package.api.mog";
 
 enum class TomlSectionKind {
     NONE,
@@ -345,6 +348,484 @@ bool scanPackageRootForEntry(const std::filesystem::path& root,
     return false;
 }
 
+struct ParsedPackageApiType {
+    TypeRef type;
+    SourceSpan span = makePointSpan(1, 1);
+};
+
+class PackageApiParser {
+   public:
+    PackageApiParser(std::string_view source, std::string apiPath,
+                     std::string packageId, std::string importName)
+        : m_scanner(source),
+          m_apiPath(std::move(apiPath)),
+          m_packageId(std::move(packageId)),
+          m_importName(std::move(importName)) {
+        advance();
+    }
+
+    bool parse(PackageApiMetadata& outMetadata, std::string& outError) {
+        outMetadata = PackageApiMetadata{};
+        outError.clear();
+
+        if (!checkIdentifier("package")) {
+            outError = "Package API must start with 'package <name>'.";
+            return false;
+        }
+        advance();
+        if (!check(TokenType::IDENTIFIER)) {
+            outError = "Expected package name after 'package'.";
+            return false;
+        }
+
+        outMetadata.packageName = tokenText(m_current);
+        if (outMetadata.packageName != m_importName) {
+            outError = "Package API declares package '" + outMetadata.packageName +
+                       "' but manifest import name is '" + m_importName + "'.";
+            return false;
+        }
+        advance();
+
+        while (!check(TokenType::END_OF_FILE)) {
+            if (!parseDeclaration(outMetadata, outError)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+   private:
+    Scanner m_scanner;
+    Token m_current;
+    Token m_previous;
+    std::deque<Token> m_bufferedTokens;
+    std::string m_apiPath;
+    std::string m_packageId;
+    std::string m_importName;
+    std::unordered_map<std::string, TypeRef> m_opaqueTypes;
+
+    void advance() {
+        m_previous = m_current;
+        if (!m_bufferedTokens.empty()) {
+            m_current = m_bufferedTokens.front();
+            m_bufferedTokens.pop_front();
+            return;
+        }
+        m_current = m_scanner.nextToken();
+    }
+
+    const Token& tokenAt(size_t offset) {
+        if (offset == 0) {
+            return m_current;
+        }
+        while (m_bufferedTokens.size() < offset) {
+            m_bufferedTokens.push_back(m_scanner.nextToken());
+        }
+        return m_bufferedTokens[offset - 1];
+    }
+
+    bool check(TokenType type) const { return m_current.type() == type; }
+
+    bool match(TokenType type) {
+        if (!check(type)) {
+            return false;
+        }
+        advance();
+        return true;
+    }
+
+    bool checkIdentifier(std::string_view expected) const {
+        return m_current.type() == TokenType::IDENTIFIER &&
+               tokenText(m_current) == expected;
+    }
+
+    std::string tokenText(const Token& token) const {
+        return tokenLexeme(token);
+    }
+
+    bool consume(TokenType type, std::string_view description,
+                 std::string& outError) {
+        if (check(type)) {
+            advance();
+            return true;
+        }
+        outError = "Expected " + std::string(description) + ".";
+        return false;
+    }
+
+    bool parseAnnotation(std::string& outName, std::string& outValue,
+                         SourceSpan& outSpan, std::string& outError) {
+        Token atToken = m_current;
+        if (!consume(TokenType::AT, "'@'", outError)) {
+            return false;
+        }
+        if (!check(TokenType::IDENTIFIER)) {
+            outError = "Expected annotation name after '@'.";
+            return false;
+        }
+        outName = tokenText(m_current);
+        advance();
+        if (!consume(TokenType::OPEN_PAREN, "'('", outError)) {
+            return false;
+        }
+        if (!check(TokenType::STRING)) {
+            outError = "Expected string literal annotation argument.";
+            return false;
+        }
+        const std::string literal = tokenText(m_current);
+        outValue =
+            literal.size() >= 2 ? literal.substr(1, literal.size() - 2) : "";
+        advance();
+        if (!consume(TokenType::CLOSE_PAREN, "')'", outError)) {
+            return false;
+        }
+        outSpan = combineSourceSpans(atToken.span(), m_previous.span());
+        return true;
+    }
+
+    ParsedPackageApiType parseTypeExpr(std::string& outError) {
+        ParsedPackageApiType parsed;
+        Token startToken = m_current;
+
+        auto applyOptionalSuffix = [&]() {
+            while (check(TokenType::QUESTION)) {
+                Token questionToken = m_current;
+                advance();
+                parsed.type = TypeInfo::makeOptional(parsed.type);
+                parsed.span =
+                    combineSourceSpans(parsed.span, questionToken.span());
+            }
+        };
+
+        if (check(TokenType::TYPE_FN)) {
+            advance();
+            if (!consume(TokenType::OPEN_PAREN, "'('", outError)) {
+                return {};
+            }
+
+            std::vector<TypeRef> params;
+            if (!check(TokenType::CLOSE_PAREN)) {
+                while (true) {
+                    ParsedPackageApiType paramType = parseTypeExpr(outError);
+                    if (!paramType.type) {
+                        return {};
+                    }
+                    params.push_back(paramType.type);
+                    if (!match(TokenType::COMMA)) {
+                        break;
+                    }
+                }
+            }
+            if (!consume(TokenType::CLOSE_PAREN, "')'", outError)) {
+                return {};
+            }
+
+            ParsedPackageApiType returnType = parseTypeExpr(outError);
+            if (!returnType.type) {
+                return {};
+            }
+
+            parsed.type = TypeInfo::makeFunction(std::move(params), returnType.type);
+            parsed.span = combineSourceSpans(startToken.span(), returnType.span);
+            applyOptionalSuffix();
+            return parsed;
+        }
+
+        switch (m_current.type()) {
+            case TokenType::TYPE_I8:
+                parsed.type = TypeInfo::makeI8();
+                break;
+            case TokenType::TYPE_I16:
+                parsed.type = TypeInfo::makeI16();
+                break;
+            case TokenType::TYPE_I32:
+                parsed.type = TypeInfo::makeI32();
+                break;
+            case TokenType::TYPE_I64:
+                parsed.type = TypeInfo::makeI64();
+                break;
+            case TokenType::TYPE_U8:
+                parsed.type = TypeInfo::makeU8();
+                break;
+            case TokenType::TYPE_U16:
+                parsed.type = TypeInfo::makeU16();
+                break;
+            case TokenType::TYPE_U32:
+                parsed.type = TypeInfo::makeU32();
+                break;
+            case TokenType::TYPE_U64:
+                parsed.type = TypeInfo::makeU64();
+                break;
+            case TokenType::TYPE_USIZE:
+                parsed.type = TypeInfo::makeUSize();
+                break;
+            case TokenType::TYPE_F32:
+                parsed.type = TypeInfo::makeF32();
+                break;
+            case TokenType::TYPE_F64:
+                parsed.type = TypeInfo::makeF64();
+                break;
+            case TokenType::TYPE_BOOL:
+                parsed.type = TypeInfo::makeBool();
+                break;
+            case TokenType::TYPE_STR:
+                parsed.type = TypeInfo::makeStr();
+                break;
+            case TokenType::TYPE_VOID:
+                parsed.type = TypeInfo::makeVoid();
+                break;
+            case TokenType::TYPE_NULL_KW:
+                parsed.type = TypeInfo::makeNull();
+                break;
+            case TokenType::IDENTIFIER:
+                break;
+            default:
+                outError = "Expected type expression.";
+                return {};
+        }
+
+        if (parsed.type) {
+            parsed.span = m_current.span();
+            advance();
+            applyOptionalSuffix();
+            return parsed;
+        }
+
+        Token nameToken = m_current;
+        const std::string name = tokenText(nameToken);
+        advance();
+
+        if (isCollectionTypeNameText(name)) {
+            if (!consume(TokenType::LESS, "'<'", outError)) {
+                return {};
+            }
+            if (name == "Array" || name == "Set") {
+                ParsedPackageApiType elementType = parseTypeExpr(outError);
+                if (!elementType.type ||
+                    !consume(TokenType::GREATER, "'>'", outError)) {
+                    return {};
+                }
+                parsed.type = name == "Array" ? TypeInfo::makeArray(elementType.type)
+                                               : TypeInfo::makeSet(elementType.type);
+                parsed.span =
+                    combineSourceSpans(nameToken.span(), m_previous.span());
+                applyOptionalSuffix();
+                return parsed;
+            }
+
+            ParsedPackageApiType keyType = parseTypeExpr(outError);
+            if (!keyType.type || !consume(TokenType::COMMA, "','", outError)) {
+                return {};
+            }
+            ParsedPackageApiType valueType = parseTypeExpr(outError);
+            if (!valueType.type ||
+                !consume(TokenType::GREATER, "'>'", outError)) {
+                return {};
+            }
+            parsed.type = TypeInfo::makeDict(keyType.type, valueType.type);
+            parsed.span = combineSourceSpans(nameToken.span(), m_previous.span());
+            applyOptionalSuffix();
+            return parsed;
+        }
+
+        if (match(TokenType::DOT)) {
+            outError =
+                "Package API declarations must use package-local type names, not "
+                "qualified names.";
+            return {};
+        }
+
+        auto opaqueIt = m_opaqueTypes.find(name);
+        if (opaqueIt == m_opaqueTypes.end()) {
+            outError = "Unknown package API type '" + name + "'.";
+            return {};
+        }
+
+        parsed.type = opaqueIt->second;
+        parsed.span = nameToken.span();
+        applyOptionalSuffix();
+        return parsed;
+    }
+
+    bool parseOpaqueType(PackageApiMetadata& outMetadata, const std::string& doc,
+                         const std::string& nativeHandleTypeName,
+                         std::string& outError) {
+        Token opaqueToken = m_current;
+        advance();
+        if (!check(TokenType::TYPE)) {
+            outError = "Expected 'type' after 'opaque'.";
+            return false;
+        }
+        advance();
+        if (!check(TokenType::IDENTIFIER)) {
+            outError = "Expected opaque type name.";
+            return false;
+        }
+
+        Token nameToken = m_current;
+        const std::string name = tokenText(nameToken);
+        advance();
+
+        if (nativeHandleTypeName.empty()) {
+            outError = "Opaque type '" + name +
+                       "' must declare @native_handle(\"...\").";
+            return false;
+        }
+        if (!isValidHandleTypeName(nativeHandleTypeName)) {
+            outError = "Opaque type '" + name +
+                       "' has invalid @native_handle name '" +
+                       nativeHandleTypeName + "'.";
+            return false;
+        }
+
+        TypeRef type = TypeInfo::makeNativeHandle(m_packageId,
+                                                  nativeHandleTypeName,
+                                                  m_importName, name);
+        m_opaqueTypes[name] = type;
+        outMetadata.typeExports[name] = PackageApiOpaqueType{
+            type,
+            doc,
+            nativeHandleTypeName,
+            combineSourceSpans(opaqueToken.span(), nameToken.span()),
+            nameToken.span(),
+        };
+        return true;
+    }
+
+    bool parseConstDecl(PackageApiMetadata& outMetadata, const std::string& doc,
+                        std::string& outError) {
+        Token constToken = m_current;
+        advance();
+        if (!check(TokenType::IDENTIFIER)) {
+            outError = "Expected constant name after 'const'.";
+            return false;
+        }
+
+        Token nameToken = m_current;
+        const std::string name = tokenText(nameToken);
+        advance();
+
+        ParsedPackageApiType type = parseTypeExpr(outError);
+        if (!type.type) {
+            return false;
+        }
+
+        outMetadata.valueExports[name] = PackageApiExport{
+            type.type,
+            doc,
+            "constant",
+            combineSourceSpans(constToken.span(), type.span),
+            nameToken.span(),
+        };
+        return true;
+    }
+
+    bool parseFunctionDecl(PackageApiMetadata& outMetadata, const std::string& doc,
+                           std::string& outError) {
+        Token fnToken = m_current;
+        advance();
+        if (!check(TokenType::IDENTIFIER)) {
+            outError = "Expected function name after 'fn'.";
+            return false;
+        }
+
+        Token nameToken = m_current;
+        const std::string name = tokenText(nameToken);
+        advance();
+
+        if (!consume(TokenType::OPEN_PAREN, "'('", outError)) {
+            return false;
+        }
+
+        std::vector<TypeRef> params;
+        if (!check(TokenType::CLOSE_PAREN)) {
+            while (true) {
+                if (!check(TokenType::IDENTIFIER)) {
+                    outError = "Expected parameter name in function declaration.";
+                    return false;
+                }
+                advance();
+
+                ParsedPackageApiType paramType = parseTypeExpr(outError);
+                if (!paramType.type) {
+                    return false;
+                }
+                params.push_back(paramType.type);
+                if (!match(TokenType::COMMA)) {
+                    break;
+                }
+            }
+        }
+
+        if (!consume(TokenType::CLOSE_PAREN, "')'", outError)) {
+            return false;
+        }
+
+        ParsedPackageApiType returnType = parseTypeExpr(outError);
+        if (!returnType.type) {
+            return false;
+        }
+
+        outMetadata.valueExports[name] = PackageApiExport{
+            TypeInfo::makeFunction(std::move(params), returnType.type),
+            doc,
+            "function",
+            combineSourceSpans(fnToken.span(), returnType.span),
+            nameToken.span(),
+        };
+        return true;
+    }
+
+    bool parseDeclaration(PackageApiMetadata& outMetadata,
+                          std::string& outError) {
+        std::string doc;
+        std::string nativeHandleTypeName;
+        while (check(TokenType::AT)) {
+            std::string annotationName;
+            std::string annotationValue;
+            SourceSpan annotationSpan = makePointSpan(1, 1);
+            if (!parseAnnotation(annotationName, annotationValue, annotationSpan,
+                                 outError)) {
+                return false;
+            }
+
+            if (annotationName == "doc") {
+                doc = annotationValue;
+            } else if (annotationName == "native_handle") {
+                nativeHandleTypeName = annotationValue;
+            } else {
+                outError = "Unsupported package API annotation '@" +
+                           annotationName + "'.";
+                return false;
+            }
+        }
+
+        if (checkIdentifier("opaque")) {
+            return parseOpaqueType(outMetadata, doc, nativeHandleTypeName,
+                                   outError);
+        }
+        if (check(TokenType::CONST)) {
+            if (!nativeHandleTypeName.empty()) {
+                outError = "@native_handle can only annotate opaque type declarations.";
+                return false;
+            }
+            return parseConstDecl(outMetadata, doc, outError);
+        }
+        if (check(TokenType::TYPE_FN)) {
+            if (!nativeHandleTypeName.empty()) {
+                outError = "@native_handle can only annotate opaque type declarations.";
+                return false;
+            }
+            return parseFunctionDecl(outMetadata, doc, outError);
+        }
+
+        outError = "Unsupported package API declaration starting at '" +
+                   tokenText(m_current) + "'.";
+        return false;
+    }
+};
+
 }  // namespace
 
 std::string packageImportNameFromId(std::string_view packageId) {
@@ -494,6 +975,8 @@ bool resolveHandlePackageId(const std::string& importerPath,
 }
 
 bool loadPackageApiMetadata(const std::string& apiPath,
+                            const std::string& packageId,
+                            const std::string& importName,
                             PackageApiMetadata& outMetadata,
                             std::string& outError) {
     outMetadata = PackageApiMetadata{};
@@ -505,84 +988,100 @@ bool loadPackageApiMetadata(const std::string& apiPath,
         return false;
     }
 
-    TomlSectionKind section = TomlSectionKind::NONE;
-    std::string currentName;
-    std::string currentTypeText;
-    std::string currentDoc;
-    std::string line;
-    size_t lineNumber = 0;
+    std::string source((std::istreambuf_iterator<char>(file)),
+                       std::istreambuf_iterator<char>());
+    return parsePackageApiMetadata(source, apiPath, packageId, importName,
+                                   outMetadata, outError);
+}
 
-    auto flushCurrent = [&]() -> bool {
-        if (section != TomlSectionKind::EXPORT || currentName.empty()) {
-            currentName.clear();
-            currentTypeText.clear();
-            currentDoc.clear();
-            return true;
-        }
+bool parsePackageApiMetadata(std::string_view source,
+                             const std::string& apiPath,
+                             const std::string& packageId,
+                             const std::string& importName,
+                             PackageApiMetadata& outMetadata,
+                             std::string& outError) {
+    PackageApiParser parser(source, apiPath, packageId, importName);
+    return parser.parse(outMetadata, outError);
+}
 
-        std::string typeError;
-        TypeRef type = parsePackageType(currentTypeText, typeError);
-        if (!type) {
-            outError = "Package API export '" + currentName +
-                       "' has invalid type: " + typeError;
-            return false;
-        }
-        outMetadata.exportTypes[currentName] = type;
-        if (!currentDoc.empty()) {
-            outMetadata.exportDocs[currentName] = currentDoc;
-        }
-        currentName.clear();
-        currentTypeText.clear();
-        currentDoc.clear();
-        return true;
-    };
+namespace {
 
-    while (std::getline(file, line)) {
-        ++lineNumber;
-        const std::string content = stripComment(line);
-        if (content.empty()) {
-            continue;
-        }
+bool packageTypesEqual(const TypeRef& lhs, const TypeRef& rhs) {
+    if (!lhs || !rhs || lhs->kind != rhs->kind) {
+        return false;
+    }
 
-        if (content == "[[export]]") {
-            if (!flushCurrent()) {
+    switch (lhs->kind) {
+        case TypeKind::FUNCTION:
+            if (lhs->paramTypes.size() != rhs->paramTypes.size() ||
+                !packageTypesEqual(lhs->returnType, rhs->returnType)) {
                 return false;
             }
-            section = TomlSectionKind::EXPORT;
-            continue;
-        }
+            for (size_t index = 0; index < lhs->paramTypes.size(); ++index) {
+                if (!packageTypesEqual(lhs->paramTypes[index], rhs->paramTypes[index])) {
+                    return false;
+                }
+            }
+            return true;
+        case TypeKind::ARRAY:
+        case TypeKind::SET:
+            return packageTypesEqual(lhs->elementType, rhs->elementType);
+        case TypeKind::DICT:
+            return packageTypesEqual(lhs->keyType, rhs->keyType) &&
+                   packageTypesEqual(lhs->valueType, rhs->valueType);
+        case TypeKind::OPTIONAL:
+            return packageTypesEqual(lhs->innerType, rhs->innerType);
+        case TypeKind::CLASS:
+            return lhs->className == rhs->className;
+        case TypeKind::NATIVE_HANDLE:
+            return lhs->nativeHandlePackageId == rhs->nativeHandlePackageId &&
+                   lhs->nativeHandleTypeName == rhs->nativeHandleTypeName;
+        default:
+            return true;
+    }
+}
 
-        const size_t equals = content.find('=');
-        if (equals == std::string::npos) {
-            outError = "Invalid package API line " + std::to_string(lineNumber) +
-                       ": expected key = value.";
+}  // namespace
+
+bool validateNativePackageApi(const PackageApiMetadata& api,
+                              const NativePackageDescriptor& descriptor,
+                              std::string& outError) {
+    outError.clear();
+
+    for (const auto& [name, valueExport] : api.valueExports) {
+        const auto descriptorIt = descriptor.exportTypes.find(name);
+        if (descriptorIt == descriptor.exportTypes.end()) {
+            outError = "Package API declares export '" + name +
+                       "' that native package '" + descriptor.packageId +
+                       "' does not provide.";
             return false;
         }
-
-        if (section != TomlSectionKind::EXPORT) {
-            outError = "Invalid package API line " + std::to_string(lineNumber) +
-                       ": entries must appear inside [[export]].";
+        if (!packageTypesEqual(valueExport.type, descriptorIt->second)) {
+            outError = "Package API export '" + name +
+                       "' type mismatch: declaration uses '" +
+                       valueExport.type->toString() + "' but native package uses '" +
+                       descriptorIt->second->toString() + "'.";
             return false;
-        }
-
-        const std::string key = trim(std::string_view(content).substr(0, equals));
-        const std::string value =
-            trim(std::string_view(content).substr(equals + 1));
-        std::string parsed;
-        if (!parseQuotedString(value, parsed, outError)) {
-            outError = "Invalid package API line " + std::to_string(lineNumber) +
-                       ": " + outError;
-            return false;
-        }
-
-        if (key == "name") {
-            currentName = parsed;
-        } else if (key == "type") {
-            currentTypeText = parsed;
-        } else if (key == "doc") {
-            currentDoc = parsed;
         }
     }
 
-    return flushCurrent();
+    for (const auto& function : descriptor.functions) {
+        if (api.valueExports.find(function.name) == api.valueExports.end()) {
+            outError = "Native package '" + descriptor.packageId +
+                       "' exports function '" + function.name +
+                       "' but package API does not declare it.";
+            return false;
+        }
+    }
+
+    for (const auto& constant : descriptor.constants) {
+        if (api.valueExports.find(constant.name) == api.valueExports.end()) {
+            outError = "Native package '" + descriptor.packageId +
+                       "' exports constant '" + constant.name +
+                       "' but package API does not declare it.";
+            return false;
+        }
+    }
+
+    return true;
 }
