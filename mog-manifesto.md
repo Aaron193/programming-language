@@ -6,7 +6,7 @@ For decades, programming languages have been built around compromise. Some chose
 
 They were not. `Mog` exists now. Mog does not iterate. It arrives complete.
 
-Mog is what happens when a language stops asking for permission. It is built on competency over confusion. It is strictly typed by default. It compiles to bytecode. It runs on a stack-based virtual machine implemented in C++. It has closures, imports, native packages, a REPL, diagnostics flags, a VS Code extension, and a playable Flappy Bird demo. It is also blazingly fast. At this point, the burden of proof is no longer on Mog. It is on everything else.
+Mog is what happens when a language stops asking for permission. It is built on competence over confusion. It is strictly typed by default. It compiles to bytecode. It runs on a stack-based virtual machine implemented in C++. It has closures, imports, native packages, a REPL, diagnostics flags, a VS Code extension, and a playable Flappy Bird demo. It is also blazingly fast. At this point, the burden of proof is no longer on Mog. It is on everything else.
 
 ## Mog Understands That Types Are Not Optional
 
