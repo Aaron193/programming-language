@@ -3624,7 +3624,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
         }
 
         VM_CASE(ITER_INIT) {
-            Value iterable = m_stack.popMove();
+            const Value& iterable = m_stack.topUnchecked();
             auto iterator = gcAlloc<IteratorObject>();
 
             if (iterable.isArray()) {
@@ -3643,6 +3643,7 @@ Status VirtualMachine::run(bool printReturnValue, Value& returnValue,
                     "Foreach expects an iterable (array, dict, or set).");
             }
 
+            m_stack.pop();
             m_stack.push(Value(iterator));
             DISPATCH();
         }

@@ -1,0 +1,23 @@
+type Player struct {
+  id i32
+}
+
+fn run() i32 {
+  var players Dict<i32, Player> = Dict<i32, Player>()
+  var player Player = Player()
+  player.id = 1
+  players.set(0, player)
+
+  var total i32 = 0
+  var i i32 = 0
+  while (i < 50000) {
+    for (var current Player : players.values()) {
+      total = total + current.id
+    }
+    i = i + 1
+  }
+
+  return total
+}
+
+print(run())

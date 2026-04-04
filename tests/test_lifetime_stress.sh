@@ -117,6 +117,10 @@ run_expect_exact_output \
     "$SCRIPT_DIR/sample_ast_opt_import_member_cast_stress.mog" \
     "2200" || failed=1
 
+run_expect_exact_output \
+    "$SCRIPT_DIR/sample_stress_dict_values_instances.mog" \
+    "50000" || failed=1
+
 if [[ $failed -ne 0 ]]; then
     exit 1
 fi

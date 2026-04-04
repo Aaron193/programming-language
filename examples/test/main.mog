@@ -105,8 +105,7 @@ type Game struct {
     }
 
     fn update(dt f64) void {
-        for (const id usize : this.players.keys()) {
-            const player Player = this.players.get(id)
+        for (const player Player : this.players.values()) {
             print(player.name)
         }
     }
