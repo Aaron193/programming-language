@@ -1,7 +1,8 @@
-# Programming Language Interpreter
+# Mog Programming Language
 
-This project is a bytecode-compiled, stack-based interpreter implemented in C++.
-The language is strictly typed by default; there is no opt-in non-strict mode.
+Mog is a bytecode-compiled, stack-based programming language implemented in
+C++. It is strictly typed by default, with a compiler, VM, REPL, native package
+system, and editor tooling in the same repository.
 
 ## Supported Language Features
 
@@ -10,12 +11,12 @@ The language is strictly typed by default; there is no opt-in non-strict mode.
 - Comparison/equality: `>`, `>=`, `<`, `<=`, `==`, `!=`
 - Logical operators: `!`, `&&`, `||` (short-circuiting)
 - Bitwise operators: `&`, `|`, `^`, `~`, `<<`, `>>`
-- Variables: `var name Type = value`, `var name = value`, `const name Type = value`, `const name = value`, `const name = @import(...)`, assignment, compound assignment (`+=`, `-=`, `*=`, `/=`, `&=`, `|=`, `^=`, `<<=`, `>>=`), lexical scope
+- Variables and constants: explicit or inferred local bindings (`var name Type = value`, `var name = value`, `const name Type = value`, `const name = value`), assignment, compound assignment (`+=`, `-=`, `*=`, `/=`, `&=`, `|=`, `^=`, `<<=`, `>>=`), lexical scope
 - Update operators: `++`, `--`
 - Control flow: `if`/`else`, `while`, `for`, foreach (`for (var x Type : collection)`), `break`, `continue`, labeled loops
 - Functions: `fn name(param Type, ...) ReturnType { ... }`, omitted `void` on named functions/methods (`fn name(...) { ... }`), block function literals, expression-bodied lambdas, recursion
 - Closures: nested functions with captured/upvalue variables
-- Types: `type Name struct { ... }`, aliases via `type Alias ExistingType`, fields/methods, `this`
+- Types: `type Name struct { ... }`, aliases via `type Alias ExistingType`, fields/methods, `this`, nullable types with `?`
 - Inheritance: `type Child struct < Parent { ... }` with `super.method()` calls
 - Modules: `@import(...)` bindings with capitalization-based exports
 - Operator annotations: `@operator(\"+\")` lowers annotated method calls at compile time
@@ -23,7 +24,7 @@ The language is strictly typed by default; there is no opt-in non-strict mode.
 
 Notes:
 - Semicolons are not part of normal statement syntax. They are only used as separators inside `for (...)` clauses.
-- Local declarations still require explicit types except for `@import(...)` bindings.
+- Local `var`/`const` bindings can omit the type when it can be inferred. Function parameters, exported APIs, and ambiguous cases still need explicit types.
 - `type ... struct` is currently class-backed syntax, not a separate value-type runtime.
 - Supported operator annotations are currently limited to `+`, `-`, `*`, `/`, `==`, `!=`, `<`, `<=`, `>`, `>=`.
 - Newline continuation is explicit: `(`, `[`, `.`, `as`, assignment operators, and binary operators must stay on the same line as the expression they continue.
@@ -33,49 +34,86 @@ Notes:
 
 Examples:
 
-Functions and lambdas:
+Functions, lambdas, and closures:
 
-```expr
+```rust
 fn applyTwice(f fn(i32) i32, value i32) i32 {
   return f(f(value))
 }
 
-var addOne fn(i32) i32 = fn(x i32) => x + 1
-print(applyTwice(addOne, 40))
-```
-
-Closures:
-
-```expr
-fn makeAdder(x i32) fn(i32) i32 {
-  return fn(y i32) => x + y
+fn makeAdder(base i32) fn(i32) i32 {
+  return fn(delta i32) => base + delta
 }
 
-var addTen fn(i32) i32 = makeAdder(10)
+var addOne = fn(x i32) => x + 1
+var addTen = makeAdder(10)
+
+print(applyTwice(addOne, 40))
 print(addTen(32))
 ```
 
-Types and fields:
+Structs, methods, and inferred locals:
 
-```expr
-type Bag struct {
+```rust
+type Counter struct {
   value i32
-  label str
+
+  fn reset() {
+    this.value = 0
+  }
 }
 
-var bag Bag = Bag()
-bag.value = 42
-bag.label = "snacks"
-print(bag.label)
+fn buildCounter() Counter {
+  var counter = Counter()
+  counter.reset()
+  return counter
+}
+
+var current = buildCounter()
+print(current.value)
 ```
 
-Collections:
+Inheritance and `super` calls:
 
-```expr
+```rust
+type A struct {
+  fn greet() str {
+    return "A"
+  }
+}
+
+type B struct < A {
+  fn greet() str {
+    return super.greet() + "B"
+  }
+}
+
+print(B().greet())
+```
+
+Collections, iteration, and nullable values:
+
+```rust
 var scores Dict<str, i32> = {"alice": 7, "bob": 9}
-scores["alice"] = scores["alice"] + 1
-print(scores.get("alice"))
-print(scores.has("bob"))
+for (var name str : scores.keys()) {
+  print(name)
+  print(scores[name])
+}
+
+var maybeScore i32? = 7
+if (maybeScore != null) {
+  print("score present")
+}
+```
+
+Modules and aliasing:
+
+```rust
+const math = @import("./math.mog")
+const { Add as sum } = @import("./math.mog")
+
+print(math.PI)
+print(sum(10, 5))
 ```
 
 Syntax note: continuation tokens such as `(`, `[`, `.`, `as`, assignment operators, and binary operators must stay on the same line as the expression they continue. For example, `print(1 +` on one line and `2)` on the next is valid, but moving `+` to the next line is rejected.
