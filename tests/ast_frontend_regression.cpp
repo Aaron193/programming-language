@@ -156,6 +156,30 @@ HirDestructuredImportStmt* topLevelHirDestructuredImport(HirModule& module) {
     return nullptr;
 }
 
+AstStmt* topLevelVarDeclStmt(AstModule& module, std::string_view name) {
+    for (auto& item : module.items) {
+        if (!item) {
+            continue;
+        }
+
+        auto* stmtPtr = std::get_if<AstStmtPtr>(&item->value);
+        if (!stmtPtr || !*stmtPtr) {
+            continue;
+        }
+
+        auto* varDecl = std::get_if<AstVarDeclStmt>(&(*stmtPtr)->value);
+        if (!varDecl) {
+            continue;
+        }
+
+        if (std::string_view(varDecl->name.start(), varDecl->name.length()) == name) {
+            return stmtPtr->get();
+        }
+    }
+
+    return nullptr;
+}
+
 bool buildOptimizedFrontend(std::string_view source,
                             OptimizedFrontendResult& outResult,
                             std::string& outError) {
@@ -1590,6 +1614,118 @@ bool checkHirDeadForRewriteRegression() {
     return true;
 }
 
+bool checkTypeInferenceFrontendRegression() {
+    constexpr std::string_view kSource =
+        "type Counter struct {\n"
+        "    value i32\n"
+        "    fn reset() {\n"
+        "        this.value = 0\n"
+        "    }\n"
+        "}\n"
+        "fn buildCounter() Counter {\n"
+        "    var counter = Counter()\n"
+        "    return counter\n"
+        "}\n"
+        "fn touch(counter Counter) {\n"
+        "    counter.reset()\n"
+        "}\n"
+        "var current = buildCounter()\n";
+
+    AstFrontendResult frontend;
+    std::vector<TypeError> errors;
+    const AstFrontendOptions options;
+    const AstFrontendBuildStatus status =
+        buildAstFrontend(kSource, options, errors, frontend);
+    if (!require(status == AstFrontendBuildStatus::Success,
+                 "type inference regression source should build successfully")) {
+        return false;
+    }
+
+    const auto buildCounterIt = frontend.functionSignatures.find("buildCounter");
+    if (!require(buildCounterIt != frontend.functionSignatures.end() &&
+                     buildCounterIt->second &&
+                     buildCounterIt->second->returnType &&
+                     buildCounterIt->second->returnType->kind == TypeKind::CLASS &&
+                     buildCounterIt->second->returnType->className == "Counter",
+                 "function signature collection should preserve explicit non-void returns")) {
+        return false;
+    }
+
+    const auto touchIt = frontend.functionSignatures.find("touch");
+    if (!require(touchIt != frontend.functionSignatures.end() &&
+                     touchIt->second &&
+                     touchIt->second->returnType &&
+                     touchIt->second->returnType->isVoid(),
+                 "omitted named function returns should collect as void signatures")) {
+        return false;
+    }
+
+    const auto classIt =
+        frontend.semanticModel.metadata.classMethodSignatures.find("Counter");
+    if (!require(classIt != frontend.semanticModel.metadata.classMethodSignatures.end(),
+                 "class method metadata should include the inferred-void method")) {
+        return false;
+    }
+
+    const auto resetIt = classIt->second.find("reset");
+    if (!require(resetIt != classIt->second.end() && resetIt->second &&
+                     resetIt->second->returnType &&
+                     resetIt->second->returnType->isVoid(),
+                 "omitted method returns should collect as void metadata")) {
+        return false;
+    }
+
+    AstStmt* currentStmt = topLevelVarDeclStmt(frontend.module, "current");
+    if (!require(currentStmt != nullptr,
+                 "type inference regression should contain the top-level inferred variable")) {
+        return false;
+    }
+
+    const auto nodeTypeIt = frontend.semanticModel.nodeTypes.find(currentStmt->node.id);
+    if (!require(nodeTypeIt != frontend.semanticModel.nodeTypes.end() &&
+                     nodeTypeIt->second &&
+                     nodeTypeIt->second->kind == TypeKind::CLASS &&
+                     nodeTypeIt->second->className == "Counter",
+                 "semantic model should record inferred variable types")) {
+        return false;
+    }
+
+    if (!require(frontend.hirModule != nullptr,
+                 "type inference regression should lower to HIR")) {
+        return false;
+    }
+
+    HirVarDeclStmt* hirCurrentDecl = nullptr;
+    for (HirItemId itemId : frontend.hirModule->items) {
+        auto* stmtId = std::get_if<HirStmtId>(&frontend.hirModule->item(itemId).value);
+        if (!stmtId) {
+            continue;
+        }
+
+        auto* varDecl =
+            std::get_if<HirVarDeclStmt>(&frontend.hirModule->stmt(*stmtId).value);
+        if (!varDecl) {
+            continue;
+        }
+
+        if (std::string_view(varDecl->name.start(), varDecl->name.length()) == "current") {
+            hirCurrentDecl = varDecl;
+            break;
+        }
+    }
+
+    if (!require(hirCurrentDecl != nullptr && hirCurrentDecl->omittedType &&
+                     hirCurrentDecl->node.type &&
+                     hirCurrentDecl->node.type->kind == TypeKind::CLASS &&
+                     hirCurrentDecl->node.type->className == "Counter",
+                 "HIR should preserve the inferred variable type")) {
+        return false;
+    }
+
+    std::cout << "[PASS] type inference frontend regression\n";
+    return true;
+}
+
 }  // namespace
 
 int main() {
@@ -1668,6 +1804,9 @@ int main() {
         return 1;
     }
     if (!checkHirDeadForRewriteRegression()) {
+        return 1;
+    }
+    if (!checkTypeInferenceFrontendRegression()) {
         return 1;
     }
 

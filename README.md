@@ -10,10 +10,10 @@ The language is strictly typed by default; there is no opt-in non-strict mode.
 - Comparison/equality: `>`, `>=`, `<`, `<=`, `==`, `!=`
 - Logical operators: `!`, `&&`, `||` (short-circuiting)
 - Bitwise operators: `&`, `|`, `^`, `~`, `<<`, `>>`
-- Variables: `var name Type = value`, `const name Type = value`, `const name = @import(...)`, assignment, compound assignment (`+=`, `-=`, `*=`, `/=`, `&=`, `|=`, `^=`, `<<=`, `>>=`), lexical scope
+- Variables: `var name Type = value`, `var name = value`, `const name Type = value`, `const name = value`, `const name = @import(...)`, assignment, compound assignment (`+=`, `-=`, `*=`, `/=`, `&=`, `|=`, `^=`, `<<=`, `>>=`), lexical scope
 - Update operators: `++`, `--`
 - Control flow: `if`/`else`, `while`, `for`, foreach (`for (var x Type : collection)`), `break`, `continue`, labeled loops
-- Functions: `fn name(param Type, ...) ReturnType { ... }`, block function literals, expression-bodied lambdas, recursion
+- Functions: `fn name(param Type, ...) ReturnType { ... }`, omitted `void` on named functions/methods (`fn name(...) { ... }`), block function literals, expression-bodied lambdas, recursion
 - Closures: nested functions with captured/upvalue variables
 - Types: `type Name struct { ... }`, aliases via `type Alias ExistingType`, fields/methods, `this`
 - Inheritance: `type Child struct < Parent { ... }` with `super.method()` calls

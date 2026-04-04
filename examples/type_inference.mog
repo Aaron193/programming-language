@@ -1,0 +1,38 @@
+// Example Type Inference feature
+
+/* Example 1:  fn return void is optional: */
+
+type Person struct {
+    name str
+}
+
+fn modifyPerson(person Person) void { // <- void here could be optional when 
+    // it can be inferred by the compiler: fn modifyPerson(person Person) {
+    person.name = "Bob"
+}
+
+/* Example 2:  type annotations on variables are optional: */
+fn main() void {
+    var person Person = Person() // <- type annotation on variable is optional
+    // when it can be inferred by the compiler: var person = Person()
+    modifyPerson(person)
+}
+
+// another example of #2
+
+fn createPerson(name str) Person {
+    var person Person = Person()
+    person.name = name
+    return person
+}
+
+var person Person = createPerson("Alice") // <- type annotation on variable is
+//  optional when it can be inferred by the compiler: var person = createPerson("Alice")
+// another example of #2
+
+fn secondOrderFunction() fn(str) Person {
+    return createPerson
+}
+
+var func fn(str) Person = secondOrderFunction() // <- type annotation on variable is 
+// optional when it can be inferred by the compiler: var func = secondOrderFunction()

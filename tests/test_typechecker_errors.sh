@@ -165,6 +165,14 @@ run_expect_compile_error \
     "1:36" || failed=1
 
 run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/infer_var_from_void.mog" \
+    "cannot infer type for variable 'result' from a void expression; add an explicit type annotation." || failed=1
+
+run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/omitted_return_value_named_function.mog" \
+    "functions with omitted return types cannot return a value; add an explicit return type." || failed=1
+
+run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/assign_handle_foreign_type.mog" \
     "cannot assign 'counter.Counter' to variable 'bad' of type 'window.Window'" || failed=1
 

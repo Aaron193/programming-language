@@ -87,10 +87,13 @@ bool collectSymbolsFromAst(
             params.push_back(resolved ? resolved : TypeInfo::makeAny());
         }
 
-        TypeRef returnType =
-            functionDecl->returnType
-                ? frontendResolveTypeExpr(*functionDecl->returnType, typeContext)
-                : TypeInfo::makeAny();
+        TypeRef returnType = nullptr;
+        if (functionDecl->returnType) {
+            returnType =
+                frontendResolveTypeExpr(*functionDecl->returnType, typeContext);
+        } else {
+            returnType = TypeInfo::makeVoid();
+        }
         if (!returnType) {
             returnType = TypeInfo::makeAny();
         }

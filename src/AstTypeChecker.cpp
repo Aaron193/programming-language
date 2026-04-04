@@ -96,6 +96,7 @@ class AstTypeCheckerImpl {
 
     struct FunctionCtx {
         TypeRef returnType = TypeInfo::makeAny();
+        bool omittedReturnType = false;
     };
 
     struct LoopCtx {
@@ -872,6 +873,8 @@ class AstTypeCheckerImpl {
             } else if (hasExpectedFunctionType && expectedSignature->returnType &&
                        !expectedSignature->returnType->isAny()) {
                 out.returnType = expectedSignature->returnType;
+            } else if (!isClosure) {
+                out.returnType = TypeInfo::makeVoid();
             }
 
             const bool hasSignatureReturnType =
@@ -880,7 +883,7 @@ class AstTypeCheckerImpl {
             const bool isInitializer = isMethod && functionName == "init";
 
             if (!hasExplicitReturnType && !hasSignatureReturnType &&
-                !isInitializer) {
+                !isInitializer && isClosure) {
                 addError(fallbackSpan,
                          "Type error: function '" + functionName +
                              "' must declare a return type.");
@@ -1864,14 +1867,7 @@ class AstTypeCheckerImpl {
         const std::string name = tokenText(stmt.name);
         TypeRef declaredType = TypeInfo::makeAny();
         const bool omittedType = stmt.omittedType;
-
-        if (omittedType) {
-            if (!stmt.initializer || !isImportExpr(*stmt.initializer)) {
-                addError(stmt.name.span(),
-                         "Type error: variables require an explicit type unless "
-                         "initialized from '@import(...)'.");
-            }
-        } else {
+        if (!omittedType) {
             declaredType = requireTypeExpr(
                 stmt.declaredType.get(), stmt.name.span(),
                 "Type error: expected type after variable name.");
@@ -1900,8 +1896,25 @@ class AstTypeCheckerImpl {
         }
 
         TypeRef finalType = omittedType ? initializer.type : declaredType;
+        if (omittedType) {
+            const bool initializerIsImport =
+                stmt.initializer && isImportExpr(*stmt.initializer);
+            if ((!finalType || finalType->isAny()) && !initializerIsImport) {
+                addError(stmt.name.span(),
+                         "Type error: cannot infer type for variable '" + name +
+                             "'; add an explicit type annotation.");
+                finalType = TypeInfo::makeAny();
+            } else if (finalType->isVoid()) {
+                addError(stmt.name.span(),
+                         "Type error: cannot infer type for variable '" + name +
+                             "' from a void expression; add an explicit type annotation.");
+                finalType = TypeInfo::makeAny();
+            }
+        }
         declareValue(stmtNode.id, finalType, stmt.isConst);
         recordDeclarationType(stmtNode, name, finalType, stmt.name.line(),
+                              stmt.isConst);
+        recordDeclarationType(stmt.node, name, finalType, stmt.name.line(),
                               stmt.isConst);
     }
 
@@ -1984,6 +1997,11 @@ class AstTypeCheckerImpl {
         }
 
         if (!m_functionContexts.empty()) {
+            if (m_functionContexts.back().omittedReturnType) {
+                addError(stmt.value->node,
+                         "Type error: functions with omitted return types cannot "
+                         "return a value; add an explicit return type.");
+            }
             TypeRef expected = m_functionContexts.back().returnType;
             ExprInfo value = analyzeExpr(*stmt.value, expected);
             if (expected && !isAssignableType(value.type, expected)) {
@@ -2212,7 +2230,12 @@ class AstTypeCheckerImpl {
             functionName, functionDecl.params, functionDecl.returnType.get(),
             functionType, false, false, true, functionDecl.name.span());
 
-        m_functionContexts.push_back(FunctionCtx{signature.returnType});
+        const bool omittedReturnType =
+            functionDecl.returnType == nullptr ||
+            (functionDecl.returnType &&
+             isOmittedNamedType(*functionDecl.returnType));
+        m_functionContexts.push_back(
+            FunctionCtx{signature.returnType, omittedReturnType});
         for (size_t index = 0; index < signature.params.size(); ++index) {
             declareValue(functionDecl.params[index].node.id,
                          signature.params[index].second, false);
@@ -2259,7 +2282,9 @@ class AstTypeCheckerImpl {
                 methodType && methodType->kind == TypeKind::FUNCTION &&
                         methodType->returnType
                     ? methodType->returnType
-                    : TypeInfo::makeAny()});
+                    : TypeInfo::makeAny(),
+                method.returnType == nullptr ||
+                    (method.returnType && isOmittedNamedType(*method.returnType))});
 
             const auto& paramTypes =
                 methodType && methodType->kind == TypeKind::FUNCTION

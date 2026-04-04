@@ -1,0 +1,5 @@
+fn logValue() {
+    print("hi")
+}
+
+var result = logValue()

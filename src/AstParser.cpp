@@ -1324,12 +1324,31 @@ AstStmtPtr AstParser::parseForStatement(const Token& forToken) {
 
         Token nameToken = m_current;
         advance();
-        std::unique_ptr<AstTypeExpr> declaredType = parseTypeExpr();
-        if (!declaredType) {
-            return nullptr;
-        }
+        if (check(TokenType::EQUAL)) {
+            auto varDecl = std::make_unique<AstVarDeclStmt>();
+            varDecl->node = makeNodeInfo(mutabilityToken);
+            varDecl->isConst = isConst;
+            varDecl->name = nameToken;
+            varDecl->omittedType = true;
+            advance();
+            varDecl->initializer = parseExpression();
+            if (!varDecl->initializer) {
+                return nullptr;
+            }
+            recoverLineLeadingContinuation({TokenType::SEMI_COLON});
+            if (!consume(TokenType::SEMI_COLON)) {
+                return nullptr;
+            }
+            varDecl->node = makeNodeInfo(combineSourceSpans(
+                mutabilityToken.span(), varDecl->initializer->node.span));
+            forStmt.initializer = std::move(varDecl);
+        } else {
+            std::unique_ptr<AstTypeExpr> declaredType = parseTypeExpr();
+            if (!declaredType) {
+                return nullptr;
+            }
 
-        if (match(TokenType::COLON)) {
+            if (match(TokenType::COLON)) {
             AstForEachStmt foreach;
             foreach.isConst = isConst;
             foreach.name = nameToken;
@@ -1347,26 +1366,27 @@ AstStmtPtr AstParser::parseForStatement(const Token& forToken) {
                 return nullptr;
             }
             forEachStmt = std::move(foreach);
-        } else {
-            if (!consume(TokenType::EQUAL)) {
-                return nullptr;
+            } else {
+                if (!consume(TokenType::EQUAL)) {
+                    return nullptr;
+                }
+                auto varDecl = std::make_unique<AstVarDeclStmt>();
+                varDecl->node = makeNodeInfo(mutabilityToken);
+                varDecl->isConst = isConst;
+                varDecl->name = nameToken;
+                varDecl->declaredType = std::move(declaredType);
+                varDecl->initializer = parseExpression();
+                if (!varDecl->initializer) {
+                    return nullptr;
+                }
+                recoverLineLeadingContinuation({TokenType::SEMI_COLON});
+                if (!consume(TokenType::SEMI_COLON)) {
+                    return nullptr;
+                }
+                varDecl->node = makeNodeInfo(combineSourceSpans(
+                    mutabilityToken.span(), varDecl->initializer->node.span));
+                forStmt.initializer = std::move(varDecl);
             }
-            auto varDecl = std::make_unique<AstVarDeclStmt>();
-            varDecl->node = makeNodeInfo(mutabilityToken);
-            varDecl->isConst = isConst;
-            varDecl->name = nameToken;
-            varDecl->declaredType = std::move(declaredType);
-            varDecl->initializer = parseExpression();
-            if (!varDecl->initializer) {
-                return nullptr;
-            }
-            recoverLineLeadingContinuation({TokenType::SEMI_COLON});
-            if (!consume(TokenType::SEMI_COLON)) {
-                return nullptr;
-            }
-            varDecl->node = makeNodeInfo(
-                combineSourceSpans(mutabilityToken.span(), varDecl->initializer->node.span));
-            forStmt.initializer = std::move(varDecl);
         }
         (void)mutabilityToken;
     } else {

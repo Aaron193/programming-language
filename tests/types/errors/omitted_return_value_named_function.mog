@@ -1,0 +1,3 @@
+fn answer() {
+    return 42
+}

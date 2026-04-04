@@ -279,6 +279,8 @@ class AstBinderImpl {
             } else {
                 out.returnType = resolved;
             }
+        } else {
+            out.returnType = TypeInfo::makeVoid();
         }
 
         return out;

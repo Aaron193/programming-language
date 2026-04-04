@@ -1,0 +1,22 @@
+type Counter struct {
+    value i32
+
+    fn reset() {
+        this.value = 0
+    }
+}
+
+fn buildCounter() Counter {
+    var counter = Counter()
+    return counter
+}
+
+fn touch(counter Counter) {
+    counter.reset()
+}
+
+var current = buildCounter()
+
+for (var next = buildCounter(); false;) {
+    touch(next)
+}
