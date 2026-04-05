@@ -31,7 +31,8 @@ fn updatePipes(state GameState, dt f64) void {
 
 fn updateScore(state GameState) void {
     for (var pipe Pipe : state.pipes) {
-        if (pipe.passed == false && (pipe.x + (C.PIPE_WIDTH as f64)) < (C.BIRD_X as f64)) {
+        if (pipe.passed == false &&
+            (pipe.x + (C.PIPE_WIDTH as f64)) < (C.BIRD_X as f64)) {
             pipe.passed = true
             state.score = state.score + 1
         }
@@ -46,7 +47,7 @@ fn checkCollisions(state GameState) bool {
     const groundTop f64 = (C.WINDOW_HEIGHT - C.GROUND_HEIGHT) as f64
     const halfGap f64 = (C.PIPE_GAP as f64) / 2.0
 
-    if (birdTop < 0.0) {
+    if (birdTop < 0) {
         return true
     }
 

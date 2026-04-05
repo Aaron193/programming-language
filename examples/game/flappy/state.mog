@@ -32,28 +32,28 @@ fn nextGapY(spawnIndex i32) f64 {
     }
 
     if (cycle == 0) {
-        return 180.0
+        return 180
     }
     if (cycle == 1) {
-        return 260.0
+        return 260
     }
     if (cycle == 2) {
-        return 320.0
+        return 320
     }
     if (cycle == 3) {
-        return 230.0
+        return 230
     }
     if (cycle == 4) {
-        return 150.0
+        return 150
     }
     if (cycle == 5) {
-        return 300.0
+        return 300
     }
     if (cycle == 6) {
-        return 210.0
+        return 210
     }
 
-    return 280.0
+    return 280
 }
 
 fn SpawnPipe(state GameState, x f64) void {
@@ -63,18 +63,18 @@ fn SpawnPipe(state GameState, x f64) void {
 }
 
 fn SeedInitialPipes(state GameState) void {
-    SpawnPipe(state, 500.0)
-    SpawnPipe(state, 500.0 + (PIPE_SPEED * SPAWN_INTERVAL))
+    SpawnPipe(state, 500)
+    SpawnPipe(state, 500 + (PIPE_SPEED * SPAWN_INTERVAL))
 }
 
 fn ResetGame() GameState {
     const state GameState = GameState()
     const pipes Array<Pipe> = []
 
-    state.birdY = 220.0
-    state.birdVelocity = 0.0
+    state.birdY = 220
+    state.birdVelocity = 0
     state.pipes = pipes
-    state.spawnTimer = 0.0
+    state.spawnTimer = 0
     state.spawnIndex = 0
     state.score = 0
     state.running = true
