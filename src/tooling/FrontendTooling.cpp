@@ -497,6 +497,11 @@ struct ResolvedClassDeclaration {
     const AstClassDecl* declaration = nullptr;
 };
 
+struct ResolvedMemberDeclaration {
+    const ToolingDocumentAnalysis* analysis = nullptr;
+    DeclarationSite declaration;
+};
+
 std::optional<ResolvedClassDeclaration> resolveClassDeclarationForTooling(
     const ToolingDocumentAnalysis& analysis, std::string_view className,
     ImportedToolingAnalysisCache& cache) {
@@ -533,34 +538,39 @@ std::optional<ResolvedClassDeclaration> resolveClassDeclarationForTooling(
     return std::nullopt;
 }
 
-std::optional<DeclarationSite> findClassMemberDeclarationSite(
+std::optional<ResolvedMemberDeclaration> resolveClassMemberDeclarationForTooling(
     const ToolingDocumentAnalysis& analysis, std::string_view className,
-    std::string_view memberName) {
+    std::string_view memberName, ImportedToolingAnalysisCache& cache) {
     std::string current(className);
     std::unordered_set<std::string> visited;
 
     while (!current.empty() && visited.insert(current).second) {
-        const AstClassDecl* classDecl =
-            findClassDeclaration(analysis.frontend.module, current);
-        if (classDecl == nullptr) {
+        const auto resolvedClass =
+            resolveClassDeclarationForTooling(analysis, current, cache);
+        if (!resolvedClass.has_value() || resolvedClass->analysis == nullptr ||
+            resolvedClass->declaration == nullptr) {
             break;
         }
 
-        for (const auto& field : classDecl->fields) {
+        const ToolingDocumentAnalysis& ownerAnalysis = *resolvedClass->analysis;
+        const AstClassDecl& classDecl = *resolvedClass->declaration;
+        for (const auto& field : classDecl.fields) {
             if (tokenText(field.name) == memberName) {
-                return fieldDeclarationSite(field);
+                return ResolvedMemberDeclaration{&ownerAnalysis,
+                                                 fieldDeclarationSite(field)};
             }
         }
 
-        for (const auto& method : classDecl->methods) {
+        for (const auto& method : classDecl.methods) {
             if (tokenText(method.name) == memberName) {
-                return methodDeclarationSite(method);
+                return ResolvedMemberDeclaration{&ownerAnalysis,
+                                                 methodDeclarationSite(method)};
             }
         }
 
         const auto superIt =
-            analysis.frontend.bindings.metadata.superclassOf.find(current);
-        if (superIt == analysis.frontend.bindings.metadata.superclassOf.end()) {
+            ownerAnalysis.frontend.bindings.metadata.superclassOf.find(current);
+        if (superIt == ownerAnalysis.frontend.bindings.metadata.superclassOf.end()) {
             break;
         }
 
@@ -568,6 +578,16 @@ std::optional<DeclarationSite> findClassMemberDeclarationSite(
     }
 
     return std::nullopt;
+}
+
+std::optional<DeclarationSite> findClassMemberDeclarationSite(
+    const ToolingDocumentAnalysis& analysis, std::string_view className,
+    std::string_view memberName) {
+    ImportedToolingAnalysisCache cache;
+    const auto resolved = resolveClassMemberDeclarationForTooling(
+        analysis, className, memberName, cache);
+    return resolved.has_value() ? std::optional<DeclarationSite>(resolved->declaration)
+                                : std::nullopt;
 }
 
 std::vector<DeclarationSite> collectClassMemberDeclarationSites(
@@ -4478,21 +4498,33 @@ std::optional<MemberAccessResolution> resolveMemberAccessForTooling(
 
     const std::string memberName = tokenText(target->memberExpr->member);
     if (objectTypeIt->second->kind == TypeKind::CLASS) {
-        const auto declaration = findClassMemberDeclarationSite(
-            analysis, objectTypeIt->second->className, memberName);
-        if (!declaration.has_value()) {
+        ImportedToolingAnalysisCache cache;
+        const auto resolvedMember = resolveClassMemberDeclarationForTooling(
+            analysis, objectTypeIt->second->className, memberName, cache);
+        if (!resolvedMember.has_value() || resolvedMember->analysis == nullptr) {
             return std::nullopt;
         }
 
+        const ToolingDocumentAnalysis& ownerAnalysis = *resolvedMember->analysis;
+        const DeclarationSite& declaration = resolvedMember->declaration;
         const auto declarationType =
-            declarationTypeForTooling(analysis, *declaration);
+            declarationTypeForTooling(ownerAnalysis, declaration);
+        std::optional<ToolingLocation> definitionLocation;
+        if (resolvedMember->analysis != &analysis) {
+            definitionLocation = ToolingLocation{
+                ownerAnalysis.sourcePath,
+                toolingRangeFromSourceSpan(declaration.range),
+                toolingRangeFromSourceSpan(declaration.selectionRange),
+            };
+        }
         return MemberAccessResolution{declaration,
-                                      std::nullopt,
-                                      declaration->name,
-                                      declaration->kind,
-                                      std::string(),
-                                      std::string(),
-                                      std::string(),
+                                      definitionLocation,
+                                      declaration.name,
+                                      declaration.kind,
+                                      hoverRoleForKind(declaration.kind),
+                                      declarationDetailForDeclaration(ownerAnalysis,
+                                                                      declaration),
+                                      "",
                                       declarationType.has_value()
                                           ? *declarationType
                                           : nullptr,
@@ -7067,12 +7099,17 @@ std::optional<ToolingSignatureInformation> signatureInformationForCallable(
         if (objectTypeIt != analysis.frontend.semanticModel.nodeTypes.end() &&
             objectTypeIt->second) {
             if (objectTypeIt->second->kind == TypeKind::CLASS) {
-                const auto declaration = findClassMemberDeclarationSite(
-                    analysis, objectTypeIt->second->className,
-                    tokenText(member->member));
-                if (declaration.has_value()) {
+                ImportedToolingAnalysisCache cache;
+                const auto resolvedMember =
+                    resolveClassMemberDeclarationForTooling(
+                        analysis, objectTypeIt->second->className,
+                        tokenText(member->member), cache);
+                if (resolvedMember.has_value() &&
+                    resolvedMember->analysis != nullptr) {
                     if (const auto info = signatureInformationForDeclaration(
-                            analysis, *declaration, tokenText(member->member));
+                            *resolvedMember->analysis,
+                            resolvedMember->declaration,
+                            tokenText(member->member));
                         info.has_value()) {
                         return info;
                     }

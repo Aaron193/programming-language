@@ -206,6 +206,28 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
     imported_member_path = Path(tmpdir) / "imported_member_sample.mog"
     imported_member_path.write_text(imported_member_source, encoding="utf-8")
     imported_member_uri = imported_member_path.resolve().as_uri()
+    imported_nav_state_source = "\n".join([
+        "type GameState struct {",
+        "    running bool",
+        "    dead bool",
+        "}",
+        ""
+    ])
+    imported_nav_state_path = Path(tmpdir) / "imported_nav_state.mog"
+    imported_nav_state_path.write_text(imported_nav_state_source, encoding="utf-8")
+    imported_nav_state_uri = imported_nav_state_path.resolve().as_uri()
+    imported_nav_logic_source = "\n".join([
+        "const { GameState } = @import(\"./imported_nav_state.mog\")",
+        "fn step(state GameState) void {",
+        "    if (state.running == false) {",
+        "        return",
+        "    }",
+        "}",
+        ""
+    ])
+    imported_nav_logic_path = Path(tmpdir) / "imported_nav_logic.mog"
+    imported_nav_logic_path.write_text(imported_nav_logic_source, encoding="utf-8")
+    imported_nav_logic_uri = imported_nav_logic_path.resolve().as_uri()
     type_definition_source = "\n".join([
         "type Pipe struct {",
         "    x f64",
@@ -1238,6 +1260,48 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
 
         send_message(proc, {
             "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": imported_nav_state_uri,
+                    "languageId": "mog",
+                    "version": 1,
+                    "text": imported_nav_state_source
+                }
+            }
+        })
+        imported_nav_state_diagnostics = read_until(
+            proc,
+            lambda msg: msg.get("method") == "textDocument/publishDiagnostics" and
+            msg.get("params", {}).get("uri") == imported_nav_state_uri,
+        )
+        if imported_nav_state_diagnostics["params"]["diagnostics"]:
+            raise AssertionError(
+                "expected imported member navigation state module to stay diagnostics-free")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": imported_nav_logic_uri,
+                    "languageId": "mog",
+                    "version": 1,
+                    "text": imported_nav_logic_source
+                }
+            }
+        })
+        imported_nav_logic_diagnostics = read_until(
+            proc,
+            lambda msg: msg.get("method") == "textDocument/publishDiagnostics" and
+            msg.get("params", {}).get("uri") == imported_nav_logic_uri,
+        )
+        if imported_nav_logic_diagnostics["params"]["diagnostics"]:
+            raise AssertionError(
+                "expected imported member navigation sample to stay diagnostics-free")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
             "id": 7.4,
             "method": "textDocument/completion",
             "params": {
@@ -1342,6 +1406,26 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         member_hover_value = member_hover["result"]["contents"]["value"]
         if member_hover_value != "**property**\n\n```mog\nvalue i32\n```":
             raise AssertionError(f"unexpected member hover payload: {member_hover['result']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 8.05,
+            "method": "textDocument/hover",
+            "params": {
+                "textDocument": {
+                    "uri": imported_nav_logic_uri
+                },
+                "position": {
+                    "line": 2,
+                    "character": 16
+                }
+            }
+        })
+        imported_member_hover = read_until(proc, lambda msg: msg.get("id") == 8.05)
+        imported_member_hover_value = imported_member_hover["result"]["contents"]["value"]
+        if imported_member_hover_value != "**property**\n\n```mog\nrunning bool\n```":
+            raise AssertionError(
+                f"unexpected imported member hover payload: {imported_member_hover['result']}")
 
         send_message(proc, {
             "jsonrpc": "2.0",
@@ -1486,6 +1570,30 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         if member_result["range"]["start"]["line"] != 3 or \
                 member_result["range"]["start"]["character"] != 7:
             raise AssertionError(f"unexpected member definition range: {member_result['range']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 9.1,
+            "method": "textDocument/definition",
+            "params": {
+                "textDocument": {
+                    "uri": imported_nav_logic_uri
+                },
+                "position": {
+                    "line": 2,
+                    "character": 16
+                }
+            }
+        })
+        imported_member_definition = read_until(proc, lambda msg: msg.get("id") == 9.1)
+        imported_member_result = imported_member_definition["result"]
+        if imported_member_result["uri"] != imported_nav_state_uri:
+            raise AssertionError(
+                f"imported member definition should jump to the imported module: {imported_member_result}")
+        if imported_member_result["range"]["start"]["line"] != 1 or \
+                imported_member_result["range"]["start"]["character"] != 4:
+            raise AssertionError(
+                f"unexpected imported member definition range: {imported_member_result['range']}")
 
         send_message(proc, {
             "jsonrpc": "2.0",

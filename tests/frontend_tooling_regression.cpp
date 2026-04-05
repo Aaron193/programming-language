@@ -641,6 +641,64 @@ bool testDefinitionLookup() {
         return false;
     }
 
+    const std::filesystem::path importedMemberDefinitionTempRoot =
+        std::filesystem::temp_directory_path() /
+        "mog_tooling_member_definition_regression";
+    std::error_code importedMemberDefinitionEc;
+    std::filesystem::create_directories(importedMemberDefinitionTempRoot,
+                                        importedMemberDefinitionEc);
+    if (!require(!importedMemberDefinitionEc,
+                 "imported member definition regression should create its temporary workspace")) {
+        return false;
+    }
+
+    const std::filesystem::path importedStatePath =
+        importedMemberDefinitionTempRoot / "state.mog";
+    const std::filesystem::path importedLogicPath =
+        importedMemberDefinitionTempRoot / "logic.mog";
+    const std::string importedStateSource =
+                "type GameState struct {\n"
+        "    running bool\n"
+        "    dead bool\n"
+        "}\n";
+    const std::string importedLogicSource =
+                "const { GameState } = @import(\"./state.mog\")\n"
+        "fn step(state GameState) void {\n"
+        "    if (state.running == false) {\n"
+        "        return\n"
+        "    }\n"
+        "}\n";
+    if (!require(writeFile(importedStatePath, importedStateSource),
+                 "imported member definition regression should write the state module") ||
+        !require(writeFile(importedLogicPath, importedLogicSource),
+                 "imported member definition regression should write the consumer module")) {
+        return false;
+    }
+
+    options.sourcePath = importedLogicPath.string();
+    ToolingDocumentAnalysis importedMemberDefinitionAnalysis =
+        analyzeDocumentForTooling(importedLogicSource, options);
+    if (!require(importedMemberDefinitionAnalysis.status ==
+                     AstFrontendBuildStatus::Success,
+                 "imported member definition sample should succeed")) {
+        return false;
+    }
+    const auto importedMemberDefinition = findDefinitionForTooling(
+        importedMemberDefinitionAnalysis, ToolingPosition{2, 16});
+    if (!require(importedMemberDefinition.has_value(),
+                 "imported field access should resolve to the imported module declaration")) {
+        return false;
+    }
+    if (!require(importedMemberDefinition->path == importedStatePath.string(),
+                 "imported field definition should point at the imported module path")) {
+        return false;
+    }
+    if (!require(importedMemberDefinition->selectionRange.start.line == 1 &&
+                     importedMemberDefinition->selectionRange.start.character == 4,
+                 "imported field definition should point at the imported field name")) {
+        return false;
+    }
+
     const std::string typeUseSource =
                 "type Pipe struct {\n"
         "    x f64\n"
@@ -867,6 +925,60 @@ bool testReferencesAndHover() {
                      memberHover->role == "property" &&
                      memberHover->detail == "value i32",
                  "member hover should preserve field kind and type detail")) {
+        return false;
+    }
+
+    const std::filesystem::path importedMemberHoverTempRoot =
+        std::filesystem::temp_directory_path() /
+        "mog_tooling_member_hover_regression";
+    std::error_code importedMemberHoverEc;
+    std::filesystem::create_directories(importedMemberHoverTempRoot,
+                                        importedMemberHoverEc);
+    if (!require(!importedMemberHoverEc,
+                 "imported member hover regression should create its temporary workspace")) {
+        return false;
+    }
+
+    const std::filesystem::path importedHoverStatePath =
+        importedMemberHoverTempRoot / "state.mog";
+    const std::filesystem::path importedHoverLogicPath =
+        importedMemberHoverTempRoot / "logic.mog";
+    const std::string importedHoverStateSource =
+                "type GameState struct {\n"
+        "    running bool\n"
+        "}\n";
+    const std::string importedHoverLogicSource =
+                "const { GameState } = @import(\"./state.mog\")\n"
+        "fn step(state GameState) void {\n"
+        "    if (state.running == false) {\n"
+        "        return\n"
+        "    }\n"
+        "}\n";
+    if (!require(writeFile(importedHoverStatePath, importedHoverStateSource),
+                 "imported member hover regression should write the state module") ||
+        !require(writeFile(importedHoverLogicPath, importedHoverLogicSource),
+                 "imported member hover regression should write the consumer module")) {
+        return false;
+    }
+
+    options.sourcePath = importedHoverLogicPath.string();
+    ToolingDocumentAnalysis importedMemberHoverAnalysis =
+        analyzeDocumentForTooling(importedHoverLogicSource, options);
+    if (!require(importedMemberHoverAnalysis.status ==
+                     AstFrontendBuildStatus::Success,
+                 "imported member hover sample should succeed")) {
+        return false;
+    }
+    const auto importedMemberHover = findHoverForTooling(
+        importedMemberHoverAnalysis, ToolingPosition{2, 16});
+    if (!require(importedMemberHover.has_value(),
+                 "member access hover should be available for imported fields")) {
+        return false;
+    }
+    if (!require(importedMemberHover->kind == "field" &&
+                     importedMemberHover->role == "property" &&
+                     importedMemberHover->detail == "running bool",
+                 "imported member hover should preserve field kind and type detail")) {
         return false;
     }
 
