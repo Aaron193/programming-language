@@ -498,6 +498,68 @@ body {
 	max-width: 50rem;
 }
 
+.manifesto-header p {
+	font-size: 1.12rem;
+	max-width: 42rem;
+}
+
+.manifesto-article {
+	max-width: 52rem;
+	margin: 2rem auto 0;
+	padding: 2rem;
+	border-radius: 1.75rem;
+	background:
+		linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(242, 248, 243, 0.92)),
+		#ffffff;
+	border: 1px solid rgba(6, 19, 17, 0.08);
+	box-shadow: 0 24px 72px rgba(6, 19, 17, 0.1);
+}
+
+.manifesto-lede {
+	padding-bottom: 1.5rem;
+	margin-bottom: 1.5rem;
+	border-bottom: 1px solid rgba(6, 19, 17, 0.08);
+}
+
+.manifesto-section + .manifesto-section {
+	margin-top: 2.25rem;
+	padding-top: 2.25rem;
+	border-top: 1px solid rgba(6, 19, 17, 0.08);
+}
+
+.manifesto-article h2 {
+	margin: 0 0 1rem;
+	font-size: clamp(1.5rem, 3vw, 2.15rem);
+}
+
+.manifesto-article p {
+	margin: 0;
+	color: rgba(6, 19, 17, 0.8);
+	line-height: 1.9;
+	font-size: 1.04rem;
+}
+
+.manifesto-article p + p {
+	margin-top: 1rem;
+}
+
+.manifesto-callouts {
+	margin: 1.2rem 0;
+	padding: 1.1rem 1.2rem;
+	border-radius: 1.2rem;
+	background: rgba(6, 19, 17, 0.04);
+	border: 1px solid rgba(6, 19, 17, 0.08);
+}
+
+.manifesto-callouts p {
+	font-family: 'IBM Plex Mono', var(--__sl-font-mono);
+	font-size: 0.98rem;
+}
+
+.manifesto-callouts p + p {
+	margin-top: 0.7rem;
+}
+
 .manifesto-grid {
 	margin-top: 2rem;
 	padding-bottom: 2.5rem;
@@ -571,5 +633,9 @@ body {
 
 	.hero-grid {
 		padding-top: 3.5rem;
+	}
+
+	.manifesto-article {
+		padding: 1.4rem;
 	}
 }

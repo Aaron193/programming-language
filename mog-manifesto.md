@@ -21,7 +21,7 @@ This is the correct relationship between a programmer and the program.
 
 There are no semicolons in normal statement syntax. They survive only in the one place civilization still hasn't collapsed: inside `for (...)` clauses, like some ancient ritual nobody dares remove. This is the kind of restraint you only get from a language designed by people who have stared into legacy code and blinked first.
 
-We live in an age where developers can finally stop pretending semicolons are a moral obligation handed down from the compiler gods and admit what they really are: syntactic confetti—sprinkled everywhere out of tradition, cleaned up by no one, and mourned by absolutely nobody.
+We live in an age where developers can finally stop pretending semicolons are a moral obligation handed down from the compiler gods and admit what they really are: syntactic confetti—sprinkled everywhere out of tradition, cleaned up by no one, and mourned by even less.
 
 The newline rules are similarly disciplined. Continuation tokens have to stay on the same line as the expression they continue. That means the language can still be readable without turning formatting into interpretive dance. You are free to write clean code. You are not free to pretend chaos is style.
 

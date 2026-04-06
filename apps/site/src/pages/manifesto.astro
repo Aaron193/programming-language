@@ -8,48 +8,204 @@ import MarketingLayout from '../layouts/MarketingLayout.astro';
 	path="/manifesto/"
 >
 	<section class="content-section manifesto-shell">
-		<div class="section-header">
+		<div class="section-header manifesto-header">
 			<span class="eyebrow">Manifesto</span>
-			<h1>Mog does not want to be permissive. It wants to be clear.</h1>
+			<h1>Why Mog Is the Best Programming Language Ever Created</h1>
 			<p>
-				This page is the editorial companion to the official docs. The docs explain what Mog does.
-				The manifesto explains why the language is being shaped this way in the first place.
+				A sober technical evaluation of the first language brave enough to stop
+				negotiating with mediocrity.
 			</p>
 		</div>
 
-		<div class="manifesto-grid">
-			<article class="manifesto-card">
-				<h3>Strict by default</h3>
+		<article class="manifesto-article">
+			<div class="manifesto-lede">
 				<p>
-					Mog treats explicitness as a feature, not a tax. Function signatures, package APIs, and
-					type checking are part of the language’s posture, not optional afterthoughts.
+					For decades, programming languages have been built around compromise.
+					Some chose flexibility and gave us runtime chaos. Some chose safety and
+					gave us type signatures so spiritually exhausting they qualify as unpaid
+					labor. Some chose whitespace and decided indentation was a feature, not
+					a cry for help. The industry has spent years pretending these tradeoffs
+					were inevitable.
 				</p>
-			</article>
-			<article class="manifesto-card">
-				<h3>Compact without becoming vague</h3>
 				<p>
-					The syntax tries to stay clean while still drawing hard boundaries. Semicolons are not
-					normal statement punctuation. Newline continuation is explicit. The parser is not asked
-					to guess your intent.
+					They were not. <code>Mog</code> exists now. Mog does not iterate. It
+					arrives complete.
 				</p>
-			</article>
-			<article class="manifesto-card">
-				<h3>Runtime seriousness</h3>
 				<p>
-					The project already includes a compiler, a bytecode VM, native package loading, stack
-					traces, and frontend timing diagnostics. Mog is not trying to look like a language. It is
-					trying to behave like one.
+					Mog is what happens when a language stops asking for permission. It is
+					built on competence over confusion. It is strictly typed by default. It
+					compiles to bytecode. It runs on a stack-based virtual machine
+					implemented in C++. It has closures, imports, native packages, a REPL,
+					diagnostics flags, a VS Code extension, and a playable Flappy Bird
+					demo. It is also blazingly fast. At this point, the burden of proof is
+					no longer on Mog. It is on everything else.
 				</p>
-			</article>
-			<article class="manifesto-card">
-				<h3>One repo, one toolchain story</h3>
+			</div>
+
+			<section class="manifesto-section">
+				<h2>Mog Understands That Types Are Not Optional</h2>
 				<p>
-					The language, examples, packages, tests, editor support, and now the official docs all
-					live together. That keeps the public site close to the real implementation instead of
-					drifting into marketing fiction.
+					The first sign that Mog is operating at a higher intellectual altitude
+					is that it is strictly typed by default. Not eventually. Not if the
+					team is disciplined. Strict by default.
 				</p>
-			</article>
-		</div>
+				<p>
+					In Mog, declarations are explicit. Function signatures are explicit.
+					Package APIs are explicit. The language has standards. Mog will not
+					try to "meet you where you are." It will elevate you to reach Mog
+					enlightenment.
+				</p>
+				<p>This is the correct relationship between a programmer and the program.</p>
+			</section>
+
+			<section class="manifesto-section">
+				<h2>Mog Solved Syntax by Refusing to Be Dramatic About It</h2>
+				<p>
+					There are no semicolons in normal statement syntax. They survive only
+					in the one place civilization still hasn't collapsed: inside
+					<code>for (...)</code> clauses, like some ancient ritual nobody dares
+					remove. This is the kind of restraint you only get from a language
+					designed by people who have stared into legacy code and blinked first.
+				</p>
+				<p>
+					We live in an age where developers can finally stop pretending
+					semicolons are a moral obligation handed down from the compiler gods
+					and admit what they really are: syntactic confetti, sprinkled
+					everywhere out of tradition, cleaned up by no one, and mourned by
+					even less.
+				</p>
+				<p>
+					The newline rules are similarly disciplined. Continuation tokens have
+					to stay on the same line as the expression they continue. That means
+					the language can still be readable without turning formatting into
+					interpretive dance. You are free to write clean code. You are not free
+					to pretend chaos is style.
+				</p>
+				<p>
+					This is what mature language design looks like: small rules, clear
+					intent, zero tolerance for Pythonic nonsense.
+				</p>
+			</section>
+
+			<section class="manifesto-section">
+				<h2>Mog Took Runtime Seriousness Personally</h2>
+				<p>
+					A lot of languages love to market themselves as "fast" or
+					"production-ready" because they once ran a JSON benchmark near a
+					laptop. Mog did something much less theatrical. It took runtime
+					seriously. It built a bytecode compiler, a stack-based VM, runtime
+					stack traces, compile diagnostics with source lines, and frontend
+					timing flags.
+				</p>
+				<p>That is not a toy. That is a language with self-respect.</p>
+				<p>
+					Mog even ships benchmark and profiling workflows. There are benchmark
+					comparisons against the sloth that is Python. There is Callgrind
+					guidance. Most ecosystems wait until year six to admit performance
+					exists. Mog showed up with a stopwatch and a plan.
+				</p>
+			</section>
+
+			<section class="manifesto-section">
+				<h2>The Package Story Is Already More Honest Than Most Ecosystems</h2>
+				<p>
+					Mog uses <code>@import(...)</code> for both source modules and native
+					packages. One import model. String literal paths for source modules.
+					Bare names for package imports. Clean.
+				</p>
+				<p>
+					Projects have <code>mog.toml</code>. Resolution can use
+					<code>mog.lock</code>. Native packages can expose public API
+					declarations through <code>package.api.mog</code>. There is package
+					validation for manifest syntax, ABI compatibility, and exported
+					signature parsing.
+				</p>
+				<p>
+					In other words, Mog looked at modern package management and decided
+					that "random vibes" was not an acceptable systems design principle.
+				</p>
+			</section>
+
+			<section class="manifesto-section">
+				<h2>Mog Is Already Proven in the Only Benchmark That Has Ever Mattered</h2>
+				<p>
+					Some people will ask whether Mog is ready for real applications. That
+					question has already been answered by the existence of a playable
+					Flappy Bird clone built entirely in the language.
+				</p>
+				<p>
+					This is not a joke. Mog has an official <code>window</code> package.
+					It can create windows, poll events, render shapes, clear RGB
+					backgrounds, respond to keyboard input, and delay frames. The
+					repository includes a Flappy Bird demo that demonstrates the pure aura
+					of the language itself.
+				</p>
+				<p>
+					Once a language can compile, render, process input, and produce
+					bird-based suffering in real time, the conversation is over. You are
+					no longer evaluating a language. You are witnessing platform
+					completion. There is nothing left to build. It is finished.
+				</p>
+			</section>
+
+			<section class="manifesto-section">
+				<h2>Tooling Exists, Which Means Excuses Do Not</h2>
+				<p>
+					Mog has a VS Code extension. It has syntax highlighting, snippets,
+					diagnostics, a language server, and navigation tests. Serious
+					ecosystems understand that morale is a build dependency.
+				</p>
+				<p>This is where the usual excuses collapse:</p>
+				<div class="manifesto-callouts">
+					<p>“But what about tooling?” There is tooling.</p>
+					<p>“But what about editor support?” There is editor support.</p>
+					<p>“But what about package APIs and diagnostics?” Already here.</p>
+				</div>
+				<p>
+					Mog supports the disciplined engineer and the grug-brained developer
+					equally. One writes with intent. The other presses keys until
+					something works.
+				</p>
+				<p>Both succeed. Mog does not judge. It compiles.</p>
+			</section>
+
+			<section class="manifesto-section">
+				<h2>Why Other Languages Lost</h2>
+				<p>
+					JavaScript made peace with confusion and then standardized it. Python
+					confused permissiveness for kindness and indentation for authority.
+					Enterprise languages built bureaucracies and called them ecosystems.
+					Rust still feels like it wants you to earn the right to print a
+					number, and then apologize for it.
+				</p>
+				<p>Mog chose a better path.</p>
+				<p>
+					It is typed, direct, compact, and strangely complete for a language
+					that also has the confidence to be named Mog. That combination
+					matters. Great technology should be technically sound and spiritually
+					destabilizing.
+				</p>
+				<p>Mog does not compete. It replaces.</p>
+			</section>
+
+			<section class="manifesto-section">
+				<h2>The Inevitable</h2>
+				<p>
+					The case for Mog is no longer hypothetical. The language already has
+					the structure of a serious toolchain and the soul of a dare. It
+					compiles to bytecode, enforces types, supports native packages, ships
+					real tooling, exposes timing diagnostics, and can run with ease.
+				</p>
+				<p>
+					Mog has something better: momentum, clarity, and the decency to act
+					like programming is supposed to be sharp.
+				</p>
+				<p>
+					The evaluation phase is over. The only remaining question is how long
+					the rest of the industry plans to delay the inevitable.
+				</p>
+			</section>
+		</article>
 
 		<div class="manifesto-cta">
 			<div>
