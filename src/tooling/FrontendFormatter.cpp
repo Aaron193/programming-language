@@ -15,7 +15,7 @@ namespace {
 
 constexpr int kFormatIndentWidth = 4;
 constexpr size_t kMaxPreservedBlankLines = 1;
-constexpr size_t kMaxFormattedLineWidth = 80;
+constexpr size_t kMaxFormattedLineWidth = 120;
 
 struct FormatComment {
     size_t startOffset = 0;
