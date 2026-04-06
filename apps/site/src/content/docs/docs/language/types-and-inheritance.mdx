@@ -1,0 +1,108 @@
+---
+title: Types and Inheritance
+description: Struct declarations, methods, aliases, `this`, `super`, and the current runtime model.
+---
+
+User-defined types are declared with `type ... struct`.
+
+```rust
+type Counter struct {
+  value i32
+
+  fn reset() {
+    this.value = 0
+  }
+}
+```
+
+## Current runtime model
+
+`type ... struct` is currently class-backed syntax in the runtime. Treat it as
+the user-facing way to define object-shaped types today, not as a value-type
+system.
+
+## Fields and methods
+
+Fields live directly in the type body. Methods use the same `fn` syntax as
+top-level functions.
+
+```rust
+type Box struct {
+  value i32
+
+  fn get() i32 {
+    return this.value
+  }
+
+  fn set(v i32) i32 {
+    this.value = v
+    return this.value
+  }
+}
+```
+
+Use `this` inside methods to read or write the receiver.
+
+## Construction
+
+Construction uses normal call syntax on the type name:
+
+```rust
+var counter = Counter()
+var box Box = Box()
+```
+
+## Type aliases
+
+The language also supports aliases:
+
+```rust
+type Score i32
+```
+
+Aliases are part of the documented language surface in the README even though
+most examples in the repo focus on structs.
+
+## Inheritance
+
+Single inheritance is available with `< Parent`.
+
+```rust
+type A struct {
+  fn greet() str {
+    return "A"
+  }
+}
+
+type B struct < A {
+  fn greet() str {
+    return super.greet() + "B"
+  }
+}
+```
+
+Use `super.method()` to call an inherited implementation.
+
+## Operator annotations
+
+The compiler also supports operator annotations on methods. This is currently a
+real feature, but it is still narrower than a full custom-operator system.
+
+Supported annotations today are limited to:
+
+- `+`
+- `-`
+- `*`
+- `/`
+- `==`
+- `!=`
+- `<`
+- `<=`
+- `>`
+- `>=`
+
+## Related pages
+
+- [Functions and Closures](/docs/language/functions-and-closures/)
+- [Modules and Imports](/docs/language/modules-and-imports/)
+- [Syntax Rules](/docs/reference/syntax-rules/)

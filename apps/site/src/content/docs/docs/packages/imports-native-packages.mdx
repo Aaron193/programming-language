@@ -1,41 +1,33 @@
 ---
-title: Imports and Native Packages
-description: How Mog currently resolves modules and native packages.
+title: Packages Overview
+description: A map of the package docs, the current import model, and where to go next.
 ---
 
-## Import model
+Mog uses `@import(...)` for both source modules and native packages. The package
+story is real today, but it is still grounded in the implementation in this
+repository.
 
-Mog uses `@import(...)` for both source modules and native packages.
+## Read by task
 
-- string literal paths are used for source modules
-- bare names are used for package imports
+- [Using Native Packages](/docs/packages/using-native-packages/) for package
+  imports, search paths, opaque handles, and validation.
+- [Authoring Native Packages](/docs/packages/authoring-native-packages/) for
+  manifests, `package.api.mog`, and reference package layout.
+- [Window Package](/docs/packages/window-package/) for the first official
+  runtime-maintained package.
 
-This gives the language one import mechanism instead of separate systems for
-source code and package loading.
+## Import model at a glance
 
-## Project manifests
+- string literal paths such as `"./math.mog"` resolve as source modules
+- bare names such as `"math"` and `"window"` resolve as packages
+- package metadata already exists in `mog.toml`, `mog.lock`, `package.toml`,
+  and `package.api.mog`
 
-The repository already uses:
-
-- `mog.toml` for project metadata
-- `mog.lock` for lockfile state
-- `package.toml` for packages
-- `package.api.mog` for public type/API declarations on native packages
-
-## Native packages in this repo
-
-Examples include:
+## Reference packages in this repo
 
 - `packages/mog/window/`
 - `packages/examples/math/`
 - `packages/examples/counter/`
 
-These packages demonstrate package manifests, runtime loading, and API
-declaration files.
-
-## Current direction
-
-The repo TODOs still mention follow-up work around import-system clarity between
-standard library packages, user code, and external dependencies. Treat the
-current docs as a description of the implemented behavior today, not a promise
-that the package model is fully stabilized.
+Treat the current docs as documentation of implemented behavior, not as a
+promise that the broader package ecosystem is fully stabilized.

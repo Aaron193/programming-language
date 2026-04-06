@@ -1,56 +1,24 @@
 ---
-title: CLI, REPL, VS Code, and LSP
-description: Runtime flags and editor tooling currently available for Mog.
+title: Tooling Overview
+description: A map of the Mog tooling docs and the runtime/editor capabilities already present in the repo.
 ---
 
-## CLI and runtime flags
+The repo’s tooling story is larger than one page now. Use this page as a map of
+the deeper tooling guides.
 
-The interpreter exposes optional diagnostics and debugging flags:
+## Read by task
 
-- `--trace`
-- `--show-return`
-- `--disassemble`
-- `--frontend-timings`
-- `--frontend-timings-json`
+- [CLI and Debug Flags](/docs/tooling/cli-and-debug-flags/) for build modes,
+  interpreter entrypoints, diagnostics flags, and package validation.
+- [REPL](/docs/tooling/repl/) for interactive use and current limitations.
+- [VS Code and LSP](/docs/tooling/vscode-and-lsp/) for the editor extension,
+  `mog-lsp`, formatting, hover, navigation, completion, and semantic tokens.
 
-Example:
+## Current surface area
 
-```bash
-./build/interpreter --frontend-timings path/to/program.mog
-```
-
-## REPL
-
-Run the interpreter without a source file to start the interactive REPL:
-
-```bash
-./build/interpreter
-```
-
-This is useful for quick expression checks and runtime experiments.
-
-## VS Code extension
-
-The repository includes a VS Code extension under `tooling/vscode-mog/`.
-Current extension features include:
-
-- syntax highlighting
-- snippets
-- diagnostics
-- language registration for `.mog`
-
-The extension also supports a `mog.serverPath` setting to point VS Code at a
-`mog-lsp` executable.
-
-## Language server
-
-The in-repo language server binary is built as `mog-lsp`.
-
-Related coverage already exists in the repository for:
-
-- navigation
-- formatting
-- import diagnostics
-- VS Code grammar and manifest validation
-
-These tests live under the existing shell-based test suite.
+- interpreter build modes through `build.sh`
+- runtime tracing and disassembly flags
+- frontend timing output in human and JSON form
+- interactive REPL
+- VS Code language support
+- in-repo LSP with real regression coverage

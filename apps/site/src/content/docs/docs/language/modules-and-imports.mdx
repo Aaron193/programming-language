@@ -1,0 +1,90 @@
+---
+title: Modules and Imports
+description: Source-module imports, named bindings, aliases, export rules, and package-vs-source resolution.
+---
+
+Mog uses `@import(...)` for both source modules and native packages. That
+shared surface is one of the most important things to document clearly.
+
+## Source modules
+
+Use a string literal path that includes the filename:
+
+```rust
+const math = @import("./math.mog")
+print(math.PI)
+print(math.Add(1, 2))
+```
+
+Current source-module rules:
+
+- the import target must be a string literal
+- relative paths resolve from the importing file’s directory
+- REPL mode does not allow `@import(...)`
+
+## Public exports
+
+Capitalized top-level names are exported. Lowercase names stay private to the
+module.
+
+```rust
+fn Add(a i32, b i32) i32 { return a + b }
+const PI f64 = 3.14159
+type Vector struct {}
+```
+
+## Named imports and aliasing
+
+```rust
+const { Add, PI } = @import("./math.mog")
+const { Add as sum } = @import("./math.mog")
+
+print(sum(10, 5))
+```
+
+The frontend and parser tests also cover typed destructuring imports:
+
+```rust
+const { Add: fn(i32, i32) i32, PI as Tau: f64 } =
+  @import("./math.mog")
+```
+
+## Packages use the same syntax
+
+Bare names resolve as package imports:
+
+```rust
+const nativeMath = @import("math")
+const { addI64, greet } = @import("math")
+```
+
+Path-like imports such as `"./math.mog"` stay source imports. Bare names such
+as `"math"` or `"window"` resolve as package imports.
+
+## Import resolution today
+
+The current implementation looks for project/package metadata before falling
+back to package roots. The documented search locations include:
+
+- `build/packages` relative to the interpreter binary
+- extra roots passed with `--package-path`
+- `packages/` relative to the importing source file or current working directory
+
+Read [Using Native Packages](/docs/packages/using-native-packages/) for the
+package-specific side of the model.
+
+## Common import failures
+
+The test suite covers several failure modes:
+
+- missing exports
+- import cycles
+- non-string import arguments
+- type mismatches on typed import bindings
+- importing package handles through the wrong package type
+
+## Related pages
+
+- [Using Native Packages](/docs/packages/using-native-packages/)
+- [Authoring Native Packages](/docs/packages/authoring-native-packages/)
+- [Nullability and Type Checking](/docs/language/nullability-and-typechecking/)

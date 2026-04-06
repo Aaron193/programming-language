@@ -1,0 +1,39 @@
+---
+title: REPL
+description: Starting the Mog REPL, what it is good for, and its current constraints.
+---
+
+Start the REPL by running the interpreter without a source file:
+
+```bash
+./build/interpreter
+```
+
+## What it is good for
+
+The REPL is useful for:
+
+- quick expression checks
+- small runtime experiments
+- trying built-in functions
+- validating simple syntax without creating a file
+
+## Current limitation
+
+The frontend currently rejects `@import(...)` in interactive mode. Use a real
+`.mog` file when the experiment depends on source modules or native packages.
+
+## When to leave the REPL
+
+Switch to a file when you need:
+
+- imports
+- multi-file examples
+- package usage
+- anything you want to keep under version control
+
+## Related pages
+
+- [Quickstart](/docs/getting-started/quickstart/)
+- [Modules and Imports](/docs/language/modules-and-imports/)
+- [CLI and Debug Flags](/docs/tooling/cli-and-debug-flags/)

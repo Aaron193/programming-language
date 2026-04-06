@@ -1,0 +1,103 @@
+---
+title: Values and Bindings
+description: Expressions, local bindings, inference, and assignment in Mog today.
+---
+
+Mog keeps the expression model small on purpose. The language already supports
+numbers, booleans, `null`, strings, grouping, arithmetic, comparison, logical
+operators, and bitwise operators.
+
+## Expressions
+
+```rust
+print((2 + 3) * 4)
+print(10 > 3)
+print(!false && true)
+print(7 & 3)
+print(1 << 4)
+```
+
+The current operator surface includes:
+
+- arithmetic: `+`, `-`, `*`, `/`
+- comparison and equality: `>`, `>=`, `<`, `<=`, `==`, `!=`
+- logical operators: `!`, `&&`, `||`
+- bitwise operators: `&`, `|`, `^`, `~`, `<<`, `>>`
+
+## `var` and `const`
+
+Local bindings can be written with explicit types or with local inference.
+
+```rust
+var count i32 = 10
+var message = "mog"
+const answer = 42
+const enabled bool = true
+```
+
+Use `const` when the binding should not be reassigned. Use `var` when mutation
+is part of the design.
+
+## Type inference
+
+Inference works well for local values whose initializer already makes the type
+obvious.
+
+```rust
+fn buildCounter() Counter {
+  var counter = Counter()
+  return counter
+}
+```
+
+Current repo guidance is stricter for public APIs and ambiguous cases:
+
+- function parameters still need explicit types
+- exported APIs should stay explicit
+- locals inferred from `void`-producing expressions are rejected
+
+## Assignment and updates
+
+Bindings and index/member targets support assignment and compound assignment.
+
+```rust
+var total i32 = 10
+total += 5
+total <<= 1
+print(total)
+```
+
+Update operators are also available:
+
+```rust
+var i i32 = 0
+i++
+++i
+print(i)
+```
+
+## Scope
+
+Bindings are lexical. Inner scopes can read outer names, and nested functions
+can capture them.
+
+```rust
+fn outer() i32 {
+  var x i32 = 10
+
+  fn inner() i32 {
+    return x + 1
+  }
+
+  return inner()
+}
+```
+
+Read [Functions and Closures](/docs/language/functions-and-closures/) for the
+closure-specific behavior.
+
+## Related pages
+
+- [Control Flow](/docs/language/control-flow/)
+- [Collections](/docs/language/collections/)
+- [Nullability and Type Checking](/docs/language/nullability-and-typechecking/)

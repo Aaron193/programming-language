@@ -1,0 +1,121 @@
+---
+title: Collections
+description: Arrays, sets, dictionaries, literals, indexing, and iteration in Mog.
+---
+
+Mog currently ships built-in arrays, sets, and dictionaries. The tests under
+`tests/` are the best source of truth for current behavior.
+
+## Arrays
+
+Array literals use square brackets.
+
+```rust
+var values Array<i32> = [1, 2, 3]
+print(values[0])
+
+values[1] = 9
+values[0] += 4
+
+values.push(7)
+print(values.pop())
+print(values.size())
+print(values.has(3))
+```
+
+Current docs-worthy behavior already covered by tests:
+
+- indexed read: `values[index]`
+- indexed write: `values[index] = value`
+- compound assignment on indexed elements
+- methods such as `push`, `pop`, `size`, and `has`
+
+## Sets
+
+Sets support constructor-style creation and membership operations.
+
+```rust
+var ids Set<i32> = Set(1, 2, 2, 3)
+print(ids.size())
+print(ids.has(2))
+
+print(ids.add(4))
+print(ids.remove(3))
+```
+
+Set values can be iterated directly:
+
+```rust
+for (var item i32 : ids) {
+  print(item)
+}
+```
+
+## Dictionaries
+
+Dictionaries use key/value literals with braces.
+
+```rust
+var scores Dict<str, i32> = {"alice": 7, "bob": 9}
+print(scores["alice"])
+
+scores["alice"] = 8
+print(scores.get("alice"))
+
+scores.set("carol", 10)
+print(scores.has("carol"))
+print(scores.size())
+print(scores.remove("carol"))
+```
+
+The current dictionary story is:
+
+- bracket access reads and writes values
+- `.get(...)`, `.set(...)`, `.has(...)`, `.remove(...)`, and `.size()` are in use
+- `.keys()` and `.values()` exist and are exercised in the test suite
+- direct foreach over a dictionary is rejected today; iterate a projection such
+  as `.keys()` instead
+
+## Generic types
+
+Collections are parameterized with angle-bracket type arguments:
+
+```rust
+var nums Array<i32> = []
+var seen Set<str> = Set()
+var players Dict<usize, i32> = Dict()
+```
+
+The codebase also uses nested collection types such as `Dict<Array<i32>, i32>`.
+
+## Collection literals and inference
+
+Local inference works well when the target type is already clear:
+
+```rust
+var nums Array<i32> = [1, 2, 3]
+var empty Set<str> = Set()
+var mapping Dict<str, i32> = {}
+```
+
+When the literal alone is ambiguous, keep the explicit collection type.
+
+## Iteration patterns
+
+```rust
+var nums Array<i32> = [1, 2, 3]
+for (var n i32 : nums) {
+  print(n)
+}
+
+var scores Dict<str, i32> = {"alice": 7, "bob": 9}
+for (var name str : scores.keys()) {
+  print(scores[name])
+}
+```
+
+## Related pages
+
+- [Control Flow](/docs/language/control-flow/)
+- [Nullability and Type Checking](/docs/language/nullability-and-typechecking/)
+- [Built-in Functions](/docs/reference/built-in-functions/)

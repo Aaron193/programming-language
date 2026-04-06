@@ -1,60 +1,28 @@
 ---
-title: Syntax, Built-ins, and Flags
-description: Quick reference for common Mog syntax and runtime switches.
+title: Reference Overview
+description: A map of the syntax and runtime-reference pages for Mog.
 ---
 
-## Built-in native functions
+Use this section when you need exact rules or a compact runtime reference rather
+than a tutorial.
 
-- `clock()`
-- `sqrt(x)`
-- `len(x)`
-- `type(x)`
-- `str(x)`
-- `num(x)`
+## Read by topic
 
-## Core syntax at a glance
+- [Syntax Rules](/docs/reference/syntax-rules/) for newline continuation,
+  semicolon usage, import constraints, export visibility, and dictionary foreach
+  rules.
+- [Built-in Functions](/docs/reference/built-in-functions/) for the current
+  runtime-provided helper functions.
+- [CLI and Debug Flags](/docs/tooling/cli-and-debug-flags/) for runtime flags.
 
-```rust
-var name = "mog"
-const score i32 = 7
+## Common lookups
 
-fn add(left i32, right i32) i32 {
-  return left + right
-}
+- syntax edge cases and “why did this parse fail?”
+- runtime helper names
+- quick reminder pages while reading code or tests
 
-type Counter struct {
-  value i32
-}
+## Related guides
 
-const math = @import("./math.mog")
-```
-
-## Supported categories
-
-- arithmetic
-- comparison and equality
-- logical operators with short-circuiting
-- bitwise operators
-- variables and constants
-- functions, closures, and lambdas
-- structs, fields, and methods
-- inheritance with `super`
-- modules and native packages
-- arrays, sets, and dictionaries
-
-## Useful interpreter flags
-
-```bash
-./build/interpreter --trace file.mog
-./build/interpreter --show-return file.mog
-./build/interpreter --disassemble file.mog
-./build/interpreter --frontend-timings file.mog
-./build/interpreter --frontend-timings-json file.mog
-```
-
-## Current limitations to remember
-
-- trailing commas in call argument lists are not supported
-- newline continuation is explicit and token-based
-- `type ... struct` is currently class-backed syntax in the runtime
-- operator annotations currently cover `+`, `-`, `*`, `/`, `==`, `!=`, `<`, `<=`, `>`, `>=`
+If you need fuller explanations instead of lookup pages, jump back into the
+[Language](/docs/language/basics/), [Packages](/docs/packages/imports-native-packages/),
+and [Tooling](/docs/tooling/cli-repl-vscode-lsp/) sections.

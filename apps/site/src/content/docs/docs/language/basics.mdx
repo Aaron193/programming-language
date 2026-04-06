@@ -1,80 +1,44 @@
 ---
-title: Basics
-description: Core syntax and behavior in Mog today.
+title: Language Overview
+description: A map of the Mog language docs and the features that already exist in the repo.
 ---
 
-## Expressions and values
+The language surface has outgrown a single “basics” page. Use this page as the
+entry point into the deeper language guides.
 
-Mog supports:
+## What Mog already supports
 
 - numbers
 - booleans
 - `null`
 - strings
 - grouping expressions
+- `var` and `const` bindings with local inference
+- assignment, compound assignment, `++`, and `--`
+- `if`, `while`, classic `for`, foreach, `break`, `continue`, and labeled loops
+- arrays, sets, and dictionaries
+- named functions, lambdas, recursion, and closures
+- `type ... struct`, aliases, methods, `this`, inheritance, and `super`
+- source modules and native packages through `@import(...)`
+- nullable types with `?`
 
-Arithmetic and comparison operators are available, along with logical
-short-circuiting and bitwise operators.
+## Read by topic
 
-```rust
-print((2 + 3) * 4)
-print(10 > 3)
-print(!false && true)
-print(7 & 3)
-```
+- [Values and Bindings](/docs/language/values-and-bindings/) for expressions,
+  locals, inference, and assignment.
+- [Control Flow](/docs/language/control-flow/) for loops, labels, and foreach.
+- [Collections](/docs/language/collections/) for arrays, sets, dictionaries,
+  indexing, and iteration.
+- [Functions and Closures](/docs/language/functions-and-closures/) for function
+  types, lambdas, and captured locals.
+- [Types and Inheritance](/docs/language/types-and-inheritance/) for structs,
+  methods, aliases, `this`, and `super`.
+- [Modules and Imports](/docs/language/modules-and-imports/) for source files,
+  named imports, aliases, and package-vs-source resolution.
+- [Nullability and Type Checking](/docs/language/nullability-and-typechecking/)
+  for optional types and the current error model.
 
-## Variables and constants
+## Cross-links
 
-Local bindings can be explicit or inferred:
-
-```rust
-var count i32 = 10
-var message = "mog"
-const answer = 42
-```
-
-Compound assignment operators such as `+=`, `-=`, `*=`, `/=`, `&=`, `|=`,
-`^=`, `<<=`, and `>>=` are supported.
-
-## Control flow
-
-Current control flow includes:
-
-- `if` / `else`
-- `while`
-- `for`
-- foreach loops
-- `break`
-- `continue`
-- labeled loops
-
-```rust
-for (var i i32 = 0; i < 3; i += 1) {
-  print(i)
-}
-
-var scores Dict<str, i32> = {"alice": 7, "bob": 9}
-for (var name str : scores.keys()) {
-  print(name)
-}
-```
-
-## Newline and syntax rules
-
-- Semicolons are only used inside `for (...)` clauses.
-- Continuation tokens such as `(`, `[`, `.`, `as`, assignment operators, and
-  binary operators stay on the same line as the expression they continue.
-- A newline before `++` or `--` starts a new prefix expression; it does not
-  continue a postfix update.
-- Trailing commas in call argument lists are currently not supported.
-
-## Nullability
-
-Nullable types use `?`:
-
-```rust
-var maybeScore i32? = 7
-if (maybeScore != null) {
-  print("score present")
-}
-```
+The syntax edge cases live in [Syntax Rules](/docs/reference/syntax-rules/).
+Runtime helpers live in [Built-in Functions](/docs/reference/built-in-functions/).

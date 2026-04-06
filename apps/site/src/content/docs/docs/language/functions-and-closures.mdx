@@ -1,0 +1,91 @@
+---
+title: Functions and Closures
+description: Named functions, lambdas, function types, recursion, and captured locals.
+---
+
+Mog already supports named functions, block function literals, expression-bodied
+lambdas, recursion, and closures with captured variables.
+
+## Named functions
+
+```rust
+fn add(left i32, right i32) i32 {
+  return left + right
+}
+```
+
+Named functions and methods can omit an explicit `void` return type:
+
+```rust
+fn logAnswer() {
+  print(42)
+}
+```
+
+## Function types
+
+Function types appear directly in signatures and local bindings.
+
+```rust
+fn applyTwice(f fn(i32) i32, value i32) i32 {
+  return f(f(value))
+}
+```
+
+```rust
+var addOne fn(i32) i32 = fn(x i32) => x + 1
+```
+
+## Lambdas
+
+Expression-bodied lambdas are the compact form:
+
+```rust
+var addOne = fn(x i32) => x + 1
+```
+
+Block function literals are available when you want multiple statements:
+
+```rust
+var addOne fn(i32) i32 = fn(x) {
+  return x + 1
+}
+```
+
+Parameter types still matter. The repo includes negative tests for missing
+parameter annotations and return-type mismatches.
+
+## Closures
+
+Nested functions can capture outer locals.
+
+```rust
+fn makeAdder(base i32) fn(i32) i32 {
+  return fn(delta i32) => base + delta
+}
+
+var addTen = makeAdder(10)
+print(addTen(32))
+```
+
+The test suite also covers closure mutation and deeper nested upvalue chains, so
+captured state is not limited to the simplest read-only case.
+
+## Recursion
+
+Named functions can call themselves normally. Several stress tests in the repo
+exercise recursive execution.
+
+## Return rules
+
+Mog’s type checker enforces return behavior:
+
+- returned values must match the declared return type
+- named functions without a value should omit the return type or use `void`
+- omitted return values on non-`void` paths are errors
+
+## Related pages
+
+- [Values and Bindings](/docs/language/values-and-bindings/)
+- [Types and Inheritance](/docs/language/types-and-inheritance/)
+- [Nullability and Type Checking](/docs/language/nullability-and-typechecking/)

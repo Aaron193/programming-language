@@ -1,0 +1,57 @@
+---
+title: VS Code and LSP
+description: The in-repo VS Code extension, the `mog-lsp` binary, and the editor features already covered by tests.
+---
+
+The repo ships both a VS Code extension and an in-repo language server.
+
+## VS Code extension
+
+The extension lives under `tooling/vscode-mog/`.
+
+Current extension-facing features include:
+
+- `.mog` language registration
+- syntax highlighting
+- snippets
+- diagnostics
+- a bundled language icon
+
+The extension also supports a `mog.serverPath` setting for pointing VS Code at a
+specific `mog-lsp` executable.
+
+## Language server binary
+
+Build the repo, then use the generated `mog-lsp` binary from `build/mog-lsp`.
+
+## Capabilities already exercised in the repo
+
+The LSP and tooling regression tests cover real editor functionality, including:
+
+- formatting
+- go to definition
+- find references
+- hover
+- completion
+- semantic tokens
+- document symbols
+- import-aware navigation
+- package-aware type and API navigation
+
+That is enough surface area to document Mog as having serious editor tooling,
+not just syntax coloring.
+
+## Why `package.api.mog` matters
+
+Package API declaration files are not only runtime metadata. They also feed the
+editor experience:
+
+- hover documentation from `@doc(...)`
+- navigation to opaque package types
+- readable imported signatures
+
+## Related pages
+
+- [Authoring Native Packages](/docs/packages/authoring-native-packages/)
+- [CLI and Debug Flags](/docs/tooling/cli-and-debug-flags/)
+- [Example Programs](/docs/examples/)

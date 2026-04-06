@@ -49,20 +49,37 @@ export default defineConfig({
 				{
 					label: 'Language',
 					items: [
-						{ label: 'Basics', slug: 'docs/language/basics' },
+						{ label: 'Language Overview', slug: 'docs/language/basics' },
+						{ label: 'Values and Bindings', slug: 'docs/language/values-and-bindings' },
+						{ label: 'Control Flow', slug: 'docs/language/control-flow' },
+						{ label: 'Collections', slug: 'docs/language/collections' },
+						{ label: 'Functions and Closures', slug: 'docs/language/functions-and-closures' },
+						{ label: 'Types and Inheritance', slug: 'docs/language/types-and-inheritance' },
+						{ label: 'Modules and Imports', slug: 'docs/language/modules-and-imports' },
 						{
-							label: 'Functions, Types, and Modules',
-							slug: 'docs/language/functions-types-modules',
+							label: 'Nullability and Type Checking',
+							slug: 'docs/language/nullability-and-typechecking',
 						},
+						{ label: 'Legacy Overview', slug: 'docs/language/functions-types-modules' },
 					],
 				},
 				{
 					label: 'Tooling',
-					items: [{ label: 'CLI, REPL, VS Code, and LSP', slug: 'docs/tooling/cli-repl-vscode-lsp' }],
+					items: [
+						{ label: 'Tooling Overview', slug: 'docs/tooling/cli-repl-vscode-lsp' },
+						{ label: 'CLI and Debug Flags', slug: 'docs/tooling/cli-and-debug-flags' },
+						{ label: 'REPL', slug: 'docs/tooling/repl' },
+						{ label: 'VS Code and LSP', slug: 'docs/tooling/vscode-and-lsp' },
+					],
 				},
 				{
 					label: 'Packages',
-					items: [{ label: 'Imports and Native Packages', slug: 'docs/packages/imports-native-packages' }],
+					items: [
+						{ label: 'Packages Overview', slug: 'docs/packages/imports-native-packages' },
+						{ label: 'Using Native Packages', slug: 'docs/packages/using-native-packages' },
+						{ label: 'Authoring Native Packages', slug: 'docs/packages/authoring-native-packages' },
+						{ label: 'Window Package', slug: 'docs/packages/window-package' },
+					],
 				},
 				{
 					label: 'Examples',
@@ -70,7 +87,11 @@ export default defineConfig({
 				},
 				{
 					label: 'Reference',
-					items: [{ label: 'Syntax, Built-ins, and Flags', slug: 'docs/reference/syntax-builtins-flags' }],
+					items: [
+						{ label: 'Reference Overview', slug: 'docs/reference/syntax-builtins-flags' },
+						{ label: 'Syntax Rules', slug: 'docs/reference/syntax-rules' },
+						{ label: 'Built-in Functions', slug: 'docs/reference/built-in-functions' },
+					],
 				},
 			],
 		}),

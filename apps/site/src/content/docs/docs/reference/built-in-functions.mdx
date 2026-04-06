@@ -1,0 +1,41 @@
+---
+title: Built-in Functions
+description: The runtime-provided native functions that are available without importing a package.
+---
+
+Mog currently exposes a small built-in native function set:
+
+- `clock()`
+- `sqrt(x)`
+- `len(x)`
+- `type(x)`
+- `str(x)`
+- `num(x)`
+- `print(x)`
+
+## Notes on the current surface
+
+- `print(...)` is part of the normal language experience and is surfaced through
+  tooling/completion, even though the README’s built-in list focuses on the
+  native helpers.
+- Conversion-style helpers such as `str(x)` and `num(x)` are useful in small
+  scripts and REPL checks.
+- Collection code in the repo also relies heavily on methods such as `.size()`,
+  `.has(...)`, `.get(...)`, and `.set(...)`, but those are collection methods,
+  not global built-ins.
+
+## Quick example
+
+```rust
+print(sqrt(9))
+print(len("mog"))
+print(type(42))
+print(str(7))
+print(num("12"))
+```
+
+## Related pages
+
+- [Values and Bindings](/docs/language/values-and-bindings/)
+- [Collections](/docs/language/collections/)
+- [REPL](/docs/tooling/repl/)

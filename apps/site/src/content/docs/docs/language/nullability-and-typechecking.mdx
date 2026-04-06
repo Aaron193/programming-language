@@ -1,0 +1,86 @@
+---
+title: Nullability and Type Checking
+description: Nullable types, explicit checks, and the kind of compile-time errors Mog already enforces.
+---
+
+Mog is strictly typed by default. The repo has broad type-error coverage, and
+the docs should reflect that posture instead of softening it.
+
+## Nullable types
+
+Nullable types are written with `?`.
+
+```rust
+var maybeScore i32? = 7
+if (maybeScore != null) {
+  print("score present")
+}
+```
+
+You can also assign `null` later:
+
+```rust
+type Dog struct {
+  fn bark() str {
+    return "woof"
+  }
+}
+
+var maybeDog Dog? = Dog()
+maybeDog = null
+```
+
+## Explicit null checks
+
+The current type checker expects explicit checks before optional member access
+or optional calls. The repo includes negative tests for both.
+
+```rust
+if (maybeDog != null) {
+  print("dog present")
+}
+```
+
+## Assignment rules
+
+The type checker already rejects:
+
+- assigning `null` to non-optional bindings
+- assigning the wrong primitive or collection type
+- assigning to `const`
+- invalid subtype assignments
+- invalid handle/package-type mixing
+
+## Function checking
+
+Functions are checked for:
+
+- argument type mismatches
+- lambda parameter and return mismatches
+- invalid casts
+- wrong return types
+- missing values on non-`void` returns
+
+## Control-flow checking
+
+The repo also enforces loop-control correctness:
+
+- `break` outside loops is rejected
+- `continue` outside loops is rejected
+- unknown loop labels are rejected
+- duplicate loop labels are rejected
+
+## Imports and types
+
+Typed imports are checked too. Existing tests cover:
+
+- missing imported symbols
+- typed import binding mismatches
+- native package binding mismatches
+- import cycles surfaced during frontend analysis
+
+## Related pages
+
+- [Values and Bindings](/docs/language/values-and-bindings/)
+- [Modules and Imports](/docs/language/modules-and-imports/)
+- [Syntax Rules](/docs/reference/syntax-rules/)

@@ -1,0 +1,92 @@
+---
+title: Authoring Native Packages
+description: The package manifest files, API declaration files, and reference examples already used in this repo.
+---
+
+The repo already contains multiple package examples, so the docs can describe a
+real authoring path instead of a hypothetical future design.
+
+## Package layout
+
+A native package in this repo typically includes:
+
+- `mog.toml`
+- `package.toml`
+- `package.api.mog`
+- `package.cpp`
+
+Examples:
+
+- `packages/examples/math/`
+- `packages/examples/counter/`
+- `packages/mog/window/`
+
+## Manifest fields
+
+Reference packages in this repo use metadata like:
+
+```toml
+kind = "native"
+import_name = "math"
+namespace = "examples"
+name = "math"
+version = "0.1.0"
+abi_version = 3
+description = "Reference namespaced math package."
+dependencies = []
+```
+
+The `import_name` is the name users write in `@import("...")`.
+
+## Public API declarations
+
+`package.api.mog` is where you declare the public surface:
+
+```rust
+package counter
+
+@doc("GC-managed opaque counter handle.")
+@native_handle("CounterHandle")
+opaque type Counter
+
+@doc("Create a new counter handle.")
+fn create(initial i64) Counter
+```
+
+The repo uses this file for:
+
+- editor-facing signatures
+- public docs strings through `@doc(...)`
+- opaque package types via `opaque type`
+- native handle metadata via `@native_handle(...)`
+
+## Registration and ABI
+
+The compiled shared library still provides the runtime implementation. This repo
+registers package exports from C++ and validates them against the manifest and
+API metadata.
+
+Keep the docs honest here: authoring is real today, but it is still a
+repo-local, runtime-backed system rather than a finished public package
+ecosystem.
+
+## Reserved namespaces
+
+Official runtime-maintained packages use the reserved `mog:*` canonical package
+space internally. User and example packages should not claim that space outside
+the sanctioned repo roots.
+
+## Recommended authoring flow
+
+1. Copy a minimal reference package such as `packages/examples/math/`.
+2. Fill in manifest metadata and `import_name`.
+3. Declare the public API in `package.api.mog`.
+4. Implement and register the package in `package.cpp`.
+5. Build the repo.
+6. Run `--validate-package` before treating the package as stable.
+
+## Related pages
+
+- [Using Native Packages](/docs/packages/using-native-packages/)
+- [Window Package](/docs/packages/window-package/)
+- [VS Code and LSP](/docs/tooling/vscode-and-lsp/)

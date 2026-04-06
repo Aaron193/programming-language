@@ -1,0 +1,86 @@
+---
+title: Window Package
+description: The official SDL-backed window package, its current API, and the demos that use it.
+---
+
+`window` is the first official runtime-maintained package in the repo. It is
+SDL-backed and only builds when SDL2 is available at configure time.
+
+## Importing the package
+
+```rust
+const window = @import("window")
+```
+
+## Core lifecycle
+
+```rust
+const win window.Window =
+  window.create("Demo", 800i64, 600i64)
+
+window.clear(win)
+window.present(win)
+window.close(win)
+```
+
+The current API creates windows hidden by default. Visible manual demos call
+`window.show(win)` explicitly.
+
+## Events and input
+
+```rust
+const evt window.Event? = window.pollEvent(win)
+
+if (evt != null) {
+  print(window.eventKind(evt))
+}
+```
+
+Current input/event helpers include:
+
+- `pollEvent(win) -> Event?`
+- `eventKind(evt) -> str`
+- `eventKeyCode(evt) -> i64`
+- `isKeyDown(win, keyCode) -> bool`
+- `mouseX(win) -> i64`
+- `mouseY(win) -> i64`
+- `KEY_SPACE`
+- `KEY_ESCAPE`
+
+## Rendering helpers
+
+The package already exposes a small immediate-mode drawing surface:
+
+```rust
+window.clearRgb(win, 32i64, 64i64, 96i64)
+window.fillRect(win, 8i64, 8i64, 24i64, 24i64, 255i64, 0i64, 0i64)
+window.present(win)
+window.delay(1i64)
+```
+
+That is enough for the rectangle-rendered Flappy Bird demo in
+`examples/flappy_bird.mog`.
+
+## Demos in this repo
+
+Manual examples:
+
+- `examples/window_open.mog`
+- `examples/window_events.mog`
+- `examples/flappy_bird.mog`
+
+Headless test coverage:
+
+- `tests/sample_mog_window.mog`
+- `tests/sample_mog_window_render.mog`
+
+## Build note
+
+If SDL2 is not installed, the main interpreter still builds normally and simply
+skips the optional `window` package target.
+
+## Related pages
+
+- [Using Native Packages](/docs/packages/using-native-packages/)
+- [Example Programs](/docs/examples/)
+- [Built-in Functions](/docs/reference/built-in-functions/)

@@ -1,0 +1,81 @@
+---
+title: Using Native Packages
+description: Importing native packages, package search paths, opaque handles, and validation workflows.
+---
+
+Native packages use the same `@import(...)` syntax as source modules.
+
+## Importing a package
+
+```rust
+const math = @import("math")
+const { addI64, greet, MEANING_OF_LIFE } = @import("math")
+
+print(addI64(1i64, 2i64))
+print(MEANING_OF_LIFE)
+print(greet("Turing"))
+```
+
+Bare import names such as `"math"` or `"window"` resolve as packages. Path-like
+imports such as `"./math.mog"` stay source imports.
+
+## Search paths
+
+The current interpreter searches for packages in:
+
+- `build/packages` relative to the interpreter binary
+- any roots passed with `--package-path`
+- `packages/` relative to the importing source file or current working directory
+
+You can add extra roots explicitly:
+
+```bash
+./build/interpreter --package-path /path/to/packages app.mog
+```
+
+## Opaque package types
+
+Packages can expose opaque handle types through `package.api.mog`.
+
+```rust
+const counter = @import("counter")
+
+const first counter.Counter = counter.create(10i64)
+const second counter.Counter = counter.create(20i64)
+
+print(counter.read(first))
+print(counter.add(second, 5i64))
+```
+
+Those values are package-managed handles, but the type checker still tracks
+their package identity.
+
+## API declaration files
+
+Native packages can ship `package.api.mog` for:
+
+- readable public signatures
+- editor navigation and hover docs
+- public opaque type declarations
+
+The reference packages under `packages/examples/` are the best examples in this
+repo.
+
+## Validating a package
+
+Validate a package directory against its manifest and compiled shared library:
+
+```bash
+./build/interpreter --validate-package packages/examples/math
+./build/interpreter --validate-package=packages/examples/counter
+```
+
+The current validator checks package ID syntax, reserved `mog` usage,
+manifest/ABI compatibility, registration metadata, and exported native
+signature parsing.
+
+## Related pages
+
+- [Authoring Native Packages](/docs/packages/authoring-native-packages/)
+- [Window Package](/docs/packages/window-package/)
+- [Modules and Imports](/docs/language/modules-and-imports/)

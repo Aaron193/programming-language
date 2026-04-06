@@ -1,0 +1,101 @@
+---
+title: Control Flow
+description: Branching, loops, foreach syntax, and loop-control rules in Mog.
+---
+
+Mog currently supports `if`, `else`, `while`, classic `for`, foreach loops,
+`break`, `continue`, and labeled loops.
+
+## `if` and `else`
+
+```rust
+var score i32 = 7
+
+if (score > 5) {
+  print("pass")
+} else {
+  print("retry")
+}
+```
+
+Conditions are expressions, not statement-only forms.
+
+## `while`
+
+```rust
+var i i32 = 0
+while (i < 3) {
+  print(i)
+  i += 1
+}
+```
+
+## Classic `for`
+
+Semicolons only appear inside `for (...)` clauses.
+
+```rust
+for (var i i32 = 0; i < 3; i += 1) {
+  print(i)
+}
+```
+
+Outside `for (...)`, semicolons are a syntax error.
+
+## Foreach
+
+Foreach uses `:` instead of semicolons.
+
+```rust
+var nums Array<i32> = [1, 2, 3]
+for (var n i32 : nums) {
+  print(n)
+}
+```
+
+For dictionaries, iterate an explicit projection instead of the dictionary
+itself:
+
+```rust
+var scores Dict<str, i32> = {"alice": 7, "bob": 9}
+for (var name str : scores.keys()) {
+  print(name)
+  print(scores[name])
+}
+```
+
+The type checker currently rejects `for (... : dict)` directly.
+
+## `break` and `continue`
+
+`break` exits the nearest loop. `continue` skips to the next iteration.
+
+```rust
+for (var i i32 = 0; i < 10; i++) {
+  if (i == 3) continue
+  if (i == 7) break
+  print(i)
+}
+```
+
+## Labeled loops
+
+Labels let you target an outer loop instead of only the innermost one.
+
+```rust
+outer: while (true) {
+  for (var i i32 = 0; i < 10; i++) {
+    if (i == 3) continue
+    if (i == 7) break outer
+  }
+}
+```
+
+The repo also has error coverage for duplicate labels, unknown labels, and
+labels attached to non-loop statements.
+
+## Related pages
+
+- [Values and Bindings](/docs/language/values-and-bindings/)
+- [Collections](/docs/language/collections/)
+- [Syntax Rules](/docs/reference/syntax-rules/)

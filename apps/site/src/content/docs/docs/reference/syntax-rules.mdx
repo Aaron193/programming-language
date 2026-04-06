@@ -1,0 +1,72 @@
+---
+title: Syntax Rules
+description: The syntax constraints and edge-case rules that matter most when writing Mog today.
+---
+
+This page focuses on rules that are easy to forget and worth documenting
+exactly.
+
+## Semicolons
+
+Semicolons are not part of normal statement syntax.
+
+They are only used as separators inside classic `for (...)` clauses:
+
+```rust
+for (var i i32 = 0; i < 3; i += 1) {
+  print(i)
+}
+```
+
+## Newline continuation
+
+Continuation is explicit and token-based. Tokens such as `(`, `[`, `.`, `as`,
+assignment operators, and binary operators must stay on the same line as the
+expression they continue.
+
+Valid shape:
+
+```rust
+print(1 +
+  2)
+```
+
+Invalid shape:
+
+```rust
+print(1
+  + 2)
+```
+
+After the continuation token is consumed, the rest of the call, index, or
+member access may span later lines.
+
+## `++` and `--`
+
+A newline before `++` or `--` starts a new prefix expression. It does not keep
+continuing the previous line as a postfix update.
+
+## Trailing commas
+
+Trailing commas in call argument lists are currently not supported.
+
+## Imports
+
+Import paths must be string literals. For source modules, include the full
+filename such as `./math.mog`.
+
+## Export visibility
+
+Capitalized top-level names are exported from source modules. Lowercase names
+are private module implementation details.
+
+## Foreach over dictionaries
+
+Iterate an explicit projection such as `dict.keys()` instead of iterating the
+dictionary directly.
+
+## Related pages
+
+- [Modules and Imports](/docs/language/modules-and-imports/)
+- [Control Flow](/docs/language/control-flow/)
+- [Nullability and Type Checking](/docs/language/nullability-and-typechecking/)

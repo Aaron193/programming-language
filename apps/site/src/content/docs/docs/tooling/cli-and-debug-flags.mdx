@@ -1,0 +1,90 @@
+---
+title: CLI and Debug Flags
+description: Build modes, interpreter entrypoints, diagnostics flags, and package-validation commands.
+---
+
+## Build modes
+
+Build the interpreter with the repo-local helper:
+
+```bash
+./build.sh
+```
+
+Useful variants already supported by the script:
+
+```bash
+./build.sh --debug
+./build.sh --debug --asan
+./build.sh --debug --ubsan
+./build.sh --debug --asan --ubsan
+./build.sh --release --profiling
+./build.sh --release --pgo-generate
+./build.sh --release --pgo-use=/tmp/pgo-data
+```
+
+Sanitizers cannot be combined with `--lto`, `--pgo-generate`, or `--pgo-use`.
+
+## Running code
+
+```bash
+./build/interpreter path/to/program.mog
+```
+
+Add extra package roots when needed:
+
+```bash
+./build/interpreter --package-path /path/to/packages app.mog
+```
+
+## Runtime and diagnostics flags
+
+The current interpreter exposes these runtime/debugging switches:
+
+- `--trace`
+- `--show-return`
+- `--disassemble`
+- `--frontend-timings`
+- `--frontend-timings-json`
+
+Examples:
+
+```bash
+./build/interpreter --trace tests/sample_var.mog
+./build/interpreter --show-return tests/sample_var.mog
+./build/interpreter --disassemble tests/sample_var.mog
+./build/interpreter --frontend-timings tests/sample_var.mog
+./build/interpreter --frontend-timings-json tests/sample_var.mog
+```
+
+The shell test suite verifies that these flags still execute the target program
+while emitting their extra diagnostics.
+
+## Frontend timings
+
+`--frontend-timings` reports a readable phase summary that includes parse,
+symbol collection, import resolution, bind, type-check, HIR lowering, HIR
+optimization, cache stats, and total frontend time.
+
+`--frontend-timings-json` emits the same information as JSON.
+
+## Package validation
+
+The interpreter also validates package directories:
+
+```bash
+./build/interpreter --validate-package packages/examples/math
+./build/interpreter --validate-package=packages/examples/counter
+```
+
+## Intentional non-feature
+
+The repo explicitly tests that `--strict` is rejected as an unknown option. Mog
+is already strictly typed by default; there is no separate runtime strictness
+flag today.
+
+## Related pages
+
+- [Install and Build](/docs/getting-started/install/)
+- [Using Native Packages](/docs/packages/using-native-packages/)
+- [REPL](/docs/tooling/repl/)
