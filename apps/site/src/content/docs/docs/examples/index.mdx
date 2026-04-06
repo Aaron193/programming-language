@@ -1,0 +1,38 @@
+---
+title: Example Programs
+description: Notable runnable examples and demos in the Mog repository.
+---
+
+## Manual examples
+
+The `examples/` directory contains runnable demos intended for manual
+exploration rather than CI coverage.
+
+## Visible window demos
+
+If SDL2 is available at configure time, you can run:
+
+```bash
+./build/interpreter examples/window_open.mog
+./build/interpreter examples/window_events.mog
+./build/interpreter examples/flappy_bird.mog
+```
+
+These demonstrate visible window creation, event polling, rendering, and simple
+real-time game logic through the official `window` package.
+
+## Test-focused samples
+
+The `tests/` tree also acts as a dense catalog of language behavior. It includes
+focused `.mog` files for:
+
+- control flow
+- imports
+- closures
+- optimizations
+- type errors
+- package validation
+- tooling behavior
+
+When documenting a feature, this directory is often the best source of stable
+examples because it already captures edge cases under automated coverage.

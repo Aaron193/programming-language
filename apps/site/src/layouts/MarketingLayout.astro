@@ -1,0 +1,63 @@
+---
+import '../styles/site.css';
+
+interface Props {
+	title: string;
+	description: string;
+	path?: string;
+}
+
+const { title, description, path = '/' } = Astro.props;
+const site = Astro.site ?? new URL('https://moglang.dev');
+const canonical = new URL(path, site).toString();
+---
+
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>{title} | Mog</title>
+		<meta name="description" content={description} />
+		<meta name="theme-color" content="#061311" />
+		<link rel="canonical" href={canonical} />
+		<meta property="og:title" content={`${title} | Mog`} />
+		<meta property="og:description" content={description} />
+		<meta property="og:type" content="website" />
+		<meta property="og:url" content={canonical} />
+		<meta name="twitter:card" content="summary_large_image" />
+		<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+	</head>
+	<body class="site-shell">
+		<header class="topbar">
+			<div class="topbar__inner">
+				<a class="brand" href="/">
+					<img src="/favicon.svg" alt="Mog" />
+					<span>
+						Mog
+						<small>Strict by default. Fast on purpose.</small>
+					</span>
+				</a>
+				<nav class="topnav" aria-label="Primary">
+					<a href="/docs/">Docs</a>
+					<a href="/manifesto/">Manifesto</a>
+					<a href="/docs/reference/syntax-builtins-flags/">Reference</a>
+					<a class="cta" href="/docs/getting-started/quickstart/">Start Building</a>
+				</nav>
+			</div>
+		</header>
+		<main>
+			<slot />
+		</main>
+		<footer class="footer">
+			<div class="footer__inner">
+				<p>Mog is a bytecode-compiled language project implemented in C++ with official docs in Astro + Starlight.</p>
+				<div class="footer__links">
+					<a href="/docs/">Docs</a>
+					<a href="/manifesto/">Manifesto</a>
+					<a href="/docs/reference/syntax-builtins-flags/">Reference</a>
+				</div>
+			</div>
+		</footer>
+	</body>
+</html>

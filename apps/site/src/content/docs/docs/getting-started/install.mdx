@@ -1,0 +1,80 @@
+---
+title: Install and Build
+description: Build Mog from source and understand the current toolchain layout.
+---
+
+import { Steps, FileTree } from '@astrojs/starlight/components';
+
+Mog is currently built from source from this repository. The implementation
+targets GCC or Clang because the VM uses computed-goto dispatch.
+
+## Prerequisites
+
+- A Unix-like environment with `bash`
+- `cmake`
+- GCC or Clang
+- Optional: SDL2 if you want to build and run the visible `window` demos
+
+## Workspace Shape
+
+<FileTree>
+	- README.md
+	- build.sh
+	- src/
+		- main.cpp
+		- Compiler.cpp
+		- VirtualMachine.cpp
+	- examples/
+	- packages/
+	- tests/
+	- apps/
+		- site/
+</FileTree>
+
+## Build Commands
+
+<Steps>
+1. Build the default release binary:
+
+   ```bash
+   ./build.sh
+   ```
+
+2. Build a debug binary with sanitizers when needed:
+
+   ```bash
+   ./build.sh --debug --asan
+   ./build.sh --debug --ubsan
+   ./build.sh --debug --asan --ubsan
+   ```
+
+3. Build a profiling-friendly optimized binary:
+
+   ```bash
+   ./build.sh --release --profiling
+   ```
+</Steps>
+
+## Important Notes
+
+- Sanitizer builds cannot be combined with `--lto`, `--pgo-generate`, or `--pgo-use`.
+- `./build.sh` configures CMake and builds the interpreter plus test binaries and packages.
+- If SDL2 is not installed, the build can still succeed, but the optional `window` package and visible window demos will be unavailable.
+
+## Run the Interpreter
+
+```bash
+./build/interpreter path/to/program.mog
+```
+
+Add extra native package roots if you need them:
+
+```bash
+./build/interpreter --package-path /path/to/packages path/to/program.mog
+```
+
+Start the REPL by running the binary without a source file:
+
+```bash
+./build/interpreter
+```

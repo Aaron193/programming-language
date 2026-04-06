@@ -1,0 +1,60 @@
+---
+title: Syntax, Built-ins, and Flags
+description: Quick reference for common Mog syntax and runtime switches.
+---
+
+## Built-in native functions
+
+- `clock()`
+- `sqrt(x)`
+- `len(x)`
+- `type(x)`
+- `str(x)`
+- `num(x)`
+
+## Core syntax at a glance
+
+```rust
+var name = "mog"
+const score i32 = 7
+
+fn add(left i32, right i32) i32 {
+  return left + right
+}
+
+type Counter struct {
+  value i32
+}
+
+const math = @import("./math.mog")
+```
+
+## Supported categories
+
+- arithmetic
+- comparison and equality
+- logical operators with short-circuiting
+- bitwise operators
+- variables and constants
+- functions, closures, and lambdas
+- structs, fields, and methods
+- inheritance with `super`
+- modules and native packages
+- arrays, sets, and dictionaries
+
+## Useful interpreter flags
+
+```bash
+./build/interpreter --trace file.mog
+./build/interpreter --show-return file.mog
+./build/interpreter --disassemble file.mog
+./build/interpreter --frontend-timings file.mog
+./build/interpreter --frontend-timings-json file.mog
+```
+
+## Current limitations to remember
+
+- trailing commas in call argument lists are not supported
+- newline continuation is explicit and token-based
+- `type ... struct` is currently class-backed syntax in the runtime
+- operator annotations currently cover `+`, `-`, `*`, `/`, `==`, `!=`, `<`, `<=`, `>`, `>=`

@@ -1,0 +1,35 @@
+name: Site
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/site.yml"
+      - "apps/site/**"
+      - "package.json"
+      - "package-lock.json"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/site.yml"
+      - "apps/site/**"
+      - "package.json"
+      - "package-lock.json"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm install
+      - run: npm run site:check
+      - run: npm run site:build

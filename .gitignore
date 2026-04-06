@@ -1,5 +1,8 @@
 libs/
 build/
+node_modules/
+apps/site/dist/
+apps/site/.astro/
 
 error.log
 

@@ -1,0 +1,53 @@
+---
+title: Mog Docs
+description: Official documentation for the Mog programming language.
+template: splash
+hero:
+  tagline: Strict by default. Bytecode-compiled. Backed by a real VM and toolchain.
+  actions:
+    - text: Install and Build
+      link: /docs/getting-started/install/
+      icon: right-arrow
+    - text: Read the Quickstart
+      link: /docs/getting-started/quickstart/
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+<div class="docs-home">
+
+<span class="eyebrow">Official Documentation</span>
+
+Mog is a strictly typed programming language implemented in C++ with a compiler,
+stack-based VM, REPL, native package system, and editor tooling in the same
+repository.
+
+## Start Here
+
+<CardGrid stagger>
+	<Card title="Install and build" icon="rocket">
+		Set up the interpreter and understand the build modes, sanitizer options,
+		and runtime entrypoints.
+	</Card>
+	<Card title="Write a first program" icon="pencil">
+		Follow the quickstart to create a file, run it through the interpreter, and
+		see the current language shape.
+	</Card>
+	<Card title="Learn the language" icon="open-book">
+		Study expressions, variables, functions, structs, inheritance, nullability,
+		and imports.
+	</Card>
+	<Card title="Use the tooling" icon="setting">
+		Explore diagnostics flags, the REPL, VS Code extension, and the in-repo
+		language server.
+	</Card>
+</CardGrid>
+
+## Current Scope
+
+These docs cover the implementation and language behavior that already exists in
+this repository today. The content is intentionally grounded in the current
+`README.md`, examples, package manifests, and tooling sources.
+
+</div>

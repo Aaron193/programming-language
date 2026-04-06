@@ -1,0 +1,75 @@
+---
+title: Quickstart
+description: Write and run a first Mog program.
+---
+
+import { Steps, Aside } from '@astrojs/starlight/components';
+
+This walkthrough gets you from a built interpreter to a real `.mog` file with
+functions, locals, and output.
+
+## First Program
+
+Create a file named `hello.mog`:
+
+```rust
+fn applyTwice(f fn(i32) i32, value i32) i32 {
+  return f(f(value))
+}
+
+var addOne = fn(x i32) => x + 1
+
+print(applyTwice(addOne, 40))
+```
+
+Run it:
+
+```bash
+./build/interpreter hello.mog
+```
+
+## What This Shows
+
+- Named function declarations
+- Function types in parameter position
+- Local type inference with `var`
+- Expression-bodied lambdas
+- `print(...)` output through the runtime
+
+## Next Sample
+
+Mog already supports structs, methods, and inferred locals:
+
+```rust
+type Counter struct {
+  value i32
+
+  fn reset() {
+    this.value = 0
+  }
+}
+
+fn buildCounter() Counter {
+  var counter = Counter()
+  counter.reset()
+  return counter
+}
+
+var current = buildCounter()
+print(current.value)
+```
+
+<Aside type="tip" title="Use real examples">
+	The repository already contains runnable samples under `examples/` and many
+	focused language cases under `tests/`. When you are documenting a new feature,
+	prefer pulling a sample from one of those locations instead of inventing a
+	separate docs-only snippet.
+</Aside>
+
+## Where To Go Next
+
+<Steps>
+1. Read [Basics](/docs/language/basics/) for the language model.
+2. Read [Functions, Types, and Modules](/docs/language/functions-types-modules/) for larger building blocks.
+3. Read [CLI, REPL, VS Code, and LSP](/docs/tooling/cli-repl-vscode-lsp/) when you want the surrounding tooling.
+</Steps>

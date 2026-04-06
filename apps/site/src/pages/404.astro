@@ -1,0 +1,31 @@
+---
+import MarketingLayout from '../layouts/MarketingLayout.astro';
+---
+
+<MarketingLayout
+	title="Page Not Found"
+	description="The page you were looking for does not exist in the Mog site."
+	path="/404"
+>
+	<section class="content-section manifesto-shell">
+		<div class="section-header">
+			<span class="eyebrow">404</span>
+			<h1>The page moved, or it never existed.</h1>
+			<p>
+				Use the docs index to navigate from stable sections, or return to the landing page and
+				start from there.
+			</p>
+		</div>
+		<div class="manifesto-cta">
+			<div>
+				<span class="eyebrow">Recovery</span>
+				<h2>Use a known-good entrypoint.</h2>
+				<p>The docs home, quickstart, and reference pages are the fastest way back into the site.</p>
+			</div>
+			<div class="hero-actions">
+				<a class="primary" href="/docs/">Open Docs</a>
+				<a class="secondary" href="/">Go Home</a>
+			</div>
+		</div>
+	</section>
+</MarketingLayout>

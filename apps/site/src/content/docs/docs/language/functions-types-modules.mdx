@@ -1,0 +1,74 @@
+---
+title: Functions, Types, and Modules
+description: The larger language building blocks currently implemented in Mog.
+---
+
+## Functions and closures
+
+Mog supports named functions, block function literals, expression-bodied
+lambdas, recursion, and closures with captured variables.
+
+```rust
+fn makeAdder(base i32) fn(i32) i32 {
+  return fn(delta i32) => base + delta
+}
+
+var addTen = makeAdder(10)
+print(addTen(32))
+```
+
+## Structs and methods
+
+`type ... struct` is currently class-backed syntax in the runtime.
+
+```rust
+type Counter struct {
+  value i32
+
+  fn reset() {
+    this.value = 0
+  }
+}
+```
+
+Methods can use `this`, and constructors are created through normal type call
+syntax such as `Counter()`.
+
+## Inheritance
+
+Single inheritance is available through `type Child struct < Parent`.
+
+```rust
+type A struct {
+  fn greet() str {
+    return "A"
+  }
+}
+
+type B struct < A {
+  fn greet() str {
+    return super.greet() + "B"
+  }
+}
+```
+
+## Modules
+
+Source modules are imported with `@import(...)` and can be aliased or
+destructured.
+
+```rust
+const math = @import("./math.mog")
+const { Add as sum } = @import("./math.mog")
+
+print(math.PI)
+print(sum(10, 5))
+```
+
+Capitalization is used to distinguish exported bindings.
+
+## Native packages
+
+The same `@import(...)` model also loads native packages. These are runtime
+shared libraries backed by package manifests and optional public API files such
+as `package.api.mog`.

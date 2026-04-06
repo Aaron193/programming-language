@@ -1,0 +1,41 @@
+---
+title: Imports and Native Packages
+description: How Mog currently resolves modules and native packages.
+---
+
+## Import model
+
+Mog uses `@import(...)` for both source modules and native packages.
+
+- string literal paths are used for source modules
+- bare names are used for package imports
+
+This gives the language one import mechanism instead of separate systems for
+source code and package loading.
+
+## Project manifests
+
+The repository already uses:
+
+- `mog.toml` for project metadata
+- `mog.lock` for lockfile state
+- `package.toml` for packages
+- `package.api.mog` for public type/API declarations on native packages
+
+## Native packages in this repo
+
+Examples include:
+
+- `packages/mog/window/`
+- `packages/examples/math/`
+- `packages/examples/counter/`
+
+These packages demonstrate package manifests, runtime loading, and API
+declaration files.
+
+## Current direction
+
+The repo TODOs still mention follow-up work around import-system clarity between
+standard library packages, user code, and external dependencies. Treat the
+current docs as a description of the implemented behavior today, not a promise
+that the package model is fully stabilized.

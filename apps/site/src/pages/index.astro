@@ -1,0 +1,196 @@
+---
+import MarketingLayout from '../layouts/MarketingLayout.astro';
+---
+
+<MarketingLayout
+	title="A Programming Language With Bite"
+	description="Mog is a strictly typed programming language with a bytecode VM, REPL, native packages, and editor tooling. Start with the official docs."
+>
+	<section class="hero-grid">
+		<div class="hero-copy">
+			<span class="eyebrow">Official Website + Docs</span>
+			<h1>Strict by default. Small rules. Real tooling.</h1>
+			<p>
+				Mog is a bytecode-compiled programming language implemented in C++ with a VM, compiler,
+				REPL, native package system, and editor tooling in the same repository. The design goal is
+				clarity without softness.
+			</p>
+			<div class="hero-actions">
+				<a class="primary" href="/docs/getting-started/quickstart/">Read the Quickstart</a>
+				<a class="secondary" href="/docs/reference/syntax-builtins-flags/">Browse the Reference</a>
+			</div>
+			<div class="hero-metrics">
+				<div class="metric-card">
+					<strong>Typed</strong>
+					<span>Explicit signatures, local inference, and strict defaults.</span>
+				</div>
+				<div class="metric-card">
+					<strong>Compiled</strong>
+					<span>Bytecode compiler and stack-based virtual machine.</span>
+				</div>
+				<div class="metric-card">
+					<strong>Tooled</strong>
+					<span>REPL, diagnostics flags, VS Code extension, and LSP.</span>
+				</div>
+			</div>
+		</div>
+
+		<div class="code-panel" aria-label="Mog code sample">
+			<div class="code-panel__top">
+				<div class="code-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+				<span>flappy_core.mog</span>
+			</div>
+			<pre><code><span class="kw">fn</span> <span class="fn">makeAdder</span>(base <span class="type">i32</span>) <span class="type">fn(i32) i32</span> &#123;
+  <span class="kw">return</span> <span class="kw">fn</span>(delta <span class="type">i32</span>) =&gt; base + delta
+&#125;
+
+<span class="kw">type</span> <span class="type">Bird</span> struct &#123;
+  velocity <span class="type">f64</span>
+
+  <span class="kw">fn</span> <span class="fn">jump</span>() &#123;
+    this.velocity = -280.0
+  &#125;
+&#125;
+
+<span class="kw">const</span> window = @import(<span class="str">"window"</span>)
+<span class="kw">var</span> addTen = makeAdder(10)
+print(addTen(32))</code></pre>
+		</div>
+	</section>
+
+	<section class="feature-band">
+		<article class="feature-card">
+			<span class="eyebrow">Language Shape</span>
+			<h3>Readable syntax without ceremonial noise</h3>
+			<p>
+				No semicolons in normal statement syntax, explicit continuation rules, and type signatures
+				where they matter. Mog is compact without becoming vague.
+			</p>
+		</article>
+		<article class="feature-card">
+			<span class="eyebrow">Runtime</span>
+			<h3>Compiler and VM in the same repo</h3>
+			<p>
+				The current implementation includes a Pratt parser, HIR lowering, optimization passes,
+				bytecode emission, stack traces, and frontend timing diagnostics.
+			</p>
+		</article>
+		<article class="feature-card">
+			<span class="eyebrow">Packages + Tooling</span>
+			<h3>Imports, native packages, and editor support</h3>
+			<p>
+				Use `@import(...)` for modules and native packages, build with `mog.toml`, and work with
+				VS Code language support plus an in-repo LSP implementation.
+			</p>
+		</article>
+	</section>
+
+	<section class="content-section">
+		<div class="section-header">
+			<span class="eyebrow">What Ships In V1</span>
+			<h2>A landing page for the pitch, and docs that stay close to the code.</h2>
+			<p>
+				The public site is one Astro app. The landing page handles positioning and narrative. The
+				docs run on Starlight so you get search, navigation, Markdown authoring, and static output
+				without building a documentation framework from nothing.
+			</p>
+		</div>
+		<div class="stack-grid">
+			<article class="stack-card">
+				<h3>Why this approach</h3>
+				<p>
+					Most documentation sites use a framework or platform instead of custom-building docs UI.
+					For Mog, Astro + Starlight gives you a modern docs experience while leaving the landing
+					page fully customizable.
+				</p>
+				<ul>
+					<li>Static output suitable for Vercel, Netlify, or any CDN</li>
+					<li>In-repo Markdown and MDX content with searchable builds</li>
+					<li>Design control without recreating docs navigation from scratch</li>
+				</ul>
+			</article>
+			<article class="stack-card">
+				<h3>What the stack looks like</h3>
+				<p>
+					The repo now acts as a real monorepo: the language runtime stays in C++ and the website
+					lives under <code>apps/site</code>.
+				</p>
+				<ul>
+					<li><code>npm</code> workspaces at the repo root</li>
+					<li><code>Astro</code> for custom pages and static delivery</li>
+					<li><code>Starlight</code> for docs, sidebar, search, and content collections</li>
+				</ul>
+			</article>
+		</div>
+	</section>
+
+	<section class="content-section">
+		<div class="section-header">
+			<span class="eyebrow">Official Docs</span>
+			<h2>Docs organized around getting productive fast, then understanding the language deeply.</h2>
+			<p>
+				The docs are intentionally split between workflow pages and durable reference pages so the
+				site does not collapse into a giant README.
+			</p>
+		</div>
+		<div class="docs-grid">
+			<article class="docs-card">
+				<h3>Getting Started</h3>
+				<p>Build the interpreter, run your first file, and understand the current project shape.</p>
+			</article>
+			<article class="docs-card">
+				<h3>Language Guides</h3>
+				<p>Learn Mog syntax, control flow, functions, structs, inheritance, and imports.</p>
+			</article>
+			<article class="docs-card">
+				<h3>Tooling</h3>
+				<p>Use the REPL, diagnostics flags, VS Code extension, and the language server.</p>
+			</article>
+			<article class="docs-card">
+				<h3>Reference</h3>
+				<p>Check syntax rules, built-in functions, and current compiler/runtime flags quickly.</p>
+			</article>
+		</div>
+	</section>
+
+	<section class="content-section">
+		<div class="section-header">
+			<span class="eyebrow">Repository Highlights</span>
+			<h2>The site points directly at the real capabilities already present in the repo.</h2>
+			<p>
+				This avoids fake product copy. The landing narrative is tied to features that exist today:
+				type checking, native packages, example programs, benchmark scripts, and editor tooling.
+			</p>
+		</div>
+		<div class="example-grid">
+			<article class="docs-card">
+				<h3>Examples and demos</h3>
+				<p>
+					Explore manual examples under <code>examples/</code>, including visible window demos and a
+					playable Flappy Bird clone powered by the official <code>window</code> package.
+				</p>
+			</article>
+			<article class="docs-card">
+				<h3>Package story</h3>
+				<p>
+					Mog supports package manifests, lockfiles, native package APIs, and resolution through
+					<code>@import(...)</code> for both modules and native packages.
+				</p>
+			</article>
+		</div>
+		<div class="cta-banner">
+			<div>
+				<span class="eyebrow">Start Here</span>
+				<h2>Read the docs, then tune the voice.</h2>
+				<p>
+					The structure is now in place for a polished public site. Next iterations can deepen the
+					reference, add versioned docs, and refine the brand voice without reworking the stack.
+				</p>
+			</div>
+			<div class="hero-actions">
+				<a class="primary" href="/docs/">Open Docs</a>
+				<a class="secondary" href="/manifesto/">Read the Manifesto</a>
+			</div>
+		</div>
+	</section>
+</MarketingLayout>

@@ -1,0 +1,56 @@
+---
+title: CLI, REPL, VS Code, and LSP
+description: Runtime flags and editor tooling currently available for Mog.
+---
+
+## CLI and runtime flags
+
+The interpreter exposes optional diagnostics and debugging flags:
+
+- `--trace`
+- `--show-return`
+- `--disassemble`
+- `--frontend-timings`
+- `--frontend-timings-json`
+
+Example:
+
+```bash
+./build/interpreter --frontend-timings path/to/program.mog
+```
+
+## REPL
+
+Run the interpreter without a source file to start the interactive REPL:
+
+```bash
+./build/interpreter
+```
+
+This is useful for quick expression checks and runtime experiments.
+
+## VS Code extension
+
+The repository includes a VS Code extension under `tooling/vscode-mog/`.
+Current extension features include:
+
+- syntax highlighting
+- snippets
+- diagnostics
+- language registration for `.mog`
+
+The extension also supports a `mog.serverPath` setting to point VS Code at a
+`mog-lsp` executable.
+
+## Language server
+
+The in-repo language server binary is built as `mog-lsp`.
+
+Related coverage already exists in the repository for:
+
+- navigation
+- formatting
+- import diagnostics
+- VS Code grammar and manifest validation
+
+These tests live under the existing shell-based test suite.

@@ -1,0 +1,66 @@
+---
+import MarketingLayout from '../layouts/MarketingLayout.astro';
+---
+
+<MarketingLayout
+	title="The Mog Manifesto"
+	description="A sharper editorial page for the Mog project: strict defaults, compact syntax, and a runtime that takes itself seriously."
+	path="/manifesto/"
+>
+	<section class="content-section manifesto-shell">
+		<div class="section-header">
+			<span class="eyebrow">Manifesto</span>
+			<h1>Mog does not want to be permissive. It wants to be clear.</h1>
+			<p>
+				This page is the editorial companion to the official docs. The docs explain what Mog does.
+				The manifesto explains why the language is being shaped this way in the first place.
+			</p>
+		</div>
+
+		<div class="manifesto-grid">
+			<article class="manifesto-card">
+				<h3>Strict by default</h3>
+				<p>
+					Mog treats explicitness as a feature, not a tax. Function signatures, package APIs, and
+					type checking are part of the language’s posture, not optional afterthoughts.
+				</p>
+			</article>
+			<article class="manifesto-card">
+				<h3>Compact without becoming vague</h3>
+				<p>
+					The syntax tries to stay clean while still drawing hard boundaries. Semicolons are not
+					normal statement punctuation. Newline continuation is explicit. The parser is not asked
+					to guess your intent.
+				</p>
+			</article>
+			<article class="manifesto-card">
+				<h3>Runtime seriousness</h3>
+				<p>
+					The project already includes a compiler, a bytecode VM, native package loading, stack
+					traces, and frontend timing diagnostics. Mog is not trying to look like a language. It is
+					trying to behave like one.
+				</p>
+			</article>
+			<article class="manifesto-card">
+				<h3>One repo, one toolchain story</h3>
+				<p>
+					The language, examples, packages, tests, editor support, and now the official docs all
+					live together. That keeps the public site close to the real implementation instead of
+					drifting into marketing fiction.
+				</p>
+			</article>
+		</div>
+
+		<div class="manifesto-cta">
+			<div>
+				<span class="eyebrow">Continue</span>
+				<h2>The argument is one thing. The docs are the proof.</h2>
+				<p>Use the official docs for build instructions, language basics, tooling, packages, and reference material.</p>
+			</div>
+			<div class="hero-actions">
+				<a class="primary" href="/docs/">Open the Docs</a>
+				<a class="secondary" href="/docs/getting-started/install/">Install and Build</a>
+			</div>
+		</div>
+	</section>
+</MarketingLayout>

@@ -1,0 +1,80 @@
+---
+title: Basics
+description: Core syntax and behavior in Mog today.
+---
+
+## Expressions and values
+
+Mog supports:
+
+- numbers
+- booleans
+- `null`
+- strings
+- grouping expressions
+
+Arithmetic and comparison operators are available, along with logical
+short-circuiting and bitwise operators.
+
+```rust
+print((2 + 3) * 4)
+print(10 > 3)
+print(!false && true)
+print(7 & 3)
+```
+
+## Variables and constants
+
+Local bindings can be explicit or inferred:
+
+```rust
+var count i32 = 10
+var message = "mog"
+const answer = 42
+```
+
+Compound assignment operators such as `+=`, `-=`, `*=`, `/=`, `&=`, `|=`,
+`^=`, `<<=`, and `>>=` are supported.
+
+## Control flow
+
+Current control flow includes:
+
+- `if` / `else`
+- `while`
+- `for`
+- foreach loops
+- `break`
+- `continue`
+- labeled loops
+
+```rust
+for (var i i32 = 0; i < 3; i += 1) {
+  print(i)
+}
+
+var scores Dict<str, i32> = {"alice": 7, "bob": 9}
+for (var name str : scores.keys()) {
+  print(name)
+}
+```
+
+## Newline and syntax rules
+
+- Semicolons are only used inside `for (...)` clauses.
+- Continuation tokens such as `(`, `[`, `.`, `as`, assignment operators, and
+  binary operators stay on the same line as the expression they continue.
+- A newline before `++` or `--` starts a new prefix expression; it does not
+  continue a postfix update.
+- Trailing commas in call argument lists are currently not supported.
+
+## Nullability
+
+Nullable types use `?`:
+
+```rust
+var maybeScore i32? = 7
+if (maybeScore != null) {
+  print("score present")
+}
+```

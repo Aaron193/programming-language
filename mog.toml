@@ -1,4 +1,4 @@
 kind = "project"
-name = "programming-language"
+name = "mog-lang"
 version = "0.1.0"
 description = "Mog language workspace"
