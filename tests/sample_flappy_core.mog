@@ -110,7 +110,7 @@ fn updatePipes(state GameState, dt f64) void {
     while ((index as f64) < state.pipes.size()) {
         var pipe Pipe = state.pipes[index]
         pipe.x = pipe.x - (PIPE_SPEED * dt)
-        if ((pipe.x + (PIPE_WIDTH as f64)) > 0.0) {
+        if ((pipe.x + PIPE_WIDTH) > 0.0) {
             activePipes.push(pipe)
         }
 
@@ -122,7 +122,7 @@ fn updatePipes(state GameState, dt f64) void {
 
     while (state.spawnTimer >= SPAWN_INTERVAL) {
         state.spawnTimer = state.spawnTimer - SPAWN_INTERVAL
-        spawnPipe(state, (WINDOW_WIDTH as f64) + (PIPE_WIDTH as f64))
+        spawnPipe(state, WINDOW_WIDTH + PIPE_WIDTH)
     }
 }
 
@@ -131,7 +131,7 @@ fn updateScore(state GameState) void {
     while ((index as f64) < state.pipes.size()) {
         var pipe Pipe = state.pipes[index]
         if (pipe.passed == false &&
-            (pipe.x + (PIPE_WIDTH as f64)) < (BIRD_X as f64)) {
+            (pipe.x + PIPE_WIDTH) < BIRD_X) {
             pipe.passed = true
             state.score = state.score + 1
         }
@@ -141,12 +141,12 @@ fn updateScore(state GameState) void {
 }
 
 fn checkCollisions(state GameState) bool {
-    var birdLeft f64 = BIRD_X as f64
-    var birdRight f64 = birdLeft + (BIRD_WIDTH as f64)
+    var birdLeft f64 = BIRD_X
+    var birdRight f64 = birdLeft + BIRD_WIDTH
     var birdTop f64 = state.birdY
-    var birdBottom f64 = state.birdY + (BIRD_HEIGHT as f64)
-    var groundTop f64 = (WINDOW_HEIGHT - GROUND_HEIGHT) as f64
-    var halfGap f64 = (PIPE_GAP as f64) / 2.0
+    var birdBottom f64 = state.birdY + BIRD_HEIGHT
+    var groundTop f64 = WINDOW_HEIGHT - GROUND_HEIGHT
+    var halfGap f64 = PIPE_GAP / 2.0
 
     if (birdTop < 0.0) {
         return true
@@ -160,7 +160,7 @@ fn checkCollisions(state GameState) bool {
     while ((index as f64) < state.pipes.size()) {
         var pipe Pipe = state.pipes[index]
         var pipeLeft f64 = pipe.x
-        var pipeRight f64 = pipe.x + (PIPE_WIDTH as f64)
+        var pipeRight f64 = pipe.x + PIPE_WIDTH
         if (birdRight > pipeLeft && birdLeft < pipeRight) {
             var gapTop f64 = pipe.gapY - halfGap
             var gapBottom f64 = pipe.gapY + halfGap
@@ -215,9 +215,10 @@ var startX f64 = state.pipes[0].x
 updatePipes(state, 0.5)
 require(state.pipes[0].x < startX, "pipe should move left")
 
-state.pipes[0].x = (BIRD_X as f64) - (PIPE_WIDTH as f64) - 5.0
+state.pipes[0].x = BIRD_X - PIPE_WIDTH - 5.0
 updateScore(state)
 require(state.score == 1, "passing a pipe should increment score")
+
 updateScore(state)
 require(state.score == 1, "score should only increment once per pipe")
 

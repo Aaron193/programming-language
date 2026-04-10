@@ -15,7 +15,7 @@ fn updatePipes(state GameState, dt f64) void {
 
     for (const pipe Pipe : state.pipes) {
         pipe.x = pipe.x - (C.PIPE_SPEED * dt)
-        if ((pipe.x + (C.PIPE_WIDTH as f64)) > 0.0) {
+        if ((pipe.x + C.PIPE_WIDTH) > 0.0) {
             activePipes.push(pipe)
         }
     }
@@ -25,14 +25,14 @@ fn updatePipes(state GameState, dt f64) void {
 
     while (state.spawnTimer >= C.SPAWN_INTERVAL) {
         state.spawnTimer = state.spawnTimer - C.SPAWN_INTERVAL
-        SpawnPipe(state, (C.WINDOW_WIDTH as f64) + (C.PIPE_WIDTH as f64))
+        SpawnPipe(state, C.WINDOW_WIDTH + C.PIPE_WIDTH)
     }
 }
 
 fn updateScore(state GameState) void {
     for (var pipe Pipe : state.pipes) {
         if (pipe.passed == false &&
-            (pipe.x + (C.PIPE_WIDTH as f64)) < (C.BIRD_X as f64)) {
+            (pipe.x + C.PIPE_WIDTH) < C.BIRD_X) {
             pipe.passed = true
             state.score = state.score + 1
         }
@@ -40,12 +40,12 @@ fn updateScore(state GameState) void {
 }
 
 fn checkCollisions(state GameState) bool {
-    const birdLeft f64 = C.BIRD_X as f64
-    const birdRight f64 = birdLeft + (C.BIRD_WIDTH as f64)
+    const birdLeft f64 = C.BIRD_X
+    const birdRight f64 = birdLeft + C.BIRD_WIDTH
     const birdTop f64 = state.birdY
-    const birdBottom f64 = state.birdY + (C.BIRD_HEIGHT as f64)
-    const groundTop f64 = (C.WINDOW_HEIGHT - C.GROUND_HEIGHT) as f64
-    const halfGap f64 = (C.PIPE_GAP as f64) / 2.0
+    const birdBottom f64 = state.birdY + C.BIRD_HEIGHT
+    const groundTop f64 = C.WINDOW_HEIGHT - C.GROUND_HEIGHT
+    const halfGap f64 = C.PIPE_GAP / 2.0
 
     if (birdTop < 0) {
         return true
@@ -57,7 +57,7 @@ fn checkCollisions(state GameState) bool {
 
     for (const pipe Pipe : state.pipes) {
         const pipeLeft f64 = pipe.x
-        const pipeRight f64 = pipe.x + (C.PIPE_WIDTH as f64)
+        const pipeRight f64 = pipe.x + C.PIPE_WIDTH
         if (birdRight > pipeLeft && birdLeft < pipeRight) {
             const gapTop f64 = pipe.gapY - halfGap
             const gapBottom f64 = pipe.gapY + halfGap

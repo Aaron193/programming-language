@@ -1,0 +1,21 @@
+type Pipe struct {
+    x f64
+}
+
+const PIPE_WIDTH i64 = 80i64
+const BIRD_X i64 = 160i64
+const BIRD_WIDTH i64 = 34i64
+
+var pipe Pipe = Pipe()
+pipe.x = 10.5
+
+var rightEdge f64 = pipe.x + PIPE_WIDTH
+var birdRight f64 = BIRD_X + BIRD_WIDTH
+var total f64 = 1.5
+total += PIPE_WIDTH
+
+print(rightEdge)
+print((pipe.x + PIPE_WIDTH) < BIRD_X)
+print(birdRight)
+print(total)
+print(7i8 + 5u8)

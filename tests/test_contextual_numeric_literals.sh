@@ -74,6 +74,10 @@ run_expect_output \
     "$SCRIPT_DIR/sample_contextual_numeric_literals.mog" \
     $'3\n1\n2\n3\n[1, 2, 3]\n9\ntrue\ntrue' || failed=1
 
+run_expect_output \
+    "$SCRIPT_DIR/sample_numeric_promotion.mog" \
+    $'90.5\ntrue\n194\n81.5\n12' || failed=1
+
 run_expect_compile_error_contains \
     "$SCRIPT_DIR/types/errors/contextual_numeric_overflow_u8.mog" \
     "integer literal '256' is out of range for type 'u8'" || failed=1

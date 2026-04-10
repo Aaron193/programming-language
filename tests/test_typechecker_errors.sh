@@ -138,6 +138,10 @@ run_expect_compile_error \
     "result of compound assignment is not assignable to 'u8'" || failed=1
 
 run_expect_compile_error \
+    "$SCRIPT_DIR/types/errors/compound_arithmetic_result_unassignable.mog" \
+    "result of compound assignment is not assignable to 'i64'" || failed=1
+
+run_expect_compile_error \
     "$SCRIPT_DIR/types/errors/update_const.mog" \
     "cannot assign to const variable 'count'." || failed=1
 
