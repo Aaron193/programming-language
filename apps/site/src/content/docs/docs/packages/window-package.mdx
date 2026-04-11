@@ -54,11 +54,17 @@ The package already exposes a small immediate-mode drawing surface:
 ```rust
 window.clearRgb(win, 32i64, 64i64, 96i64)
 window.fillRect(win, 8i64, 8i64, 24i64, 24i64, 255i64, 0i64, 0i64)
+window.drawText(win, 8i64, 40i64, "Score: 12", 2i64, 255i64, 255i64, 255i64)
 window.present(win)
 window.delay(1i64)
 ```
 
-That is enough for the rectangle-rendered Flappy Bird demo in
+`drawText` uses a built-in bitmap monospace font, accepts printable ASCII,
+supports `\n` for multi-line text, and clips against the window surface. The
+`scale` argument must be at least `1`.
+
+That is enough for the rectangle-rendered Flappy Bird demo with an in-window
+score HUD in
 `examples/flappy_bird.mog`.
 
 ## Demos in this repo

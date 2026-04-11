@@ -39,8 +39,9 @@ short delay unless the user closes it first.
 `window_events.mog` opens a visible window, prints observed event kinds, and
 exits when the user closes the window or presses Escape.
 
-`flappy_bird.mog` uses the new `clearRgb`, `fillRect`, `delay`, and key
-constant APIs to run a simple playable game with rectangle art.
+`flappy_bird.mog` uses the `clearRgb`, `fillRect`, `drawText`, `delay`, and
+key constant APIs to run a simple playable game with rectangle art and an
+in-window score HUD.
 
 Headless automated coverage remains in `tests/sample_mog_window.mog`, which is
 designed to run under `SDL_VIDEODRIVER=dummy`. Additional render coverage lives

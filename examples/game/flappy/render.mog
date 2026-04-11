@@ -29,6 +29,13 @@ fn renderBird(win window.Window, state GameState) void {
     window.fillRect(win, birdBeakX, birdBeakY, 8, 6, 255, 140, 0)
 }
 
+fn renderScore(win window.Window, state GameState) void {
+    const scoreText str = "Score: " + (state.score as str)
+
+    window.drawText(win, 18, 18, scoreText, 2, 32, 32, 32)
+    window.drawText(win, 16, 16, scoreText, 2, 255, 255, 255)
+}
+
 fn RenderFrame(win window.Window, state GameState) void {
     const groundTop i64 = C.WINDOW_HEIGHT - C.GROUND_HEIGHT
 
@@ -36,5 +43,6 @@ fn RenderFrame(win window.Window, state GameState) void {
     renderPipes(win, state.pipes)
     window.fillRect(win, 0, groundTop, C.WINDOW_WIDTH, C.GROUND_HEIGHT, 181, 101, 29)
     renderBird(win, state)
+    renderScore(win, state)
     window.present(win)
 }

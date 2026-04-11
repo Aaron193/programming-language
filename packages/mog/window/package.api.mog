@@ -56,6 +56,9 @@ fn clearRgb(win Window, r i64, g i64, b i64) void
 @doc("Draw a filled RGB rectangle.")
 fn fillRect(win Window, x i64, y i64, width i64, height i64, r i64, g i64, b i64) void
 
+@doc("Draw bitmap text with a built-in monospace font.")
+fn drawText(win Window, x i64, y i64, text str, scale i64, r i64, g i64, b i64) void
+
 @doc("Present the backbuffer.")
 fn present(win Window) void
 
