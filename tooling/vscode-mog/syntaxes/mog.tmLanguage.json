@@ -154,7 +154,35 @@
     "type-context-expression": {
       "patterns": [
         {
-          "match": "\\b(var|const)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
+          "match": "\\b(const)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s+((?:[A-Za-z_][A-Za-z0-9_]*\\.)+[A-Za-z_][A-Za-z0-9_]*)\\b",
+          "captures": {
+            "1": {
+              "name": "keyword.control.mog"
+            },
+            "2": {
+              "name": "variable.other.constant.mog"
+            },
+            "3": {
+              "name": "entity.name.type.mog"
+            }
+          }
+        },
+        {
+          "match": "\\b(const)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s+([A-Za-z_][A-Za-z0-9_]*)(?!\\s*\\.)\\b",
+          "captures": {
+            "1": {
+              "name": "keyword.control.mog"
+            },
+            "2": {
+              "name": "variable.other.constant.mog"
+            },
+            "3": {
+              "name": "entity.name.type.mog"
+            }
+          }
+        },
+        {
+          "match": "\\b(var)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s+((?:[A-Za-z_][A-Za-z0-9_]*\\.)+[A-Za-z_][A-Za-z0-9_]*)\\b",
           "captures": {
             "1": {
               "name": "keyword.control.mog"
@@ -168,7 +196,21 @@
           }
         },
         {
-          "match": "\\b(?!(?:as|print|var|const|fn|type|struct|if|else|for|while|break|continue|this|super|return)\\b)([A-Za-z_][A-Za-z0-9_]*)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b(?=\\s*(?:,|\\)|:))",
+          "match": "\\b(var)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s+([A-Za-z_][A-Za-z0-9_]*)(?!\\s*\\.)\\b",
+          "captures": {
+            "1": {
+              "name": "keyword.control.mog"
+            },
+            "2": {
+              "name": "variable.other.readwrite.mog"
+            },
+            "3": {
+              "name": "entity.name.type.mog"
+            }
+          }
+        },
+        {
+          "match": "\\b(?!(?:as|print|var|const|fn|type|struct|opaque|package|if|else|for|while|break|continue|this|super|return)\\b)([A-Za-z_][A-Za-z0-9_]*)\\s+((?:[A-Za-z_][A-Za-z0-9_]*\\.)+[A-Za-z_][A-Za-z0-9_]*)\\b(?=\\s*(?:,|\\)|:))",
           "captures": {
             "1": {
               "name": "variable.parameter.mog"
@@ -179,7 +221,7 @@
           }
         },
         {
-          "match": "\\b(?!(?:as|print|var|const|fn|type|struct|if|else|for|while|break|continue|this|super|return)\\b)([A-Za-z_][A-Za-z0-9_]*)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b(?=\\s*$)",
+          "match": "\\b(?!(?:as|print|var|const|fn|type|struct|opaque|package|if|else|for|while|break|continue|this|super|return)\\b)([A-Za-z_][A-Za-z0-9_]*)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b(?=\\s*<[^\\n]*>\\s*(?:,|\\)|:))",
           "captures": {
             "1": {
               "name": "variable.parameter.mog"
@@ -190,7 +232,95 @@
           }
         },
         {
-          "match": "(\\))\\s+(?!(?:as|print|var|const|fn|type|struct|opaque|package|if|else|for|while|break|continue|this|super|return)\\b)([A-Za-z_][A-Za-z0-9_]*)\\b",
+          "match": "\\b(?!(?:as|print|var|const|fn|type|struct|opaque|package|if|else|for|while|break|continue|this|super|return)\\b)([A-Za-z_][A-Za-z0-9_]*)\\s+(fn)\\b(?=\\s*\\([^\\n]*\\)\\s+[A-Za-z_][A-Za-z0-9_.]*\\s*(?:,|\\)|:))",
+          "captures": {
+            "1": {
+              "name": "variable.parameter.mog"
+            },
+            "2": {
+              "name": "entity.name.type.mog"
+            }
+          }
+        },
+        {
+          "match": "\\b(?!(?:as|print|var|const|fn|type|struct|opaque|package|if|else|for|while|break|continue|this|super|return)\\b)([A-Za-z_][A-Za-z0-9_]*)\\s+([A-Za-z_][A-Za-z0-9_]*)(?!\\s*\\.)\\b(?=\\s*(?:,|\\)|:))",
+          "captures": {
+            "1": {
+              "name": "variable.parameter.mog"
+            },
+            "2": {
+              "name": "entity.name.type.mog"
+            }
+          }
+        },
+        {
+          "match": "\\b(?!(?:as|print|var|const|fn|type|struct|opaque|package|if|else|for|while|break|continue|this|super|return)\\b)([A-Za-z_][A-Za-z0-9_]*)\\s+((?:[A-Za-z_][A-Za-z0-9_]*\\.)+[A-Za-z_][A-Za-z0-9_]*)\\b(?=\\s*$)",
+          "captures": {
+            "1": {
+              "name": "variable.parameter.mog"
+            },
+            "2": {
+              "name": "entity.name.type.mog"
+            }
+          }
+        },
+        {
+          "match": "\\b(?!(?:as|print|var|const|fn|type|struct|opaque|package|if|else|for|while|break|continue|this|super|return)\\b)([A-Za-z_][A-Za-z0-9_]*)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b(?=\\s*<[^\\n]*>\\s*$)",
+          "captures": {
+            "1": {
+              "name": "variable.parameter.mog"
+            },
+            "2": {
+              "name": "entity.name.type.mog"
+            }
+          }
+        },
+        {
+          "match": "\\b(?!(?:as|print|var|const|fn|type|struct|opaque|package|if|else|for|while|break|continue|this|super|return)\\b)([A-Za-z_][A-Za-z0-9_]*)\\s+(fn)\\b(?=\\s*\\([^\\n]*\\)\\s+[A-Za-z_][A-Za-z0-9_.]*\\s*$)",
+          "captures": {
+            "1": {
+              "name": "variable.parameter.mog"
+            },
+            "2": {
+              "name": "entity.name.type.mog"
+            }
+          }
+        },
+        {
+          "match": "\\b(?!(?:as|print|var|const|fn|type|struct|opaque|package|if|else|for|while|break|continue|this|super|return)\\b)([A-Za-z_][A-Za-z0-9_]*)\\s+([A-Za-z_][A-Za-z0-9_]*)(?!\\s*\\.)\\b(?=\\s*$)",
+          "captures": {
+            "1": {
+              "name": "variable.parameter.mog"
+            },
+            "2": {
+              "name": "entity.name.type.mog"
+            }
+          }
+        },
+        {
+          "match": "(\\))\\s+((?:[A-Za-z_][A-Za-z0-9_]*\\.)+[A-Za-z_][A-Za-z0-9_]*)\\b",
+          "captures": {
+            "1": {
+              "name": "punctuation.section.group.end.mog"
+            },
+            "2": {
+              "name": "entity.name.type.mog"
+            }
+          }
+        },
+        {
+          "match": "(\\))\\s+(fn)\\b(?=\\s*\\()",
+          "captures": {
+            "1": {
+              "name": "punctuation.section.group.end.mog"
+            },
+            "2": {
+              "name": "entity.name.type.mog"
+            }
+          }
+        },
+        {
+          "match": "(\\))\\s+(?!(?:as|print|var|const|fn|type|struct|opaque|package|if|else|for|while|break|continue|this|super|return)\\b)([A-Za-z_][A-Za-z0-9_]*)(?!\\s*\\.)\\b",
           "captures": {
             "1": {
               "name": "punctuation.section.group.end.mog"
@@ -224,6 +354,10 @@
           "patterns": [
             {
               "include": "#type-angle-expression"
+            },
+            {
+              "name": "entity.name.type.mog",
+              "match": "\\b(?:[A-Za-z_][A-Za-z0-9_]*\\.)+[A-Za-z_][A-Za-z0-9_]*\\b"
             },
             {
               "name": "punctuation.separator.mog",

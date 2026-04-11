@@ -107,6 +107,14 @@ function collectParameterCaptureRanges(line) {
   return collectCaptureRanges(line, "variable.parameter.mog");
 }
 
+function collectConstantCaptureRanges(line) {
+  return collectCaptureRanges(line, "variable.other.constant.mog");
+}
+
+function collectReadwriteCaptureRanges(line) {
+  return collectCaptureRanges(line, "variable.other.readwrite.mog");
+}
+
 function typeRangesForText(line, text) {
   const target = line.indexOf(text);
   requireCondition(target >= 0, `test fixture is missing '${text}'`);
@@ -114,6 +122,13 @@ function typeRangesForText(line, text) {
   return collectTypeCaptureRanges(line).filter(
     (range) => !(range.end <= target || range.start >= end)
   );
+}
+
+function captureRangesForText(line, text, ranges) {
+  const target = line.indexOf(text);
+  requireCondition(target >= 0, `test fixture is missing '${text}'`);
+  const end = target + text.length;
+  return ranges.filter((range) => !(range.end <= target || range.start >= end));
 }
 
 function hasPattern(patternText) {
@@ -132,8 +147,9 @@ requireCondition(
 );
 
 requireCondition(
-  hasPattern("\\b(var|const)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b"),
-  "grammar should color explicit variable declaration types"
+  hasPattern("\\b(var)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s+([A-Za-z_][A-Za-z0-9_]*)(?!\\s*\\.)\\b") &&
+    hasPattern("\\b(const)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s+([A-Za-z_][A-Za-z0-9_]*)(?!\\s*\\.)\\b"),
+  "grammar should color explicit var and const declaration types"
 );
 
 const blockCommentPattern = grammar.patterns.find(
@@ -226,6 +242,32 @@ requireCondition(
 requireCondition(
   !typeRangesForText(postfixCastLine, "as").some((range) => range.text === "as"),
   "postfix cast keyword should not be colored as a type"
+);
+requireCondition(
+  captureRangesForText(
+    postfixCastLine,
+    "pipeX",
+    collectReadwriteCaptureRanges(postfixCastLine)
+  ).some((range) => range.text === "pipeX"),
+  "typed var declarations should keep readwrite variable coloring"
+);
+
+const typedConstLine = "    const birdY i64 = floor(state.birdY) as i64";
+requireCondition(
+  captureRangesForText(
+    typedConstLine,
+    "birdY",
+    collectConstantCaptureRanges(typedConstLine)
+  ).some((range) => range.text === "birdY"),
+  "typed const declarations should keep constant coloring"
+);
+requireCondition(
+  captureRangesForText(
+    typedConstLine,
+    "birdY",
+    collectReadwriteCaptureRanges(typedConstLine)
+  ).length === 0,
+  "typed const declarations should not be colored as readwrite variables"
 );
 
 const keywordPattern = grammar.patterns.find(
@@ -324,6 +366,47 @@ requireCondition(
   "function return types should still be colored"
 );
 
+const qualifiedParamLine =
+  "fn renderPipes(win window.Window, pipes Array<Pipe>) counter.Counter {";
+requireCondition(
+  collectParameterCaptureRanges(qualifiedParamLine).some(
+    (range) => range.text === "win"
+  ),
+  "qualified parameter types should still color the parameter name"
+);
+requireCondition(
+  collectParameterCaptureRanges(qualifiedParamLine).some(
+    (range) => range.text === "pipes"
+  ),
+  "generic parameter types should still color the parameter name"
+);
+requireCondition(
+  typeRangesForText(qualifiedParamLine, "window.Window").some(
+    (range) => range.text === "window.Window"
+  ),
+  "qualified parameter types should color the full qualified type"
+);
+requireCondition(
+  typeRangesForText(qualifiedParamLine, "counter.Counter").some(
+    (range) => range.text === "counter.Counter"
+  ),
+  "qualified return types should color the full qualified type"
+);
+
+const functionTypedParamLine = "fn each(callback fn(Player) void) void {";
+requireCondition(
+  collectParameterCaptureRanges(functionTypedParamLine).some(
+    (range) => range.text === "callback"
+  ),
+  "function-typed parameters should color the parameter name"
+);
+requireCondition(
+  collectTypeCaptureRanges(functionTypedParamLine).filter(
+    (range) => range.text === "fn"
+  ).length === 1,
+  "function-typed parameters should color the fn type marker"
+);
+
 const standaloneParameterHover = "player Player";
 requireCondition(
   collectParameterCaptureRanges(standaloneParameterHover).some(
@@ -336,6 +419,30 @@ requireCondition(
     (range) => range.text === "Player"
   ),
   "standalone parameter hover lines should color the parameter type"
+);
+
+const standaloneFunctionParameterHover = "callback fn(Player) void";
+requireCondition(
+  collectParameterCaptureRanges(standaloneFunctionParameterHover).some(
+    (range) => range.text === "callback"
+  ),
+  "standalone function-typed parameter hover should color the parameter name"
+);
+
+const qualifiedConstLine = "const evt window.Event = window.pollEvent(win)";
+requireCondition(
+  captureRangesForText(
+    qualifiedConstLine,
+    "evt",
+    collectConstantCaptureRanges(qualifiedConstLine)
+  ).some((range) => range.text === "evt"),
+  "qualified typed const declarations should color the const name"
+);
+requireCondition(
+  typeRangesForText(qualifiedConstLine, "window.Event").some(
+    (range) => range.text === "window.Event"
+  ),
+  "qualified typed const declarations should color the full qualified type"
 );
 
 requireCondition(
@@ -353,6 +460,20 @@ requireCondition(
 requireCondition(
   typeRangesForText(rawHoverSignature, "void").some((range) => range.text === "void"),
   "hover-style signatures should color return types"
+);
+
+const genericCollectionPattern = grammar.repository["type-angle-expression"].patterns.find(
+  (pattern) => pattern.name === "meta.type.generic.collection.mog"
+);
+const qualifiedGenericTypePattern = genericCollectionPattern?.patterns.find(
+  (pattern) =>
+    pattern.name === "entity.name.type.mog" &&
+    pattern.match === "\\b(?:[A-Za-z_][A-Za-z0-9_]*\\.)+[A-Za-z_][A-Za-z0-9_]*\\b"
+);
+requireCondition(
+  qualifiedGenericTypePattern !== undefined &&
+    new RegExp(qualifiedGenericTypePattern.match, "g").test("window.Event"),
+  "generic type contexts should support qualified type names"
 );
 
 console.log("[PASS] VS Code grammar regression checks");
