@@ -27,6 +27,8 @@ struct PackageApiExport {
     TypeRef type;
     std::string doc;
     std::string kind;
+    std::vector<std::string> parameterLabels;
+    std::string returnTypeLabel;
     SourceSpan range = makePointSpan(1, 1);
     SourceSpan selectionRange = makePointSpan(1, 1);
 };

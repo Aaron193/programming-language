@@ -13,20 +13,9 @@
 
 namespace {
 
-}  // namespace
-
-bool collectSymbolsFromAst(
-    const AstModule& module, std::unordered_set<std::string>& outClassNames,
-    std::unordered_map<std::string, TypeRef>& outFunctionSignatures,
-    std::unordered_map<std::string, TypeRef>* outTypeAliases,
-    const std::unordered_map<std::string, const AstImportedModuleInterface*>*
-        importedModulesByName) {
+void collectClassNamesFromAst(const AstModule& module,
+                              std::unordered_set<std::string>& outClassNames) {
     outClassNames.clear();
-    outFunctionSignatures.clear();
-    if (outTypeAliases != nullptr) {
-        outTypeAliases->clear();
-    }
-
     for (const auto& item : module.items) {
         if (item == nullptr) {
             continue;
@@ -38,34 +27,45 @@ bool collectSymbolsFromAst(
                                               classDecl->name.length()));
         }
     }
+}
 
-    if (outTypeAliases != nullptr) {
-        for (const auto& item : module.items) {
-            if (item == nullptr) {
-                continue;
-            }
+void collectTypeAliasesFromAst(
+    const AstModule& module, const std::unordered_set<std::string>& classNames,
+    std::unordered_map<std::string, TypeRef>& outTypeAliases,
+    const std::unordered_map<std::string, const AstImportedModuleInterface*>*
+        importedModulesByName) {
+    outTypeAliases.clear();
+    for (const auto& item : module.items) {
+        if (item == nullptr) {
+            continue;
+        }
 
-            const auto* aliasDecl = std::get_if<AstTypeAliasDecl>(&item->value);
-            if (aliasDecl == nullptr || !aliasDecl->aliasedType) {
-                continue;
-            }
+        const auto* aliasDecl = std::get_if<AstTypeAliasDecl>(&item->value);
+        if (aliasDecl == nullptr || !aliasDecl->aliasedType) {
+            continue;
+        }
 
-            FrontendTypeContext typeContext{outClassNames, *outTypeAliases, "",
-                                            {}, importedModulesByName};
-            TypeRef resolved =
-                frontendResolveTypeExpr(*aliasDecl->aliasedType, typeContext);
-            if (resolved) {
-                (*outTypeAliases)[std::string(aliasDecl->name.start(),
-                                              aliasDecl->name.length())] =
-                    resolved;
-            }
+        FrontendTypeContext typeContext{classNames, outTypeAliases, "", {},
+                                        importedModulesByName};
+        TypeRef resolved =
+            frontendResolveTypeExpr(*aliasDecl->aliasedType, typeContext);
+        if (resolved) {
+            outTypeAliases[std::string(aliasDecl->name.start(),
+                                       aliasDecl->name.length())] = resolved;
         }
     }
+}
 
-    const std::unordered_map<std::string, TypeRef> emptyAliases;
-    const auto& aliases =
-        outTypeAliases != nullptr ? *outTypeAliases : emptyAliases;
-    FrontendTypeContext typeContext{outClassNames, aliases, "", {},
+}  // namespace
+
+void collectFunctionSignaturesFromAst(
+    const AstModule& module, const std::unordered_set<std::string>& classNames,
+    const std::unordered_map<std::string, TypeRef>& typeAliases,
+    std::unordered_map<std::string, TypeRef>& outFunctionSignatures,
+    const std::unordered_map<std::string, const AstImportedModuleInterface*>*
+        importedModulesByName) {
+    outFunctionSignatures.clear();
+    FrontendTypeContext typeContext{classNames, typeAliases, "", {},
                                     importedModulesByName};
 
     for (const auto& item : module.items) {
@@ -102,6 +102,28 @@ bool collectSymbolsFromAst(
                                           functionDecl->name.length())] =
             TypeInfo::makeFunction(std::move(params), returnType);
     }
+}
+
+bool collectSymbolsFromAst(
+    const AstModule& module, std::unordered_set<std::string>& outClassNames,
+    std::unordered_map<std::string, TypeRef>& outFunctionSignatures,
+    std::unordered_map<std::string, TypeRef>* outTypeAliases,
+    const std::unordered_map<std::string, const AstImportedModuleInterface*>*
+        importedModulesByName) {
+    collectClassNamesFromAst(module, outClassNames);
+
+    std::unordered_map<std::string, TypeRef> localAliases;
+    if (outTypeAliases != nullptr) {
+        collectTypeAliasesFromAst(module, outClassNames, *outTypeAliases,
+                                  importedModulesByName);
+    } else {
+        collectTypeAliasesFromAst(module, outClassNames, localAliases,
+                                  importedModulesByName);
+    }
+
+    const auto& aliases = outTypeAliases != nullptr ? *outTypeAliases : localAliases;
+    collectFunctionSignaturesFromAst(module, outClassNames, aliases,
+                                     outFunctionSignatures, importedModulesByName);
 
     return true;
 }

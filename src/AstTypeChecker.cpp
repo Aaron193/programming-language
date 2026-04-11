@@ -1483,8 +1483,10 @@ class AstTypeCheckerImpl {
                         result = ExprInfo{TypeInfo::makeAny(), false, false, "",
                                           expr.node.line};
                     } else if (callee.isClassSymbol) {
-                        result = ExprInfo{TypeInfo::makeClass(callee.name), false,
-                                          false, "", expr.node.line};
+                        result = ExprInfo{callee.type ? callee.type
+                                                      : TypeInfo::makeClass(
+                                                            callee.name),
+                                          false, false, "", expr.node.line};
                     } else if (!callee.type || callee.type->isAny()) {
                         result = ExprInfo{TypeInfo::makeAny(), false, false, "",
                                           expr.node.line};
@@ -2229,6 +2231,10 @@ class AstTypeCheckerImpl {
         ResolvedCallableSignature signature = resolveCallableSignature(
             functionName, functionDecl.params, functionDecl.returnType.get(),
             functionType, false, false, true, functionDecl.name.span());
+        const TypeRef resolvedFunctionType = TypeInfo::makeFunction(
+            signature.paramTypes, signature.returnType);
+        recordDeclarationType(functionDecl.node, functionName, resolvedFunctionType,
+                              functionDecl.name.line());
 
         const bool omittedReturnType =
             functionDecl.returnType == nullptr ||

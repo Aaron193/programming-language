@@ -846,10 +846,37 @@ bool testReferencesAndHover() {
     if (!require(nativeMemberHover->kind == "function" &&
                      nativeMemberHover->role == "function" &&
                      nativeMemberHover->detail ==
-                         "fn create(i64) counter.Counter" &&
+                         "fn create(initial i64) Counter" &&
                      nativeMemberHover->documentation ==
                          "Create a new counter handle.",
                  "native package member hover should surface declaration docs")) {
+        return false;
+    }
+
+    const std::string nativeWindowHoverSource =
+                "const window = @import(\"window\")\n"
+        "fn draw(win window.Window) void {\n"
+        "    window.fillRect(win, 0i64, 0i64, 16i64, 16i64, 255i64, 0i64, 0i64)\n"
+        "}\n";
+    options.sourcePath = "tooling_native_window_hover_regression.mog";
+    ToolingDocumentAnalysis nativeWindowHoverAnalysis =
+        analyzeDocumentForTooling(nativeWindowHoverSource, options);
+    if (!require(nativeWindowHoverAnalysis.status ==
+                     AstFrontendBuildStatus::Success,
+                 "native window hover sample should succeed")) {
+        return false;
+    }
+
+    const auto nativeWindowMemberHover =
+        findHoverForTooling(nativeWindowHoverAnalysis, ToolingPosition{2, 14});
+    if (!require(nativeWindowMemberHover.has_value(),
+                 "hover should be available for native window package members")) {
+        return false;
+    }
+    if (!require(nativeWindowMemberHover->detail ==
+                     "fn fillRect(win Window, x i64, y i64, width i64, "
+                     "height i64, r i64, g i64, b i64) void",
+                 "native package hover should preserve declaration parameter labels")) {
         return false;
     }
 
@@ -979,6 +1006,64 @@ bool testReferencesAndHover() {
                      importedMemberHover->role == "property" &&
                      importedMemberHover->detail == "running bool",
                  "imported member hover should preserve field kind and type detail")) {
+        return false;
+    }
+
+    const std::filesystem::path importedFunctionHoverTempRoot =
+        std::filesystem::temp_directory_path() /
+        "mog_tooling_imported_function_hover_regression";
+    std::error_code importedFunctionHoverEc;
+    std::filesystem::create_directories(importedFunctionHoverTempRoot,
+                                        importedFunctionHoverEc);
+    if (!require(!importedFunctionHoverEc,
+                 "imported function hover regression should create its temporary workspace")) {
+        return false;
+    }
+
+    const std::filesystem::path importedFunctionStatePath =
+        importedFunctionHoverTempRoot / "state.mog";
+    const std::filesystem::path importedFunctionRenderPath =
+        importedFunctionHoverTempRoot / "render.mog";
+    const std::string importedFunctionStateSource =
+                "type GameState struct {\n"
+        "    score i32\n"
+        "}\n";
+    const std::string importedFunctionRenderSource =
+                "const { GameState } = @import(\"./state.mog\")\n"
+        "fn renderScore(win i64, state GameState) void {\n"
+        "    print(state.score)\n"
+        "}\n"
+        "fn render() void {\n"
+        "    var state GameState = GameState()\n"
+        "    renderScore(1i64, state)\n"
+        "}\n";
+    if (!require(writeFile(importedFunctionStatePath,
+                           importedFunctionStateSource),
+                 "imported function hover regression should write the state module") ||
+        !require(writeFile(importedFunctionRenderPath,
+                           importedFunctionRenderSource),
+                 "imported function hover regression should write the render module")) {
+        return false;
+    }
+
+    options.sourcePath = importedFunctionRenderPath.string();
+    ToolingDocumentAnalysis importedFunctionHoverAnalysis =
+        analyzeDocumentForTooling(importedFunctionRenderSource, options);
+    if (!require(importedFunctionHoverAnalysis.status ==
+                     AstFrontendBuildStatus::Success,
+                 "imported function hover sample should succeed")) {
+        return false;
+    }
+
+    const auto importedLocalFunctionHover = findHoverForTooling(
+        importedFunctionHoverAnalysis, ToolingPosition{6, 8});
+    if (!require(importedLocalFunctionHover.has_value(),
+                 "hover should be available for local function calls with imported class parameters")) {
+        return false;
+    }
+    if (!require(importedLocalFunctionHover->detail ==
+                     "fn renderScore(win i64, state GameState) void",
+                 "local function hover should preserve imported class parameter types")) {
         return false;
     }
 
@@ -1945,6 +2030,38 @@ bool testSignatureHelp() {
                  "module export calls should expose signature help")) {
         return false;
     }
+
+    options.packageSearchPaths = {
+        (std::filesystem::current_path() / "build" / "packages").string()};
+    const std::string nativeWindowSource =
+                "const window = @import(\"window\")\n"
+        "fn draw(win window.Window) void {\n"
+        "    window.fillRect(win, 0i64, 0i64, 16i64, 16i64, 255i64, 0i64, 0i64)\n"
+        "}\n";
+    options.sourcePath = "tooling_signature_help_native_window_regression.mog";
+    ToolingDocumentAnalysis nativeWindowAnalysis =
+        analyzeDocumentForTooling(nativeWindowSource, options);
+    if (!require(nativeWindowAnalysis.status == AstFrontendBuildStatus::Success,
+                 "native window signature help sample should succeed")) {
+        return false;
+    }
+
+    const auto nativeWindowHelp = findSignatureHelpForTooling(
+        nativeWindowAnalysis, nativeWindowSource, ToolingPosition{2, 31});
+    if (!require(nativeWindowHelp.has_value() &&
+                     !nativeWindowHelp->signatures.empty() &&
+                     nativeWindowHelp->signatures.front().label ==
+                         "fn fillRect(win Window, x i64, y i64, width i64, "
+                         "height i64, r i64, g i64, b i64) void" &&
+                     nativeWindowHelp->signatures.front().parameters.size() == 8 &&
+                     nativeWindowHelp->signatures.front().parameters[0].label ==
+                         "win Window" &&
+                     nativeWindowHelp->signatures.front().parameters[1].label ==
+                         "x i64",
+                 "native package signature help should preserve declaration parameter labels")) {
+        return false;
+    }
+    options.packageSearchPaths.clear();
 
     const std::string builtinSource =
                 "const value f64 = sqrt(9.0)\n"

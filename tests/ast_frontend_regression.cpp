@@ -1091,6 +1091,40 @@ bool checkImportedClassTypeFrontendRegression(
         return false;
     }
 
+    const auto bounceIt = frontend.functionSignatures.find("Bounce");
+    if (!require(bounceIt != frontend.functionSignatures.end() &&
+                     bounceIt->second &&
+                     bounceIt->second->paramTypes.size() == 1 &&
+                     bounceIt->second->paramTypes.front() &&
+                     bounceIt->second->paramTypes.front()->kind == TypeKind::CLASS &&
+                     bounceIt->second->paramTypes.front()->className == "Counter" &&
+                     bounceIt->second->returnType &&
+                     bounceIt->second->returnType->kind == TypeKind::CLASS &&
+                     bounceIt->second->returnType->className == "Counter",
+                 "imported class type sample should preserve function signatures that use imported class aliases")) {
+        return false;
+    }
+
+    const auto exportedBounceIt =
+        frontend.semanticModel.exportedValueTypes.find("Bounce");
+    if (!require(exportedBounceIt !=
+                     frontend.semanticModel.exportedValueTypes.end() &&
+                     exportedBounceIt->second &&
+                     exportedBounceIt->second->paramTypes.size() == 1 &&
+                     exportedBounceIt->second->paramTypes.front() &&
+                     exportedBounceIt->second->paramTypes.front()->kind ==
+                         TypeKind::CLASS &&
+                     exportedBounceIt->second->paramTypes.front()->className ==
+                         "Counter" &&
+                     exportedBounceIt->second->returnType &&
+                     exportedBounceIt->second->returnType->kind ==
+                         TypeKind::CLASS &&
+                     exportedBounceIt->second->returnType->className ==
+                         "Counter",
+                 "public function exports should preserve resolved imported class signatures")) {
+        return false;
+    }
+
     if (!require(frontend.hirModule != nullptr,
                  "imported class type sample should lower to HIR")) {
         return false;

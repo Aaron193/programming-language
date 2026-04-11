@@ -324,6 +324,16 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
     native_package_path = Path(tmpdir) / "native_package_sample.mog"
     native_package_path.write_text(native_package_source, encoding="utf-8")
     native_package_uri = native_package_path.resolve().as_uri()
+    native_window_source = "\n".join([
+        "const window = @import(\"window\")",
+        "fn draw(win window.Window) void {",
+        "    window.fillRect(win, 0i64, 0i64, 16i64, 16i64, 255i64, 0i64, 0i64)",
+        "}",
+        ""
+    ])
+    native_window_path = Path(tmpdir) / "native_window_sample.mog"
+    native_window_path.write_text(native_window_source, encoding="utf-8")
+    native_window_uri = native_window_path.resolve().as_uri()
     native_type_completion_source = "\n".join([
         "const counter = @import(\"counter\")",
         "fn make() void {",
@@ -335,6 +345,30 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
     native_type_completion_path.write_text(
         native_type_completion_source, encoding="utf-8")
     native_type_completion_uri = native_type_completion_path.resolve().as_uri()
+    imported_function_state_source = "\n".join([
+        "type GameState struct {",
+        "    score i32",
+        "}",
+        ""
+    ])
+    imported_function_state_path = Path(tmpdir) / "imported_function_state.mog"
+    imported_function_state_path.write_text(
+        imported_function_state_source, encoding="utf-8")
+    imported_function_render_source = "\n".join([
+        "const { GameState } = @import(\"./imported_function_state.mog\")",
+        "fn renderScore(win i64, state GameState) void {",
+        "    print(state.score)",
+        "}",
+        "fn render() void {",
+        "    var state GameState = GameState()",
+        "    renderScore(1i64, state)",
+        "}",
+        ""
+    ])
+    imported_function_render_path = Path(tmpdir) / "imported_function_render.mog"
+    imported_function_render_path.write_text(
+        imported_function_render_source, encoding="utf-8")
+    imported_function_render_uri = imported_function_render_path.resolve().as_uri()
 
     proc = subprocess.Popen(
         [lsp_bin],
@@ -723,6 +757,26 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
             "method": "textDocument/didOpen",
             "params": {
                 "textDocument": {
+                    "uri": native_window_uri,
+                    "languageId": "mog",
+                    "version": 1,
+                    "text": native_window_source
+                }
+            }
+        })
+        native_window_diagnostics = read_until(
+            proc,
+            lambda msg: msg.get("method") == "textDocument/publishDiagnostics" and
+            msg.get("params", {}).get("uri") == native_window_uri,
+        )
+        if native_window_diagnostics["params"]["diagnostics"]:
+            raise AssertionError(
+                f"native window sample should stay diagnostics-free: {native_window_diagnostics['params']['diagnostics']}")
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
                     "uri": native_type_completion_uri,
                     "languageId": "mog",
                     "version": 1,
@@ -735,6 +789,26 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
             lambda msg: msg.get("method") == "textDocument/publishDiagnostics" and
             msg.get("params", {}).get("uri") == native_type_completion_uri,
         )
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": imported_function_render_uri,
+                    "languageId": "mog",
+                    "version": 1,
+                    "text": imported_function_render_source
+                }
+            }
+        })
+        imported_function_render_diagnostics = read_until(
+            proc,
+            lambda msg: msg.get("method") == "textDocument/publishDiagnostics" and
+            msg.get("params", {}).get("uri") == imported_function_render_uri,
+        )
+        if imported_function_render_diagnostics["params"]["diagnostics"]:
+            raise AssertionError(
+                "imported function render sample should stay diagnostics-free")
 
         send_message(proc, {
             "jsonrpc": "2.0",
@@ -1545,9 +1619,53 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         native_member_hover = read_until(proc, lambda msg: msg.get("id") == 8.26)
         native_member_hover_value = native_member_hover["result"]["contents"]["value"]
         if native_member_hover_value != \
-                "**function**\n\n```mog\nfn create(i64) counter.Counter\n```\n\nCreate a new counter handle.":
+                "**function**\n\n```mog\nfn create(initial i64) Counter\n```\n\nCreate a new counter handle.":
             raise AssertionError(
                 f"unexpected native package member hover payload: {native_member_hover['result']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 8.265,
+            "method": "textDocument/hover",
+            "params": {
+                "textDocument": {
+                    "uri": native_window_uri
+                },
+                "position": {
+                    "line": 2,
+                    "character": 14
+                }
+            }
+        })
+        native_window_hover = read_until(proc, lambda msg: msg.get("id") == 8.265)
+        native_window_hover_value = native_window_hover["result"]["contents"]["value"]
+        if native_window_hover_value != \
+                "**function**\n\n```mog\nfn fillRect(win Window, x i64, y i64, width i64, height i64, r i64, g i64, b i64) void\n```\n\nDraw a filled RGB rectangle.":
+            raise AssertionError(
+                f"unexpected native window hover payload: {native_window_hover['result']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 8.266,
+            "method": "textDocument/hover",
+            "params": {
+                "textDocument": {
+                    "uri": imported_function_render_uri
+                },
+                "position": {
+                    "line": 6,
+                    "character": 8
+                }
+            }
+        })
+        imported_function_hover = read_until(
+            proc, lambda msg: msg.get("id") == 8.266)
+        imported_function_hover_value = \
+            imported_function_hover["result"]["contents"]["value"]
+        if imported_function_hover_value != \
+                "**function**\n\n```mog\nfn renderScore(win i64, state GameState) void\n```":
+            raise AssertionError(
+                f"unexpected imported function hover payload: {imported_function_hover['result']}")
 
         send_message(proc, {
             "jsonrpc": "2.0",
@@ -1915,6 +2033,33 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
             raise AssertionError(f"unexpected builtin signature help payload: {builtin_signature_help['result']}")
         if builtin_signature_help["result"]["signatures"][0]["label"] != "fn sqrt(f64) f64":
             raise AssertionError(f"unexpected builtin signature label: {builtin_signature_help['result']}")
+
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "id": 11.551,
+            "method": "textDocument/signatureHelp",
+            "params": {
+                "textDocument": {
+                    "uri": native_window_uri
+                },
+                "position": {
+                    "line": 2,
+                    "character": 31
+                }
+            }
+        })
+        native_window_signature_help = read_until(
+            proc, lambda msg: msg.get("id") == 11.551)
+        native_window_signature = \
+            native_window_signature_help["result"]["signatures"][0]
+        if native_window_signature["label"] != \
+                "fn fillRect(win Window, x i64, y i64, width i64, height i64, r i64, g i64, b i64) void":
+            raise AssertionError(
+                f"unexpected native window signature label: {native_window_signature_help['result']}")
+        if native_window_signature["parameters"][0]["label"] != "win Window" or \
+                native_window_signature["parameters"][1]["label"] != "x i64":
+            raise AssertionError(
+                f"unexpected native window signature parameters: {native_window_signature_help['result']}")
 
         send_message(proc, {
             "jsonrpc": "2.0",

@@ -350,6 +350,7 @@ bool scanPackageRootForEntry(const std::filesystem::path& root,
 
 struct ParsedPackageApiType {
     TypeRef type;
+    std::string text;
     SourceSpan span = makePointSpan(1, 1);
 };
 
@@ -493,6 +494,7 @@ class PackageApiParser {
                 Token questionToken = m_current;
                 advance();
                 parsed.type = TypeInfo::makeOptional(parsed.type);
+                parsed.text += "?";
                 parsed.span =
                     combineSourceSpans(parsed.span, questionToken.span());
             }
@@ -505,6 +507,7 @@ class PackageApiParser {
             }
 
             std::vector<TypeRef> params;
+            std::vector<std::string> paramTexts;
             if (!check(TokenType::CLOSE_PAREN)) {
                 while (true) {
                     ParsedPackageApiType paramType = parseTypeExpr(outError);
@@ -512,6 +515,7 @@ class PackageApiParser {
                         return {};
                     }
                     params.push_back(paramType.type);
+                    paramTexts.push_back(paramType.text);
                     if (!match(TokenType::COMMA)) {
                         break;
                     }
@@ -527,6 +531,15 @@ class PackageApiParser {
             }
 
             parsed.type = TypeInfo::makeFunction(std::move(params), returnType.type);
+            parsed.text = "fn(";
+            for (size_t index = 0; index < paramTexts.size(); ++index) {
+                if (index != 0) {
+                    parsed.text += ", ";
+                }
+                parsed.text += paramTexts[index];
+            }
+            parsed.text += ") ";
+            parsed.text += returnType.text;
             parsed.span = combineSourceSpans(startToken.span(), returnType.span);
             applyOptionalSuffix();
             return parsed;
@@ -586,6 +599,7 @@ class PackageApiParser {
         }
 
         if (parsed.type) {
+            parsed.text = tokenText(m_current);
             parsed.span = m_current.span();
             advance();
             applyOptionalSuffix();
@@ -608,6 +622,7 @@ class PackageApiParser {
                 }
                 parsed.type = name == "Array" ? TypeInfo::makeArray(elementType.type)
                                                : TypeInfo::makeSet(elementType.type);
+                parsed.text = name + "<" + elementType.text + ">";
                 parsed.span =
                     combineSourceSpans(nameToken.span(), m_previous.span());
                 applyOptionalSuffix();
@@ -624,6 +639,7 @@ class PackageApiParser {
                 return {};
             }
             parsed.type = TypeInfo::makeDict(keyType.type, valueType.type);
+            parsed.text = name + "<" + keyType.text + ", " + valueType.text + ">";
             parsed.span = combineSourceSpans(nameToken.span(), m_previous.span());
             applyOptionalSuffix();
             return parsed;
@@ -643,6 +659,7 @@ class PackageApiParser {
         }
 
         parsed.type = opaqueIt->second;
+        parsed.text = name;
         parsed.span = nameToken.span();
         applyOptionalSuffix();
         return parsed;
@@ -715,6 +732,8 @@ class PackageApiParser {
             type.type,
             doc,
             "constant",
+            {},
+            "",
             combineSourceSpans(constToken.span(), type.span),
             nameToken.span(),
         };
@@ -739,12 +758,14 @@ class PackageApiParser {
         }
 
         std::vector<TypeRef> params;
+        std::vector<std::string> parameterLabels;
         if (!check(TokenType::CLOSE_PAREN)) {
             while (true) {
                 if (!check(TokenType::IDENTIFIER)) {
                     outError = "Expected parameter name in function declaration.";
                     return false;
                 }
+                const std::string parameterName = tokenText(m_current);
                 advance();
 
                 ParsedPackageApiType paramType = parseTypeExpr(outError);
@@ -752,6 +773,7 @@ class PackageApiParser {
                     return false;
                 }
                 params.push_back(paramType.type);
+                parameterLabels.push_back(parameterName + " " + paramType.text);
                 if (!match(TokenType::COMMA)) {
                     break;
                 }
@@ -771,6 +793,8 @@ class PackageApiParser {
             TypeInfo::makeFunction(std::move(params), returnType.type),
             doc,
             "function",
+            std::move(parameterLabels),
+            returnType.text,
             combineSourceSpans(fnToken.span(), returnType.span),
             nameToken.span(),
         };

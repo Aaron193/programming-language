@@ -13,6 +13,7 @@
 #include "AstBinder.hpp"
 #include "AstSymbolCollector.hpp"
 #include "AstTypeChecker.hpp"
+#include "FrontendTypeUtils.hpp"
 #include "HirOptimizer.hpp"
 #include "NativePackage.hpp"
 #include "PackageRegistry.hpp"
@@ -167,6 +168,57 @@ void mergeImportedClassTypeAliases(AstFrontendResult& frontend) {
     }
 }
 
+std::vector<std::string> callableParameterLabelsForFunction(
+    const std::vector<AstParameter>& params) {
+    std::vector<std::string> labels;
+    labels.reserve(params.size());
+    for (const auto& param : params) {
+        std::string label = tokenLexeme(param.name);
+        if (param.type) {
+            label += " ";
+            label += frontendTypeExprText(*param.type);
+        } else {
+            label += " any";
+        }
+        labels.push_back(std::move(label));
+    }
+    return labels;
+}
+
+std::string callableReturnTypeLabelForFunction(const AstTypeExpr* returnType) {
+    return returnType ? frontendTypeExprText(*returnType) : std::string("void");
+}
+
+void annotateImportedFunctionExportsFromSource(const AstFrontendResult& frontend,
+                                               AstImportedModuleInterface& importedInterface) {
+    for (const auto& item : frontend.module.items) {
+        if (!item) {
+            continue;
+        }
+
+        const auto* functionDecl = std::get_if<AstFunctionDecl>(&item->value);
+        if (functionDecl == nullptr) {
+            continue;
+        }
+
+        const std::string name = tokenLexeme(functionDecl->name);
+        if (!isPublicSymbolName(name)) {
+            continue;
+        }
+
+        const auto exportIt = importedInterface.valueExports.find(name);
+        if (exportIt == importedInterface.valueExports.end()) {
+            continue;
+        }
+
+        exportIt->second.kind = "function";
+        exportIt->second.parameterLabels =
+            callableParameterLabelsForFunction(functionDecl->params);
+        exportIt->second.returnTypeLabel =
+            callableReturnTypeLabelForFunction(functionDecl->returnType.get());
+    }
+}
+
 bool moduleGraphNodeUpToDate(const AstFrontendModuleGraphCache& cache,
                              const std::string& canonicalId,
                              std::unordered_set<std::string>& visiting) {
@@ -252,10 +304,15 @@ topLevelImportedModulesByName(const AstFrontendResult& frontend) {
 
 void refreshCollectedSymbolsWithImports(AstFrontendResult& frontend) {
     const auto importedModules = topLevelImportedModulesByName(frontend);
-    std::unordered_map<std::string, TypeRef> sourceFunctionSignatures;
     collectSymbolsFromAst(frontend.module, frontend.classNames,
-                          sourceFunctionSignatures, &frontend.typeAliases,
+                          frontend.functionSignatures, &frontend.typeAliases,
                           &importedModules);
+    mergeImportedClassTypeAliases(frontend);
+
+    std::unordered_map<std::string, TypeRef> sourceFunctionSignatures;
+    collectFunctionSignaturesFromAst(frontend.module, frontend.classNames,
+                                     frontend.typeAliases,
+                                     sourceFunctionSignatures, &importedModules);
     frontend.functionSignatures.clear();
     registerOrdinaryStandardLibraryTypeSignatures(frontend.functionSignatures);
     for (auto& [name, type] : sourceFunctionSignatures) {
@@ -461,6 +518,8 @@ bool buildImportedModuleInterface(const ImportTarget& importTarget,
                 exportInfo.type,
                 exportInfo.doc,
                 exportInfo.kind,
+                exportInfo.parameterLabels,
+                exportInfo.returnTypeLabel,
                 exportInfo.range,
                 exportInfo.selectionRange,
                 true,
@@ -471,6 +530,8 @@ bool buildImportedModuleInterface(const ImportTarget& importTarget,
                 typeInfo.type,
                 typeInfo.doc,
                 "type",
+                {},
+                "",
                 typeInfo.range,
                 typeInfo.selectionRange,
                 true,
@@ -529,6 +590,7 @@ bool buildImportedModuleInterface(const ImportTarget& importTarget,
             importedInterface.typeExports[name] =
                 ImportedModuleSymbol{type, "", "type"};
         }
+        annotateImportedFunctionExportsFromSource(importedFrontend, importedInterface);
         importedInterface.metadata = importedFrontend.semanticModel.metadata;
         importedInterface.classOperatorMethods =
             importedFrontend.semanticModel.classOperatorMethods;
@@ -965,7 +1027,6 @@ AstFrontendBuildStatus buildAstFrontend(std::string_view source,
     }
 
     refreshCollectedSymbolsWithImports(outFrontend);
-    mergeImportedClassTypeAliases(outFrontend);
 
     const AstFrontendBuildStatus status =
         runSemanticPhases(outFrontend, options, outErrors,

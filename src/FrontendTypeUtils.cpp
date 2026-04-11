@@ -158,3 +158,42 @@ TypeRef frontendResolveTypeExpr(const AstTypeExpr& typeExpr,
 
     return nullptr;
 }
+
+std::string frontendTypeExprText(const AstTypeExpr& typeExpr) {
+    switch (typeExpr.kind) {
+        case AstTypeKind::NAMED:
+            return typeExpr.qualifier.empty()
+                       ? tokenLexeme(typeExpr.token)
+                       : typeExpr.qualifier + "." + tokenLexeme(typeExpr.token);
+        case AstTypeKind::FUNCTION: {
+            std::string text = "fn(";
+            for (size_t index = 0; index < typeExpr.paramTypes.size(); ++index) {
+                if (index != 0) {
+                    text += ", ";
+                }
+                text += frontendTypeExprText(*typeExpr.paramTypes[index]);
+            }
+            text += ") ";
+            text += typeExpr.returnType ? frontendTypeExprText(*typeExpr.returnType)
+                                        : std::string("any");
+            return text;
+        }
+        case AstTypeKind::ARRAY:
+            return tokenLexeme(typeExpr.token) + "<" +
+                   frontendTypeExprText(*typeExpr.elementType) + ">";
+        case AstTypeKind::DICT:
+            return tokenLexeme(typeExpr.token) + "<" +
+                   frontendTypeExprText(*typeExpr.keyType) + ", " +
+                   frontendTypeExprText(*typeExpr.valueType) + ">";
+        case AstTypeKind::SET:
+            return tokenLexeme(typeExpr.token) + "<" +
+                   frontendTypeExprText(*typeExpr.elementType) + ">";
+        case AstTypeKind::OPTIONAL:
+            return frontendTypeExprText(*typeExpr.innerType) + "?";
+        case AstTypeKind::NATIVE_HANDLE:
+            return tokenLexeme(typeExpr.token) + "<" + typeExpr.packageNamespace +
+                   ":" + typeExpr.nativeHandleTypeName + ">";
+    }
+
+    return "any";
+}

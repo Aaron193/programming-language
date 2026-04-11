@@ -13,6 +13,7 @@
 #include "Ast.hpp"
 #include "AstBinder.hpp"
 #include "FrontendDiagnostic.hpp"
+#include "FrontendTypeUtils.hpp"
 #include "NativePackage.hpp"
 #include "PackageManifest.hpp"
 #include "PackageRegistry.hpp"
@@ -1399,13 +1400,20 @@ std::vector<std::string> mogParameterLabels(
                                                           : 0;
     labels.reserve(paramCount);
     for (size_t index = 0; index < paramCount; ++index) {
-        const std::string typeText =
-            callableType && index < callableType->paramTypes.size()
-                ? mogTypeText(callableType->paramTypes[index])
-                : std::string("any");
         if (params != nullptr && index < params->size()) {
-            labels.push_back(tokenText((*params)[index].name) + " " + typeText);
+            const auto& param = (*params)[index];
+            const std::string typeText =
+                param.type ? frontendTypeExprText(*param.type)
+                           : (callableType &&
+                                      index < callableType->paramTypes.size()
+                                  ? mogTypeText(callableType->paramTypes[index])
+                                  : std::string("any"));
+            labels.push_back(tokenText(param.name) + " " + typeText);
         } else {
+            const std::string typeText =
+                callableType && index < callableType->paramTypes.size()
+                    ? mogTypeText(callableType->paramTypes[index])
+                    : std::string("any");
             labels.push_back(typeText);
         }
     }
@@ -1414,7 +1422,8 @@ std::vector<std::string> mogParameterLabels(
 
 std::string mogFunctionSignature(std::string_view name,
                                  const std::vector<std::string>& parameterLabels,
-                                 const TypeRef& callableType) {
+                                 const TypeRef& callableType,
+                                 const std::string* returnTypeLabel = nullptr) {
     std::string result = "fn ";
     result += name;
     result += "(";
@@ -1425,8 +1434,10 @@ std::string mogFunctionSignature(std::string_view name,
         result += parameterLabels[index];
     }
     result += ") ";
-    result += callableType ? mogTypeText(callableType->returnType)
-                           : std::string("any");
+    result += returnTypeLabel != nullptr && !returnTypeLabel->empty()
+                  ? *returnTypeLabel
+                  : (callableType ? mogTypeText(callableType->returnType)
+                                  : std::string("any"));
     return result;
 }
 
@@ -1435,11 +1446,12 @@ struct ToolingCallablePresentation {
     std::vector<ToolingSignatureParameter> parameters;
 };
 
-ToolingCallablePresentation callablePresentationFromType(
-    std::string_view name, const TypeRef& callableType) {
+ToolingCallablePresentation callablePresentationFromLabels(
+    std::string_view name, const std::vector<std::string>& parameterLabels,
+    const TypeRef& callableType, const std::string* returnTypeLabel = nullptr) {
     ToolingCallablePresentation info;
-    const auto parameterLabels = mogParameterLabels(nullptr, callableType);
-    info.label = mogFunctionSignature(name, parameterLabels, callableType);
+    info.label =
+        mogFunctionSignature(name, parameterLabels, callableType, returnTypeLabel);
     info.parameters.reserve(parameterLabels.size());
     for (const auto& parameterLabel : parameterLabels) {
         info.parameters.push_back(ToolingSignatureParameter{parameterLabel});
@@ -1447,17 +1459,31 @@ ToolingCallablePresentation callablePresentationFromType(
     return info;
 }
 
+ToolingCallablePresentation callablePresentationFromType(
+    std::string_view name, const TypeRef& callableType) {
+    const auto parameterLabels = mogParameterLabels(nullptr, callableType);
+    return callablePresentationFromLabels(name, parameterLabels, callableType);
+}
+
 ToolingCallablePresentation callablePresentationFromParameters(
     std::string_view name, const std::vector<AstParameter>& params,
-    const TypeRef& callableType) {
-    ToolingCallablePresentation info;
+    const TypeRef& callableType, const AstTypeExpr* returnTypeExpr = nullptr) {
     const auto parameterLabels = mogParameterLabels(&params, callableType);
-    info.label = mogFunctionSignature(name, parameterLabels, callableType);
-    info.parameters.reserve(parameterLabels.size());
-    for (const auto& parameterLabel : parameterLabels) {
-        info.parameters.push_back(ToolingSignatureParameter{parameterLabel});
+    const std::string returnTypeLabel =
+        returnTypeExpr ? frontendTypeExprText(*returnTypeExpr) : std::string();
+    return callablePresentationFromLabels(
+        name, parameterLabels, callableType,
+        returnTypeLabel.empty() ? nullptr : &returnTypeLabel);
+}
+
+ToolingCallablePresentation callablePresentationFromImportedSymbol(
+    std::string_view name, const ImportedModuleSymbol& symbol) {
+    if (!symbol.parameterLabels.empty() || !symbol.returnTypeLabel.empty()) {
+        return callablePresentationFromLabels(
+            name, symbol.parameterLabels, symbol.type,
+            symbol.returnTypeLabel.empty() ? nullptr : &symbol.returnTypeLabel);
     }
-    return info;
+    return callablePresentationFromType(name, symbol.type);
 }
 
 ToolingCallablePresentation callablePresentationForDeclaration(
@@ -1472,7 +1498,8 @@ ToolingCallablePresentation callablePresentationForDeclaration(
                                                 declaration.nodeId);
             functionDecl != nullptr) {
             return callablePresentationFromParameters(displayName,
-                                                      functionDecl->params, type);
+                                                      functionDecl->params, type,
+                                                      functionDecl->returnType.get());
         }
     }
 
@@ -1482,7 +1509,8 @@ ToolingCallablePresentation callablePresentationForDeclaration(
                                               declaration.nodeId);
             methodDecl != nullptr) {
             return callablePresentationFromParameters(displayName,
-                                                      methodDecl->params, type);
+                                                      methodDecl->params, type,
+                                                      methodDecl->returnType.get());
         }
     }
 
@@ -1686,15 +1714,15 @@ std::optional<HoverPresentation> importedDeclarationHoverPresentationForTooling(
         return std::nullopt;
     }
 
-    return HoverPresentation{
+        return HoverPresentation{
         hoverRoleForKind(exportIt->second.type &&
                                  exportIt->second.type->kind == TypeKind::FUNCTION
                              ? "function"
                              : "constant"),
         exportIt->second.type &&
                 exportIt->second.type->kind == TypeKind::FUNCTION
-            ? callablePresentationFromType(declaration.name,
-                                           exportIt->second.type)
+            ? callablePresentationFromImportedSymbol(declaration.name,
+                                                     exportIt->second)
                   .label
             : "const " + declaration.name + " " +
                   mogTypeText(exportIt->second.type),
@@ -1762,14 +1790,16 @@ ToolingCompletionItem completionItemForDeclaration(
 }
 
 ToolingCompletionItem completionItemForExportedSymbol(std::string_view name,
-                                                      const TypeRef& type) {
-    if (type && type->kind == TypeKind::FUNCTION) {
+                                                      const ImportedModuleSymbol& symbol) {
+    if (symbol.type && symbol.type->kind == TypeKind::FUNCTION) {
         return ToolingCompletionItem{std::string(name),
                                      "function",
-                                     callablePresentationFromType(name, type).label,
+                                     callablePresentationFromImportedSymbol(
+                                         name, symbol)
+                                         .label,
                                      completionSortText(0, std::string(name))};
     }
-    if (type && type->kind == TypeKind::CLASS) {
+    if (symbol.type && symbol.type->kind == TypeKind::CLASS) {
         return ToolingCompletionItem{std::string(name),
                                      "class",
                                      "type " + std::string(name) + " struct",
@@ -1779,7 +1809,7 @@ ToolingCompletionItem completionItemForExportedSymbol(std::string_view name,
     return ToolingCompletionItem{std::string(name),
                                  "constant",
                                  "const " + std::string(name) + " " +
-                                     mogTypeText(type),
+                                     mogTypeText(symbol.type),
                                  completionSortText(0, std::string(name))};
 }
 
@@ -2619,7 +2649,7 @@ std::string importedSymbolDetailForTooling(std::string_view name,
                                                      : std::string("any"));
     }
     if (symbol.type && symbol.type->kind == TypeKind::FUNCTION) {
-        return callablePresentationFromType(name, symbol.type).label;
+        return callablePresentationFromImportedSymbol(name, symbol).label;
     }
     if (symbol.kind == "type") {
         return "type " + std::string(name);
@@ -4612,18 +4642,18 @@ std::optional<std::vector<ToolingCompletionItem>> findMemberCompletionsForToolin
             return items;
         }
 
-        std::vector<std::pair<std::string, TypeRef>> exports;
+        std::vector<std::pair<std::string, ImportedModuleSymbol>> exports;
         exports.reserve(importedModule->valueExports.size());
         for (const auto& [name, symbol] : importedModule->valueExports) {
-            exports.emplace_back(name, symbol.type);
+            exports.emplace_back(name, symbol);
         }
         std::sort(exports.begin(), exports.end(),
                   [](const auto& lhs, const auto& rhs) {
                       return lhs.first < rhs.first;
                   });
         items.reserve(exports.size());
-        for (const auto& [name, type] : exports) {
-            items.push_back(completionItemForExportedSymbol(name, type));
+        for (const auto& [name, symbol] : exports) {
+            items.push_back(completionItemForExportedSymbol(name, symbol));
         }
         return items;
     }
@@ -6518,14 +6548,14 @@ std::vector<ToolingCompletionItem> findExportedSymbolCompletionsForTooling(
         return {};
     }
 
-    std::vector<std::pair<std::string, TypeRef>> exports;
+    std::vector<std::pair<std::string, ImportedModuleSymbol>> exports;
     exports.reserve(context->importedModule->valueExports.size());
     for (const auto& [name, symbol] : context->importedModule->valueExports) {
         if (context->usedExportedNames.find(name) !=
             context->usedExportedNames.end()) {
             continue;
         }
-        exports.emplace_back(name, symbol.type);
+        exports.emplace_back(name, symbol);
     }
     std::sort(exports.begin(), exports.end(),
               [](const auto& lhs, const auto& rhs) {
@@ -6534,8 +6564,8 @@ std::vector<ToolingCompletionItem> findExportedSymbolCompletionsForTooling(
 
     std::vector<ToolingCompletionItem> items;
     items.reserve(exports.size());
-    for (const auto& [name, type] : exports) {
-        items.push_back(completionItemForExportedSymbol(name, type));
+    for (const auto& [name, symbol] : exports) {
+        items.push_back(completionItemForExportedSymbol(name, symbol));
     }
     return items;
 }
@@ -7018,7 +7048,7 @@ std::optional<ToolingSignatureInformation> importedSignatureInformationForToolin
     }
 
     const auto presentation =
-        callablePresentationFromType(displayName, exportIt->second.type);
+        callablePresentationFromImportedSymbol(displayName, exportIt->second);
     ToolingSignatureInformation info;
     info.label = presentation.label;
     info.parameters = presentation.parameters;

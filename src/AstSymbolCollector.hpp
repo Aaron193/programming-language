@@ -22,3 +22,10 @@ bool collectSymbolsFromAst(
     std::unordered_map<std::string, TypeRef>* outTypeAliases = nullptr,
     const std::unordered_map<std::string, const AstImportedModuleInterface*>*
         importedModulesByName = nullptr);
+
+void collectFunctionSignaturesFromAst(
+    const AstModule& module, const std::unordered_set<std::string>& classNames,
+    const std::unordered_map<std::string, TypeRef>& typeAliases,
+    std::unordered_map<std::string, TypeRef>& outFunctionSignatures,
+    const std::unordered_map<std::string, const AstImportedModuleInterface*>*
+        importedModulesByName = nullptr);

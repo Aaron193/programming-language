@@ -24,3 +24,5 @@ TypeRef frontendTokenToType(const Token& token,
 
 TypeRef frontendResolveTypeExpr(const AstTypeExpr& typeExpr,
                                 const FrontendTypeContext& context);
+
+std::string frontendTypeExprText(const AstTypeExpr& typeExpr);
