@@ -1,32 +1,33 @@
-var limit i32 = 100000
-var composite Array<bool> = []
+const limit i32 = 100000
+const composite Array<bool> = []
 
 for (var i i32 = 0; i <= limit; i++) {
-  composite.push(false)
+    composite.push(false)
 }
 
-var start f64 = clock()
+const start f64 = clock()
 
 var p i64 = 2
 while (p * p <= limit) {
-  if (!composite[p]) {
-    var multiple i64 = p * p
-    while (multiple <= limit) {
-      composite[multiple] = true
-      multiple = multiple + p
+    if (!composite[p]) {
+        var multiple i64 = p * p
+        while (multiple <= limit) {
+            composite[multiple] = true
+            multiple += p
+        }
     }
-  }
-  p = p + 1
+    p++
 }
 
 var count i32 = 0
 var n i64 = 2
 while (n <= limit) {
-  if (!composite[n]) count += 1
-  n = n + 1
+    if (!composite[n])
+        count++
+    n++
 }
 
-var elapsed f64 = clock() - start
+const elapsed f64 = clock() - start
 
 print(count)
 print(elapsed)

@@ -1,24 +1,24 @@
 fn makeAdder(n i32) fn(i32) i32 {
-  fn addOne(x i32) i32 {
-    return n + x
-  }
-  return addOne
+    fn addOne(x i32) i32 {
+        return n + x
+    }
+    return addOne
 }
 
-var funcs Array<fn(i32) i32> = []
+const funcs Array<fn(i32) i32> = []
 
-var start f64 = clock()
+const start f64 = clock()
 
 for (var i i32 = 0; i < 10000; i++) {
-  funcs.push(makeAdder(i))
+    funcs.push(makeAdder(i))
 }
 
 var sum i32 = 0
 for (var i i32 = 0; i < funcs.size(); i++) {
-  sum += funcs[i](1)
+    sum += funcs[i](1)
 }
 
-var elapsed f64 = clock() - start
+const elapsed f64 = clock() - start
 
 print(sum)
 print(elapsed)

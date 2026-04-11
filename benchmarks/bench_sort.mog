@@ -1,32 +1,32 @@
-var n i32 = 5000
-var arr Array<i32> = []
+const n i32 = 5000
+const arr Array<i32> = []
 
 for (var value i32 = n; value > 0; value--) {
-  arr.push(value)
+    arr.push(value)
 }
 
-var start f64 = clock()
+const start f64 = clock()
 
 var i i32 = 1
 while (i < arr.size()) {
-  var key i32 = arr[i]
-  var j i32 = i - 1
-  var shifting bool = true
+    const key i32 = arr[i]
+    var j i32 = i - 1
+    var shifting bool = true
 
-  while (j >= 0 && shifting) {
-    if (arr[j] > key) {
-      arr[j + 1] = arr[j]
-      j = j - 1
-    } else {
-      shifting = false
+    while (j >= 0 && shifting) {
+        if (arr[j] > key) {
+            arr[j + 1] = arr[j]
+            j--
+        } else {
+            shifting = false
+        }
     }
-  }
 
-  arr[j + 1] = key
-  i = i + 1
+    arr[j + 1] = key
+    i++
 }
 
-var elapsed f64 = clock() - start
+const elapsed f64 = clock() - start
 
 print(arr[0])
 print(arr[n - 1])

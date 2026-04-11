@@ -1,19 +1,19 @@
-var d Dict<str, i32> = {}
+const d Dict<str, i32> = {}
 
-var start f64 = clock()
+const start f64 = clock()
 
 for (var i i32 = 0; i < 30000; i++) {
-  var key str = "key" + str(i)
-  d[key] = i
+    const key str = "key" + str(i)
+    d[key] = i
 }
 
 var sum i32 = 0
 for (var i i32 = 0; i < 30000; i++) {
-  var key str = "key" + str(i)
-  sum += d[key]
+    const key str = "key" + str(i)
+    sum += d[key]
 }
 
-var elapsed f64 = clock() - start
+const elapsed f64 = clock() - start
 
 print(sum)
 print(d.size())

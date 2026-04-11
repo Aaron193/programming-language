@@ -1,31 +1,31 @@
 type Node struct {
-  value i32
-  next Node
+    value i32
+    next Node
 }
 
-var start f64 = clock()
+const start f64 = clock()
 
-var head Node = Node()
+const head Node = Node()
 head.value = 1
 head.next = head
 
 var tail Node = head
 for (var i i32 = 2; i <= 100000; i++) {
-  var node Node = Node()
-  node.value = i
-  node.next = head
-  tail.next = node
-  tail = node
+    var node Node = Node()
+    node.value = i
+    node.next = head
+    tail.next = node
+    tail = node
 }
 
 var sum i64 = 0
 var current Node = head
-for (var steps i32 = 0; steps < 100000; steps++) {
-  sum += current.value
-  current = current.next
+for (var steps = 0; steps < 100000; steps++) {
+    sum += current.value
+    current = current.next
 }
 
-var elapsed f64 = clock() - start
+const elapsed f64 = clock() - start
 
 print(sum)
 print(elapsed)

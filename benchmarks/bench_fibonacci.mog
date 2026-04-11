@@ -1,11 +1,12 @@
 fn fib(n i32) i32 {
-  if (n <= 1) return n
-  return fib(n - 1) + fib(n - 2)
+    if (n <= 1)
+        return n
+    return fib(n - 1) + fib(n - 2)
 }
 
-var start f64 = clock()
-var result i32 = fib(35)
-var elapsed f64 = clock() - start
+const start f64 = clock()
+const result i32 = fib(35)
+const elapsed f64 = clock() - start
 
 print(result)
 print(elapsed)

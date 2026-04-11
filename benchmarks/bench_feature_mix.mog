@@ -1,51 +1,50 @@
 type Counter struct {
-  value i32
+    value i32
 
-  fn inc() i32 {
-    this.value = this.value + 1
-    return this.value
-  }
+    fn inc() i32 {
+        this.value = this.value + 1
+        return this.value
+    }
 }
 
 fn makeMultiplier(k i32) fn(i32) i32 {
-  fn multiply(x i32) i32 {
-    return x * k
-  }
-  return multiply
+    fn multiply(x i32) i32 {
+        return x * k
+    }
+    return multiply
 }
 
-var mul2 fn(i32) i32 = makeMultiplier(2)
-var mul3 fn(i32) i32 = makeMultiplier(3)
+const mul2 fn(i32) i32 = makeMultiplier(2)
+const mul3 fn(i32) i32 = makeMultiplier(3)
 
-var counter Counter = Counter()
+const counter Counter = Counter()
 counter.value = 0
 
-var history Array<i32> = []
-var table Dict<str, i32> = {}
-var keys Set<str> = Set()
+const history Array<i32> = []
+const table Dict<str, i32> = {}
+const keys Set<str> = Set()
 
-var start f64 = clock()
+const start f64 = clock()
 
 for (var i i32 = 0; i < 25000; i++) {
-  var k str = "k" + str(i)
-  var value i32 = mul2(i) + mul3(i) + counter.inc()
-  table[k] = value
-  keys.add(k)
-  history.push(value)
+    const k str = "k" + str(i)
+    const value i32 = mul2(i) + mul3(i) + counter.inc()
+    table[k] = value
+    keys.add(k)
+    history.push(value)
 }
 
 var sumA i64 = 0
-for (var i i32 = 0; i < history.size(); i++) {
-  sumA += history[i]
+for (const i i32 : history) {
+    sumA += i
 }
 
 var sumB i64 = 0
-var keyList Array<str> = keys.toArray()
-for (var i i32 = 0; i < keyList.size(); i++) {
-  sumB += table[keyList[i]]
+for (const item str : keys.toArray()) {
+    sumB += table[item]
 }
 
-var elapsed f64 = clock() - start
+const elapsed f64 = clock() - start
 
 print(sumA)
 print(sumB)
