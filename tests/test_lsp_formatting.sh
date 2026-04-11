@@ -207,18 +207,20 @@ try:
     if blank_line_cap["result"][0]["newText"] != blank_line_expected:
         raise AssertionError("blank-line cap formatting did not match expected output")
 
-    fixture_source = (PROJECT_ROOT / "examples" / "test" / "main.mog").read_text(
-        encoding="utf-8"
-    )
-    fixture_expected = (
-        PROJECT_ROOT / "examples" / "test" / "main-formatted.mog"
-    ).read_text(encoding="utf-8")
+    inferred_for_text = "\n".join([
+        "fn main() void {",
+        "    for (var steps = 0;steps < 10;steps++) {",
+        "        print(steps)",
+        "    }",
+        "}",
+        "",
+    ])
     send_message(proc, {
         "jsonrpc": "2.0",
         "method": "textDocument/didChange",
         "params": {
             "textDocument": {"uri": source_uri, "version": 4},
-            "contentChanges": [{"text": fixture_source}],
+            "contentChanges": [{"text": inferred_for_text}],
         },
     })
     read_until(
@@ -236,21 +238,37 @@ try:
             "options": {"insertSpaces": True, "tabSize": 4},
         },
     })
-    fixture_formatting = read_until(proc, lambda msg: msg.get("id") == 5)
-    if len(fixture_formatting["result"]) != 1:
+    inferred_for_formatting = read_until(proc, lambda msg: msg.get("id") == 5)
+    inferred_for_expected = "\n".join([
+        "fn main() void {",
+        "    for (var steps = 0; steps < 10; steps++) {",
+        "        print(steps)",
+        "    }",
+        "}",
+        "",
+    ])
+    if len(inferred_for_formatting["result"]) != 1:
         raise AssertionError(
-            f"expected one fixture formatting edit, got {fixture_formatting['result']}"
+            "expected inferred for-loop formatting to return one edit, got "
+            f"{inferred_for_formatting['result']}"
         )
-    if fixture_formatting["result"][0]["newText"] != fixture_expected:
-        raise AssertionError("fixture formatting did not preserve expected comments and spacing")
+    if inferred_for_formatting["result"][0]["newText"] != inferred_for_expected:
+        raise AssertionError(
+            "inferred for-loop formatting did not preserve omitted type syntax"
+        )
 
-    unsupported_text = "const value i32 = 1 /* inline */ + 2\n"
+    fixture_source = (PROJECT_ROOT / "examples" / "test" / "main.mog").read_text(
+        encoding="utf-8"
+    )
+    fixture_expected = (
+        PROJECT_ROOT / "examples" / "test" / "main-formatted.mog"
+    ).read_text(encoding="utf-8")
     send_message(proc, {
         "jsonrpc": "2.0",
         "method": "textDocument/didChange",
         "params": {
             "textDocument": {"uri": source_uri, "version": 5},
-            "contentChanges": [{"text": unsupported_text}],
+            "contentChanges": [{"text": fixture_source}],
         },
     })
     read_until(
@@ -268,7 +286,45 @@ try:
             "options": {"insertSpaces": True, "tabSize": 4},
         },
     })
-    unsupported = read_until(proc, lambda msg: msg.get("id") == 6)
+    fixture_formatting = read_until(proc, lambda msg: msg.get("id") == 6)
+    fixture_edits = fixture_formatting["result"]
+    if fixture_edits == []:
+        if fixture_source != fixture_expected:
+            raise AssertionError(
+                "expected canonical fixture source to match formatter expectation"
+            )
+    elif len(fixture_edits) != 1:
+        raise AssertionError(
+            f"expected fixture formatting to return zero or one edit, got {fixture_edits}"
+        )
+    elif fixture_edits[0]["newText"] != fixture_expected:
+        raise AssertionError("fixture formatting did not preserve expected comments and spacing")
+
+    unsupported_text = "const value i32 = 1 /* inline */ + 2\n"
+    send_message(proc, {
+        "jsonrpc": "2.0",
+        "method": "textDocument/didChange",
+        "params": {
+            "textDocument": {"uri": source_uri, "version": 6},
+            "contentChanges": [{"text": unsupported_text}],
+        },
+    })
+    read_until(
+        proc,
+        lambda msg: msg.get("method") == "textDocument/publishDiagnostics"
+        and msg.get("params", {}).get("uri") == source_uri,
+    )
+
+    send_message(proc, {
+        "jsonrpc": "2.0",
+        "id": 7,
+        "method": "textDocument/formatting",
+        "params": {
+            "textDocument": {"uri": source_uri},
+            "options": {"insertSpaces": True, "tabSize": 4},
+        },
+    })
+    unsupported = read_until(proc, lambda msg: msg.get("id") == 7)
     if unsupported["result"] != []:
         raise AssertionError(
             f"expected unsupported inline comments to produce no edit, got {unsupported['result']}"
@@ -318,22 +374,22 @@ try:
 
     send_message(proc, {
         "jsonrpc": "2.0",
-        "id": 7,
+        "id": 8,
         "method": "textDocument/formatting",
         "params": {
             "textDocument": {"uri": package_source_uri},
             "options": {"insertSpaces": True, "tabSize": 4},
         },
     })
-    package_formatting = read_until(proc, lambda msg: msg.get("id") == 7)
+    package_formatting = read_until(proc, lambda msg: msg.get("id") == 8)
     if package_formatting["result"] != []:
         raise AssertionError(
             "expected package.api formatting to be treated as unsupported "
             f"instead of replacing the document, got {package_formatting['result']}"
         )
 
-    send_message(proc, {"jsonrpc": "2.0", "id": 8, "method": "shutdown", "params": {}})
-    read_until(proc, lambda msg: msg.get("id") == 8)
+    send_message(proc, {"jsonrpc": "2.0", "id": 9, "method": "shutdown", "params": {}})
+    read_until(proc, lambda msg: msg.get("id") == 9)
     send_message(proc, {"jsonrpc": "2.0", "method": "exit", "params": {}})
     proc.wait(timeout=5)
 finally:

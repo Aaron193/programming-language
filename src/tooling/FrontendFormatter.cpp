@@ -1271,8 +1271,11 @@ struct Formatter {
                             std::get<std::unique_ptr<AstVarDeclStmt>>(value.initializer);
                         append(initializer->isConst ? "const " : "var ");
                         append(tokenLexeme(initializer->name));
-                        append(" ");
-                        append(formatType(*initializer->declaredType));
+                        if (!initializer->omittedType &&
+                            initializer->declaredType) {
+                            append(" ");
+                            append(formatType(*initializer->declaredType));
+                        }
                         append(" = ");
                         append(formatExpression(*initializer->initializer, indent));
                     } else if (std::holds_alternative<AstExprPtr>(
@@ -1666,9 +1669,13 @@ struct PlainFormatter {
                         const auto& initializer =
                             std::get<std::unique_ptr<AstVarDeclStmt>>(value.initializer);
                         outText += initializer->isConst ? "const " : "var ";
-                        outText += tokenLexeme(initializer->name) + " " +
-                                   parent.formatType(*initializer->declaredType) +
-                                   " = " +
+                        outText += tokenLexeme(initializer->name);
+                        if (!initializer->omittedType &&
+                            initializer->declaredType) {
+                            outText += " " +
+                                       parent.formatType(*initializer->declaredType);
+                        }
+                        outText += " = " +
                                    parent.formatExpression(*initializer->initializer, indent);
                     } else if (std::holds_alternative<AstExprPtr>(value.initializer)) {
                         outText += parent.formatExpression(
