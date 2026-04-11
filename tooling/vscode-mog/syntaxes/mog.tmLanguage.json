@@ -190,7 +190,7 @@
           }
         },
         {
-          "match": "(\\))\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
+          "match": "(\\))\\s+(?!(?:as|print|var|const|fn|type|struct|opaque|package|if|else|for|while|break|continue|this|super|return)\\b)([A-Za-z_][A-Za-z0-9_]*)\\b",
           "captures": {
             "1": {
               "name": "punctuation.section.group.end.mog"

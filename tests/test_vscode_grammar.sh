@@ -177,6 +177,7 @@ requireCondition(
 );
 
 const castLine = "    const birdLeft f64 = C.BIRD_X as f64";
+const postfixCastLine = "    var pipeX i64 = floor(pipe.x) as i64";
 requireCondition(
   grammar.patterns.some(
     (pattern) =>
@@ -189,6 +190,10 @@ requireCondition(
   castLine.includes(" as f64"),
   "cast fixture should still exercise the 'as f64' form"
 );
+requireCondition(
+  postfixCastLine.includes(") as i64"),
+  "postfix cast fixture should still exercise the ') as i64' form"
+);
 const parameterPattern = grammar.repository["type-context-expression"].patterns.find(
   (pattern) => pattern.match.includes("(?=\\s*(?:,|\\)|:))")
 );
@@ -199,6 +204,28 @@ requireCondition(
 requireCondition(
   !new RegExp(parameterPattern.match, "g").test("as f64)"),
   "parameter/type-context rule should not swallow cast syntax"
+);
+const returnTypePattern = grammar.repository["type-context-expression"].patterns.find(
+  (pattern) =>
+    pattern.captures?.["1"]?.name === "punctuation.section.group.end.mog" &&
+    pattern.captures?.["2"]?.name === "entity.name.type.mog"
+);
+requireCondition(
+  returnTypePattern !== undefined,
+  "grammar should keep the post-parameter return-type rule"
+);
+const returnTypeRegex = new RegExp(returnTypePattern.match, "gd");
+requireCondition(
+  !returnTypeRegex.test(postfixCastLine),
+  "post-parameter return-type rule should not swallow ') as' cast syntax"
+);
+requireCondition(
+  typeRangesForText(postfixCastLine, "i64").some((range) => range.text === "i64"),
+  "postfix cast target types should still be colored"
+);
+requireCondition(
+  !typeRangesForText(postfixCastLine, "as").some((range) => range.text === "as"),
+  "postfix cast keyword should not be colored as a type"
 );
 
 const keywordPattern = grammar.patterns.find(
