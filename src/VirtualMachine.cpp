@@ -1548,7 +1548,7 @@ Status VirtualMachine::callNativeMethod(NativeMethodId id,
             }
 
             array->elements.push_back(std::move(argAtRef(0)));
-            result = Value(static_cast<double>(array->elements.size()));
+            result = Value(static_cast<int64_t>(array->elements.size()));
         } else if (id == NativeMethodId::ARRAY_POP) {
             if (argumentCount != 0) {
                 return runtimeError("Array method 'pop' expects 0 arguments.");
@@ -1566,7 +1566,7 @@ Status VirtualMachine::callNativeMethod(NativeMethodId id,
                 return runtimeError("Array method 'size' expects 0 arguments.");
             }
 
-            result = Value(static_cast<double>(array->elements.size()));
+            result = Value(static_cast<int64_t>(array->elements.size()));
         } else if (id == NativeMethodId::ARRAY_HAS) {
             if (argumentCount != 1) {
                 return runtimeError("Array method 'has' expects 1 argument.");
@@ -1627,7 +1627,7 @@ Status VirtualMachine::callNativeMethod(NativeMethodId id,
                 return runtimeError("Array method 'clear' expects 0 arguments.");
             }
 
-            double removed = static_cast<double>(array->elements.size());
+            int64_t removed = static_cast<int64_t>(array->elements.size());
             array->elements.clear();
             result = Value(removed);
         } else if (id == NativeMethodId::ARRAY_IS_EMPTY) {
@@ -1749,7 +1749,7 @@ Status VirtualMachine::callNativeMethod(NativeMethodId id,
                 return runtimeError("Dict method 'size' expects 0 arguments.");
             }
 
-            result = Value(static_cast<double>(dict->map.size()));
+            result = Value(static_cast<int64_t>(dict->map.size()));
         } else if (id == NativeMethodId::DICT_REMOVE) {
             if (argumentCount != 1) {
                 return runtimeError("Dict method 'remove' expects 1 argument.");
@@ -1769,7 +1769,7 @@ Status VirtualMachine::callNativeMethod(NativeMethodId id,
                 return runtimeError("Dict method 'clear' expects 0 arguments.");
             }
 
-            double removed = static_cast<double>(dict->map.size());
+            int64_t removed = static_cast<int64_t>(dict->map.size());
             dict->map.clear();
             invalidateDictOrderCache(dict);
             result = Value(removed);
@@ -1827,7 +1827,7 @@ Status VirtualMachine::callNativeMethod(NativeMethodId id,
                 return runtimeError("Set method 'size' expects 0 arguments.");
             }
 
-            result = Value(static_cast<double>(set->elements.size()));
+            result = Value(static_cast<int64_t>(set->elements.size()));
         } else if (id == NativeMethodId::SET_TO_ARRAY) {
             if (argumentCount != 0) {
                 return runtimeError(
@@ -1845,7 +1845,7 @@ Status VirtualMachine::callNativeMethod(NativeMethodId id,
                 return runtimeError("Set method 'clear' expects 0 arguments.");
             }
 
-            double removed = static_cast<double>(set->elements.size());
+            int64_t removed = static_cast<int64_t>(set->elements.size());
             set->elements.clear();
             set->indexByValue.clear();
             result = Value(removed);
