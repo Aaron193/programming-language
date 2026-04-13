@@ -6,35 +6,43 @@
 #include <vector>
 
 #include "ModuleResolver.hpp"
+#include "PackageManager.hpp"
 #include "PackageManifest.hpp"
+#include "PackageRegistry.hpp"
 #include "VirtualMachine.hpp"
 
-struct CliOptions {
+struct RuntimeOptions {
     bool trace = false;
     bool showReturn = false;
     bool disassemble = false;
     bool frontendTimings = false;
     bool frontendTimingsJson = false;
-    std::string validatePackageDir;
     std::string sourceFile;
     std::vector<std::string> packagePaths;
 };
 
 static void printUsage(const char* executable) {
     std::cout
-        << "Usage: " << executable
-        << " [--trace] [--show-return] [--disassemble] [--frontend-timings]"
-        << " [--frontend-timings-json]"
-        << " [--package-path <dir>|--package-path=<dir>]"
-        << " [--validate-package <dir>|--validate-package=<dir>]"
-        << " [source.mog file]"
-        << std::endl;
+        << "Usage: " << executable << " <command> [options]\n"
+        << "Commands:\n"
+        << "  init [name]            Create a project mog.toml in the current directory\n"
+        << "  add <package>          Add a local package dependency and install it\n"
+        << "  install                Resolve local packages and generate install metadata\n"
+        << "  update                 Re-resolve local packages and rewrite install metadata\n"
+        << "  run [flags] <file>     Install dependencies if needed, then run a program\n"
+        << "  validate-package <dir> Validate a package directory\n"
+        << "Flags for run:\n"
+        << "  --trace --show-return --disassemble --frontend-timings --frontend-timings-json\n"
+        << "  --package-path <dir> | --package-path=<dir>\n"
+        << "Legacy mode is still supported: " << executable << " [flags] <file>\n";
 }
 
-static bool parseArgs(int argc, char** argv, CliOptions& options) {
+static bool parseRuntimeArgs(int argc, char** argv, int startIndex,
+                             RuntimeOptions& options, std::string& outError) {
+    outError.clear();
     std::vector<std::string> positional;
 
-    for (int index = 1; index < argc; ++index) {
+    for (int index = startIndex; index < argc; ++index) {
         std::string arg = argv[index];
         if (arg == "--trace") {
             options.trace = true;
@@ -48,29 +56,17 @@ static bool parseArgs(int argc, char** argv, CliOptions& options) {
             options.frontendTimingsJson = true;
         } else if (arg == "--package-path") {
             if (index + 1 >= argc) {
-                std::cerr << "Missing value for --package-path." << std::endl;
-                printUsage(argv[0]);
+                outError = "Missing value for --package-path.";
                 return false;
             }
             options.packagePaths.push_back(argv[++index]);
         } else if (arg.rfind("--package-path=", 0) == 0) {
             options.packagePaths.push_back(arg.substr(15));
-        } else if (arg == "--validate-package") {
-            if (index + 1 >= argc) {
-                std::cerr << "Missing value for --validate-package."
-                          << std::endl;
-                printUsage(argv[0]);
-                return false;
-            }
-            options.validatePackageDir = argv[++index];
-        } else if (arg.rfind("--validate-package=", 0) == 0) {
-            options.validatePackageDir = arg.substr(19);
         } else if (arg == "--help" || arg == "-h") {
-            printUsage(argv[0]);
+            outError = "help";
             return false;
         } else if (!arg.empty() && arg[0] == '-') {
-            std::cerr << "Unknown option: " << arg << std::endl;
-            printUsage(argv[0]);
+            outError = "Unknown option: " + arg;
             return false;
         } else {
             positional.push_back(arg);
@@ -78,8 +74,7 @@ static bool parseArgs(int argc, char** argv, CliOptions& options) {
     }
 
     if (positional.size() > 1) {
-        std::cerr << "Expected at most one source file." << std::endl;
-        printUsage(argv[0]);
+        outError = "Expected at most one source file.";
         return false;
     }
 
@@ -87,36 +82,71 @@ static bool parseArgs(int argc, char** argv, CliOptions& options) {
         options.sourceFile = positional[0];
     }
 
-    if (!options.validatePackageDir.empty() && !options.sourceFile.empty()) {
-        std::cerr << "--validate-package cannot be used with a source file."
-                  << std::endl;
-        printUsage(argv[0]);
-        return false;
-    }
-
     return true;
 }
 
-static int runValidatePackage(const CliOptions& options) {
-    std::string repoRoot;
+static std::string currentProjectRoot() {
     try {
-        repoRoot = std::filesystem::current_path().string();
+        return std::filesystem::current_path().string();
     } catch (const std::exception&) {
-        repoRoot.clear();
+        return ".";
+    }
+}
+
+static std::string inferValidationRootForPackage(const std::string& packageDir) {
+    PackageManifest manifest;
+    std::string error;
+    if (!loadPackageManifest(packageDir, manifest, error)) {
+        return currentProjectRoot();
     }
 
+    std::filesystem::path current;
+    try {
+        current = std::filesystem::weakly_canonical(packageDir);
+    } catch (const std::exception&) {
+        current = std::filesystem::path(packageDir);
+    }
+
+    while (!current.empty()) {
+        const std::filesystem::path candidateLibrary =
+            current / "build" / "packages" / manifest.packageNamespace /
+            manifest.packageName /
+#if defined(__APPLE__)
+            "package.dylib";
+#else
+            "package.so";
+#endif
+        if (std::filesystem::exists(candidateLibrary)) {
+            return current.string();
+        }
+        if (current == current.root_path()) {
+            break;
+        }
+        current = current.parent_path();
+    }
+
+    return currentProjectRoot();
+}
+
+static int runValidatePackageDir(const std::string& packageDir) {
     std::string error;
-    if (!validatePackageDirectory(options.validatePackageDir, repoRoot, error)) {
+    if (!validatePackageDirectory(packageDir,
+                                  inferValidationRootForPackage(packageDir),
+                                  error)) {
         std::cerr << "Package validation failed: " << error << std::endl;
         return 1;
     }
 
-    std::cout << "Package validation passed: " << options.validatePackageDir
-              << std::endl;
+    std::cout << "Package validation passed: " << packageDir << std::endl;
     return 0;
 }
 
-static int runFile(const CliOptions& options) {
+static int runFile(const RuntimeOptions& options) {
+    if (options.sourceFile.empty()) {
+        std::cerr << "run requires a source file." << std::endl;
+        return 1;
+    }
+
     if (!hasSourceModuleExtension(options.sourceFile)) {
         std::cerr << "Error: Source files must use the " << kSourceModuleExtension
                   << " extension: " << options.sourceFile << std::endl;
@@ -143,6 +173,15 @@ static int runFile(const CliOptions& options) {
         absolutePath = options.sourceFile;
     }
 
+    std::string projectRoot;
+    if (findProjectRootForPackages(absolutePath, projectRoot)) {
+        std::string installError;
+        if (!ensureProjectPackagesInstalled(projectRoot, installError)) {
+            std::cerr << "Package install failed: " << installError << std::endl;
+            return 1;
+        }
+    }
+
     VirtualMachine vm;
     vm.setPackageSearchPaths(options.packagePaths);
     Status status =
@@ -165,7 +204,7 @@ static int runFile(const CliOptions& options) {
     return 0;
 }
 
-static int runRepl(const CliOptions& options) {
+static int runRepl(const RuntimeOptions& options) {
     VirtualMachine vm;
     vm.setPackageSearchPaths(options.packagePaths);
     std::string line;
@@ -201,25 +240,143 @@ static int runRepl(const CliOptions& options) {
     return 0;
 }
 
-int main(int argc, char** argv) {
-    CliOptions options;
-    try {
-        std::filesystem::path executablePath = std::filesystem::weakly_canonical(argv[0]);
-        options.packagePaths.push_back(
-            (executablePath.parent_path() / "packages").string());
-    } catch (const std::exception&) {
-    }
-    if (!parseArgs(argc, argv, options)) {
+static int runInstallCommand(const std::string& projectRoot) {
+    std::vector<PackageRegistryEntry> entries;
+    std::string error;
+    if (!installProjectPackages(projectRoot, entries, error)) {
+        std::cerr << "Install failed: " << error << std::endl;
         return 1;
     }
 
-    if (!options.sourceFile.empty()) {
-        return runFile(options);
+    std::cout << "Installed " << entries.size() << " package";
+    if (entries.size() != 1) {
+        std::cout << "s";
+    }
+    std::cout << " into " << (std::filesystem::path(projectRoot) / ".mog/install")
+              << std::endl;
+    return 0;
+}
+
+static int runInitCommand(int argc, char** argv) {
+    std::string projectRoot = currentProjectRoot();
+    std::filesystem::path manifestPath = std::filesystem::path(projectRoot) / "mog.toml";
+    if (std::filesystem::exists(manifestPath)) {
+        std::cerr << "mog.toml already exists in " << projectRoot << std::endl;
+        return 1;
     }
 
-    if (!options.validatePackageDir.empty()) {
-        return runValidatePackage(options);
+    const std::string projectName =
+        argc >= 3 ? argv[2] : std::filesystem::path(projectRoot).filename().string();
+    std::string error;
+    if (!initializeProjectManifest(projectRoot, projectName, error)) {
+        std::cerr << "Init failed: " << error << std::endl;
+        return 1;
     }
 
-    return runRepl(options);
+    std::cout << "Created " << manifestPath << std::endl;
+    return 0;
+}
+
+static int runAddCommand(int argc, char** argv) {
+    if (argc < 3) {
+        std::cerr << "add requires a package specifier." << std::endl;
+        return 1;
+    }
+
+    const std::string projectRoot = currentProjectRoot();
+    ProjectDependencySpec dependency;
+    std::string error;
+    if (!discoverLocalDependencySpec(projectRoot, argv[2], dependency, error)) {
+        std::cerr << "Add failed: " << error << std::endl;
+        return 1;
+    }
+
+    if (!addProjectDependency(projectRoot, dependency, error)) {
+        std::cerr << "Add failed: " << error << std::endl;
+        return 1;
+    }
+
+    std::vector<PackageRegistryEntry> installedEntries;
+    if (!installProjectPackages(projectRoot, installedEntries, error)) {
+        std::cerr << "Add failed during install: " << error << std::endl;
+        return 1;
+    }
+
+    std::cout << "Added dependency '" << dependency.alias << "' from "
+              << dependency.path << std::endl;
+    return 0;
+}
+
+int main(int argc, char** argv) {
+    RuntimeOptions runtimeOptions;
+    try {
+        std::filesystem::path executablePath = std::filesystem::weakly_canonical(argv[0]);
+        runtimeOptions.packagePaths.push_back(
+            (executablePath.parent_path() / "packages").string());
+    } catch (const std::exception&) {
+    }
+
+    if (argc <= 1) {
+        return runRepl(runtimeOptions);
+    }
+
+    const std::string command = argv[1];
+    if (command == "--validate-package") {
+        if (argc < 3) {
+            std::cerr << "Missing value for --validate-package." << std::endl;
+            return 1;
+        }
+        return runValidatePackageDir(argv[2]);
+    }
+    if (command.rfind("--validate-package=", 0) == 0) {
+        return runValidatePackageDir(command.substr(19));
+    }
+    if (command == "--help" || command == "-h") {
+        printUsage(argv[0]);
+        return 0;
+    }
+    if (command == "init") {
+        return runInitCommand(argc, argv);
+    }
+    if (command == "add") {
+        return runAddCommand(argc, argv);
+    }
+    if (command == "install" || command == "update") {
+        return runInstallCommand(currentProjectRoot());
+    }
+    if (command == "validate-package") {
+        if (argc < 3) {
+            std::cerr << "validate-package requires a directory." << std::endl;
+            return 1;
+        }
+        return runValidatePackageDir(argv[2]);
+    }
+    if (command == "run") {
+        std::string parseError;
+        if (!parseRuntimeArgs(argc, argv, 2, runtimeOptions, parseError)) {
+            if (parseError == "help") {
+                printUsage(argv[0]);
+                return 0;
+            }
+            std::cerr << parseError << std::endl;
+            printUsage(argv[0]);
+            return 1;
+        }
+        return runtimeOptions.sourceFile.empty() ? runRepl(runtimeOptions)
+                                                 : runFile(runtimeOptions);
+    }
+
+    std::string parseError;
+    if (!parseRuntimeArgs(argc, argv, 1, runtimeOptions, parseError)) {
+        if (parseError == "help") {
+            printUsage(argv[0]);
+            return 0;
+        }
+        std::cerr << parseError << std::endl;
+        printUsage(argv[0]);
+        return 1;
+    }
+
+    return runtimeOptions.sourceFile.empty() ? runRepl(runtimeOptions)
+                                             : runFile(runtimeOptions);
 }

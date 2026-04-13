@@ -22,6 +22,7 @@ constexpr const char* kPackageLibraryFileName = "package.so";
 
 constexpr const char* kProjectManifestFileName = "mog.toml";
 constexpr const char* kProjectLockFileName = "mog.lock";
+constexpr const char* kProjectInstallRegistryFileName = ".mog/install/registry.toml";
 constexpr const char* kPackageApiFileName = "package.api.mog";
 
 enum class TomlSectionKind {
@@ -907,10 +908,18 @@ bool loadProjectPackageRegistry(const std::string& projectRoot,
     outEntries.clear();
     outError.clear();
 
-    const std::filesystem::path lockfilePath =
-        std::filesystem::path(projectRoot) / kProjectLockFileName;
-    if (!loadLockfileEntries(lockfilePath, outEntries, outError)) {
-        return false;
+    const std::filesystem::path installRegistryPath =
+        std::filesystem::path(projectRoot) / kProjectInstallRegistryFileName;
+    if (fileExists(installRegistryPath.string())) {
+        if (!loadLockfileEntries(installRegistryPath, outEntries, outError)) {
+            return false;
+        }
+    } else {
+        const std::filesystem::path lockfilePath =
+            std::filesystem::path(projectRoot) / kProjectLockFileName;
+        if (!loadLockfileEntries(lockfilePath, outEntries, outError)) {
+            return false;
+        }
     }
 
     for (auto& entry : outEntries) {
