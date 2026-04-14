@@ -13,14 +13,22 @@ repository. The current codebase supports:
 - `mog update`
 - `mog run <file>`
 - `mog validate-package <dir>`
+- `--locked` installs and runs against an existing `mog.lock`
+- `--offline` installs for local path/workspace dependency graphs
 - generated project install metadata in `.mog/install/registry.toml`
 - generated `mog.lock`
 - distinct generated lockfile and install-registry schemas
 - project-local package materialization under `.mog/install/packages/`
+- durable cache metadata for reused local package installs, with a project-local
+  cache fallback when the preferred user cache path is unavailable
 - local installation for both source packages and native packages
 - automatic install-on-run for projects with declared dependencies
 - shared package resolution that prefers installed project metadata and falls
   back to legacy local scanning for compatibility
+- workspace-root discovery for CLI/runtime/LSP package installs
+- root manifest workspace metadata via `[workspace] members = [...]`
+- dependency source-kind tracking and dependency-group tracking in generated
+  lock/install metadata
 - language-server auto-install for workspace projects with `mog.toml`
 
 Not implemented yet:
@@ -30,7 +38,8 @@ Not implemented yet:
 - publish/auth flows
 - prebuilt native artifact distribution
 - signed metadata or artifact verification
-- lockfile-only / offline / enterprise policy workflows
+- enterprise policy workflows beyond the current local `--locked` / `--offline`
+  support
 
 This document describes the target package architecture for Mog, the required
 user-facing workflows, internal invariants, security posture, and a phased
@@ -209,7 +218,11 @@ Behavior:
 Current implementation status:
 
 - implemented for local packages discoverable from repo/workspace `packages/`
-- does not yet support remote registries, semver ranges, git dependencies, or
+- workspace members can also be discovered and written as `workspace = true`
+  dependencies when declared in the root manifest
+- manifest parsing now recognizes `git` and `registry` dependency fields, but
+  installation still rejects them until Phase 2
+- does not yet support remote registries, semver ranges, git fetches, or
   alternate registries
 
 ### Install dependencies
@@ -227,7 +240,8 @@ Behavior:
 
 Current implementation status:
 
-- implemented for local packages
+- implemented for local path and workspace packages
+- supports `--locked` and `--offline` for current local package graphs
 - does not yet download remote artifacts or perform publish-style reproducible
   fetches
 
@@ -656,8 +670,10 @@ Current implementation status:
   `validate-package`
 - implemented compatibility path: `mog <file>`
 - implemented legacy flag compatibility: `--validate-package`
+- implemented package-manager flags: `--locked`, `--offline`
 - not implemented yet: `remove`, `test`, `build`, `publish`, `login`,
-  `registry`, `cache`, `audit`, and the recommended package-manager flags
+  `registry`, `cache`, `audit`, and the remaining recommended package-manager
+  flags
 
 ## Tooling Integration
 
@@ -677,6 +693,8 @@ Current implementation status:
 - compatibility fallback to legacy package scanning still exists
 - LSP now auto-installs project dependencies for workspace roots before
   analysis and then resolves through the same install metadata
+- CLI/runtime/LSP project-root detection now walks to workspace roots when the
+  active file lives under a declared workspace member
 - compatibility fallback still exists for temp files, tests, and package
   authoring workflows outside managed project installs
 
@@ -712,6 +730,8 @@ Current implementation status:
 
 - implemented: project install metadata is preferred when present
 - implemented: automatic install-on-run for declared dependencies
+- implemented: `mog run --locked` uses the existing lockfile/install contract
+  instead of rewriting `mog.lock`
 - still present for compatibility: fallback scanning of `build/packages`,
   `--package-path`, and nearby `packages/` directories
 
@@ -810,17 +830,24 @@ Current status:
   - generated `mog.lock`
   - generated `.mog/install/registry.toml`
   - distinct lockfile and install-registry schemas
+  - dependency-group and source-kind tracking in generated lock/install
+    metadata
   - install-time package validation for local packages
   - project-local package store materialization under `.mog/install/packages/`
+  - durable local package cache metadata with project-local fallback when the
+    preferred user cache path is unavailable
   - local source-package install support
+  - explicit `--locked` and `--offline` flows for local dependency graphs
+  - root manifest workspace metadata and workspace-root discovery
   - resolution that prefers installed project metadata
   - install-aware LSP workspace flow with automatic dependency installation
 - not yet complete inside Phase 1:
-  - durable user-local cache/store policy beyond the current local cache-backed
-    install implementation
-  - complete manifest schema for registries/git/workspaces and full
-    dev-dependency semantics
-  - explicit offline / locked install workflows and CI-oriented policy flags
+  - complete manifest/source schema for published registries, git fetches, and
+    version-ranged dependency solving
+  - richer dev-dependency consumers such as dedicated `mog test` / `mog build`
+    workflows that use the recorded dependency-group metadata
+  - CI/enterprise policy controls beyond the current local `--locked` /
+    `--offline` behavior
 
 ### Phase 2: Registry and Publishing
 

@@ -1663,7 +1663,7 @@ class MogLspServer {
         }
 
         std::string error;
-        ensureProjectPackagesInstalled(root, error);
+        ensureProjectPackagesInstalled(root, InstallOptions{}, error);
     }
 
     void ensureInstallForPath(const std::string& path) {

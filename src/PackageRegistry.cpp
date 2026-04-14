@@ -1,5 +1,6 @@
 #include "PackageRegistry.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <deque>
 #include <filesystem>
@@ -149,6 +150,83 @@ bool parseQuotedStringArray(const std::string& value,
     return true;
 }
 
+std::string normalizeRelativePath(std::string pathText) {
+    std::replace(pathText.begin(), pathText.end(), '\\', '/');
+    return pathText;
+}
+
+bool pathIsWithin(const std::filesystem::path& child,
+                  const std::filesystem::path& parent) {
+    auto childIt = child.begin();
+    auto parentIt = parent.begin();
+    for (; parentIt != parent.end(); ++parentIt, ++childIt) {
+        if (childIt == child.end() || *childIt != *parentIt) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool loadWorkspaceMembersFromManifest(const std::filesystem::path& manifestPath,
+                                      std::vector<std::string>& outMembers,
+                                      std::string& outError) {
+    outMembers.clear();
+    std::ifstream file(manifestPath);
+    if (!file) {
+        outError = "Could not open project manifest '" + manifestPath.string() + "'.";
+        return false;
+    }
+
+    enum class Section {
+        ROOT,
+        WORKSPACE,
+        OTHER,
+    };
+
+    Section section = Section::ROOT;
+    std::string line;
+    while (std::getline(file, line)) {
+        const std::string content = stripComment(line);
+        if (content.empty()) {
+            continue;
+        }
+
+        if (content == "[workspace]") {
+            section = Section::WORKSPACE;
+            continue;
+        }
+        if (content.front() == '[' && content.back() == ']') {
+            section = Section::OTHER;
+            continue;
+        }
+        if (section != Section::WORKSPACE) {
+            continue;
+        }
+
+        const size_t equals = content.find('=');
+        if (equals == std::string::npos) {
+            continue;
+        }
+
+        const std::string key = trim(std::string_view(content).substr(0, equals));
+        const std::string value =
+            trim(std::string_view(content).substr(equals + 1));
+        if (key != "members") {
+            continue;
+        }
+
+        if (!parseQuotedStringArray(value, outMembers, outError)) {
+            return false;
+        }
+        for (auto& member : outMembers) {
+            member = normalizeRelativePath(member);
+        }
+        return true;
+    }
+
+    return true;
+}
+
 std::string canonicalOrEmpty(const std::filesystem::path& path) {
     std::error_code ec;
     const std::filesystem::path resolved =
@@ -191,6 +269,10 @@ bool appendRegistryEntry(std::vector<PackageRegistryEntry>& outEntries,
 bool resolveEntryPaths(const std::string& projectRoot,
                        PackageRegistryEntry& entry,
                        std::string& outError) {
+    if (entry.packageDir.empty() && !entry.sourcePath.empty()) {
+        entry.packageDir = entry.sourcePath;
+    }
+
     if (entry.packageDir.empty()) {
         outError = "Package registry entry '" + entry.importName +
                    "' is missing 'package_dir'.";
@@ -320,6 +402,15 @@ bool loadLockfileEntries(const std::filesystem::path& lockfilePath,
         std::string parsed;
         if (key == "dependencies") {
             if (!parseQuotedStringArray(value, current.dependencyIds, outError)) {
+                outError = "Invalid lockfile line " + std::to_string(lineNumber) +
+                           ": " + outError;
+                return false;
+            }
+            continue;
+        }
+        if (key == "dependency_groups") {
+            if (!parseQuotedStringArray(value, current.dependencyGroups,
+                                        outError)) {
                 outError = "Invalid lockfile line " + std::to_string(lineNumber) +
                            ": " + outError;
                 return false;
@@ -957,7 +1048,13 @@ bool findProjectRootForPackages(const std::string& importerPath,
 
     std::vector<std::filesystem::path> starts;
     if (!importerPath.empty()) {
-        starts.push_back(std::filesystem::path(importerPath).parent_path());
+        std::filesystem::path importer(importerPath);
+        std::error_code importerEc;
+        if (std::filesystem::is_directory(importer, importerEc) && !importerEc) {
+            starts.push_back(importer);
+        } else {
+            starts.push_back(importer.parent_path());
+        }
     }
     starts.push_back(std::filesystem::current_path());
 
@@ -969,6 +1066,8 @@ bool findProjectRootForPackages(const std::string& importerPath,
             current = current.lexically_normal();
         }
 
+        const std::filesystem::path startPath = current;
+        std::string nearestProjectRoot;
         while (!current.empty()) {
             const std::string normalized = current.string();
             if (!visited.insert(normalized).second) {
@@ -978,14 +1077,46 @@ bool findProjectRootForPackages(const std::string& importerPath,
             const std::filesystem::path manifestPath =
                 current / kProjectManifestFileName;
             if (fileExists(manifestPath.string())) {
-                outProjectRoot = normalized;
-                return true;
+                if (nearestProjectRoot.empty()) {
+                    nearestProjectRoot = normalized;
+                }
+
+                std::vector<std::string> workspaceMembers;
+                std::string workspaceError;
+                if (loadWorkspaceMembersFromManifest(manifestPath, workspaceMembers,
+                                                     workspaceError) &&
+                    !workspaceMembers.empty()) {
+                    for (const std::string& member : workspaceMembers) {
+                        const std::filesystem::path memberPath =
+                            current / member;
+                        const std::string canonicalMember =
+                            canonicalOrEmpty(memberPath);
+                        if (canonicalMember.empty()) {
+                            continue;
+                        }
+                        if (pathIsWithin(startPath,
+                                         std::filesystem::path(canonicalMember))) {
+                            outProjectRoot = normalized;
+                            return true;
+                        }
+                    }
+
+                    if (pathIsWithin(startPath, current)) {
+                        outProjectRoot = normalized;
+                        return true;
+                    }
+                }
             }
 
             if (current == current.root_path()) {
                 break;
             }
             current = current.parent_path();
+        }
+
+        if (!nearestProjectRoot.empty()) {
+            outProjectRoot = nearestProjectRoot;
+            return true;
         }
     }
 
@@ -1016,6 +1147,33 @@ bool loadProjectPackageRegistry(const std::string& projectRoot,
                        installRegistryPath.string() + "'. Run 'mog install'.";
             return false;
         }
+    }
+
+    for (auto& entry : outEntries) {
+        if (!resolveEntryPaths(projectRoot, entry, outError)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool loadProjectLockfile(const std::string& projectRoot,
+                         std::vector<PackageRegistryEntry>& outEntries,
+                         std::string& outError) {
+    outEntries.clear();
+    outError.clear();
+
+    const std::filesystem::path lockfilePath =
+        std::filesystem::path(projectRoot) / kProjectLockFileName;
+    if (!fileExists(lockfilePath.string())) {
+        outError = "Project lockfile is missing at '" + lockfilePath.string() +
+                   "'. Run 'mog install' first.";
+        return false;
+    }
+
+    if (!loadLockfileEntries(lockfilePath, outEntries, outError)) {
+        return false;
     }
 
     for (auto& entry : outEntries) {

@@ -10,6 +10,9 @@ struct ProjectDependencySpec {
     std::string packageId;
     std::string path;
     std::string version;
+    std::string git;
+    std::string registry;
+    bool workspace = false;
 };
 
 struct ProjectManifestData {
@@ -17,8 +20,15 @@ struct ProjectManifestData {
     std::string name;
     std::string version = "0.1.0";
     std::string description;
+    std::vector<std::string> workspaceMembers;
     std::vector<ProjectDependencySpec> dependencies;
     std::vector<ProjectDependencySpec> devDependencies;
+};
+
+struct InstallOptions {
+    bool locked = false;
+    bool offline = false;
+    bool includeDevDependencies = true;
 };
 
 bool loadProjectManifestData(const std::string& projectRoot,
@@ -44,7 +54,9 @@ bool addProjectDependency(const std::string& projectRoot,
 
 bool installProjectPackages(const std::string& projectRoot,
                             std::vector<PackageRegistryEntry>& outEntries,
+                            const InstallOptions& options,
                             std::string& outError);
 
 bool ensureProjectPackagesInstalled(const std::string& projectRoot,
+                                    const InstallOptions& options,
                                     std::string& outError);

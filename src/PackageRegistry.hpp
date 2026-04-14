@@ -23,6 +23,7 @@ struct PackageRegistryEntry {
     std::string apiPath;
     std::string description;
     std::vector<std::string> dependencyIds;
+    std::vector<std::string> dependencyGroups;
     std::string sourceType;
     std::string sourcePath;
     std::string manifestDigest;
@@ -61,6 +62,10 @@ bool findProjectRootForPackages(const std::string& importerPath,
 bool loadProjectPackageRegistry(const std::string& projectRoot,
                                 std::vector<PackageRegistryEntry>& outEntries,
                                 std::string& outError);
+
+bool loadProjectLockfile(const std::string& projectRoot,
+                         std::vector<PackageRegistryEntry>& outEntries,
+                         std::string& outError);
 
 bool resolvePackageRegistryEntry(
     const std::string& importerPath, std::string_view rawSpecifier,

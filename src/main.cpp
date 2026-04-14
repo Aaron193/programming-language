@@ -17,6 +17,7 @@ struct RuntimeOptions {
     bool disassemble = false;
     bool frontendTimings = false;
     bool frontendTimingsJson = false;
+    InstallOptions installOptions;
     std::string sourceFile;
     std::vector<std::string> packagePaths;
 };
@@ -27,11 +28,13 @@ static void printUsage(const char* executable) {
         << "Commands:\n"
         << "  init [name]            Create a project mog.toml in the current directory\n"
         << "  add <package>          Add a local package dependency and install it\n"
-        << "  install                Resolve local packages and generate install metadata\n"
-        << "  update                 Re-resolve local packages and rewrite install metadata\n"
+        << "  install [flags]        Resolve local packages and generate install metadata\n"
+        << "  update [flags]         Re-resolve local packages and rewrite install metadata\n"
         << "  run [flags] <file>     Install dependencies if needed, then run a program\n"
         << "  validate-package <dir> Validate a package directory\n"
-        << "Flags for run:\n"
+        << "Flags for install/update/run:\n"
+        << "  --locked --offline\n"
+        << "Additional flags for run:\n"
         << "  --trace --show-return --disassemble --frontend-timings --frontend-timings-json\n"
         << "  --package-path <dir> | --package-path=<dir>\n"
         << "Legacy mode is still supported: " << executable << " [flags] <file>\n";
@@ -54,6 +57,10 @@ static bool parseRuntimeArgs(int argc, char** argv, int startIndex,
             options.frontendTimings = true;
         } else if (arg == "--frontend-timings-json") {
             options.frontendTimingsJson = true;
+        } else if (arg == "--locked") {
+            options.installOptions.locked = true;
+        } else if (arg == "--offline") {
+            options.installOptions.offline = true;
         } else if (arg == "--package-path") {
             if (index + 1 >= argc) {
                 outError = "Missing value for --package-path.";
@@ -85,12 +92,42 @@ static bool parseRuntimeArgs(int argc, char** argv, int startIndex,
     return true;
 }
 
+static bool parseInstallArgs(int argc, char** argv, int startIndex,
+                             InstallOptions& options, std::string& outError) {
+    outError.clear();
+    options = InstallOptions{};
+    for (int index = startIndex; index < argc; ++index) {
+        const std::string arg = argv[index];
+        if (arg == "--locked") {
+            options.locked = true;
+        } else if (arg == "--offline") {
+            options.offline = true;
+        } else if (arg == "--help" || arg == "-h") {
+            outError = "help";
+            return false;
+        } else {
+            outError = "Unknown option: " + arg;
+            return false;
+        }
+    }
+
+    return true;
+}
+
 static std::string currentProjectRoot() {
     try {
         return std::filesystem::current_path().string();
     } catch (const std::exception&) {
         return ".";
     }
+}
+
+static std::string currentManagedProjectRoot() {
+    std::string projectRoot;
+    if (findProjectRootForPackages(currentProjectRoot(), projectRoot)) {
+        return projectRoot;
+    }
+    return currentProjectRoot();
 }
 
 static std::string inferValidationRootForPackage(const std::string& packageDir) {
@@ -176,7 +213,8 @@ static int runFile(const RuntimeOptions& options) {
     std::string projectRoot;
     if (findProjectRootForPackages(absolutePath, projectRoot)) {
         std::string installError;
-        if (!ensureProjectPackagesInstalled(projectRoot, installError)) {
+        if (!ensureProjectPackagesInstalled(projectRoot, options.installOptions,
+                                           installError)) {
             std::cerr << "Package install failed: " << installError << std::endl;
             return 1;
         }
@@ -240,10 +278,11 @@ static int runRepl(const RuntimeOptions& options) {
     return 0;
 }
 
-static int runInstallCommand(const std::string& projectRoot) {
+static int runInstallCommand(const std::string& projectRoot,
+                             const InstallOptions& options) {
     std::vector<PackageRegistryEntry> entries;
     std::string error;
-    if (!installProjectPackages(projectRoot, entries, error)) {
+    if (!installProjectPackages(projectRoot, entries, options, error)) {
         std::cerr << "Install failed: " << error << std::endl;
         return 1;
     }
@@ -283,7 +322,7 @@ static int runAddCommand(int argc, char** argv) {
         return 1;
     }
 
-    const std::string projectRoot = currentProjectRoot();
+    const std::string projectRoot = currentManagedProjectRoot();
     ProjectDependencySpec dependency;
     std::string error;
     if (!discoverLocalDependencySpec(projectRoot, argv[2], dependency, error)) {
@@ -297,7 +336,8 @@ static int runAddCommand(int argc, char** argv) {
     }
 
     std::vector<PackageRegistryEntry> installedEntries;
-    if (!installProjectPackages(projectRoot, installedEntries, error)) {
+    if (!installProjectPackages(projectRoot, installedEntries, InstallOptions{},
+                                error)) {
         std::cerr << "Add failed during install: " << error << std::endl;
         return 1;
     }
@@ -342,7 +382,18 @@ int main(int argc, char** argv) {
         return runAddCommand(argc, argv);
     }
     if (command == "install" || command == "update") {
-        return runInstallCommand(currentProjectRoot());
+        InstallOptions installOptions;
+        std::string parseError;
+        if (!parseInstallArgs(argc, argv, 2, installOptions, parseError)) {
+            if (parseError == "help") {
+                printUsage(argv[0]);
+                return 0;
+            }
+            std::cerr << parseError << std::endl;
+            printUsage(argv[0]);
+            return 1;
+        }
+        return runInstallCommand(currentManagedProjectRoot(), installOptions);
     }
     if (command == "validate-package") {
         if (argc < 3) {
