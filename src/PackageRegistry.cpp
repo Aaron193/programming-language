@@ -227,6 +227,44 @@ bool loadWorkspaceMembersFromManifest(const std::filesystem::path& manifestPath,
     return true;
 }
 
+bool manifestDeclaresProjectKind(const std::filesystem::path& manifestPath) {
+    std::ifstream file(manifestPath);
+    if (!file) {
+        return false;
+    }
+
+    std::string line;
+    while (std::getline(file, line)) {
+        const std::string content = stripComment(line);
+        if (content.empty()) {
+            continue;
+        }
+        if (content.front() == '[' && content.back() == ']') {
+            break;
+        }
+
+        const size_t equals = content.find('=');
+        if (equals == std::string::npos) {
+            continue;
+        }
+        const std::string key = trim(std::string_view(content).substr(0, equals));
+        const std::string value =
+            trim(std::string_view(content).substr(equals + 1));
+        if (key != "kind") {
+            continue;
+        }
+
+        std::string parsed;
+        std::string parseError;
+        if (!parseQuotedString(value, parsed, parseError)) {
+            return false;
+        }
+        return parsed == "project";
+    }
+
+    return false;
+}
+
 std::string canonicalOrEmpty(const std::filesystem::path& path) {
     std::error_code ec;
     const std::filesystem::path resolved =
@@ -271,6 +309,8 @@ bool resolveEntryPaths(const std::string& projectRoot,
                        std::string& outError) {
     if (entry.packageDir.empty() && !entry.sourcePath.empty()) {
         entry.packageDir = entry.sourcePath;
+    } else if (entry.packageDir.empty() && !entry.artifactPath.empty()) {
+        entry.packageDir = entry.artifactPath;
     }
 
     if (entry.packageDir.empty()) {
@@ -314,6 +354,10 @@ bool resolveEntryPaths(const std::string& projectRoot,
     if (!entry.sourcePath.empty()) {
         entry.sourcePath =
             canonicalOrLexical(std::filesystem::path(projectRoot) / entry.sourcePath);
+    }
+    if (!entry.artifactPath.empty()) {
+        entry.artifactPath = canonicalOrLexical(
+            std::filesystem::path(projectRoot) / entry.artifactPath);
     }
 
     return true;
@@ -450,6 +494,12 @@ bool loadLockfileEntries(const std::filesystem::path& lockfilePath,
             current.sourceType = parsed;
         } else if (key == "source_path") {
             current.sourcePath = parsed;
+        } else if (key == "registry") {
+            current.registry = parsed;
+        } else if (key == "artifact_path") {
+            current.artifactPath = parsed;
+        } else if (key == "artifact_digest") {
+            current.artifactDigest = parsed;
         } else if (key == "manifest_digest") {
             current.manifestDigest = parsed;
         } else if (key == "api_digest") {
@@ -1076,7 +1126,8 @@ bool findProjectRootForPackages(const std::string& importerPath,
 
             const std::filesystem::path manifestPath =
                 current / kProjectManifestFileName;
-            if (fileExists(manifestPath.string())) {
+            if (fileExists(manifestPath.string()) &&
+                manifestDeclaresProjectKind(manifestPath)) {
                 if (nearestProjectRoot.empty()) {
                     nearestProjectRoot = normalized;
                 }

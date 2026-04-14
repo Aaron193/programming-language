@@ -26,6 +26,9 @@ struct PackageRegistryEntry {
     std::vector<std::string> dependencyGroups;
     std::string sourceType;
     std::string sourcePath;
+    std::string registry;
+    std::string artifactPath;
+    std::string artifactDigest;
     std::string manifestDigest;
     std::string apiDigest;
 };

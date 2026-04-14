@@ -30,13 +30,23 @@ repository. The current codebase supports:
 - dependency source-kind tracking and dependency-group tracking in generated
   lock/install metadata
 - language-server auto-install for workspace projects with `mog.toml`
+- Phase 2A static file-registry installs for published source packages using
+  exact `x.y.z` versions
+- root-manifest registry configuration via `[registries.<name>]`
+- registry-pinned lock/install metadata including registry identity and
+  artifact digests
+- cached `--offline` reinstalls for previously fetched registry source packages
 
 Not implemented yet:
 
-- remote registries
-- version solving across published releases
-- publish/auth flows
+- authenticated publishing flows
+- semver range solving across published releases
+- `mog add` support for published package specs
+- git dependency fetch/install
+- alternate or networked registry transports beyond the current static
+  file-registry format
 - prebuilt native artifact distribution
+- published native package installation
 - signed metadata or artifact verification
 - enterprise policy workflows beyond the current local `--locked` / `--offline`
   support
@@ -220,10 +230,13 @@ Current implementation status:
 - implemented for local packages discoverable from repo/workspace `packages/`
 - workspace members can also be discovered and written as `workspace = true`
   dependencies when declared in the root manifest
-- manifest parsing now recognizes `git` and `registry` dependency fields, but
-  installation still rejects them until Phase 2
-- does not yet support remote registries, semver ranges, git fetches, or
-  alternate registries
+- manifest parsing now recognizes `git` and `registry` dependency fields
+- install now supports published source-package dependencies through configured
+  static file registries using exact `x.y.z` versions
+- `add` itself is still local/workspace-oriented and does not yet add
+  published-package specs automatically
+- does not yet support semver ranges, git fetches, authenticated publishing,
+  or alternate registry transports
 
 ### Install dependencies
 
@@ -240,10 +253,14 @@ Behavior:
 
 Current implementation status:
 
-- implemented for local path and workspace packages
-- supports `--locked` and `--offline` for current local package graphs
-- does not yet download remote artifacts or perform publish-style reproducible
-  fetches
+- implemented for local path, workspace, and published source packages from
+  configured static file registries
+- supports `--locked` and `--offline` for local graphs and for registry source
+  packages that are already cached locally
+- generated metadata now records registry identity, artifact path, and
+  artifact digest in addition to existing manifest/API digests
+- does not yet install published native packages, perform semver solving, or
+  fetch from git/network API registries
 
 ### Update dependencies
 
@@ -861,7 +878,22 @@ Deliver:
 
 Current status:
 
-- not started
+- partially implemented
+- shipped in the current Phase 2A slice:
+  - static file-registry index format for published source packages
+  - root manifest registry configuration via `[registries.<name>]`
+  - exact-version published source-package resolution and install
+  - transitive published source-package installs through the registry index
+  - registry artifact digest verification during install
+  - lockfile/install metadata pinning for registry identity and artifact digest
+  - cached offline reinstalls for previously fetched registry source packages
+- not yet complete inside Phase 2:
+  - `mog publish`
+  - package authentication / login flows
+  - semver range solving across published releases
+  - git dependency fetch/install
+  - `mog add` UX for published package specs
+  - non-file registry transports or hosted registry APIs
 
 ### Phase 3: Native Artifact Distribution
 

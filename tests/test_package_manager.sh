@@ -16,6 +16,65 @@ REMOTE_DIR=""
 WORKSPACE_DIR=""
 trap 'rm -rf "${TEMP_DIR:-}" "${REMOTE_DIR:-}" "${WORKSPACE_DIR:-}"' EXIT
 
+write_registry_index() {
+    local registry_dir="$1"
+    local mode="${2:-correct}"
+    python3 - "$registry_dir" "$mode" <<'PY'
+from pathlib import Path
+import sys
+
+registry_dir = Path(sys.argv[1])
+mode = sys.argv[2]
+
+def digest_directory(root: Path) -> str:
+    files = sorted(path for path in root.rglob("*") if path.is_file())
+    seed = []
+    for path in files:
+        seed.append(path.relative_to(root).as_posix())
+        seed.append("\n")
+        seed.append(path.read_text(encoding="utf-8"))
+        seed.append("\n")
+    text = "".join(seed).encode("utf-8")
+    value = 1469598103934665603
+    for byte in text:
+        value ^= byte
+        value = (value * 1099511628211) & 0xFFFFFFFFFFFFFFFF
+    return f"{value:016x}"
+
+util_digest = digest_directory(registry_dir / "packages" / "util")
+http_digest = digest_directory(registry_dir / "packages" / "http")
+native_digest = digest_directory(registry_dir / "packages" / "native-demo")
+if mode == "digest-mismatch":
+    http_digest = "0000000000000000"
+
+index = f'''schema_version = "registry.v1"
+
+[[package]]
+package_id = "acme:util"
+version = "1.0.0"
+artifact_path = "packages/util"
+artifact_digest = "{util_digest}"
+dependencies = []
+
+[[package]]
+package_id = "acme:http"
+version = "1.0.0"
+artifact_path = "packages/http"
+artifact_digest = "{http_digest}"
+dependencies = ["acme:util@1.0.0"]
+
+[[package]]
+package_id = "acme:native-demo"
+version = "1.0.0"
+artifact_path = "packages/native-demo"
+artifact_digest = "{native_digest}"
+dependencies = []
+'''
+
+(registry_dir / "index.toml").write_text(index, encoding="utf-8")
+PY
+}
+
 ln -s "$PROJECT_ROOT/packages" "$TEMP_DIR/packages"
 export MOG_CACHE_DIR="$TEMP_DIR/cache-root"
 
@@ -66,13 +125,13 @@ if [[ ! -f "$TEMP_DIR/.mog/install/registry.toml" ]]; then
     exit 1
 fi
 
-if ! grep -Fq 'schema_version = "lock.v1"' "$TEMP_DIR/mog.lock"; then
+if ! grep -Fq 'schema_version = "lock.v2"' "$TEMP_DIR/mog.lock"; then
     echo "[FAIL] lockfile did not write the new lock schema"
     cat "$TEMP_DIR/mog.lock"
     exit 1
 fi
 
-if ! grep -Fq 'schema_version = "install.v1"' "$TEMP_DIR/.mog/install/registry.toml"; then
+if ! grep -Fq 'schema_version = "install.v2"' "$TEMP_DIR/.mog/install/registry.toml"; then
     echo "[FAIL] install registry did not write the new install schema"
     cat "$TEMP_DIR/.mog/install/registry.toml"
     exit 1
@@ -177,26 +236,242 @@ if ! grep -Eq "out of date|requires version" /tmp/mog_locked_failure.txt; then
 fi
 
 REMOTE_DIR="$(mktemp -d)"
+REGISTRY_DIR="$REMOTE_DIR/registry"
+mkdir -p "$REGISTRY_DIR/packages/util/src" \
+         "$REGISTRY_DIR/packages/http/src" \
+         "$REGISTRY_DIR/packages/native-demo"
 
-cat > "$REMOTE_DIR/mog.toml" <<'EOF_REMOTE'
+cat > "$REGISTRY_DIR/packages/util/mog.toml" <<'EOF_REGISTRY_UTIL_MANIFEST'
+kind = "source"
+import_name = "util"
+namespace = "acme"
+name = "util"
+version = "1.0.0"
+author = "Registry test"
+description = "Published utility package."
+entry = "src/main.mog"
+dependencies = []
+EOF_REGISTRY_UTIL_MANIFEST
+
+cat > "$REGISTRY_DIR/packages/util/src/main.mog" <<'EOF_REGISTRY_UTIL_SRC'
+const MESSAGE str = "utility from registry"
+
+fn Name() str {
+    return MESSAGE
+}
+EOF_REGISTRY_UTIL_SRC
+
+cat > "$REGISTRY_DIR/packages/http/mog.toml" <<'EOF_REGISTRY_HTTP_MANIFEST'
+kind = "source"
+import_name = "http"
+namespace = "acme"
+name = "http"
+version = "1.0.0"
+author = "Registry test"
+description = "Published http package."
+entry = "src/main.mog"
+dependencies = ["acme:util"]
+EOF_REGISTRY_HTTP_MANIFEST
+
+cat > "$REGISTRY_DIR/packages/http/src/main.mog" <<'EOF_REGISTRY_HTTP_SRC'
+const util = @import("util")
+
+fn Fetch() str {
+    return util.Name()
+}
+EOF_REGISTRY_HTTP_SRC
+
+cat > "$REGISTRY_DIR/packages/native-demo/mog.toml" <<'EOF_REGISTRY_NATIVE_MANIFEST'
+kind = "native"
+import_name = "native-demo"
+namespace = "acme"
+name = "native-demo"
+version = "1.0.0"
+abi_version = 1
+author = "Registry test"
+description = "Published native package placeholder."
+dependencies = []
+EOF_REGISTRY_NATIVE_MANIFEST
+
+write_registry_index "$REGISTRY_DIR"
+
+cat > "$REMOTE_DIR/mog.toml" <<EOF_REMOTE
 kind = "project"
 name = "remote-test"
 version = "0.1.0"
 description = "remote source test"
 
+[registries.default]
+index = "$REGISTRY_DIR"
+
 [dependencies]
-remote = { package = "acme:http", version = "1.0.0" }
+http = { package = "acme:http", version = "1.0.0" }
 EOF_REMOTE
 
-if (cd "$REMOTE_DIR" && "$MOG" install --offline >/tmp/mog_offline_failure.txt 2>&1); then
-    echo "[FAIL] install --offline should reject non-local dependencies"
-    cat /tmp/mog_offline_failure.txt
+if ! (cd "$REMOTE_DIR" && "$MOG" install >/dev/null); then
+    echo "[FAIL] install should resolve published source packages from the registry"
     exit 1
 fi
 
-if ! grep -Eq "offline|Phase 2|published package resolution" /tmp/mog_offline_failure.txt; then
-    echo "[FAIL] install --offline should explain why non-local dependencies are rejected"
-    cat /tmp/mog_offline_failure.txt
+if ! grep -Fq 'source_type = "registry"' "$REMOTE_DIR/mog.lock" || \
+   ! grep -Fq 'registry = "default"' "$REMOTE_DIR/mog.lock" || \
+   ! grep -Fq 'artifact_digest = "' "$REMOTE_DIR/mog.lock"; then
+    echo "[FAIL] remote lockfile should record registry source metadata"
+    cat "$REMOTE_DIR/mog.lock"
+    exit 1
+fi
+
+cat > "$REMOTE_DIR/app.mog" <<'EOF_REMOTE_APP'
+const http = @import("http")
+print(http.Fetch())
+EOF_REMOTE_APP
+
+REMOTE_RUN_OUTPUT="$("$MOG" run "$REMOTE_DIR/app.mog")"
+if [[ "$REMOTE_RUN_OUTPUT" != *"utility from registry"* ]]; then
+    echo "[FAIL] run should execute registry-installed source packages with transitive dependencies"
+    echo "$REMOTE_RUN_OUTPUT"
+    exit 1
+fi
+
+rm -f "$REMOTE_DIR/.mog/install/registry.toml"
+if ! (cd "$REMOTE_DIR" && "$MOG" install --offline >/dev/null); then
+    echo "[FAIL] install --offline should succeed after a registry package has been cached"
+    exit 1
+fi
+
+EMPTY_CACHE_DIR="$(mktemp -d)"
+if (cd "$REMOTE_DIR" && MOG_CACHE_DIR="$EMPTY_CACHE_DIR" "$MOG" install --offline >/tmp/mog_registry_offline_failure.txt 2>&1); then
+    echo "[FAIL] install --offline should reject uncached registry dependencies"
+    cat /tmp/mog_registry_offline_failure.txt
+    exit 1
+fi
+rm -rf "$EMPTY_CACHE_DIR"
+
+if ! grep -Eq "offline|cached locally" /tmp/mog_registry_offline_failure.txt; then
+    echo "[FAIL] install --offline should explain the missing registry cache"
+    cat /tmp/mog_registry_offline_failure.txt
+    exit 1
+fi
+
+cat > "$REGISTRY_DIR/packages/util/src/main.mog" <<'EOF_REGISTRY_UTIL_SRC_UPDATED'
+const MESSAGE str = "utility from registry v2"
+
+fn Name() str {
+    return MESSAGE
+}
+EOF_REGISTRY_UTIL_SRC_UPDATED
+write_registry_index "$REGISTRY_DIR"
+
+if (cd "$REMOTE_DIR" && "$MOG" install --locked >/tmp/mog_registry_locked_failure.txt 2>&1); then
+    echo "[FAIL] install --locked should reject registry artifact drift"
+    cat /tmp/mog_registry_locked_failure.txt
+    exit 1
+fi
+
+if ! grep -Eq "out of date|refresh" /tmp/mog_registry_locked_failure.txt; then
+    echo "[FAIL] install --locked should explain registry artifact drift"
+    cat /tmp/mog_registry_locked_failure.txt
+    exit 1
+fi
+
+cat > "$REMOTE_DIR/mog.toml" <<EOF_RANGE
+kind = "project"
+name = "remote-test"
+version = "0.1.0"
+description = "remote source test"
+
+[registries.default]
+index = "$REGISTRY_DIR"
+
+[dependencies]
+http = { package = "acme:http", version = "^1.0.0" }
+EOF_RANGE
+
+if (cd "$REMOTE_DIR" && "$MOG" install >/tmp/mog_registry_range_failure.txt 2>&1); then
+    echo "[FAIL] install should reject published dependency version ranges in the MVP"
+    cat /tmp/mog_registry_range_failure.txt
+    exit 1
+fi
+
+if ! grep -Eq "exact x.y.z|exact" /tmp/mog_registry_range_failure.txt; then
+    echo "[FAIL] install should explain exact published versions are required"
+    cat /tmp/mog_registry_range_failure.txt
+    exit 1
+fi
+
+cat > "$REMOTE_DIR/mog.toml" <<EOF_UNKNOWN_REGISTRY
+kind = "project"
+name = "remote-test"
+version = "0.1.0"
+description = "remote source test"
+
+[registries.default]
+index = "$REGISTRY_DIR"
+
+[dependencies]
+http = { package = "acme:http", version = "1.0.0", registry = "missing" }
+EOF_UNKNOWN_REGISTRY
+
+if (cd "$REMOTE_DIR" && "$MOG" install >/tmp/mog_registry_missing_failure.txt 2>&1); then
+    echo "[FAIL] install should reject unknown registry aliases"
+    cat /tmp/mog_registry_missing_failure.txt
+    exit 1
+fi
+
+if ! grep -Fq "unknown registry" /tmp/mog_registry_missing_failure.txt; then
+    echo "[FAIL] install should explain missing registry aliases"
+    cat /tmp/mog_registry_missing_failure.txt
+    exit 1
+fi
+
+cat > "$REMOTE_DIR/mog.toml" <<EOF_NATIVE_REMOTE
+kind = "project"
+name = "remote-test"
+version = "0.1.0"
+description = "remote source test"
+
+[registries.default]
+index = "$REGISTRY_DIR"
+
+[dependencies]
+native = { package = "acme:native-demo", version = "1.0.0" }
+EOF_NATIVE_REMOTE
+
+if (cd "$REMOTE_DIR" && "$MOG" install >/tmp/mog_registry_native_failure.txt 2>&1); then
+    echo "[FAIL] install should reject published native packages in Phase 2A"
+    cat /tmp/mog_registry_native_failure.txt
+    exit 1
+fi
+
+if ! grep -Eq "Phase 3|Published native packages" /tmp/mog_registry_native_failure.txt; then
+    echo "[FAIL] install should explain published native packages are deferred"
+    cat /tmp/mog_registry_native_failure.txt
+    exit 1
+fi
+
+write_registry_index "$REGISTRY_DIR" digest-mismatch
+cat > "$REMOTE_DIR/mog.toml" <<EOF_BAD_DIGEST
+kind = "project"
+name = "remote-test"
+version = "0.1.0"
+description = "remote source test"
+
+[registries.default]
+index = "$REGISTRY_DIR"
+
+[dependencies]
+http = { package = "acme:http", version = "1.0.0" }
+EOF_BAD_DIGEST
+
+if (cd "$REMOTE_DIR" && "$MOG" install >/tmp/mog_registry_digest_failure.txt 2>&1); then
+    echo "[FAIL] install should reject registry artifact digest mismatches"
+    cat /tmp/mog_registry_digest_failure.txt
+    exit 1
+fi
+
+if ! grep -Fq "digest mismatch" /tmp/mog_registry_digest_failure.txt; then
+    echo "[FAIL] install should explain registry artifact digest mismatches"
+    cat /tmp/mog_registry_digest_failure.txt
     exit 1
 fi
 
@@ -211,13 +486,13 @@ remote = { git = "https://example.com/acme/http.git", package = "acme:http", ver
 EOF_GIT
 
 if (cd "$REMOTE_DIR" && "$MOG" install >/tmp/mog_git_failure.txt 2>&1); then
-    echo "[FAIL] install should reject git dependencies until Phase 2"
+    echo "[FAIL] install should reject git dependencies until a later Phase 2 slice"
     cat /tmp/mog_git_failure.txt
     exit 1
 fi
 
 if ! grep -Fq "not implemented until Phase 2" /tmp/mog_git_failure.txt; then
-    echo "[FAIL] install should explain git dependency support is deferred"
+    echo "[FAIL] install should explain git dependency support is still deferred"
     cat /tmp/mog_git_failure.txt
     exit 1
 fi

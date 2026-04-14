@@ -15,12 +15,18 @@ struct ProjectDependencySpec {
     bool workspace = false;
 };
 
+struct ProjectRegistryConfig {
+    std::string alias;
+    std::string index;
+};
+
 struct ProjectManifestData {
     std::string kind = "project";
     std::string name;
     std::string version = "0.1.0";
     std::string description;
     std::vector<std::string> workspaceMembers;
+    std::vector<ProjectRegistryConfig> registries;
     std::vector<ProjectDependencySpec> dependencies;
     std::vector<ProjectDependencySpec> devDependencies;
 };
