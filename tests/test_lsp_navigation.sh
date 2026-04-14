@@ -20,6 +20,7 @@ import tempfile
 from pathlib import Path
 
 lsp_bin = sys.argv[1]
+repo_root = Path(lsp_bin).resolve().parents[1]
 
 
 def send_message(proc, payload):
@@ -345,6 +346,30 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
     native_type_completion_path.write_text(
         native_type_completion_source, encoding="utf-8")
     native_type_completion_uri = native_type_completion_path.resolve().as_uri()
+    project_root = Path(tmpdir) / "managed_project"
+    project_root.mkdir()
+    os.symlink(repo_root / "packages", project_root / "packages")
+    (project_root / "mog.toml").write_text(
+        "\n".join([
+            'kind = "project"',
+            'name = "managed-project"',
+            'version = "0.1.0"',
+            'description = "managed project"',
+            "",
+            "[dependencies]",
+            'math = { path = "packages/examples/math", package = "examples:math", version = "0.1.0" }',
+            ""
+        ]),
+        encoding="utf-8",
+    )
+    managed_project_source = "\n".join([
+        'const math = @import("math")',
+        "print(math.MEANING_OF_LIFE)",
+        ""
+    ])
+    managed_project_path = project_root / "main.mog"
+    managed_project_path.write_text(managed_project_source, encoding="utf-8")
+    managed_project_uri = managed_project_path.resolve().as_uri()
     imported_function_state_source = "\n".join([
         "type GameState struct {",
         "    score i32",
@@ -772,6 +797,28 @@ with tempfile.TemporaryDirectory(prefix="mog_lsp_navigation_") as tmpdir:
         if native_window_diagnostics["params"]["diagnostics"]:
             raise AssertionError(
                 f"native window sample should stay diagnostics-free: {native_window_diagnostics['params']['diagnostics']}")
+        send_message(proc, {
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": managed_project_uri,
+                    "languageId": "mog",
+                    "version": 1,
+                    "text": managed_project_source
+                }
+            }
+        })
+        managed_project_diagnostics = read_until(
+            proc,
+            lambda msg: msg.get("method") == "textDocument/publishDiagnostics" and
+            msg.get("params", {}).get("uri") == managed_project_uri,
+        )
+        if managed_project_diagnostics["params"]["diagnostics"]:
+            raise AssertionError(
+                f"managed project sample should stay diagnostics-free: {managed_project_diagnostics['params']['diagnostics']}")
+        if not (project_root / ".mog" / "install" / "registry.toml").exists():
+            raise AssertionError("LSP should auto-install project dependencies")
         send_message(proc, {
             "jsonrpc": "2.0",
             "method": "textDocument/didOpen",

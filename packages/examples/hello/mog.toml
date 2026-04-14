@@ -1,0 +1,9 @@
+kind = "source"
+import_name = "hello"
+namespace = "examples"
+name = "hello"
+version = "0.1.0"
+author = "Mog runtime"
+description = "Reference source package."
+entry = "src/main.mog"
+dependencies = []

@@ -445,7 +445,10 @@ bool validatePackageDirectory(const std::string& packageDir,
                                    manifest.packageName}) &&
             dirPath.string().rfind(joinPath(repoRootPath / "build" / "packages"),
                                    0) == 0;
-        if (!isOfficialSourcePath && !isOfficialBuildPath) {
+        const bool isInstalledPath =
+            pathEndsWith(dirPath, {".mog", "install", "packages", "mog",
+                                   manifest.packageName});
+        if (!isOfficialSourcePath && !isOfficialBuildPath && !isInstalledPath) {
             outError =
                 "Namespace 'mog' is reserved for runtime-maintained packages.";
             return false;

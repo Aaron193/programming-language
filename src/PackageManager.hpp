@@ -9,6 +9,7 @@ struct ProjectDependencySpec {
     std::string alias;
     std::string packageId;
     std::string path;
+    std::string version;
 };
 
 struct ProjectManifestData {
@@ -17,6 +18,7 @@ struct ProjectManifestData {
     std::string version = "0.1.0";
     std::string description;
     std::vector<ProjectDependencySpec> dependencies;
+    std::vector<ProjectDependencySpec> devDependencies;
 };
 
 bool loadProjectManifestData(const std::string& projectRoot,

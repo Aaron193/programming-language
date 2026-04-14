@@ -4,7 +4,7 @@
 
 In progress.
 
-Phase 1 local package-management groundwork is now implemented in the
+Phase 1 local package-management work is now substantially implemented in the
 repository. The current codebase supports:
 
 - `mog init`
@@ -15,9 +15,13 @@ repository. The current codebase supports:
 - `mog validate-package <dir>`
 - generated project install metadata in `.mog/install/registry.toml`
 - generated `mog.lock`
+- distinct generated lockfile and install-registry schemas
+- project-local package materialization under `.mog/install/packages/`
+- local installation for both source packages and native packages
 - automatic install-on-run for projects with declared dependencies
 - shared package resolution that prefers installed project metadata and falls
   back to legacy local scanning for compatibility
+- language-server auto-install for workspace projects with `mog.toml`
 
 Not implemented yet:
 
@@ -671,8 +675,10 @@ Current implementation status:
 
 - runtime and compiler/import resolution now prefer generated install metadata
 - compatibility fallback to legacy package scanning still exists
-- LSP compatibility remains intact through shared registry resolution paths
-- the dedicated install/lockfile-driven tooling workflow is not fully complete
+- LSP now auto-installs project dependencies for workspace roots before
+  analysis and then resolves through the same install metadata
+- compatibility fallback still exists for temp files, tests, and package
+  authoring workflows outside managed project installs
 
 ## Runtime Resolution Model
 
@@ -794,7 +800,7 @@ Do not deliver yet:
 
 Current status:
 
-- partially complete
+- mostly complete
 - shipped:
   - `mog init`
   - `mog add`
@@ -803,13 +809,18 @@ Current status:
   - `mog run`
   - generated `mog.lock`
   - generated `.mog/install/registry.toml`
+  - distinct lockfile and install-registry schemas
   - install-time package validation for local packages
+  - project-local package store materialization under `.mog/install/packages/`
+  - local source-package install support
   - resolution that prefers installed project metadata
+  - install-aware LSP workspace flow with automatic dependency installation
 - not yet complete inside Phase 1:
-  - dedicated project-local artifact store beyond generated install metadata
-  - user-local cache usage beyond directory creation
-  - complete manifest schema for registries/git/workspaces/dev-dependencies
-  - explicit LSP-first install workflows
+  - durable user-local cache/store policy beyond the current local cache-backed
+    install implementation
+  - complete manifest schema for registries/git/workspaces and full
+    dev-dependency semantics
+  - explicit offline / locked install workflows and CI-oriented policy flags
 
 ### Phase 2: Registry and Publishing
 

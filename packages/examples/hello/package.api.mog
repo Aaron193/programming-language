@@ -1,0 +1,7 @@
+package hello
+
+@doc("Reference source-package constant export.")
+const MESSAGE str
+
+@doc("Return the package greeting.")
+fn Greet() str

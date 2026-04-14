@@ -16,6 +16,8 @@
 #include <variant>
 #include <vector>
 
+#include "PackageManager.hpp"
+#include "PackageRegistry.hpp"
 #include "tooling/FrontendTooling.hpp"
 
 namespace {
@@ -1646,6 +1648,30 @@ class MogLspServer {
                 }
             }
         }
+
+        for (const auto& root : m_workspaceRoots) {
+            ensureInstallForProjectRoot(root);
+        }
+    }
+
+    void ensureInstallForProjectRoot(const std::string& root) {
+        const std::filesystem::path manifestPath =
+            std::filesystem::path(root) / "mog.toml";
+        std::error_code ec;
+        if (!std::filesystem::exists(manifestPath, ec) || ec) {
+            return;
+        }
+
+        std::string error;
+        ensureProjectPackagesInstalled(root, error);
+    }
+
+    void ensureInstallForPath(const std::string& path) {
+        std::string projectRoot;
+        if (!findProjectRootForPackages(path, projectRoot)) {
+            return;
+        }
+        ensureInstallForProjectRoot(projectRoot);
     }
 
     const DocumentState* findOpenDocumentByPath(const std::string& path) const {
@@ -1660,6 +1686,7 @@ class MogLspServer {
 
     std::optional<ToolingDocumentAnalysis> analyzeWorkspaceDocument(
         const std::string& path) {
+        ensureInstallForPath(path);
         if (const DocumentState* openDocument = findOpenDocumentByPath(path)) {
             ToolingAnalyzeOptions options;
             options.sourcePath = openDocument->path;
@@ -1790,6 +1817,7 @@ class MogLspServer {
     }
 
     void analyzeAndPublish(DocumentState& document) {
+        ensureInstallForPath(document.path);
         ToolingAnalyzeOptions options;
         options.sourcePath = document.path;
         options.packageSearchPaths = m_packageSearchPaths;

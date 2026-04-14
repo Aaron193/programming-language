@@ -1,0 +1,5 @@
+const MESSAGE str = "hello from source package"
+
+fn Greet() str {
+    return MESSAGE
+}

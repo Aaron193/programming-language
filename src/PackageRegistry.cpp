@@ -97,6 +97,58 @@ bool parseQuotedString(const std::string& value, std::string& out,
     return true;
 }
 
+bool parseQuotedStringArray(const std::string& value,
+                            std::vector<std::string>& outValues,
+                            std::string& outError) {
+    outValues.clear();
+    if (value.size() < 2 || value.front() != '[' || value.back() != ']') {
+        outError = "Expected array value.";
+        return false;
+    }
+
+    std::string body = trim(std::string_view(value).substr(1, value.size() - 2));
+    while (!body.empty()) {
+        size_t valueLength = 0;
+        bool inString = false;
+        bool escaped = false;
+        for (; valueLength < body.size(); ++valueLength) {
+            const char ch = body[valueLength];
+            if (inString) {
+                if (escaped) {
+                    escaped = false;
+                } else if (ch == '\\') {
+                    escaped = true;
+                } else if (ch == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+
+            if (ch == '"') {
+                inString = true;
+                continue;
+            }
+            if (ch == ',') {
+                break;
+            }
+        }
+
+        std::string parsed;
+        if (!parseQuotedString(trim(body.substr(0, valueLength)), parsed, outError)) {
+            return false;
+        }
+        outValues.push_back(parsed);
+
+        if (valueLength >= body.size()) {
+            body.clear();
+        } else {
+            body = trim(std::string_view(body).substr(valueLength + 1));
+        }
+    }
+
+    return true;
+}
+
 std::string canonicalOrEmpty(const std::filesystem::path& path) {
     std::error_code ec;
     const std::filesystem::path resolved =
@@ -177,6 +229,11 @@ bool resolveEntryPaths(const std::string& projectRoot,
         }
     }
 
+    if (!entry.sourcePath.empty()) {
+        entry.sourcePath =
+            canonicalOrLexical(std::filesystem::path(projectRoot) / entry.sourcePath);
+    }
+
     return true;
 }
 
@@ -241,16 +298,35 @@ bool loadLockfileEntries(const std::filesystem::path& lockfilePath,
             return false;
         }
 
+        const std::string key = trim(std::string_view(content).substr(0, equals));
+        const std::string value =
+            trim(std::string_view(content).substr(equals + 1));
+
+        if (section == TomlSectionKind::NONE) {
+            if (key == "schema_version") {
+                continue;
+            }
+            outError = "Invalid lockfile line " + std::to_string(lineNumber) +
+                       ": entries must appear inside [[package]].";
+            return false;
+        }
+
         if (section != TomlSectionKind::PACKAGE || !hasCurrent) {
             outError = "Invalid lockfile line " + std::to_string(lineNumber) +
                        ": entries must appear inside [[package]].";
             return false;
         }
 
-        const std::string key = trim(std::string_view(content).substr(0, equals));
-        const std::string value =
-            trim(std::string_view(content).substr(equals + 1));
         std::string parsed;
+        if (key == "dependencies") {
+            if (!parseQuotedStringArray(value, current.dependencyIds, outError)) {
+                outError = "Invalid lockfile line " + std::to_string(lineNumber) +
+                           ": " + outError;
+                return false;
+            }
+            continue;
+        }
+
         if (!parseQuotedString(value, parsed, outError)) {
             outError = "Invalid lockfile line " + std::to_string(lineNumber) +
                        ": " + outError;
@@ -265,6 +341,8 @@ bool loadLockfileEntries(const std::filesystem::path& lockfilePath,
             current.packageNamespace = parsed;
         } else if (key == "package_name") {
             current.packageName = parsed;
+        } else if (key == "version") {
+            current.version = parsed;
         } else if (key == "kind") {
             current.kind = parsed;
         } else if (key == "package_dir") {
@@ -277,6 +355,14 @@ bool loadLockfileEntries(const std::filesystem::path& lockfilePath,
             current.apiPath = parsed;
         } else if (key == "description") {
             current.description = parsed;
+        } else if (key == "source_type") {
+            current.sourceType = parsed;
+        } else if (key == "source_path") {
+            current.sourcePath = parsed;
+        } else if (key == "manifest_digest") {
+            current.manifestDigest = parsed;
+        } else if (key == "api_digest") {
+            current.apiDigest = parsed;
         }
     }
 
@@ -306,9 +392,13 @@ bool loadPackageManifestEntry(const std::filesystem::path& packageDir,
     outEntry.packageName = manifest.packageName;
     outEntry.packageId =
         makePackageId(outEntry.packageNamespace, outEntry.packageName);
+    outEntry.version = manifest.version;
     outEntry.packageDir = canonicalOrLexical(packageDir);
     outEntry.kind = manifest.kind.empty() ? "native" : manifest.kind;
     outEntry.description = manifest.description;
+    outEntry.dependencyIds = manifest.dependencies;
+    outEntry.sourceType = "path";
+    outEntry.sourcePath = outEntry.packageDir;
     if (!manifest.entry.empty()) {
         outEntry.entryPath = canonicalOrLexical(packageDir / manifest.entry);
     }
@@ -917,7 +1007,13 @@ bool loadProjectPackageRegistry(const std::string& projectRoot,
     } else {
         const std::filesystem::path lockfilePath =
             std::filesystem::path(projectRoot) / kProjectLockFileName;
-        if (!loadLockfileEntries(lockfilePath, outEntries, outError)) {
+        if (fileExists(lockfilePath.string())) {
+            if (!loadLockfileEntries(lockfilePath, outEntries, outError)) {
+                return false;
+            }
+        } else {
+            outError = "Project package install metadata is missing at '" +
+                       installRegistryPath.string() + "'. Run 'mog install'.";
             return false;
         }
     }
@@ -948,16 +1044,17 @@ bool resolvePackageRegistryEntry(
     if (findProjectRootForPackages(importerPath, projectRoot)) {
         std::vector<PackageRegistryEntry> entries;
         std::string registryError;
-        if (!loadProjectPackageRegistry(projectRoot, entries, registryError)) {
+        if (loadProjectPackageRegistry(projectRoot, entries, registryError)) {
+            for (const auto& entry : entries) {
+                if (entry.importName == rawSpecifier) {
+                    outEntry = entry;
+                    return true;
+                }
+            }
+        } else if (registryError.find("Project package install metadata is missing") ==
+                   std::string::npos) {
             outError = registryError;
             return false;
-        }
-
-        for (const auto& entry : entries) {
-            if (entry.importName == rawSpecifier) {
-                outEntry = entry;
-                return true;
-            }
         }
     }
 

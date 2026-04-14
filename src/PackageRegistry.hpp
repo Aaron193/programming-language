@@ -15,12 +15,18 @@ struct PackageRegistryEntry {
     std::string packageId;
     std::string packageNamespace;
     std::string packageName;
+    std::string version;
     std::string packageDir;
     std::string kind;
     std::string entryPath;
     std::string libraryPath;
     std::string apiPath;
     std::string description;
+    std::vector<std::string> dependencyIds;
+    std::string sourceType;
+    std::string sourcePath;
+    std::string manifestDigest;
+    std::string apiDigest;
 };
 
 struct PackageApiExport {
