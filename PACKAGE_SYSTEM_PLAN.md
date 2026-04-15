@@ -32,16 +32,25 @@ repository. The current codebase supports:
 - language-server auto-install for workspace projects with `mog.toml`
 - Phase 2A static file-registry installs for published source packages using
   exact `x.y.z` versions
+- Phase 2B semver-constrained published source-package installs using
+  `x.y.z`, `^x.y.z`, and `~x.y.z`
 - root-manifest registry configuration via `[registries.<name>]`
 - registry-pinned lock/install metadata including registry identity and
   artifact digests
 - cached `--offline` reinstalls for previously fetched registry source packages
+- lockfile-first `mog install` / `mog run` behavior for current dependency
+  graphs, with `mog update` as the explicit refresh path
+- published-package support in `mog add`, including `namespace/name` and
+  `namespace/name@constraint` specs
+- source-package `mog publish` to the current static file-registry format,
+  including exact dependency pinning and idempotent re-publish checks
+- package-manifest dependency parsing aligned with project manifests via
+  `[dependencies]` inline tables, while retaining legacy compatibility for
+  `dependencies = []`
 
 Not implemented yet:
 
 - authenticated publishing flows
-- semver range solving across published releases
-- `mog add` support for published package specs
 - git dependency fetch/install
 - alternate or networked registry transports beyond the current static
   file-registry format
@@ -231,12 +240,12 @@ Current implementation status:
 - workspace members can also be discovered and written as `workspace = true`
   dependencies when declared in the root manifest
 - manifest parsing now recognizes `git` and `registry` dependency fields
-- install now supports published source-package dependencies through configured
-  static file registries using exact `x.y.z` versions
-- `add` itself is still local/workspace-oriented and does not yet add
-  published-package specs automatically
-- does not yet support semver ranges, git fetches, authenticated publishing,
-  or alternate registry transports
+- `add` now supports published-package specs through configured static file
+  registries, including `namespace/name` and `namespace/name@constraint`
+- published source-package adds currently accept exact versions plus `^` and
+  `~` semver constraints
+- does not yet support git fetches, authenticated publishing, or alternate
+  registry transports
 
 ### Install dependencies
 
@@ -246,8 +255,9 @@ mog install
 
 Behavior:
 
-- resolves from `mog.toml`
-- rewrites `mog.lock`
+- prefers the existing `mog.lock` when it is still compatible with `mog.toml`
+- otherwise resolves from `mog.toml`
+- rewrites `mog.lock` only when a fresh resolution is required
 - rewrites `.mog/install/registry.toml`
 - validates installed packages
 
@@ -257,10 +267,12 @@ Current implementation status:
   configured static file registries
 - supports `--locked` and `--offline` for local graphs and for registry source
   packages that are already cached locally
+- published source-package resolution supports exact versions plus `^` and `~`
+  semver constraints
 - generated metadata now records registry identity, artifact path, and
   artifact digest in addition to existing manifest/API digests
-- does not yet install published native packages, perform semver solving, or
-  fetch from git/network API registries
+- does not yet install published native packages or fetch from git/network API
+  registries
 
 ### Update dependencies
 
@@ -271,12 +283,15 @@ mog update window
 
 Behavior:
 
-- currently behaves like `mog install` for local packages
+- re-resolves dependencies from `mog.toml`
+- refreshes `mog.lock`
+- upgrades published dependencies within the allowed semver constraints
 
 Current implementation status:
 
-- implemented as a local reinstall/regeneration command
-- does not yet perform version upgrades across published package releases
+- implemented for both local graphs and published source-package graphs
+- now performs version upgrades across published source-package releases within
+  supported semver constraints
 
 ### Run a program
 
@@ -287,12 +302,14 @@ mog run app.mog
 Behavior:
 
 - ensures declared local dependencies are installed before execution
+- prefers the existing `mog.lock` when it is still compatible with `mog.toml`
 - prefers installed project package metadata during resolution
 - invokes the interpreter with the resolved package graph
 
 Current implementation status:
 
 - implemented
+- follows the same lockfile-first install behavior as `mog install`
 - legacy direct file execution (`mog file.mog`) still works as a compatibility
   path
 
@@ -305,13 +322,17 @@ mog publish
 Behavior:
 
 - validates manifest and API metadata
-- builds required artifacts
-- checks version/tag consistency
-- uploads metadata and artifacts to a registry
+- resolves published direct dependencies to exact pins
+- copies source artifacts into the current static file-registry layout
+- updates the registry index and records artifact digests
 
 Current implementation status:
 
-- not implemented yet
+- implemented for source packages published to configured static file
+  registries
+- rejects conflicting re-publishes of an existing `package_id@version`
+- does not yet support authentication, hosted registries, or published native
+  packages
 
 ## Package Layout
 
@@ -859,8 +880,8 @@ Current status:
   - resolution that prefers installed project metadata
   - install-aware LSP workspace flow with automatic dependency installation
 - not yet complete inside Phase 1:
-  - complete manifest/source schema for published registries, git fetches, and
-    version-ranged dependency solving
+  - complete manifest/source schema for git fetches and more advanced registry
+    transports beyond the current file-registry model
   - richer dev-dependency consumers such as dedicated `mog test` / `mog build`
     workflows that use the recorded dependency-group metadata
   - CI/enterprise policy controls beyond the current local `--locked` /
@@ -879,21 +900,24 @@ Deliver:
 Current status:
 
 - partially implemented
-- shipped in the current Phase 2A slice:
+- shipped in the current Phase 2A/2B source-package slice:
   - static file-registry index format for published source packages
   - root manifest registry configuration via `[registries.<name>]`
-  - exact-version published source-package resolution and install
+  - exact-version and constrained-version published source-package resolution
+    and install using `x.y.z`, `^x.y.z`, and `~x.y.z`
   - transitive published source-package installs through the registry index
   - registry artifact digest verification during install
   - lockfile/install metadata pinning for registry identity and artifact digest
   - cached offline reinstalls for previously fetched registry source packages
+  - lockfile-first install/run behavior with explicit `mog update` refreshes
+  - `mog add` support for published package specs
+  - `mog publish` for source packages to the current file-registry format
 - not yet complete inside Phase 2:
-  - `mog publish`
   - package authentication / login flows
-  - semver range solving across published releases
   - git dependency fetch/install
-  - `mog add` UX for published package specs
   - non-file registry transports or hosted registry APIs
+  - richer publish workflow concerns such as version/tag enforcement and
+    registry-side authentication
 
 ### Phase 3: Native Artifact Distribution
 

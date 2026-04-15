@@ -27,9 +27,10 @@ static void printUsage(const char* executable) {
         << "Usage: " << executable << " <command> [options]\n"
         << "Commands:\n"
         << "  init [name]            Create a project mog.toml in the current directory\n"
-        << "  add <package>          Add a local package dependency and install it\n"
-        << "  install [flags]        Resolve local packages and generate install metadata\n"
-        << "  update [flags]         Re-resolve local packages and rewrite install metadata\n"
+        << "  add <package>          Add a package dependency and install it\n"
+        << "  install [flags]        Install dependencies using mog.lock when it is current\n"
+        << "  update [flags]         Re-resolve dependencies and rewrite install metadata\n"
+        << "  publish [options] [dir] Publish a source package to a configured file registry\n"
         << "  run [flags] <file>     Install dependencies if needed, then run a program\n"
         << "  validate-package <dir> Validate a package directory\n"
         << "Flags for install/update/run:\n"
@@ -107,6 +108,41 @@ static bool parseInstallArgs(int argc, char** argv, int startIndex,
             return false;
         } else {
             outError = "Unknown option: " + arg;
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool parsePublishArgs(int argc, char** argv, int startIndex,
+                             std::string& outRegistryAlias,
+                             std::string& outPackageDir,
+                             std::string& outError) {
+    outError.clear();
+    outRegistryAlias.clear();
+    outPackageDir.clear();
+
+    for (int index = startIndex; index < argc; ++index) {
+        const std::string arg = argv[index];
+        if (arg == "--registry") {
+            if (index + 1 >= argc) {
+                outError = "Missing value for --registry.";
+                return false;
+            }
+            outRegistryAlias = argv[++index];
+        } else if (arg.rfind("--registry=", 0) == 0) {
+            outRegistryAlias = arg.substr(11);
+        } else if (arg == "--help" || arg == "-h") {
+            outError = "help";
+            return false;
+        } else if (!arg.empty() && arg[0] == '-') {
+            outError = "Unknown option: " + arg;
+            return false;
+        } else if (outPackageDir.empty()) {
+            outPackageDir = arg;
+        } else {
+            outError = "publish accepts at most one package directory.";
             return false;
         }
     }
@@ -323,9 +359,9 @@ static int runAddCommand(int argc, char** argv) {
     }
 
     const std::string projectRoot = currentManagedProjectRoot();
-    ProjectDependencySpec dependency;
+    DependencySpec dependency;
     std::string error;
-    if (!discoverLocalDependencySpec(projectRoot, argv[2], dependency, error)) {
+    if (!discoverDependencySpec(projectRoot, argv[2], dependency, error)) {
         std::cerr << "Add failed: " << error << std::endl;
         return 1;
     }
@@ -342,8 +378,46 @@ static int runAddCommand(int argc, char** argv) {
         return 1;
     }
 
-    std::cout << "Added dependency '" << dependency.alias << "' from "
-              << dependency.path << std::endl;
+    if (!dependency.path.empty()) {
+        std::cout << "Added dependency '" << dependency.alias << "' from "
+                  << dependency.path << std::endl;
+    } else {
+        std::cout << "Added dependency '" << dependency.alias << "' as "
+                  << dependency.packageId;
+        if (!dependency.version.empty()) {
+            std::cout << "@" << dependency.version;
+        }
+        std::cout << std::endl;
+    }
+    return 0;
+}
+
+static int runPublishCommand(int argc, char** argv) {
+    std::string registryAlias;
+    std::string packageDir;
+    std::string parseError;
+    if (!parsePublishArgs(argc, argv, 2, registryAlias, packageDir, parseError)) {
+        if (parseError == "help") {
+            printUsage(argv[0]);
+            return 0;
+        }
+        std::cerr << parseError << std::endl;
+        printUsage(argv[0]);
+        return 1;
+    }
+
+    if (packageDir.empty()) {
+        packageDir = currentProjectRoot();
+    }
+
+    std::string error;
+    if (!publishProjectPackage(currentManagedProjectRoot(), packageDir, registryAlias,
+                               error)) {
+        std::cerr << "Publish failed: " << error << std::endl;
+        return 1;
+    }
+
+    std::cout << "Published package from " << packageDir << std::endl;
     return 0;
 }
 
@@ -393,7 +467,11 @@ int main(int argc, char** argv) {
             printUsage(argv[0]);
             return 1;
         }
+        installOptions.update = command == "update";
         return runInstallCommand(currentManagedProjectRoot(), installOptions);
+    }
+    if (command == "publish") {
+        return runPublishCommand(argc, argv);
     }
     if (command == "validate-package") {
         if (argc < 3) {

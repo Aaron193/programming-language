@@ -3,17 +3,8 @@
 #include <string>
 #include <vector>
 
+#include "DependencySpec.hpp"
 #include "PackageRegistry.hpp"
-
-struct ProjectDependencySpec {
-    std::string alias;
-    std::string packageId;
-    std::string path;
-    std::string version;
-    std::string git;
-    std::string registry;
-    bool workspace = false;
-};
 
 struct ProjectRegistryConfig {
     std::string alias;
@@ -27,14 +18,15 @@ struct ProjectManifestData {
     std::string description;
     std::vector<std::string> workspaceMembers;
     std::vector<ProjectRegistryConfig> registries;
-    std::vector<ProjectDependencySpec> dependencies;
-    std::vector<ProjectDependencySpec> devDependencies;
+    std::vector<DependencySpec> dependencies;
+    std::vector<DependencySpec> devDependencies;
 };
 
 struct InstallOptions {
     bool locked = false;
     bool offline = false;
     bool includeDevDependencies = true;
+    bool update = false;
 };
 
 bool loadProjectManifestData(const std::string& projectRoot,
@@ -49,14 +41,19 @@ bool initializeProjectManifest(const std::string& projectRoot,
                                const std::string& projectName,
                                std::string& outError);
 
-bool discoverLocalDependencySpec(const std::string& projectRoot,
-                                 const std::string& rawSpecifier,
-                                 ProjectDependencySpec& outDependency,
-                                 std::string& outError);
+bool discoverDependencySpec(const std::string& projectRoot,
+                            const std::string& rawSpecifier,
+                            DependencySpec& outDependency,
+                            std::string& outError);
 
 bool addProjectDependency(const std::string& projectRoot,
-                          const ProjectDependencySpec& dependency,
+                          const DependencySpec& dependency,
                           std::string& outError);
+
+bool publishProjectPackage(const std::string& projectRoot,
+                           const std::string& packageDir,
+                           const std::string& registryAlias,
+                           std::string& outError);
 
 bool installProjectPackages(const std::string& projectRoot,
                             std::vector<PackageRegistryEntry>& outEntries,

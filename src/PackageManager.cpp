@@ -236,9 +236,29 @@ struct RegistryDependencyPin {
     std::string version;
 };
 
+struct SemanticVersion {
+    int major = 0;
+    int minor = 0;
+    int patch = 0;
+};
+
+struct VersionRequirement {
+    enum class Kind {
+        ANY,
+        EXACT,
+        CARET,
+        TILDE,
+    };
+
+    Kind kind = Kind::ANY;
+    SemanticVersion version;
+    std::string raw;
+};
+
 struct RegistryIndexRecord {
     std::string packageId;
     std::string version;
+    SemanticVersion parsedVersion;
     std::string artifactPath;
     std::string artifactDigest;
     std::vector<RegistryDependencyPin> dependencies;
@@ -248,7 +268,11 @@ struct LoadedRegistryIndex {
     std::filesystem::path indexPath;
     std::filesystem::path rootDir;
     std::unordered_map<std::string, RegistryIndexRecord> recordsByKey;
+    std::unordered_map<std::string, std::vector<RegistryIndexRecord>> recordsByPackageId;
 };
+
+const ProjectRegistryConfig* findRegistryConfig(
+    const ProjectManifestData& manifest, std::string_view alias);
 
 std::string registryRecordKey(std::string_view packageId,
                               std::string_view version) {
@@ -280,6 +304,96 @@ bool isExactPublishedVersion(std::string_view version) {
     return componentLength > 0 && componentCount == 2;
 }
 
+bool parseSemanticVersion(std::string_view text, SemanticVersion& outVersion) {
+    outVersion = SemanticVersion{};
+    if (!isExactPublishedVersion(text)) {
+        return false;
+    }
+
+    std::string component;
+    std::vector<int> values;
+    std::stringstream stream{std::string(text)};
+    while (std::getline(stream, component, '.')) {
+        try {
+            values.push_back(std::stoi(component));
+        } catch (const std::exception&) {
+            return false;
+        }
+    }
+
+    if (values.size() != 3) {
+        return false;
+    }
+
+    outVersion.major = values[0];
+    outVersion.minor = values[1];
+    outVersion.patch = values[2];
+    return true;
+}
+
+int compareSemanticVersions(const SemanticVersion& lhs,
+                           const SemanticVersion& rhs) {
+    if (lhs.major != rhs.major) {
+        return lhs.major < rhs.major ? -1 : 1;
+    }
+    if (lhs.minor != rhs.minor) {
+        return lhs.minor < rhs.minor ? -1 : 1;
+    }
+    if (lhs.patch != rhs.patch) {
+        return lhs.patch < rhs.patch ? -1 : 1;
+    }
+    return 0;
+}
+
+bool parseVersionRequirement(std::string_view text, VersionRequirement& outRequirement,
+                             std::string& outError) {
+    outRequirement = VersionRequirement{};
+    outRequirement.raw = std::string(text);
+    if (text.empty()) {
+        outRequirement.kind = VersionRequirement::Kind::ANY;
+        return true;
+    }
+
+    VersionRequirement::Kind kind = VersionRequirement::Kind::EXACT;
+    if (text.front() == '^') {
+        kind = VersionRequirement::Kind::CARET;
+        text.remove_prefix(1);
+    } else if (text.front() == '~') {
+        kind = VersionRequirement::Kind::TILDE;
+        text.remove_prefix(1);
+    }
+
+    if (!parseSemanticVersion(text, outRequirement.version)) {
+        outError = "Version requirements must use x.y.z, ^x.y.z, or ~x.y.z.";
+        return false;
+    }
+
+    outRequirement.kind = kind;
+    return true;
+}
+
+bool versionSatisfiesRequirement(const SemanticVersion& version,
+                                 const VersionRequirement& requirement) {
+    switch (requirement.kind) {
+        case VersionRequirement::Kind::ANY:
+            return true;
+        case VersionRequirement::Kind::EXACT:
+            return compareSemanticVersions(version, requirement.version) == 0;
+        case VersionRequirement::Kind::CARET:
+            if (version.major != requirement.version.major) {
+                return false;
+            }
+            return compareSemanticVersions(version, requirement.version) >= 0;
+        case VersionRequirement::Kind::TILDE:
+            if (version.major != requirement.version.major ||
+                version.minor != requirement.version.minor) {
+                return false;
+            }
+            return compareSemanticVersions(version, requirement.version) >= 0;
+    }
+    return false;
+}
+
 bool parseRegistryDependencyPin(std::string_view text,
                                 RegistryDependencyPin& outPin,
                                 std::string& outError) {
@@ -301,7 +415,7 @@ bool parseRegistryDependencyPin(std::string_view text,
 }
 
 bool parseDependencyInlineTable(const std::string& value,
-                                ProjectDependencySpec& outDependency,
+                                DependencySpec& outDependency,
                                 std::string& outError) {
     if (value.size() < 2 || value.front() != '{' || value.back() != '}') {
         outError = "Dependency entries must be inline tables.";
@@ -657,7 +771,10 @@ bool loadPackageEntryFromDir(const std::filesystem::path& packageDir,
     outEntry.packageDir = canonicalOrLexical(packageDir);
     outEntry.kind = manifest.kind.empty() ? "native" : manifest.kind;
     outEntry.description = manifest.description;
-    outEntry.dependencyIds = manifest.dependencies;
+    outEntry.dependencyIds.clear();
+    for (const auto& dependency : manifest.dependencies) {
+        outEntry.dependencyIds.push_back(dependency.packageId);
+    }
     outEntry.sourceType = "path";
     outEntry.sourcePath = canonicalOrLexical(packageDir);
     outEntry.manifestDigest = manifestDigestForDir(packageDir);
@@ -684,7 +801,7 @@ bool loadPackageEntryFromDir(const std::filesystem::path& packageDir,
     }
 
     if (outDependencies != nullptr) {
-        *outDependencies = manifest.dependencies;
+        *outDependencies = outEntry.dependencyIds;
     }
 
     return true;
@@ -701,6 +818,33 @@ std::string normalizePackageIdLikeSpecifier(const std::string& rawSpecifier) {
     }
 
     return rawSpecifier.substr(0, slash) + ":" + rawSpecifier.substr(slash + 1);
+}
+
+bool parseDependencySpecifier(const std::string& rawSpecifier,
+                              std::string& outPackageId,
+                              std::string& outVersionRequirement) {
+    outPackageId.clear();
+    outVersionRequirement.clear();
+
+    const size_t at = rawSpecifier.rfind('@');
+    std::string packageText = rawSpecifier;
+    if (at != std::string::npos && at > 0) {
+        packageText = rawSpecifier.substr(0, at);
+        outVersionRequirement = rawSpecifier.substr(at + 1);
+    }
+
+    outPackageId = normalizePackageIdLikeSpecifier(packageText);
+    return !outPackageId.empty();
+}
+
+std::string defaultPublishedRegistryAlias(const ProjectManifestData& manifest) {
+    if (findRegistryConfig(manifest, "default") != nullptr) {
+        return "default";
+    }
+    if (manifest.registries.size() == 1) {
+        return manifest.registries.front().alias;
+    }
+    return "";
 }
 
 bool relativePathString(const std::filesystem::path& from,
@@ -851,6 +995,52 @@ bool writeLockfile(const std::filesystem::path& outputPath,
         if (!entry.apiDigest.empty()) {
             out << "api_digest = " << quoteTomlString(entry.apiDigest) << "\n";
         }
+    }
+
+    return true;
+}
+
+bool writeRegistryIndexFile(const std::filesystem::path& outputPath,
+                            std::vector<RegistryIndexRecord> records,
+                            std::string& outError) {
+    std::sort(records.begin(), records.end(),
+              [](const RegistryIndexRecord& lhs,
+                 const RegistryIndexRecord& rhs) {
+                  if (lhs.packageId != rhs.packageId) {
+                      return lhs.packageId < rhs.packageId;
+                  }
+                  return compareSemanticVersions(lhs.parsedVersion,
+                                                 rhs.parsedVersion) < 0;
+              });
+
+    std::error_code ec;
+    std::filesystem::create_directories(outputPath.parent_path(), ec);
+    if (ec) {
+        outError = "Could not create registry directory '" +
+                   outputPath.parent_path().string() + "'.";
+        return false;
+    }
+
+    std::ofstream out(outputPath);
+    if (!out) {
+        outError = "Could not open registry index '" + outputPath.string() +
+                   "' for writing.";
+        return false;
+    }
+
+    out << "schema_version = " << quoteTomlString("registry.v1") << "\n";
+    for (const auto& record : records) {
+        out << "\n[[package]]\n";
+        out << "package_id = " << quoteTomlString(record.packageId) << "\n";
+        out << "version = " << quoteTomlString(record.version) << "\n";
+        out << "artifact_path = " << quoteTomlString(record.artifactPath) << "\n";
+        out << "artifact_digest = " << quoteTomlString(record.artifactDigest) << "\n";
+
+        std::vector<std::string> pins;
+        for (const auto& dependency : record.dependencies) {
+            pins.push_back(registryRecordKey(dependency.packageId, dependency.version));
+        }
+        out << "dependencies = " << quoteTomlArray(pins) << "\n";
     }
 
     return true;
@@ -1094,12 +1284,18 @@ bool loadRegistryIndex(const std::string& projectRoot,
                        current.packageId + "' must use an exact x.y.z version.";
             return false;
         }
+        if (!parseSemanticVersion(current.version, current.parsedVersion)) {
+            outError = "Registry '" + config.alias + "' package '" +
+                       current.packageId + "' must use an exact x.y.z version.";
+            return false;
+        }
         const std::string key = registryRecordKey(current.packageId, current.version);
         if (!outIndex.recordsByKey.emplace(key, current).second) {
             outError = "Registry '" + config.alias + "' contains a duplicate entry for '" +
                        key + "'.";
             return false;
         }
+        outIndex.recordsByPackageId[current.packageId].push_back(current);
         current = RegistryIndexRecord{};
         hasCurrent = false;
         return true;
@@ -1183,7 +1379,43 @@ bool loadRegistryIndex(const std::string& projectRoot,
         }
     }
 
-    return flushCurrent();
+    if (!flushCurrent()) {
+        return false;
+    }
+
+    for (auto& [packageId, records] : outIndex.recordsByPackageId) {
+        std::sort(records.begin(), records.end(),
+                  [](const RegistryIndexRecord& lhs,
+                     const RegistryIndexRecord& rhs) {
+                      return compareSemanticVersions(lhs.parsedVersion,
+                                                     rhs.parsedVersion) > 0;
+                  });
+    }
+
+    return true;
+}
+
+bool resolveRegistryIndexLocation(const std::string& projectRoot,
+                                  const ProjectRegistryConfig& config,
+                                  std::filesystem::path& outIndexPath,
+                                  std::filesystem::path& outRootDir,
+                                  std::string& outError) {
+    std::filesystem::path configuredPath;
+    if (!resolveManifestPath(projectRoot, config.index, configuredPath, outError)) {
+        return false;
+    }
+
+    std::error_code ec;
+    if (std::filesystem::is_directory(configuredPath, ec) && !ec) {
+        configuredPath /= "index.toml";
+    } else if (!configuredPath.has_filename() ||
+               configuredPath.filename() != "index.toml") {
+        configuredPath /= "index.toml";
+    }
+
+    outIndexPath = configuredPath.lexically_normal();
+    outRootDir = outIndexPath.parent_path();
+    return true;
 }
 
 bool scanPackageDirectories(const std::filesystem::path& root,
@@ -1269,27 +1501,60 @@ bool packageIdsMatchDependencyPins(const std::vector<std::string>& manifestDeps,
     return sortedUniqueStrings(manifestDeps) == sortedUniqueStrings(std::move(pinnedIds));
 }
 
+bool findRegistryRecordForRequirement(const LoadedRegistryIndex& index,
+                                      std::string_view packageId,
+                                      const VersionRequirement& requirement,
+                                      RegistryIndexRecord& outRecord,
+                                      std::string& outError) {
+    auto recordsIt = index.recordsByPackageId.find(std::string(packageId));
+    if (recordsIt == index.recordsByPackageId.end()) {
+        outError = "Registry does not contain '" + std::string(packageId) + "'.";
+        return false;
+    }
+
+    for (const auto& record : recordsIt->second) {
+        if (versionSatisfiesRequirement(record.parsedVersion, requirement)) {
+            outRecord = record;
+            return true;
+        }
+    }
+
+    outError = "Registry does not contain a version of '" + std::string(packageId) +
+               "' matching '" + requirement.raw + "'.";
+    return false;
+}
+
+std::vector<RegistryIndexRecord> matchingRegistryRecords(
+    const LoadedRegistryIndex& index, std::string_view packageId,
+    const VersionRequirement& requirement) {
+    std::vector<RegistryIndexRecord> matches;
+    auto recordsIt = index.recordsByPackageId.find(std::string(packageId));
+    if (recordsIt == index.recordsByPackageId.end()) {
+        return matches;
+    }
+
+    for (const auto& record : recordsIt->second) {
+        if (versionSatisfiesRequirement(record.parsedVersion, requirement)) {
+            matches.push_back(record);
+        }
+    }
+    return matches;
+}
+
 bool resolveRegistryPackageNode(
     const std::string& projectRoot, const ProjectManifestData& manifest,
     const std::string& registryAlias, const std::string& packageId,
-    const std::string& version,
+    const std::string& requirementText,
     std::unordered_map<std::string, LoadedRegistryIndex>& loadedRegistryIndexes,
     std::unordered_map<std::string, PackageNode>& nodeCache, PackageNode& outNode,
     std::string& outError) {
     outNode = PackageNode{};
 
-    if (!isExactPublishedVersion(version)) {
-        outError = "Published dependency '" + packageId +
-                   "' must use an exact x.y.z version in this Phase 2 slice.";
+    VersionRequirement requirement;
+    if (!parseVersionRequirement(requirementText, requirement, outError)) {
+        outError = "Published dependency '" + packageId + "' has an invalid version requirement: " +
+                   outError;
         return false;
-    }
-
-    const std::string cacheKey =
-        registryAlias + "|" + registryRecordKey(packageId, version);
-    auto nodeIt = nodeCache.find(cacheKey);
-    if (nodeIt != nodeCache.end()) {
-        outNode = nodeIt->second;
-        return true;
     }
 
     const ProjectRegistryConfig* registry =
@@ -1309,15 +1574,20 @@ bool resolveRegistryPackageNode(
         indexIt = loadedRegistryIndexes.emplace(registryAlias, std::move(loaded)).first;
     }
 
-    const auto recordIt =
-        indexIt->second.recordsByKey.find(registryRecordKey(packageId, version));
-    if (recordIt == indexIt->second.recordsByKey.end()) {
-        outError = "Registry '" + registryAlias + "' does not contain '" + packageId +
-                   "@" + version + "'.";
+    RegistryIndexRecord record;
+    if (!findRegistryRecordForRequirement(indexIt->second, packageId, requirement,
+                                          record, outError)) {
+        outError = "Registry '" + registryAlias + "': " + outError;
         return false;
     }
 
-    const RegistryIndexRecord& record = recordIt->second;
+    const std::string cacheKey =
+        registryAlias + "|" + registryRecordKey(packageId, record.version);
+    auto nodeIt = nodeCache.find(cacheKey);
+    if (nodeIt != nodeCache.end()) {
+        outNode = nodeIt->second;
+        return true;
+    }
     std::filesystem::path artifactPath;
     if (!resolveManifestPath(indexIt->second.rootDir.string(), record.artifactPath,
                              artifactPath, outError)) {
@@ -1325,7 +1595,7 @@ bool resolveRegistryPackageNode(
     }
     artifactPath = canonicalOrLexical(artifactPath);
     if (!isDirectory(artifactPath)) {
-        outError = "Registry artifact for '" + packageId + "@" + version +
+        outError = "Registry artifact for '" + packageId + "@" + record.version +
                    "' is missing at '" + artifactPath.string() + "'.";
         return false;
     }
@@ -1338,7 +1608,7 @@ bool resolveRegistryPackageNode(
     }
     if (actualDigest != record.artifactDigest) {
         outError = "Registry artifact digest mismatch for '" + packageId + "@" +
-                   version + "'.";
+                   record.version + "'.";
         return false;
     }
 
@@ -1352,10 +1622,10 @@ bool resolveRegistryPackageNode(
                    "' but the index expects '" + packageId + "'.";
         return false;
     }
-    if (node.entry.version != version) {
+    if (node.entry.version != record.version) {
         outError = "Registry artifact '" + artifactPath.string() +
                    "' declares version '" + node.entry.version +
-                   "' but the index expects '" + version + "'.";
+                   "' but the index expects '" + record.version + "'.";
         return false;
     }
     if (node.entry.kind != "source") {
@@ -1366,7 +1636,7 @@ bool resolveRegistryPackageNode(
     if (!packageIdsMatchDependencyPins(node.entry.dependencyIds, record.dependencies)) {
         outError = "Registry artifact '" + artifactPath.string() +
                    "' has dependency IDs that do not match the registry index for '" +
-                   packageId + "@" + version + "'.";
+                   packageId + "@" + record.version + "'.";
         return false;
     }
 
@@ -1401,7 +1671,7 @@ void ensureResolvedLibraryPath(PackageNode& node, const std::string& projectRoot
 }
 
 bool resolveDependencyNode(
-    const std::string& projectRoot, const ProjectDependencySpec& dependency,
+    const std::string& projectRoot, const DependencySpec& dependency,
     const std::unordered_map<std::string, PackageNode>& available,
     const std::unordered_set<std::string>& workspacePackageIds, PackageNode& outNode,
     std::string& outError) {
@@ -1466,12 +1736,23 @@ bool resolveDependencyNode(
         return false;
     }
 
-    if (!dependency.version.empty() && dependency.version != outNode.entry.version) {
-        outError = "Dependency '" + dependency.alias + "' requires version '" +
-                   dependency.version + "' but local package '" +
-                   outNode.entry.packageId + "' reports '" +
-                   outNode.entry.version + "'.";
-        return false;
+    if (!dependency.version.empty()) {
+        VersionRequirement requirement;
+        if (!parseVersionRequirement(dependency.version, requirement, outError)) {
+            outError = "Dependency '" + dependency.alias + "' has an invalid version requirement: " +
+                       outError;
+            return false;
+        }
+
+        SemanticVersion localVersion;
+        if (!parseSemanticVersion(outNode.entry.version, localVersion) ||
+            !versionSatisfiesRequirement(localVersion, requirement)) {
+            outError = "Dependency '" + dependency.alias + "' requires version '" +
+                       dependency.version + "' but local package '" +
+                       outNode.entry.packageId + "' reports '" +
+                       outNode.entry.version + "'.";
+            return false;
+        }
     }
 
     return true;
@@ -1657,11 +1938,19 @@ bool collectResolvedPackages(
         return false;
     }
 
+    struct PublishedRootConstraint {
+        std::string packageId;
+        std::string requirement;
+        std::string registryAlias;
+        std::string group;
+    };
+
     std::unordered_map<std::string, LoadedRegistryIndex> loadedRegistryIndexes;
     std::unordered_map<std::string, PackageNode> resolvedRegistryNodes;
     std::vector<DependencyRoot> roots;
+    std::vector<PublishedRootConstraint> publishedRoots;
     auto appendDependencies =
-        [&](const std::vector<ProjectDependencySpec>& dependencies,
+        [&](const std::vector<DependencySpec>& dependencies,
             const char* groupName) -> bool {
         for (const auto& dependency : dependencies) {
             const bool isPublishedDependency =
@@ -1675,19 +1964,14 @@ bool collectResolvedPackages(
                 return false;
             }
 
-            PackageNode node;
             if (isPublishedDependency) {
                 const std::string registryAlias =
                     dependency.registry.empty() ? "default" : dependency.registry;
-                if (!resolveRegistryPackageNode(projectRoot, manifest, registryAlias,
-                                                dependency.packageId,
-                                                dependency.version,
-                                                loadedRegistryIndexes,
-                                                resolvedRegistryNodes, node,
-                                                outError)) {
-                    return false;
-                }
+                publishedRoots.push_back(PublishedRootConstraint{
+                    dependency.packageId, dependency.version, registryAlias,
+                    groupName});
             } else {
+                PackageNode node;
                 if (!resolveDependencyNode(projectRoot, dependency, available,
                                            workspacePackageIds, node, outError)) {
                     return false;
@@ -1696,9 +1980,9 @@ bool collectResolvedPackages(
                 if (!addAvailableNode(available, node, outError)) {
                     return false;
                 }
-            }
 
-            roots.push_back(DependencyRoot{std::move(node), groupName});
+                roots.push_back(DependencyRoot{std::move(node), groupName});
+            }
         }
         return true;
     };
@@ -1709,6 +1993,150 @@ bool collectResolvedPackages(
     if (options.includeDevDependencies &&
         !appendDependencies(manifest.devDependencies, "dev")) {
         return false;
+    }
+
+    if (!publishedRoots.empty()) {
+        auto ensureLoadedRegistry =
+            [&](const std::string& registryAlias) -> bool {
+                if (loadedRegistryIndexes.find(registryAlias) !=
+                    loadedRegistryIndexes.end()) {
+                    return true;
+                }
+                const ProjectRegistryConfig* registry =
+                    findRegistryConfig(manifest, registryAlias);
+                if (registry == nullptr) {
+                    outError = "Dependency references unknown registry '" +
+                               registryAlias + "'.";
+                    return false;
+                }
+
+                LoadedRegistryIndex loaded;
+                if (!loadRegistryIndex(projectRoot, *registry, loaded, outError)) {
+                    return false;
+                }
+                loadedRegistryIndexes.emplace(registryAlias, std::move(loaded));
+                return true;
+            };
+
+        std::function<bool(const std::string&, const std::string&, const std::string&,
+                           std::unordered_map<std::string, PackageNode>&)>
+            choosePublishedExact =
+                [&](const std::string& registryAlias, const std::string& packageId,
+                    const std::string& version,
+                    std::unordered_map<std::string, PackageNode>& chosen) {
+                    auto chosenIt = chosen.find(packageId);
+                    if (chosenIt != chosen.end()) {
+                        return chosenIt->second.entry.registry == registryAlias &&
+                               chosenIt->second.entry.version == version;
+                    }
+
+                    PackageNode node;
+                    if (!resolveRegistryPackageNode(projectRoot, manifest, registryAlias,
+                                                    packageId, version,
+                                                    loadedRegistryIndexes,
+                                                    resolvedRegistryNodes, node,
+                                                    outError)) {
+                        return false;
+                    }
+                    chosen.emplace(packageId, node);
+                    for (const auto& dependency : node.registryDependencies) {
+                        if (!choosePublishedExact(registryAlias, dependency.packageId,
+                                                  dependency.version, chosen)) {
+                            return false;
+                        }
+                    }
+                    return true;
+                };
+
+        std::function<bool(size_t, std::unordered_map<std::string, PackageNode>&)>
+            solvePublishedRoots =
+                [&](size_t index,
+                    std::unordered_map<std::string, PackageNode>& chosen) -> bool {
+                    if (index >= publishedRoots.size()) {
+                        return true;
+                    }
+
+                    const auto& root = publishedRoots[index];
+                    if (!ensureLoadedRegistry(root.registryAlias)) {
+                        return false;
+                    }
+
+                    VersionRequirement requirement;
+                    if (!parseVersionRequirement(root.requirement, requirement,
+                                                 outError)) {
+                        outError = "Published dependency '" + root.packageId +
+                                   "' has an invalid version requirement: " +
+                                   outError;
+                        return false;
+                    }
+
+                    auto chosenIt = chosen.find(root.packageId);
+                    if (chosenIt != chosen.end()) {
+                        if (chosenIt->second.entry.registry != root.registryAlias) {
+                            outError = "Package '" + root.packageId +
+                                       "' resolves from conflicting registries.";
+                            return false;
+                        }
+
+                        SemanticVersion chosenVersion;
+                        if (!parseSemanticVersion(chosenIt->second.entry.version,
+                                                  chosenVersion) ||
+                            !versionSatisfiesRequirement(chosenVersion,
+                                                         requirement)) {
+                            outError = "Package '" + root.packageId +
+                                       "' does not have a single published version that satisfies all direct dependency requirements.";
+                            return false;
+                        }
+                        return solvePublishedRoots(index + 1, chosen);
+                    }
+
+                    const auto& loaded = loadedRegistryIndexes.at(root.registryAlias);
+                    const std::vector<RegistryIndexRecord> candidates =
+                        matchingRegistryRecords(loaded, root.packageId, requirement);
+                    if (candidates.empty()) {
+                        outError = "Registry '" + root.registryAlias +
+                                   "' does not contain a version of '" +
+                                   root.packageId + "' matching '" +
+                                   requirement.raw + "'.";
+                        return false;
+                    }
+
+                    for (const auto& candidate : candidates) {
+                        auto snapshot = chosen;
+                        outError.clear();
+                        if (!choosePublishedExact(root.registryAlias, root.packageId,
+                                                  candidate.version, chosen)) {
+                            if (!outError.empty()) {
+                                return false;
+                            }
+                            chosen = std::move(snapshot);
+                            continue;
+                        }
+                        if (solvePublishedRoots(index + 1, chosen)) {
+                            return true;
+                        }
+                        chosen = std::move(snapshot);
+                    }
+
+                    outError = "Package '" + root.packageId +
+                               "' does not have a single published version that satisfies all direct dependency requirements.";
+                    return false;
+                };
+
+        std::unordered_map<std::string, PackageNode> chosenPublishedRoots;
+        if (!solvePublishedRoots(0, chosenPublishedRoots)) {
+            return false;
+        }
+
+        for (const auto& root : publishedRoots) {
+            auto it = chosenPublishedRoots.find(root.packageId);
+            if (it == chosenPublishedRoots.end()) {
+                outError = "Internal error: published dependency '" + root.packageId +
+                           "' was not resolved.";
+                return false;
+            }
+            roots.push_back(DependencyRoot{it->second, root.group});
+        }
     }
 
     std::sort(roots.begin(), roots.end(),
@@ -1816,8 +2244,9 @@ bool collectResolvedPackages(
     return true;
 }
 
-bool packageEntryMatchesLocked(const PackageRegistryEntry& expected,
-                               const PackageRegistryEntry& actual) {
+bool packageEntryMatchesResolution(const PackageRegistryEntry& expected,
+                                   const PackageRegistryEntry& actual,
+                                   bool includeDependencyGroups) {
     return expected.packageId == actual.packageId &&
            expected.importName == actual.importName &&
            expected.packageNamespace == actual.packageNamespace &&
@@ -1833,8 +2262,163 @@ bool packageEntryMatchesLocked(const PackageRegistryEntry& expected,
            expected.apiDigest == actual.apiDigest &&
            sortedUniqueStrings(expected.dependencyIds) ==
                sortedUniqueStrings(actual.dependencyIds) &&
-           sortedUniqueStrings(expected.dependencyGroups) ==
-               sortedUniqueStrings(actual.dependencyGroups);
+           (!includeDependencyGroups ||
+            sortedUniqueStrings(expected.dependencyGroups) ==
+                sortedUniqueStrings(actual.dependencyGroups));
+}
+
+bool packageEntryMatchesLocked(const PackageRegistryEntry& expected,
+                               const PackageRegistryEntry& actual) {
+    return packageEntryMatchesResolution(expected, actual, true);
+}
+
+bool dependencyMatchesLockedEntry(const DependencySpec& dependency,
+                                  const PackageRegistryEntry& lockedEntry,
+                                  std::string& outError) {
+    if (lockedEntry.importName != dependency.alias) {
+        outError = "mog.lock is out of date for dependency '" + dependency.alias +
+                   "'. Run 'mog update' to refresh it.";
+        return false;
+    }
+
+    if (!dependency.packageId.empty() &&
+        lockedEntry.packageId != dependency.packageId) {
+        outError = "mog.lock is out of date for dependency '" + dependency.alias +
+                   "'. Run 'mog update' to refresh it.";
+        return false;
+    }
+
+    if (!dependency.version.empty()) {
+        VersionRequirement requirement;
+        if (!parseVersionRequirement(dependency.version, requirement, outError)) {
+            outError = "Dependency '" + dependency.alias +
+                       "' has an invalid version requirement: " + outError;
+            return false;
+        }
+
+        SemanticVersion lockedVersion;
+        if (!parseSemanticVersion(lockedEntry.version, lockedVersion) ||
+            !versionSatisfiesRequirement(lockedVersion, requirement)) {
+            outError = "mog.lock is out of date for dependency '" + dependency.alias +
+                       "'. Run 'mog update' to refresh it.";
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool validateLockedEntriesAgainstManifest(
+    const std::string& projectRoot, const ProjectManifestData& manifest,
+    const InstallOptions& options,
+    const std::vector<PackageRegistryEntry>& lockedEntries, std::string& outError) {
+    std::unordered_map<std::string, PackageRegistryEntry> lockedById;
+    for (const auto& entry : lockedEntries) {
+        lockedById[entry.packageId] = entry;
+    }
+
+    std::unordered_map<std::string, PackageNode> available;
+    if (!scanPackageDirectories(std::filesystem::path(projectRoot) / "packages",
+                                available, outError)) {
+        return false;
+    }
+
+    std::unordered_set<std::string> workspacePackageIds;
+    if (!scanWorkspaceMemberPackages(std::filesystem::path(projectRoot), manifest,
+                                     available, workspacePackageIds,
+                                     outError)) {
+        return false;
+    }
+
+    auto validateDependencies =
+        [&](const std::vector<DependencySpec>& dependencies) -> bool {
+        for (const auto& dependency : dependencies) {
+            const bool isPublishedDependency =
+                !dependency.packageId.empty() && dependency.path.empty() &&
+                !dependency.workspace && dependency.git.empty();
+            if (isPublishedDependency) {
+                auto lockedIt = lockedById.find(dependency.packageId);
+                if (lockedIt == lockedById.end()) {
+                    outError = "mog.lock is missing package '" +
+                               dependency.packageId + "'.";
+                    return false;
+                }
+
+                const std::string registryAlias =
+                    dependency.registry.empty() ? "default" : dependency.registry;
+                if (lockedIt->second.sourceType != "registry" ||
+                    lockedIt->second.registry != registryAlias) {
+                    outError = "mog.lock is out of date for dependency '" +
+                               dependency.alias + "'. Run 'mog update' to refresh it.";
+                    return false;
+                }
+                if (!dependencyMatchesLockedEntry(dependency, lockedIt->second,
+                                                 outError)) {
+                    return false;
+                }
+                continue;
+            }
+
+            PackageNode resolved;
+            if (!resolveDependencyNode(projectRoot, dependency, available,
+                                       workspacePackageIds, resolved, outError)) {
+                return false;
+            }
+
+            auto lockedIt = lockedById.find(resolved.entry.packageId);
+            if (lockedIt == lockedById.end()) {
+                outError = "mog.lock is missing package '" +
+                           resolved.entry.packageId + "'.";
+                return false;
+            }
+
+            if (!packageEntryMatchesResolution(resolved.entry, lockedIt->second,
+                                               false)) {
+                outError = "mog.lock is out of date for dependency '" +
+                           dependency.alias + "'. Run 'mog update' to refresh it.";
+                return false;
+            }
+        }
+        return true;
+    };
+
+    if (!validateDependencies(manifest.dependencies)) {
+        return false;
+    }
+    if (options.includeDevDependencies &&
+        !validateDependencies(manifest.devDependencies)) {
+        return false;
+    }
+
+    for (const auto& entry : lockedEntries) {
+        if (entry.sourceType != "path" && entry.sourceType != "workspace") {
+            continue;
+        }
+
+        PackageRegistryEntry current;
+        if (!loadPackageEntryFromDir(std::filesystem::path(entry.sourcePath), current,
+                                     nullptr, outError)) {
+            outError = "mog.lock is out of date for package '" + entry.packageId +
+                       "'. Run 'mog update' to refresh it.";
+            return false;
+        }
+        current.sourceType = entry.sourceType;
+        current.sourcePath = entry.sourcePath;
+        if (current.kind == "native" && current.libraryPath.empty()) {
+            PackageNode currentNode;
+            currentNode.entry = current;
+            currentNode.packageDir = std::filesystem::path(current.packageDir);
+            ensureResolvedLibraryPath(currentNode, projectRoot);
+            current = currentNode.entry;
+        }
+        if (!packageEntryMatchesResolution(current, entry, false)) {
+            outError = "mog.lock is out of date for package '" + entry.packageId +
+                       "'. Run 'mog update' to refresh it.";
+            return false;
+        }
+    }
+
+    return true;
 }
 
 bool validateLockedGraph(const std::vector<PackageRegistryEntry>& resolvedEntries,
@@ -1888,10 +2472,10 @@ bool materializeInstalledPackages(const std::string& projectRoot,
     return true;
 }
 
-void sortDependencies(std::vector<ProjectDependencySpec>& dependencies) {
+void sortDependencies(std::vector<DependencySpec>& dependencies) {
     std::sort(dependencies.begin(), dependencies.end(),
-              [](const ProjectDependencySpec& lhs,
-                 const ProjectDependencySpec& rhs) {
+              [](const DependencySpec& lhs,
+                 const DependencySpec& rhs) {
                   return lhs.alias < rhs.alias;
               });
 }
@@ -1905,7 +2489,7 @@ void sortRegistries(std::vector<ProjectRegistryConfig>& registries) {
 }
 
 void writeDependencyTable(std::ofstream& out, const char* tableName,
-                          const std::vector<ProjectDependencySpec>& dependencies) {
+                          const std::vector<DependencySpec>& dependencies) {
     if (dependencies.empty()) {
         return;
     }
@@ -2117,7 +2701,7 @@ bool loadProjectManifestData(const std::string& projectRoot,
             continue;
         }
 
-        ProjectDependencySpec dependency;
+        DependencySpec dependency;
         dependency.alias = key;
         if (!parseDependencyInlineTable(value, dependency, parseError)) {
             outError = "Invalid dependency '" + key + "': " + parseError;
@@ -2169,8 +2753,8 @@ bool writeProjectManifestData(const std::string& projectRoot,
     }
 
     std::vector<ProjectRegistryConfig> registries = manifest.registries;
-    std::vector<ProjectDependencySpec> dependencies = manifest.dependencies;
-    std::vector<ProjectDependencySpec> devDependencies = manifest.devDependencies;
+    std::vector<DependencySpec> dependencies = manifest.dependencies;
+    std::vector<DependencySpec> devDependencies = manifest.devDependencies;
     sortRegistries(registries);
     sortDependencies(dependencies);
     sortDependencies(devDependencies);
@@ -2190,11 +2774,11 @@ bool initializeProjectManifest(const std::string& projectRoot,
     return writeProjectManifestData(projectRoot, manifest, outError);
 }
 
-bool discoverLocalDependencySpec(const std::string& projectRoot,
-                                 const std::string& rawSpecifier,
-                                 ProjectDependencySpec& outDependency,
-                                 std::string& outError) {
-    outDependency = ProjectDependencySpec{};
+bool discoverDependencySpec(const std::string& projectRoot,
+                            const std::string& rawSpecifier,
+                            DependencySpec& outDependency,
+                            std::string& outError) {
+    outDependency = DependencySpec{};
     outError.clear();
 
     const std::string packageId = normalizePackageIdLikeSpecifier(rawSpecifier);
@@ -2215,34 +2799,68 @@ bool discoverLocalDependencySpec(const std::string& projectRoot,
         return false;
     }
 
+    std::string requestedPackageId;
+    std::string requestedVersion;
+    const bool looksLikePublishedSpecifier =
+        parseDependencySpecifier(rawSpecifier, requestedPackageId, requestedVersion);
+
     const PackageNode* matched = nullptr;
     for (const auto& [candidateId, node] : available) {
         if (node.entry.importName == rawSpecifier || candidateId == rawSpecifier ||
-            (!packageId.empty() && candidateId == packageId)) {
+            (!packageId.empty() && candidateId == packageId) ||
+            (looksLikePublishedSpecifier && candidateId == requestedPackageId)) {
             matched = &node;
             break;
         }
     }
 
-    if (matched == nullptr) {
-        outError = "Cannot discover a local package matching '" + rawSpecifier + "'.";
+    if (matched != nullptr) {
+        outDependency.alias = matched->entry.importName;
+        outDependency.packageId = matched->entry.packageId;
+        outDependency.version = matched->entry.version;
+        if (workspacePackageIds.find(matched->entry.packageId) !=
+            workspacePackageIds.end()) {
+            outDependency.workspace = true;
+        } else {
+            relativePathString(projectRoot, matched->packageDir, outDependency.path);
+        }
+        return true;
+    }
+
+    if (!looksLikePublishedSpecifier) {
+        outError = "Cannot discover a package matching '" + rawSpecifier + "'.";
         return false;
     }
 
-    outDependency.alias = matched->entry.importName;
-    outDependency.packageId = matched->entry.packageId;
-    outDependency.version = matched->entry.version;
-    if (workspacePackageIds.find(matched->entry.packageId) !=
-        workspacePackageIds.end()) {
-        outDependency.workspace = true;
-    } else {
-        relativePathString(projectRoot, matched->packageDir, outDependency.path);
+    const std::string registryAlias = defaultPublishedRegistryAlias(manifest);
+    if (registryAlias.empty()) {
+        outError =
+            "Published package specs require a configured registry (preferably [registries.default]).";
+        return false;
+    }
+
+    std::unordered_map<std::string, LoadedRegistryIndex> loadedRegistryIndexes;
+    std::unordered_map<std::string, PackageNode> resolvedRegistryNodes;
+    PackageNode publishedNode;
+    if (!resolveRegistryPackageNode(projectRoot, manifest, registryAlias,
+                                    requestedPackageId, requestedVersion,
+                                    loadedRegistryIndexes, resolvedRegistryNodes,
+                                    publishedNode, outError)) {
+        return false;
+    }
+
+    outDependency.alias = publishedNode.entry.importName;
+    outDependency.packageId = publishedNode.entry.packageId;
+    outDependency.version =
+        requestedVersion.empty() ? publishedNode.entry.version : requestedVersion;
+    if (registryAlias != "default") {
+        outDependency.registry = registryAlias;
     }
     return true;
 }
 
 bool addProjectDependency(const std::string& projectRoot,
-                          const ProjectDependencySpec& dependency,
+                          const DependencySpec& dependency,
                           std::string& outError) {
     ProjectManifestData manifest;
     if (!loadProjectManifestData(projectRoot, manifest, outError)) {
@@ -2251,7 +2869,7 @@ bool addProjectDependency(const std::string& projectRoot,
 
     auto existing = std::find_if(
         manifest.dependencies.begin(), manifest.dependencies.end(),
-        [&](const ProjectDependencySpec& candidate) {
+        [&](const DependencySpec& candidate) {
             return candidate.alias == dependency.alias;
         });
     if (existing != manifest.dependencies.end()) {
@@ -2264,6 +2882,179 @@ bool addProjectDependency(const std::string& projectRoot,
     return writeProjectManifestData(projectRoot, manifest, outError);
 }
 
+bool publishProjectPackage(const std::string& projectRoot,
+                           const std::string& packageDir,
+                           const std::string& registryAlias,
+                           std::string& outError) {
+    ProjectManifestData projectManifest;
+    if (!loadProjectManifestData(projectRoot, projectManifest, outError)) {
+        return false;
+    }
+
+    const std::string effectiveRegistryAlias =
+        registryAlias.empty() ? defaultPublishedRegistryAlias(projectManifest)
+                              : registryAlias;
+    if (effectiveRegistryAlias.empty()) {
+        outError =
+            "Publish requires a configured registry alias (preferably [registries.default]).";
+        return false;
+    }
+
+    const ProjectRegistryConfig* registry =
+        findRegistryConfig(projectManifest, effectiveRegistryAlias);
+    if (registry == nullptr) {
+        outError = "Unknown registry '" + effectiveRegistryAlias + "'.";
+        return false;
+    }
+
+    const std::filesystem::path packagePath = canonicalOrLexical(packageDir);
+    PackageManifest manifest;
+    if (!loadPackageManifest(packagePath.string(), manifest, outError)) {
+        return false;
+    }
+    if (manifest.kind != "source") {
+        outError = "Only source packages can be published in this Phase 2 slice.";
+        return false;
+    }
+
+    for (const auto& dependency : manifest.dependencies) {
+        if (dependency.packageId.empty() || !dependency.path.empty() ||
+            dependency.workspace || !dependency.git.empty()) {
+            outError = "Published source packages currently require published dependency specs with package = \"namespace:name\" and optional version constraints.";
+            return false;
+        }
+    }
+
+    PackageRegistryEntry packageEntry;
+    if (!loadPackageEntryFromDir(packagePath, packageEntry, nullptr, outError)) {
+        return false;
+    }
+    if (!validatePackageEntry(packageEntry, projectRoot, outError)) {
+        return false;
+    }
+
+    ProjectManifestData resolverManifest;
+    resolverManifest.registries = projectManifest.registries;
+    resolverManifest.dependencies = manifest.dependencies;
+    InstallOptions resolveOptions;
+    resolveOptions.includeDevDependencies = false;
+    resolveOptions.update = true;
+
+    std::vector<PackageRegistryEntry> resolvedDependencies;
+    if (!collectResolvedPackages(projectRoot, resolverManifest, resolveOptions,
+                                 resolvedDependencies, outError)) {
+        return false;
+    }
+
+    std::vector<RegistryDependencyPin> dependencyPins;
+    for (const auto& dependency : manifest.dependencies) {
+        auto it = std::find_if(
+            resolvedDependencies.begin(), resolvedDependencies.end(),
+            [&](const PackageRegistryEntry& entry) {
+                return entry.packageId == dependency.packageId;
+            });
+        if (it == resolvedDependencies.end()) {
+            outError = "Could not resolve dependency '" + dependency.packageId +
+                       "' for publish.";
+            return false;
+        }
+        dependencyPins.push_back(RegistryDependencyPin{it->packageId, it->version});
+    }
+    std::sort(dependencyPins.begin(), dependencyPins.end(),
+              [](const RegistryDependencyPin& lhs,
+                 const RegistryDependencyPin& rhs) {
+                  if (lhs.packageId != rhs.packageId) {
+                      return lhs.packageId < rhs.packageId;
+                  }
+                  return lhs.version < rhs.version;
+              });
+
+    std::filesystem::path indexPath;
+    std::filesystem::path registryRoot;
+    if (!resolveRegistryIndexLocation(projectRoot, *registry, indexPath, registryRoot,
+                                      outError)) {
+        return false;
+    }
+
+    LoadedRegistryIndex existingIndex;
+    std::vector<RegistryIndexRecord> records;
+    if (fileExists(indexPath)) {
+        if (!loadRegistryIndex(projectRoot, *registry, existingIndex, outError)) {
+            return false;
+        }
+        for (const auto& [key, record] : existingIndex.recordsByKey) {
+            records.push_back(record);
+        }
+    }
+
+    const std::filesystem::path artifactDir =
+        registryRoot / "packages" / packageEntry.packageNamespace /
+        packageEntry.packageName / packageEntry.version;
+    const std::string relativeArtifactPath =
+        normalizeRelativePath(
+            artifactDir.lexically_relative(registryRoot).lexically_normal().string());
+    const std::string artifactDigest = digestDirectory(packagePath);
+    if (artifactDigest.empty()) {
+        outError = "Could not compute publish artifact digest for '" +
+                   packagePath.string() + "'.";
+        return false;
+    }
+
+    const std::string recordKey =
+        registryRecordKey(packageEntry.packageId, packageEntry.version);
+    auto existingRecordIt =
+        std::find_if(records.begin(), records.end(),
+                     [&](const RegistryIndexRecord& record) {
+                         return registryRecordKey(record.packageId, record.version) ==
+                                recordKey;
+                     });
+    if (existingRecordIt != records.end()) {
+        if (existingRecordIt->artifactDigest != artifactDigest ||
+            existingRecordIt->artifactPath != relativeArtifactPath ||
+            existingRecordIt->dependencies.size() != dependencyPins.size() ||
+            !std::equal(existingRecordIt->dependencies.begin(),
+                        existingRecordIt->dependencies.end(),
+                        dependencyPins.begin(),
+                        [](const RegistryDependencyPin& lhs,
+                           const RegistryDependencyPin& rhs) {
+                            return lhs.packageId == rhs.packageId &&
+                                   lhs.version == rhs.version;
+                        })) {
+            outError = "Registry already contains '" + packageEntry.packageId +
+                       "@" + packageEntry.version +
+                       "' with different published contents.";
+            return false;
+        }
+    }
+
+    if (fileExists(artifactDir)) {
+        const std::string existingDigest = digestDirectory(artifactDir);
+        if (!existingDigest.empty() && existingDigest != artifactDigest) {
+            outError = "Registry artifact path '" + artifactDir.string() +
+                       "' already exists with different contents.";
+            return false;
+        }
+    } else {
+        if (!copyDirectoryRecursive(packagePath, artifactDir, outError)) {
+            return false;
+        }
+    }
+
+    if (existingRecordIt == records.end()) {
+        RegistryIndexRecord record;
+        record.packageId = packageEntry.packageId;
+        record.version = packageEntry.version;
+        record.parsedVersion = SemanticVersion{};
+        parseSemanticVersion(record.version, record.parsedVersion);
+        record.artifactPath = relativeArtifactPath;
+        record.artifactDigest = artifactDigest;
+        record.dependencies = dependencyPins;
+        records.push_back(std::move(record));
+    }
+
+    return writeRegistryIndexFile(indexPath, std::move(records), outError);
+}
+
 bool installProjectPackages(const std::string& projectRoot,
                             std::vector<PackageRegistryEntry>& outEntries,
                             const InstallOptions& options,
@@ -2274,18 +3065,39 @@ bool installProjectPackages(const std::string& projectRoot,
     }
 
     std::vector<PackageRegistryEntry> resolvedEntries;
-    if (!collectResolvedPackages(projectRoot, manifest, options, resolvedEntries,
-                                 outError)) {
-        return false;
-    }
-
-    if (options.locked) {
+    bool usingLockfile = false;
+    if (!options.update) {
         std::vector<PackageRegistryEntry> lockedEntries;
-        if (!loadProjectLockfile(projectRoot, lockedEntries, outError)) {
+        std::string lockError;
+        if (loadProjectLockfile(projectRoot, lockedEntries, lockError)) {
+            if (validateLockedEntriesAgainstManifest(projectRoot, manifest, options,
+                                                    lockedEntries, lockError)) {
+                resolvedEntries = std::move(lockedEntries);
+                usingLockfile = true;
+            } else if (options.locked) {
+                outError = lockError;
+                return false;
+            }
+        } else if (options.locked) {
+            outError = lockError;
             return false;
         }
-        if (!validateLockedGraph(resolvedEntries, lockedEntries, outError)) {
+    }
+
+    if (!usingLockfile) {
+        if (!collectResolvedPackages(projectRoot, manifest, options, resolvedEntries,
+                                     outError)) {
             return false;
+        }
+
+        if (options.locked) {
+            std::vector<PackageRegistryEntry> lockedEntries;
+            if (!loadProjectLockfile(projectRoot, lockedEntries, outError)) {
+                return false;
+            }
+            if (!validateLockedGraph(resolvedEntries, lockedEntries, outError)) {
+                return false;
+            }
         }
     }
 
@@ -2301,7 +3113,7 @@ bool installProjectPackages(const std::string& projectRoot,
         return false;
     }
 
-    if (!options.locked) {
+    if (!options.locked && !usingLockfile) {
         const std::filesystem::path lockfilePath = projectRootPath / kLockfileName;
         if (!writeLockfile(lockfilePath, projectRootPath, resolvedEntries, outError)) {
             return false;

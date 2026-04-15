@@ -537,7 +537,10 @@ bool loadPackageManifestEntry(const std::filesystem::path& packageDir,
     outEntry.packageDir = canonicalOrLexical(packageDir);
     outEntry.kind = manifest.kind.empty() ? "native" : manifest.kind;
     outEntry.description = manifest.description;
-    outEntry.dependencyIds = manifest.dependencies;
+    outEntry.dependencyIds.clear();
+    for (const auto& dependency : manifest.dependencies) {
+        outEntry.dependencyIds.push_back(dependency.packageId);
+    }
     outEntry.sourceType = "path";
     outEntry.sourcePath = outEntry.packageDir;
     if (!manifest.entry.empty()) {

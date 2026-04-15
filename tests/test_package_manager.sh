@@ -14,7 +14,13 @@ fi
 TEMP_DIR="$(mktemp -d)"
 REMOTE_DIR=""
 WORKSPACE_DIR=""
-trap 'rm -rf "${TEMP_DIR:-}" "${REMOTE_DIR:-}" "${WORKSPACE_DIR:-}"' EXIT
+RANGE_DIR=""
+ADD_DIR=""
+ADD_RANGE_DIR=""
+PUBLISH_WORKSPACE=""
+PUBLISHED_GREETER_DIR=""
+DIGEST_DIR=""
+trap 'rm -rf "${TEMP_DIR:-}" "${REMOTE_DIR:-}" "${WORKSPACE_DIR:-}" "${RANGE_DIR:-}" "${ADD_DIR:-}" "${ADD_RANGE_DIR:-}" "${PUBLISH_WORKSPACE:-}" "${PUBLISHED_GREETER_DIR:-}" "${DIGEST_DIR:-}"' EXIT
 
 write_registry_index() {
     local registry_dir="$1"
@@ -41,37 +47,31 @@ def digest_directory(root: Path) -> str:
         value = (value * 1099511628211) & 0xFFFFFFFFFFFFFFFF
     return f"{value:016x}"
 
-util_digest = digest_directory(registry_dir / "packages" / "util")
-http_digest = digest_directory(registry_dir / "packages" / "http")
-native_digest = digest_directory(registry_dir / "packages" / "native-demo")
-if mode == "digest-mismatch":
-    http_digest = "0000000000000000"
+records = []
+for package_dir in sorted((registry_dir / "packages" / "acme").glob("*/*")):
+    package_name = package_dir.parent.name
+    version = package_dir.name
+    package_id = f"acme:{package_name}"
+    digest = digest_directory(package_dir)
+    if mode == "digest-mismatch" and package_id == "acme:http" and version == "1.0.0":
+        digest = "0000000000000000"
 
-index = f'''schema_version = "registry.v1"
+    dependencies = []
+    if package_id == "acme:http":
+        dependencies = [f"acme:util@{version}"]
 
-[[package]]
-package_id = "acme:util"
-version = "1.0.0"
-artifact_path = "packages/util"
-artifact_digest = "{util_digest}"
-dependencies = []
-
-[[package]]
-package_id = "acme:http"
-version = "1.0.0"
-artifact_path = "packages/http"
-artifact_digest = "{http_digest}"
-dependencies = ["acme:util@1.0.0"]
-
-[[package]]
-package_id = "acme:native-demo"
-version = "1.0.0"
-artifact_path = "packages/native-demo"
-artifact_digest = "{native_digest}"
-dependencies = []
+    records.append(
+        f'''[[package]]
+package_id = "{package_id}"
+version = "{version}"
+artifact_path = "{package_dir.relative_to(registry_dir).as_posix()}"
+artifact_digest = "{digest}"
+dependencies = {dependencies!r}
 '''
+    )
 
-(registry_dir / "index.toml").write_text(index, encoding="utf-8")
+index = 'schema_version = "registry.v1"\n\n' + "\n".join(records)
+(registry_dir / "index.toml").write_text(index.replace("'", '"'), encoding="utf-8")
 PY
 }
 
@@ -237,11 +237,11 @@ fi
 
 REMOTE_DIR="$(mktemp -d)"
 REGISTRY_DIR="$REMOTE_DIR/registry"
-mkdir -p "$REGISTRY_DIR/packages/util/src" \
-         "$REGISTRY_DIR/packages/http/src" \
-         "$REGISTRY_DIR/packages/native-demo"
+mkdir -p "$REGISTRY_DIR/packages/acme/util/1.0.0/src" \
+         "$REGISTRY_DIR/packages/acme/http/1.0.0/src" \
+         "$REGISTRY_DIR/packages/acme/native-demo/1.0.0"
 
-cat > "$REGISTRY_DIR/packages/util/mog.toml" <<'EOF_REGISTRY_UTIL_MANIFEST'
+cat > "$REGISTRY_DIR/packages/acme/util/1.0.0/mog.toml" <<'EOF_REGISTRY_UTIL_MANIFEST'
 kind = "source"
 import_name = "util"
 namespace = "acme"
@@ -253,7 +253,7 @@ entry = "src/main.mog"
 dependencies = []
 EOF_REGISTRY_UTIL_MANIFEST
 
-cat > "$REGISTRY_DIR/packages/util/src/main.mog" <<'EOF_REGISTRY_UTIL_SRC'
+cat > "$REGISTRY_DIR/packages/acme/util/1.0.0/src/main.mog" <<'EOF_REGISTRY_UTIL_SRC'
 const MESSAGE str = "utility from registry"
 
 fn Name() str {
@@ -261,7 +261,7 @@ fn Name() str {
 }
 EOF_REGISTRY_UTIL_SRC
 
-cat > "$REGISTRY_DIR/packages/http/mog.toml" <<'EOF_REGISTRY_HTTP_MANIFEST'
+cat > "$REGISTRY_DIR/packages/acme/http/1.0.0/mog.toml" <<'EOF_REGISTRY_HTTP_MANIFEST'
 kind = "source"
 import_name = "http"
 namespace = "acme"
@@ -270,10 +270,11 @@ version = "1.0.0"
 author = "Registry test"
 description = "Published http package."
 entry = "src/main.mog"
-dependencies = ["acme:util"]
+[dependencies]
+util = { package = "acme:util", version = "^1.0.0" }
 EOF_REGISTRY_HTTP_MANIFEST
 
-cat > "$REGISTRY_DIR/packages/http/src/main.mog" <<'EOF_REGISTRY_HTTP_SRC'
+cat > "$REGISTRY_DIR/packages/acme/http/1.0.0/src/main.mog" <<'EOF_REGISTRY_HTTP_SRC'
 const util = @import("util")
 
 fn Fetch() str {
@@ -281,7 +282,7 @@ fn Fetch() str {
 }
 EOF_REGISTRY_HTTP_SRC
 
-cat > "$REGISTRY_DIR/packages/native-demo/mog.toml" <<'EOF_REGISTRY_NATIVE_MANIFEST'
+cat > "$REGISTRY_DIR/packages/acme/native-demo/1.0.0/mog.toml" <<'EOF_REGISTRY_NATIVE_MANIFEST'
 kind = "native"
 import_name = "native-demo"
 namespace = "acme"
@@ -353,7 +354,7 @@ if ! grep -Eq "offline|cached locally" /tmp/mog_registry_offline_failure.txt; th
     exit 1
 fi
 
-cat > "$REGISTRY_DIR/packages/util/src/main.mog" <<'EOF_REGISTRY_UTIL_SRC_UPDATED'
+cat > "$REGISTRY_DIR/packages/acme/util/1.0.0/src/main.mog" <<'EOF_REGISTRY_UTIL_SRC_UPDATED'
 const MESSAGE str = "utility from registry v2"
 
 fn Name() str {
@@ -362,23 +363,25 @@ fn Name() str {
 EOF_REGISTRY_UTIL_SRC_UPDATED
 write_registry_index "$REGISTRY_DIR"
 
-if (cd "$REMOTE_DIR" && "$MOG" install --locked >/tmp/mog_registry_locked_failure.txt 2>&1); then
-    echo "[FAIL] install --locked should reject registry artifact drift"
-    cat /tmp/mog_registry_locked_failure.txt
+if ! (cd "$REMOTE_DIR" && "$MOG" install --locked >/dev/null); then
+    echo "[FAIL] install --locked should continue to use the pinned registry lockfile"
     exit 1
 fi
 
-if ! grep -Eq "out of date|refresh" /tmp/mog_registry_locked_failure.txt; then
-    echo "[FAIL] install --locked should explain registry artifact drift"
-    cat /tmp/mog_registry_locked_failure.txt
+LOCKED_REMOTE_OUTPUT="$("$MOG" run --locked "$REMOTE_DIR/app.mog")"
+if [[ "$LOCKED_REMOTE_OUTPUT" != *"utility from registry"* ]] || \
+   [[ "$LOCKED_REMOTE_OUTPUT" == *"utility from registry v2"* ]]; then
+    echo "[FAIL] run --locked should continue to use the pinned registry artifact"
+    echo "$LOCKED_REMOTE_OUTPUT"
     exit 1
 fi
 
-cat > "$REMOTE_DIR/mog.toml" <<EOF_RANGE
+RANGE_DIR="$(mktemp -d)"
+cat > "$RANGE_DIR/mog.toml" <<EOF_RANGE
 kind = "project"
-name = "remote-test"
+name = "range-test"
 version = "0.1.0"
-description = "remote source test"
+description = "range source test"
 
 [registries.default]
 index = "$REGISTRY_DIR"
@@ -387,15 +390,206 @@ index = "$REGISTRY_DIR"
 http = { package = "acme:http", version = "^1.0.0" }
 EOF_RANGE
 
-if (cd "$REMOTE_DIR" && "$MOG" install >/tmp/mog_registry_range_failure.txt 2>&1); then
-    echo "[FAIL] install should reject published dependency version ranges in the MVP"
-    cat /tmp/mog_registry_range_failure.txt
+if ! (cd "$RANGE_DIR" && "$MOG" install >/dev/null); then
+    echo "[FAIL] install should accept published dependency version ranges"
     exit 1
 fi
 
-if ! grep -Eq "exact x.y.z|exact" /tmp/mog_registry_range_failure.txt; then
-    echo "[FAIL] install should explain exact published versions are required"
-    cat /tmp/mog_registry_range_failure.txt
+if ! grep -Fq 'version = "1.0.0"' "$RANGE_DIR/mog.lock"; then
+    echo "[FAIL] initial ranged install should lock the only available published version"
+    cat "$RANGE_DIR/mog.lock"
+    exit 1
+fi
+
+mkdir -p "$REGISTRY_DIR/packages/acme/util/1.1.0/src" \
+         "$REGISTRY_DIR/packages/acme/http/1.1.0/src"
+
+cat > "$REGISTRY_DIR/packages/acme/util/1.1.0/mog.toml" <<'EOF_REGISTRY_UTIL_MANIFEST_110'
+kind = "source"
+import_name = "util"
+namespace = "acme"
+name = "util"
+version = "1.1.0"
+author = "Registry test"
+description = "Published utility package."
+entry = "src/main.mog"
+dependencies = []
+EOF_REGISTRY_UTIL_MANIFEST_110
+
+cat > "$REGISTRY_DIR/packages/acme/util/1.1.0/src/main.mog" <<'EOF_REGISTRY_UTIL_SRC_110'
+const MESSAGE str = "utility from registry 1.1"
+
+fn Name() str {
+    return MESSAGE
+}
+EOF_REGISTRY_UTIL_SRC_110
+
+cat > "$REGISTRY_DIR/packages/acme/http/1.1.0/mog.toml" <<'EOF_REGISTRY_HTTP_MANIFEST_110'
+kind = "source"
+import_name = "http"
+namespace = "acme"
+name = "http"
+version = "1.1.0"
+author = "Registry test"
+description = "Published http package."
+entry = "src/main.mog"
+
+[dependencies]
+util = { package = "acme:util", version = "^1.1.0" }
+EOF_REGISTRY_HTTP_MANIFEST_110
+
+cat > "$REGISTRY_DIR/packages/acme/http/1.1.0/src/main.mog" <<'EOF_REGISTRY_HTTP_SRC_110'
+const util = @import("util")
+
+fn Fetch() str {
+    return util.Name()
+}
+EOF_REGISTRY_HTTP_SRC_110
+
+write_registry_index "$REGISTRY_DIR"
+
+if ! (cd "$RANGE_DIR" && "$MOG" install >/dev/null); then
+    echo "[FAIL] install should continue to work after new compatible releases are published"
+    exit 1
+fi
+
+if ! grep -Fq 'version = "1.0.0"' "$RANGE_DIR/mog.lock"; then
+    echo "[FAIL] install should keep using the existing lockfile for ranged dependencies"
+    cat "$RANGE_DIR/mog.lock"
+    exit 1
+fi
+
+if ! (cd "$RANGE_DIR" && "$MOG" update >/dev/null); then
+    echo "[FAIL] update should refresh ranged published dependencies"
+    exit 1
+fi
+
+if ! grep -Fq 'version = "1.1.0"' "$RANGE_DIR/mog.lock"; then
+    echo "[FAIL] update should upgrade ranged published dependencies to the newest compatible version"
+    cat "$RANGE_DIR/mog.lock"
+    exit 1
+fi
+
+ADD_DIR="$(mktemp -d)"
+cat > "$ADD_DIR/mog.toml" <<EOF_ADD
+kind = "project"
+name = "add-test"
+version = "0.1.0"
+description = "published add test"
+
+[registries.default]
+index = "$REGISTRY_DIR"
+EOF_ADD
+
+if ! (cd "$ADD_DIR" && "$MOG" add acme/http >/dev/null); then
+    echo "[FAIL] add should support published package specs without an explicit version"
+    exit 1
+fi
+
+if ! grep -Fq 'http = { package = "acme:http", version = "1.1.0" }' "$ADD_DIR/mog.toml"; then
+    echo "[FAIL] add should record the latest exact published version when no version is specified"
+    cat "$ADD_DIR/mog.toml"
+    exit 1
+fi
+
+ADD_RANGE_DIR="$(mktemp -d)"
+cat > "$ADD_RANGE_DIR/mog.toml" <<EOF_ADD_RANGE
+kind = "project"
+name = "add-range-test"
+version = "0.1.0"
+description = "published add range test"
+
+[registries.default]
+index = "$REGISTRY_DIR"
+EOF_ADD_RANGE
+
+if ! (cd "$ADD_RANGE_DIR" && "$MOG" add acme/util@^1.0.0 >/dev/null); then
+    echo "[FAIL] add should support published package specs with explicit version ranges"
+    exit 1
+fi
+
+if ! grep -Fq 'util = { package = "acme:util", version = "^1.0.0" }' "$ADD_RANGE_DIR/mog.toml"; then
+    echo "[FAIL] add should preserve explicit published version ranges"
+    cat "$ADD_RANGE_DIR/mog.toml"
+    exit 1
+fi
+
+PUBLISH_WORKSPACE="$(mktemp -d)"
+PUBLISH_PACKAGE_DIR="$PUBLISH_WORKSPACE/packages/greeter"
+mkdir -p "$PUBLISH_PACKAGE_DIR/src"
+
+cat > "$PUBLISH_WORKSPACE/mog.toml" <<EOF_PUBLISH_ROOT
+kind = "project"
+name = "publish-root"
+version = "0.1.0"
+description = "publish root"
+
+[registries.default]
+index = "$REGISTRY_DIR"
+EOF_PUBLISH_ROOT
+
+cat > "$PUBLISH_PACKAGE_DIR/mog.toml" <<'EOF_PUBLISH_PACKAGE'
+kind = "source"
+import_name = "greeter"
+namespace = "demo"
+name = "greeter"
+version = "0.1.0"
+author = "Registry test"
+description = "Published greeter package."
+entry = "src/main.mog"
+
+[dependencies]
+util = { package = "acme:util", version = "^1.0.0" }
+EOF_PUBLISH_PACKAGE
+
+cat > "$PUBLISH_PACKAGE_DIR/src/main.mog" <<'EOF_PUBLISH_SRC'
+const util = @import("util")
+
+fn Greet() str {
+    return util.Name()
+}
+EOF_PUBLISH_SRC
+
+if ! (cd "$PUBLISH_WORKSPACE" && "$MOG" publish "$PUBLISH_PACKAGE_DIR" >/dev/null); then
+    echo "[FAIL] publish should create a source package registry entry"
+    exit 1
+fi
+
+if ! (cd "$PUBLISH_WORKSPACE" && "$MOG" publish "$PUBLISH_PACKAGE_DIR" >/dev/null); then
+    echo "[FAIL] publish should allow idempotent re-publish when the artifact and metadata are unchanged"
+    exit 1
+fi
+
+if ! grep -Fq 'package_id = "demo:greeter"' "$REGISTRY_DIR/index.toml" || \
+   ! grep -Fq 'dependencies = ["acme:util@1.1.0"]' "$REGISTRY_DIR/index.toml"; then
+    echo "[FAIL] publish should pin direct published dependencies exactly in the registry index"
+    cat "$REGISTRY_DIR/index.toml"
+    exit 1
+fi
+
+PUBLISHED_GREETER_DIR="$(mktemp -d)"
+cat > "$PUBLISHED_GREETER_DIR/mog.toml" <<EOF_PUBLISHED_GREETER
+kind = "project"
+name = "published-greeter"
+version = "0.1.0"
+description = "published greeter consumer"
+
+[registries.default]
+index = "$REGISTRY_DIR"
+
+[dependencies]
+greeter = { package = "demo:greeter", version = "0.1.0" }
+EOF_PUBLISHED_GREETER
+
+cat > "$PUBLISHED_GREETER_DIR/app.mog" <<'EOF_PUBLISHED_GREETER_APP'
+const greeter = @import("greeter")
+print(greeter.Greet())
+EOF_PUBLISHED_GREETER_APP
+
+PUBLISHED_GREETER_OUTPUT="$("$MOG" run "$PUBLISHED_GREETER_DIR/app.mog")"
+if [[ "$PUBLISHED_GREETER_OUTPUT" != *"utility from registry 1.1"* ]]; then
+    echo "[FAIL] published source packages should install and run after mog publish"
+    echo "$PUBLISHED_GREETER_OUTPUT"
     exit 1
 fi
 
@@ -450,11 +644,12 @@ if ! grep -Eq "Phase 3|Published native packages" /tmp/mog_registry_native_failu
 fi
 
 write_registry_index "$REGISTRY_DIR" digest-mismatch
-cat > "$REMOTE_DIR/mog.toml" <<EOF_BAD_DIGEST
+DIGEST_DIR="$(mktemp -d)"
+cat > "$DIGEST_DIR/mog.toml" <<EOF_BAD_DIGEST
 kind = "project"
-name = "remote-test"
+name = "digest-test"
 version = "0.1.0"
-description = "remote source test"
+description = "digest source test"
 
 [registries.default]
 index = "$REGISTRY_DIR"
@@ -463,7 +658,7 @@ index = "$REGISTRY_DIR"
 http = { package = "acme:http", version = "1.0.0" }
 EOF_BAD_DIGEST
 
-if (cd "$REMOTE_DIR" && "$MOG" install >/tmp/mog_registry_digest_failure.txt 2>&1); then
+if (cd "$DIGEST_DIR" && "$MOG" install >/tmp/mog_registry_digest_failure.txt 2>&1); then
     echo "[FAIL] install should reject registry artifact digest mismatches"
     cat /tmp/mog_registry_digest_failure.txt
     exit 1

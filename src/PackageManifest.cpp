@@ -110,88 +110,235 @@ bool parseUnsignedValue(const std::string& value, uint32_t& out,
     return true;
 }
 
-bool parseDependencies(const std::string& value, std::vector<std::string>& out,
-                       std::string& outError) {
-    out.clear();
+bool parseBoolValue(const std::string& value, bool& out, std::string& outError) {
+    if (value == "true") {
+        out = true;
+        return true;
+    }
+    if (value == "false") {
+        out = false;
+        return true;
+    }
+    outError = "Expected boolean value.";
+    return false;
+}
+
+bool parseQuotedStringArray(const std::string& value,
+                            std::vector<std::string>& outValues,
+                            std::string& outError) {
+    outValues.clear();
     if (value.size() < 2 || value.front() != '[' || value.back() != ']') {
-        outError = "dependencies must be an array of quoted package IDs.";
+        outError = "Expected array value.";
         return false;
     }
 
     std::string body = trim(std::string_view(value).substr(1, value.size() - 2));
-    if (body.empty()) {
-        return true;
-    }
-
-    size_t cursor = 0;
-    while (cursor < body.size()) {
-        while (cursor < body.size() &&
-               std::isspace(static_cast<unsigned char>(body[cursor]))) {
-            ++cursor;
-        }
-        if (cursor >= body.size()) {
-            break;
-        }
-        if (body[cursor] != '"') {
-            outError = "dependencies must contain only quoted package IDs.";
-            return false;
-        }
-
-        size_t end = cursor + 1;
+    while (!body.empty()) {
+        size_t valueLength = 0;
+        bool inString = false;
         bool escaped = false;
-        for (; end < body.size(); ++end) {
-            if (!escaped && body[end] == '"') {
+        for (; valueLength < body.size(); ++valueLength) {
+            const char ch = body[valueLength];
+            if (inString) {
+                if (escaped) {
+                    escaped = false;
+                } else if (ch == '\\') {
+                    escaped = true;
+                } else if (ch == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+
+            if (ch == '"') {
+                inString = true;
+                continue;
+            }
+            if (ch == ',') {
                 break;
             }
-            escaped = !escaped && body[end] == '\\';
-        }
-        if (end >= body.size()) {
-            outError = "Unterminated string in dependencies.";
-            return false;
         }
 
         std::string parsed;
-        if (!parseQuotedString(body.substr(cursor, end - cursor + 1), parsed,
-                               outError)) {
+        if (!parseQuotedString(trim(body.substr(0, valueLength)), parsed, outError)) {
             return false;
         }
-        out.push_back(parsed);
-        cursor = end + 1;
+        outValues.push_back(parsed);
 
-        while (cursor < body.size() &&
-               std::isspace(static_cast<unsigned char>(body[cursor]))) {
-            ++cursor;
+        if (valueLength >= body.size()) {
+            body.clear();
+        } else {
+            body = trim(std::string_view(body).substr(valueLength + 1));
         }
-        if (cursor >= body.size()) {
-            break;
-        }
-        if (body[cursor] != ',') {
-            outError = "Expected ',' between dependency entries.";
-            return false;
-        }
-        ++cursor;
     }
 
     return true;
 }
 
-bool validateDependencyIds(const std::vector<std::string>& dependencies,
-                           std::string& outError) {
-    for (const std::string& dependency : dependencies) {
-        size_t colon = dependency.find(':');
+std::string normalizeRelativePath(std::string pathText) {
+    std::replace(pathText.begin(), pathText.end(), '\\', '/');
+    return pathText;
+}
+
+bool parseDependencyInlineTable(const std::string& value,
+                                DependencySpec& outDependency,
+                                std::string& outError) {
+    if (value.size() < 2 || value.front() != '{' || value.back() != '}') {
+        outError = "Dependency entries must be inline tables.";
+        return false;
+    }
+
+    std::string body = trim(std::string_view(value).substr(1, value.size() - 2));
+    while (!body.empty()) {
+        const size_t equals = body.find('=');
+        if (equals == std::string::npos) {
+            outError = "Dependency table must use key = value entries.";
+            return false;
+        }
+
+        const std::string key = trim(std::string_view(body).substr(0, equals));
+        body = trim(std::string_view(body).substr(equals + 1));
+        if (body.empty()) {
+            outError = "Dependency table entry is missing a value.";
+            return false;
+        }
+
+        size_t valueLength = 0;
+        bool inString = false;
+        bool escaped = false;
+        for (; valueLength < body.size(); ++valueLength) {
+            const char ch = body[valueLength];
+            if (inString) {
+                if (escaped) {
+                    escaped = false;
+                } else if (ch == '\\') {
+                    escaped = true;
+                } else if (ch == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+
+            if (ch == '"') {
+                inString = true;
+                continue;
+            }
+            if (ch == ',') {
+                break;
+            }
+        }
+
+        const std::string rawValue = trim(body.substr(0, valueLength));
+        if (key == "path") {
+            std::string parsed;
+            if (!parseQuotedString(rawValue, parsed, outError)) {
+                return false;
+            }
+            outDependency.path = normalizeRelativePath(parsed);
+        } else if (key == "package") {
+            std::string parsed;
+            if (!parseQuotedString(rawValue, parsed, outError)) {
+                return false;
+            }
+            outDependency.packageId = parsed;
+        } else if (key == "version") {
+            std::string parsed;
+            if (!parseQuotedString(rawValue, parsed, outError)) {
+                return false;
+            }
+            outDependency.version = parsed;
+        } else if (key == "git") {
+            std::string parsed;
+            if (!parseQuotedString(rawValue, parsed, outError)) {
+                return false;
+            }
+            outDependency.git = parsed;
+        } else if (key == "registry") {
+            std::string parsed;
+            if (!parseQuotedString(rawValue, parsed, outError)) {
+                return false;
+            }
+            outDependency.registry = parsed;
+        } else if (key == "workspace") {
+            if (!parseBoolValue(rawValue, outDependency.workspace, outError)) {
+                return false;
+            }
+        } else {
+            outError = "Unsupported dependency field '" + key + "'.";
+            return false;
+        }
+
+        if (valueLength >= body.size()) {
+            body.clear();
+        } else {
+            body = trim(std::string_view(body).substr(valueLength + 1));
+        }
+    }
+
+    if (outDependency.path.empty() && !outDependency.workspace &&
+        outDependency.git.empty() && outDependency.registry.empty() &&
+        outDependency.packageId.empty()) {
+        outError = "Dependency entries must define path, workspace, git, registry, or package metadata.";
+        return false;
+    }
+
+    return true;
+}
+
+bool parseLegacyDependencies(const std::string& value,
+                             std::vector<DependencySpec>& outDependencies,
+                             std::string& outError) {
+    std::vector<std::string> ids;
+    if (!parseQuotedStringArray(value, ids, outError)) {
+        outError = "dependencies must be an array of quoted package IDs.";
+        return false;
+    }
+
+    outDependencies.clear();
+    for (const std::string& dependencyId : ids) {
+        DependencySpec dependency;
+        dependency.packageId = dependencyId;
+        dependency.alias = packageImportNameFromId(dependencyId);
+        outDependencies.push_back(std::move(dependency));
+    }
+    return true;
+}
+
+void sortDependencies(std::vector<DependencySpec>& dependencies) {
+    std::sort(dependencies.begin(), dependencies.end(),
+              [](const DependencySpec& lhs, const DependencySpec& rhs) {
+                  return lhs.alias < rhs.alias;
+              });
+}
+
+bool validateDependencySpecs(const std::vector<DependencySpec>& dependencies,
+                             std::string& outError) {
+    for (const auto& dependency : dependencies) {
+        if (dependency.alias.empty() || !isValidPackageIdPart(dependency.alias)) {
+            outError = "Dependency aliases must use lowercase letters, digits, '_', or '-'.";
+            return false;
+        }
+
+        const std::string& packageId = dependency.packageId;
+        if (packageId.empty()) {
+            outError = "Package manifests currently require each dependency to declare package = \"namespace:name\".";
+            return false;
+        }
+
+        size_t colon = packageId.find(':');
         if (colon == std::string::npos ||
-            dependency.find(':', colon + 1) != std::string::npos) {
-            outError = "Dependency '" + dependency +
+            packageId.find(':', colon + 1) != std::string::npos) {
+            outError = "Dependency '" + packageId +
                        "' must use a canonical package ID like 'mog:window'.";
             return false;
         }
 
-        std::string_view packageNamespace(dependency.data(), colon);
-        std::string_view packageName(dependency.data() + colon + 1,
-                                     dependency.size() - colon - 1);
+        std::string_view packageNamespace(packageId.data(), colon);
+        std::string_view packageName(packageId.data() + colon + 1,
+                                     packageId.size() - colon - 1);
         if (!isValidPackageIdPart(packageNamespace) ||
             !isValidPackageIdPart(packageName)) {
-            outError = "Dependency '" + dependency +
+            outError = "Dependency '" + packageId +
                        "' must use lowercase package IDs.";
             return false;
         }
@@ -266,6 +413,13 @@ bool loadPackageManifest(const std::string& packageDir,
         return false;
     }
 
+    enum class Section {
+        ROOT,
+        DEPENDENCIES,
+        DEV_DEPENDENCIES,
+    };
+
+    Section section = Section::ROOT;
     std::string line;
     size_t lineNumber = 0;
     while (std::getline(file, line)) {
@@ -273,6 +427,19 @@ bool loadPackageManifest(const std::string& packageDir,
         const std::string content = stripComment(line);
         if (content.empty()) {
             continue;
+        }
+
+        if (content == "[dependencies]") {
+            section = Section::DEPENDENCIES;
+            continue;
+        }
+        if (content == "[dev-dependencies]") {
+            section = Section::DEV_DEPENDENCIES;
+            continue;
+        }
+        if (content.front() == '[' && content.back() == ']') {
+            outError = "Unknown manifest section '" + content + "'.";
+            return false;
         }
 
         const size_t equals = content.find('=');
@@ -286,6 +453,20 @@ bool loadPackageManifest(const std::string& packageDir,
         const std::string value =
             trim(std::string_view(content).substr(equals + 1));
         std::string parseError;
+
+        if (section == Section::DEPENDENCIES ||
+            section == Section::DEV_DEPENDENCIES) {
+            DependencySpec dependency;
+            dependency.alias = key;
+            if (!parseDependencyInlineTable(value, dependency, parseError)) {
+                outError = "Invalid dependency '" + key + "': " + parseError;
+                return false;
+            }
+            auto& output = section == Section::DEPENDENCIES ? outManifest.dependencies
+                                                            : outManifest.devDependencies;
+            output.push_back(std::move(dependency));
+            continue;
+        }
 
         if (key == "kind") {
             if (!parseQuotedString(value, outManifest.kind, parseError)) {
@@ -339,7 +520,7 @@ bool loadPackageManifest(const std::string& packageDir,
                 return false;
             }
         } else if (key == "dependencies") {
-            if (!parseDependencies(value, outManifest.dependencies, parseError)) {
+            if (!parseLegacyDependencies(value, outManifest.dependencies, parseError)) {
                 outError = "Invalid manifest dependencies: " + parseError;
                 return false;
             }
@@ -383,7 +564,13 @@ bool loadPackageManifest(const std::string& packageDir,
         return false;
     }
 
-    if (!validateDependencyIds(outManifest.dependencies, outError)) {
+    sortDependencies(outManifest.dependencies);
+    sortDependencies(outManifest.devDependencies);
+
+    if (!validateDependencySpecs(outManifest.dependencies, outError)) {
+        return false;
+    }
+    if (!validateDependencySpecs(outManifest.devDependencies, outError)) {
         return false;
     }
 

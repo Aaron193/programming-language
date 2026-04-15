@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include "DependencySpec.hpp"
+
 struct PackageManifest {
     std::string kind = "native";
     std::string importName;
@@ -15,7 +17,8 @@ struct PackageManifest {
     std::string description;
     std::string entry;
     std::string library;
-    std::vector<std::string> dependencies;
+    std::vector<DependencySpec> dependencies;
+    std::vector<DependencySpec> devDependencies;
 };
 
 bool loadPackageManifest(const std::string& packageDir,
