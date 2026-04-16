@@ -261,6 +261,9 @@ struct RegistryIndexRecord {
     SemanticVersion parsedVersion;
     std::string artifactPath;
     std::string artifactDigest;
+    std::vector<std::string> nativeTargets;
+    std::vector<std::string> nativeArtifactPaths;
+    std::vector<std::string> nativeArtifactDigests;
     std::vector<RegistryDependencyPin> dependencies;
 };
 
@@ -277,6 +280,51 @@ const ProjectRegistryConfig* findRegistryConfig(
 std::string registryRecordKey(std::string_view packageId,
                               std::string_view version) {
     return std::string(packageId) + "@" + std::string(version);
+}
+
+std::string detectHostOs() {
+#if defined(__APPLE__)
+    return "macos";
+#elif defined(__linux__)
+    return "linux";
+#elif defined(_WIN32)
+    return "windows";
+#else
+    return "unknown";
+#endif
+}
+
+std::string detectHostArch() {
+#if defined(__aarch64__) || defined(_M_ARM64)
+    return "arm64";
+#elif defined(__x86_64__) || defined(_M_X64)
+    return "x86_64";
+#elif defined(__i386__) || defined(_M_IX86)
+    return "x86";
+#elif defined(__arm__) || defined(_M_ARM)
+    return "arm";
+#else
+    return "unknown";
+#endif
+}
+
+std::string detectHostTarget() {
+    std::string target = detectHostOs() + "-" + detectHostArch();
+#if defined(__linux__)
+#if defined(__GLIBC__)
+    target += "-gnu";
+#elif defined(__MUSL__)
+    target += "-musl";
+#endif
+#endif
+    return target;
+}
+
+std::string effectiveInstallTarget(const InstallOptions* options) {
+    if (options != nullptr && !options->target.empty()) {
+        return options->target;
+    }
+    return detectHostTarget();
 }
 
 bool isExactPublishedVersion(std::string_view version) {
@@ -965,6 +1013,10 @@ bool writeInstallRegistryFile(const std::filesystem::path& outputPath,
             out << "artifact_digest = " << quoteTomlString(entry.artifactDigest)
                 << "\n";
         }
+        if (!entry.selectedTarget.empty()) {
+            out << "selected_target = " << quoteTomlString(entry.selectedTarget)
+                << "\n";
+        }
         if (!entry.manifestDigest.empty()) {
             out << "manifest_digest = " << quoteTomlString(entry.manifestDigest)
                 << "\n";
@@ -1037,6 +1089,10 @@ bool writeLockfile(const std::filesystem::path& outputPath,
             out << "artifact_digest = " << quoteTomlString(entry.artifactDigest)
                 << "\n";
         }
+        if (!entry.selectedTarget.empty()) {
+            out << "selected_target = " << quoteTomlString(entry.selectedTarget)
+                << "\n";
+        }
         out << "dependencies = " << quoteTomlArray(entry.dependencyIds) << "\n";
         if (!entry.manifestDigest.empty()) {
             out << "manifest_digest = " << quoteTomlString(entry.manifestDigest)
@@ -1083,8 +1139,40 @@ bool writeRegistryIndexFile(const std::filesystem::path& outputPath,
         out << "\n[[package]]\n";
         out << "package_id = " << quoteTomlString(record.packageId) << "\n";
         out << "version = " << quoteTomlString(record.version) << "\n";
-        out << "artifact_path = " << quoteTomlString(record.artifactPath) << "\n";
-        out << "artifact_digest = " << quoteTomlString(record.artifactDigest) << "\n";
+        if (!record.artifactPath.empty()) {
+            out << "artifact_path = " << quoteTomlString(record.artifactPath)
+                << "\n";
+        }
+        if (!record.artifactDigest.empty()) {
+            out << "artifact_digest = " << quoteTomlString(record.artifactDigest)
+                << "\n";
+        }
+        if (!record.nativeTargets.empty()) {
+            std::vector<size_t> nativeIndexes(record.nativeTargets.size());
+            for (size_t index = 0; index < nativeIndexes.size(); ++index) {
+                nativeIndexes[index] = index;
+            }
+            std::sort(nativeIndexes.begin(), nativeIndexes.end(),
+                      [&](size_t lhs, size_t rhs) {
+                          return record.nativeTargets[lhs] <
+                                 record.nativeTargets[rhs];
+                      });
+
+            std::vector<std::string> targets;
+            std::vector<std::string> paths;
+            std::vector<std::string> digests;
+            for (size_t index : nativeIndexes) {
+                targets.push_back(record.nativeTargets[index]);
+                paths.push_back(record.nativeArtifactPaths[index]);
+                digests.push_back(record.nativeArtifactDigests[index]);
+            }
+
+            out << "native_targets = " << quoteTomlArray(targets)
+                << "\n";
+            out << "native_artifact_paths = " << quoteTomlArray(paths) << "\n";
+            out << "native_artifact_digests = "
+                << quoteTomlArray(digests) << "\n";
+        }
 
         std::vector<std::string> pins;
         for (const auto& dependency : record.dependencies) {
@@ -1116,6 +1204,7 @@ struct CacheEntryMetadata {
     std::string registry;
     std::string artifactPath;
     std::string artifactDigest;
+    std::string selectedTarget;
     std::string manifestDigest;
     std::string apiDigest;
     std::vector<std::string> dependencyGroups;
@@ -1139,6 +1228,7 @@ bool writeCacheMetadataFile(const std::filesystem::path& outputPath,
     out << "registry = " << quoteTomlString(entry.registry) << "\n";
     out << "artifact_path = " << quoteTomlString(entry.artifactPath) << "\n";
     out << "artifact_digest = " << quoteTomlString(entry.artifactDigest) << "\n";
+    out << "selected_target = " << quoteTomlString(entry.selectedTarget) << "\n";
     out << "manifest_digest = " << quoteTomlString(entry.manifestDigest) << "\n";
     out << "api_digest = " << quoteTomlString(entry.apiDigest) << "\n";
     out << "dependency_groups = "
@@ -1209,6 +1299,8 @@ bool loadCacheMetadataFile(const std::filesystem::path& metadataPath,
             outMetadata.artifactPath = parsed;
         } else if (key == "artifact_digest") {
             outMetadata.artifactDigest = parsed;
+        } else if (key == "selected_target") {
+            outMetadata.selectedTarget = parsed;
         } else if (key == "manifest_digest") {
             outMetadata.manifestDigest = parsed;
         } else if (key == "api_digest") {
@@ -1233,6 +1325,7 @@ bool cacheMetadataMatchesEntry(const CacheEntryMetadata& metadata,
            metadata.registry == entry.registry &&
            metadata.artifactPath == entry.artifactPath &&
            metadata.artifactDigest == entry.artifactDigest &&
+           metadata.selectedTarget == entry.selectedTarget &&
            metadata.manifestDigest == entry.manifestDigest &&
            metadata.apiDigest == entry.apiDigest &&
            metadata.dependencyGroups ==
@@ -1323,10 +1416,27 @@ bool loadRegistryIndex(const std::string& projectRoot,
         if (!hasCurrent) {
             return true;
         }
+        const bool hasPrimaryArtifact =
+            !current.artifactPath.empty() || !current.artifactDigest.empty();
+        const bool hasNativeArtifacts = !current.nativeTargets.empty() ||
+                                       !current.nativeArtifactPaths.empty() ||
+                                       !current.nativeArtifactDigests.empty();
         if (current.packageId.empty() || current.version.empty() ||
-            current.artifactPath.empty() || current.artifactDigest.empty()) {
+            (!hasPrimaryArtifact && !hasNativeArtifacts)) {
             outError = "Registry '" + config.alias +
-                       "' index entries must define package_id, version, artifact_path, and artifact_digest.";
+                       "' index entries must define package_id, version, and at least one artifact.";
+            return false;
+        }
+        if ((!current.artifactPath.empty() && current.artifactDigest.empty()) ||
+            (current.artifactPath.empty() && !current.artifactDigest.empty())) {
+            outError = "Registry '" + config.alias +
+                       "' source artifact entries must define both artifact_path and artifact_digest.";
+            return false;
+        }
+        if (current.nativeTargets.size() != current.nativeArtifactPaths.size() ||
+            current.nativeTargets.size() != current.nativeArtifactDigests.size()) {
+            outError = "Registry '" + config.alias +
+                       "' native artifact fields must define the same number of targets, paths, and digests.";
             return false;
         }
         if (!isExactPublishedVersion(current.version)) {
@@ -1402,6 +1512,33 @@ bool loadRegistryIndex(const std::string& projectRoot,
                     return false;
                 }
                 current.dependencies.push_back(std::move(pin));
+            }
+            continue;
+        }
+
+        if (key == "native_targets") {
+            if (!parseQuotedStringArray(value, current.nativeTargets, outError)) {
+                outError = "Invalid registry index line " +
+                           std::to_string(lineNumber) + ": " + outError;
+                return false;
+            }
+            continue;
+        }
+        if (key == "native_artifact_paths") {
+            if (!parseQuotedStringArray(value, current.nativeArtifactPaths,
+                                        outError)) {
+                outError = "Invalid registry index line " +
+                           std::to_string(lineNumber) + ": " + outError;
+                return false;
+            }
+            continue;
+        }
+        if (key == "native_artifact_digests") {
+            if (!parseQuotedStringArray(value, current.nativeArtifactDigests,
+                                        outError)) {
+                outError = "Invalid registry index line " +
+                           std::to_string(lineNumber) + ": " + outError;
+                return false;
             }
             continue;
         }
@@ -1591,13 +1728,86 @@ std::vector<RegistryIndexRecord> matchingRegistryRecords(
     return matches;
 }
 
+std::string availableNativeTargetsLabel(const RegistryIndexRecord& record) {
+    std::vector<std::string> targets = record.nativeTargets;
+    std::sort(targets.begin(), targets.end());
+    targets.erase(std::unique(targets.begin(), targets.end()), targets.end());
+
+    std::ostringstream out;
+    for (size_t index = 0; index < targets.size(); ++index) {
+        if (index != 0) {
+            out << ", ";
+        }
+        out << targets[index];
+    }
+    return out.str();
+}
+
+bool selectRegistryArtifact(const RegistryIndexRecord& record,
+                            std::string_view packageId,
+                            const InstallOptions* options,
+                            std::string& outArtifactPath,
+                            std::string& outArtifactDigest,
+                            std::string& outSelectedTarget,
+                            std::string& outError) {
+    outArtifactPath.clear();
+    outArtifactDigest.clear();
+    outSelectedTarget.clear();
+
+    if (record.nativeTargets.empty()) {
+        outArtifactPath = record.artifactPath;
+        outArtifactDigest = record.artifactDigest;
+        return !outArtifactPath.empty() && !outArtifactDigest.empty();
+    }
+
+    const std::string desiredTarget = effectiveInstallTarget(options);
+    auto targetIt = std::find(record.nativeTargets.begin(),
+                              record.nativeTargets.end(), desiredTarget);
+    if (targetIt != record.nativeTargets.end()) {
+        const size_t index =
+            static_cast<size_t>(std::distance(record.nativeTargets.begin(), targetIt));
+        outArtifactPath = record.nativeArtifactPaths[index];
+        outArtifactDigest = record.nativeArtifactDigests[index];
+        outSelectedTarget = desiredTarget;
+        return true;
+    }
+
+    if (options == nullptr && !record.nativeTargets.empty()) {
+        outArtifactPath = record.nativeArtifactPaths.front();
+        outArtifactDigest = record.nativeArtifactDigests.front();
+        outSelectedTarget = record.nativeTargets.front();
+        return true;
+    }
+
+    if (!record.artifactPath.empty() && !record.artifactDigest.empty()) {
+        if (options != nullptr && options->noNativeBuild) {
+            outError = "Registry package '" + std::string(packageId) +
+                       "' does not publish a prebuilt native artifact for target '" +
+                       desiredTarget + "'. Available targets: " +
+                       availableNativeTargetsLabel(record) +
+                       ". Source fallback is available in the registry entry, but --no-native-build forbids using it.";
+            return false;
+        }
+        outArtifactPath = record.artifactPath;
+        outArtifactDigest = record.artifactDigest;
+        outSelectedTarget = desiredTarget;
+        return true;
+    }
+
+    outError = "Registry package '" + std::string(packageId) +
+               "' does not publish a native artifact for target '" +
+               desiredTarget + "'. Available targets: " +
+               availableNativeTargetsLabel(record) + ".";
+    return false;
+}
+
 bool resolveRegistryPackageNode(
     const std::string& projectRoot, const ProjectManifestData& manifest,
     const std::string& registryAlias, const std::string& packageId,
     const std::string& requirementText,
     std::unordered_map<std::string, LoadedRegistryIndex>& loadedRegistryIndexes,
-    std::unordered_map<std::string, PackageNode>& nodeCache, PackageNode& outNode,
-    std::string& outError) {
+    std::unordered_map<std::string, PackageNode>& nodeCache,
+    const InstallOptions* options, PackageNode& outNode, std::string& outError) {
     outNode = PackageNode{};
 
     VersionRequirement requirement;
@@ -1631,15 +1841,25 @@ bool resolveRegistryPackageNode(
         return false;
     }
 
-    const std::string cacheKey =
-        registryAlias + "|" + registryRecordKey(packageId, record.version);
+    std::string rawArtifactPath;
+    std::string artifactDigest;
+    std::string selectedTarget;
+    if (!selectRegistryArtifact(record, packageId, options, rawArtifactPath,
+                                artifactDigest, selectedTarget, outError)) {
+        return false;
+    }
+
+    const std::string cacheKey = registryAlias + "|" +
+                                 registryRecordKey(packageId, record.version) +
+                                 "|" + selectedTarget + "|" + rawArtifactPath +
+                                 "|" + artifactDigest;
     auto nodeIt = nodeCache.find(cacheKey);
     if (nodeIt != nodeCache.end()) {
         outNode = nodeIt->second;
         return true;
     }
     std::filesystem::path artifactPath;
-    if (!resolveManifestPath(indexIt->second.rootDir.string(), record.artifactPath,
+    if (!resolveManifestPath(indexIt->second.rootDir.string(), rawArtifactPath,
                              artifactPath, outError)) {
         return false;
     }
@@ -1656,7 +1876,7 @@ bool resolveRegistryPackageNode(
                    artifactPath.string() + "'.";
         return false;
     }
-    if (actualDigest != record.artifactDigest) {
+    if (actualDigest != artifactDigest) {
         outError = "Registry artifact digest mismatch for '" + packageId + "@" +
                    record.version + "'.";
         return false;
@@ -1691,7 +1911,8 @@ bool resolveRegistryPackageNode(
     node.entry.sourcePath = artifactPath.string();
     node.entry.registry = registryAlias;
     node.entry.artifactPath = artifactPath.string();
-    node.entry.artifactDigest = record.artifactDigest;
+    node.entry.artifactDigest = artifactDigest;
+    node.entry.selectedTarget = selectedTarget;
     node.entry.dependencyIds.clear();
     for (const auto& pin : record.dependencies) {
         node.entry.dependencyIds.push_back(pin.packageId);
@@ -1923,6 +2144,7 @@ bool validatePackageEntry(const PackageRegistryEntry& entry,
 }
 
 bool materializeCacheEntry(const PackageRegistryEntry& sourceEntry,
+                           const InstallOptions& options,
                            const std::filesystem::path& cacheDir,
                            std::string& outError) {
     if (!removePathIfExists(cacheDir, outError)) {
@@ -1960,6 +2182,20 @@ bool materializeCacheEntry(const PackageRegistryEntry& sourceEntry,
     }
 
     if (sourceEntry.libraryPath.empty()) {
+        if (!sourceEntry.selectedTarget.empty()) {
+            if (options.noNativeBuild) {
+                outError = "Native package '" + sourceEntry.importName +
+                           "' does not publish a prebuilt library for target '" +
+                           sourceEntry.selectedTarget +
+                           "', and --no-native-build forbids source fallback.";
+            } else {
+                outError = "Native package '" + sourceEntry.importName +
+                           "' does not publish a prebuilt library for target '" +
+                           sourceEntry.selectedTarget +
+                           "'. Source-build fallback is not implemented yet for this runtime installation.";
+            }
+            return false;
+        }
         outError = "Native package '" + sourceEntry.importName +
                    "' does not have a built library to install.";
         return false;
@@ -1975,7 +2211,8 @@ bool materializeCacheEntry(const PackageRegistryEntry& sourceEntry,
 
 bool materializeProjectInstall(const PackageRegistryEntry& sourceEntry,
                                const std::filesystem::path& projectRoot,
-                               bool offline, PackageRegistryEntry& outInstalled,
+                               const InstallOptions& options,
+                               PackageRegistryEntry& outInstalled,
                                std::string& outError) {
     outInstalled = sourceEntry;
 
@@ -1983,6 +2220,7 @@ bool materializeProjectInstall(const PackageRegistryEntry& sourceEntry,
                                    sourceEntry.registry + "|" +
                                    sourceEntry.artifactPath + "|" +
                                    sourceEntry.artifactDigest + "|" +
+                                   sourceEntry.selectedTarget + "|" +
                                    sourceEntry.manifestDigest + "|" +
                                    sourceEntry.apiDigest + "|" +
                                    sourceEntry.sourcePath;
@@ -2004,12 +2242,12 @@ bool materializeProjectInstall(const PackageRegistryEntry& sourceEntry,
         cacheMetadataMatchesEntry(metadata, sourceEntry);
 
     if (!hasReusableCache) {
-        if (offline && sourceEntry.sourceType == "registry") {
+        if (options.offline && sourceEntry.sourceType == "registry") {
             outError = "Dependency '" + sourceEntry.packageId +
                        "' cannot be installed with --offline because its registry artifact is not cached locally.";
             return false;
         }
-        if (!materializeCacheEntry(sourceEntry, cacheDir, outError)) {
+        if (!materializeCacheEntry(sourceEntry, options, cacheDir, outError)) {
             return false;
         }
     }
@@ -2028,6 +2266,7 @@ bool materializeProjectInstall(const PackageRegistryEntry& sourceEntry,
     outInstalled.packageDir = installDir.lexically_normal().string();
     outInstalled.sourcePath = canonicalOrLexical(sourceEntry.sourcePath);
     outInstalled.artifactPath = canonicalOrLexical(sourceEntry.artifactPath);
+    outInstalled.selectedTarget = sourceEntry.selectedTarget;
 
     const std::filesystem::path installedApi = installDir / kPackageApiFileName;
     if (fileExists(installedApi)) {
@@ -2170,8 +2409,8 @@ bool collectResolvedPackages(
                     if (!resolveRegistryPackageNode(projectRoot, manifest, registryAlias,
                                                     packageId, version,
                                                     loadedRegistryIndexes,
-                                                    resolvedRegistryNodes, node,
-                                                    outError)) {
+                                                    resolvedRegistryNodes,
+                                                    &options, node, outError)) {
                         return false;
                     }
                     chosen.emplace(packageId, node);
@@ -2317,7 +2556,7 @@ bool collectResolvedPackages(
                     if (!resolveRegistryPackageNode(
                             projectRoot, manifest, node.entry.registry,
                             dependency.packageId, dependency.version,
-                            loadedRegistryIndexes, resolvedRegistryNodes,
+                            loadedRegistryIndexes, resolvedRegistryNodes, &options,
                             dependencyNode, outError)) {
                         return false;
                     }
@@ -2394,6 +2633,7 @@ bool packageEntryMatchesResolution(const PackageRegistryEntry& expected,
            expected.registry == actual.registry &&
            expected.artifactPath == actual.artifactPath &&
            expected.artifactDigest == actual.artifactDigest &&
+           expected.selectedTarget == actual.selectedTarget &&
            expected.manifestDigest == actual.manifestDigest &&
            expected.apiDigest == actual.apiDigest &&
            sortedUniqueStrings(expected.dependencyIds) ==
@@ -2487,6 +2727,19 @@ bool validateLockedEntriesAgainstManifest(
                     outError = "mog.lock is out of date for dependency '" +
                                dependency.alias + "'. Run 'mog update' to refresh it.";
                     return false;
+                }
+                if (lockedIt->second.kind == "native") {
+                    const std::string expectedTarget =
+                        effectiveInstallTarget(&options);
+                    if (lockedIt->second.selectedTarget != expectedTarget) {
+                        outError = "mog.lock is pinned for native target '" +
+                                   lockedIt->second.selectedTarget +
+                                   "', but this install requires '" +
+                                   expectedTarget +
+                                   "'. Run 'mog update --target " + expectedTarget +
+                                   "' to refresh it.";
+                        return false;
+                    }
                 }
                 if (!dependencyMatchesLockedEntry(dependency, lockedIt->second,
                                                  outError)) {
@@ -2599,7 +2852,7 @@ bool materializeInstalledPackages(const std::string& projectRoot,
     for (const auto& entry : resolved) {
         PackageRegistryEntry installedEntry;
         if (!materializeProjectInstall(entry, std::filesystem::path(projectRoot),
-                                       options.offline, installedEntry,
+                                       options, installedEntry,
                                        outError)) {
             return false;
         }
@@ -2981,6 +3234,7 @@ bool discoverDependencySpec(const std::string& projectRoot,
     if (!resolveRegistryPackageNode(projectRoot, manifest, registryAlias,
                                     requestedPackageId, requestedVersion,
                                     loadedRegistryIndexes, resolvedRegistryNodes,
+                                    nullptr,
                                     publishedNode, outError)) {
         return false;
     }
@@ -3120,9 +3374,14 @@ bool publishProjectPackage(const std::string& projectRoot,
         }
     }
 
+    const std::string publishedTarget =
+        packageEntry.kind == "native" ? detectHostTarget() : "";
     const std::filesystem::path artifactDir =
-        registryRoot / "packages" / packageEntry.packageNamespace /
-        packageEntry.packageName / packageEntry.version;
+        packageEntry.kind == "native"
+            ? registryRoot / "packages" / packageEntry.packageNamespace /
+                  packageEntry.packageName / packageEntry.version / publishedTarget
+            : registryRoot / "packages" / packageEntry.packageNamespace /
+                  packageEntry.packageName / packageEntry.version;
     const std::string relativeArtifactPath =
         normalizeRelativePath(
             artifactDir.lexically_relative(registryRoot).lexically_normal().string());
@@ -3152,17 +3411,45 @@ bool publishProjectPackage(const std::string& projectRoot,
                                 recordKey;
                      });
     if (existingRecordIt != records.end()) {
-        if (existingRecordIt->artifactDigest != artifactDigest ||
-            existingRecordIt->artifactPath != relativeArtifactPath ||
-            existingRecordIt->dependencies.size() != dependencyPins.size() ||
-            !std::equal(existingRecordIt->dependencies.begin(),
-                        existingRecordIt->dependencies.end(),
-                        dependencyPins.begin(),
-                        [](const RegistryDependencyPin& lhs,
-                           const RegistryDependencyPin& rhs) {
-                            return lhs.packageId == rhs.packageId &&
-                                   lhs.version == rhs.version;
-                        })) {
+        const bool sameDependencies =
+            existingRecordIt->dependencies.size() == dependencyPins.size() &&
+            std::equal(existingRecordIt->dependencies.begin(),
+                       existingRecordIt->dependencies.end(),
+                       dependencyPins.begin(),
+                       [](const RegistryDependencyPin& lhs,
+                          const RegistryDependencyPin& rhs) {
+                           return lhs.packageId == rhs.packageId &&
+                                  lhs.version == rhs.version;
+                       });
+        if (!sameDependencies) {
+            outError = "Registry already contains '" + packageEntry.packageId +
+                       "@" + packageEntry.version +
+                       "' with different published contents.";
+            return false;
+        }
+
+        if (packageEntry.kind == "native") {
+            auto targetIt = std::find(existingRecordIt->nativeTargets.begin(),
+                                      existingRecordIt->nativeTargets.end(),
+                                      publishedTarget);
+            if (targetIt != existingRecordIt->nativeTargets.end()) {
+                const size_t targetIndex = static_cast<size_t>(
+                    std::distance(existingRecordIt->nativeTargets.begin(),
+                                  targetIt));
+                if (existingRecordIt->nativeArtifactDigests[targetIndex] !=
+                        artifactDigest ||
+                    existingRecordIt->nativeArtifactPaths[targetIndex] !=
+                        relativeArtifactPath) {
+                    outError = "Registry already contains '" +
+                               packageEntry.packageId + "@" +
+                               packageEntry.version + "' for target '" +
+                               publishedTarget +
+                               "' with different published contents.";
+                    return false;
+                }
+            }
+        } else if (existingRecordIt->artifactDigest != artifactDigest ||
+                   existingRecordIt->artifactPath != relativeArtifactPath) {
             outError = "Registry already contains '" + packageEntry.packageId +
                        "@" + packageEntry.version +
                        "' with different published contents.";
@@ -3189,10 +3476,25 @@ bool publishProjectPackage(const std::string& projectRoot,
         record.version = packageEntry.version;
         record.parsedVersion = SemanticVersion{};
         parseSemanticVersion(record.version, record.parsedVersion);
-        record.artifactPath = relativeArtifactPath;
-        record.artifactDigest = artifactDigest;
+        if (packageEntry.kind == "native") {
+            record.nativeTargets.push_back(publishedTarget);
+            record.nativeArtifactPaths.push_back(relativeArtifactPath);
+            record.nativeArtifactDigests.push_back(artifactDigest);
+        } else {
+            record.artifactPath = relativeArtifactPath;
+            record.artifactDigest = artifactDigest;
+        }
         record.dependencies = dependencyPins;
         records.push_back(std::move(record));
+    } else if (packageEntry.kind == "native") {
+        auto targetIt = std::find(existingRecordIt->nativeTargets.begin(),
+                                  existingRecordIt->nativeTargets.end(),
+                                  publishedTarget);
+        if (targetIt == existingRecordIt->nativeTargets.end()) {
+            existingRecordIt->nativeTargets.push_back(publishedTarget);
+            existingRecordIt->nativeArtifactPaths.push_back(relativeArtifactPath);
+            existingRecordIt->nativeArtifactDigests.push_back(artifactDigest);
+        }
     }
 
     return writeRegistryIndexFile(indexPath, std::move(records), outError);
@@ -3291,8 +3593,24 @@ bool ensureProjectPackagesInstalled(const std::string& projectRoot,
 
     std::error_code ec;
     if (!options.locked && std::filesystem::exists(registryPath, ec) && !ec) {
+        std::vector<PackageRegistryEntry> installedEntries;
+        std::string registryError;
+        bool targetMismatch = false;
+        if (loadProjectPackageRegistry(projectRoot, installedEntries, registryError)) {
+            const std::string desiredTarget = effectiveInstallTarget(&options);
+            for (const auto& entry : installedEntries) {
+                if (entry.kind != "native" || entry.sourceType != "registry") {
+                    continue;
+                }
+                if (entry.selectedTarget != desiredTarget) {
+                    targetMismatch = true;
+                    break;
+                }
+            }
+        }
+
         const auto registryTime = std::filesystem::last_write_time(registryPath, ec);
-        if (!ec) {
+        if (!ec && !targetMismatch) {
             const auto manifestTime =
                 std::filesystem::last_write_time(manifestPath, ec);
             if (!ec && registryTime >= manifestTime) {

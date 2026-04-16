@@ -56,6 +56,9 @@ repository. The current codebase supports:
   including exact dependency pinning and idempotent re-publish checks
 - native-package `mog publish` / install through the current static
   file-registry format for the current host platform
+- target-keyed native-package publish/install through the current static
+  file-registry format, including `--target`, `--prefer-prebuilt`, and pinned
+  selected-target metadata in `mog.lock` / `.mog/install/registry.toml`
 - package-manifest dependency parsing aligned with project manifests via
   `[dependencies]` inline tables, while retaining legacy compatibility for
   `dependencies = []`
@@ -66,7 +69,8 @@ Not implemented yet:
 - git dependency fetch/install
 - alternate or networked registry transports beyond the current static
   file-registry format
-- prebuilt native artifact distribution
+- source-build fallback for published native packages
+- native system dependency diagnostics / build-toolchain diagnostics
 - signed metadata or artifact verification
 - enterprise policy workflows beyond the current local `--locked` / `--offline`
   support
@@ -941,18 +945,21 @@ Deliver:
 
 Current status:
 
-- Phase 3A in progress
-- shipped in the current Phase 3A native-registry slice:
+- Phase 3B in progress
+- shipped in the current Phase 3A/3B native-registry slice:
   - published native-package install through the current static file-registry
-    format for the current host platform
+    format
   - published native-package `mog publish` using staged manifest/API/library
     artifacts
+  - target-keyed native registry artifacts using normalized platform strings
+  - native artifact selection for the host platform or explicit `--target`
+    requests
+  - `--prefer-prebuilt` and `--no-native-build` CLI surface
+  - lockfile/install-metadata pinning of the selected native target
   - cached `--offline` reinstalls for previously fetched registry native
     packages
   - lockfile-first `mog run --locked` reuse of cached native registry artifacts
 - not yet complete inside Phase 3:
-  - platform-keyed artifact selection
-  - `--prefer-prebuilt`
   - source-build fallback for published native packages
   - system dependency diagnostics
   - official package release automation for packages like `mog:window`

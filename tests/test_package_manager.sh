@@ -23,7 +23,45 @@ DIGEST_DIR=""
 NATIVE_PUBLISH_WORKSPACE=""
 NATIVE_CONSUMER_DIR=""
 NATIVE_BAD_DIR=""
-trap 'rm -rf "${TEMP_DIR:-}" "${REMOTE_DIR:-}" "${WORKSPACE_DIR:-}" "${RANGE_DIR:-}" "${ADD_DIR:-}" "${ADD_RANGE_DIR:-}" "${PUBLISH_WORKSPACE:-}" "${PUBLISHED_GREETER_DIR:-}" "${DIGEST_DIR:-}" "${NATIVE_PUBLISH_WORKSPACE:-}" "${NATIVE_CONSUMER_DIR:-}" "${NATIVE_BAD_DIR:-}"' EXIT
+NATIVE_TARGET_DIR=""
+NATIVE_TARGET_FAIL_DIR=""
+trap 'rm -rf "${TEMP_DIR:-}" "${REMOTE_DIR:-}" "${WORKSPACE_DIR:-}" "${RANGE_DIR:-}" "${ADD_DIR:-}" "${ADD_RANGE_DIR:-}" "${PUBLISH_WORKSPACE:-}" "${PUBLISHED_GREETER_DIR:-}" "${DIGEST_DIR:-}" "${NATIVE_PUBLISH_WORKSPACE:-}" "${NATIVE_CONSUMER_DIR:-}" "${NATIVE_BAD_DIR:-}" "${NATIVE_TARGET_DIR:-}" "${NATIVE_TARGET_FAIL_DIR:-}"' EXIT
+
+detect_host_target() {
+    local os
+    local arch
+    case "$(uname -s)" in
+        Linux) os="linux" ;;
+        Darwin) os="macos" ;;
+        MINGW*|MSYS*|CYGWIN*) os="windows" ;;
+        *) os="unknown" ;;
+    esac
+
+    case "$(uname -m)" in
+        x86_64|amd64) arch="x86_64" ;;
+        aarch64|arm64) arch="arm64" ;;
+        i386|i686) arch="x86" ;;
+        armv7l|armv6l|arm) arch="arm" ;;
+        *) arch="unknown" ;;
+    esac
+
+    if [[ "$os" == "linux" ]]; then
+        if command -v ldd >/dev/null 2>&1 && ldd --version 2>&1 | head -n1 | grep -qi musl; then
+            printf '%s-%s-musl\n' "$os" "$arch"
+            return
+        fi
+        printf '%s-%s-gnu\n' "$os" "$arch"
+        return
+    fi
+
+    printf '%s-%s\n' "$os" "$arch"
+}
+
+HOST_TARGET="$(detect_host_target)"
+ALT_TARGET="linux-arm64-gnu"
+if [[ "$ALT_TARGET" == "$HOST_TARGET" ]]; then
+    ALT_TARGET="macos-arm64"
+fi
 
 write_registry_index() {
     local registry_dir="$1"
@@ -690,6 +728,14 @@ if ! grep -Fq 'package_id = "examples:counter"' "$REGISTRY_DIR/index.toml"; then
     exit 1
 fi
 
+if ! grep -Fq "native_targets = [\"$HOST_TARGET\"]" "$REGISTRY_DIR/index.toml" || \
+   ! grep -Fq "native_artifact_paths = [\"packages/examples/counter/0.1.0/$HOST_TARGET\"]" \
+      "$REGISTRY_DIR/index.toml"; then
+    echo "[FAIL] publish should record target-keyed native artifact metadata"
+    cat "$REGISTRY_DIR/index.toml"
+    exit 1
+fi
+
 python3 - "$NATIVE_PUBLISH_WORKSPACE/packages/examples/counter/package.toml" <<'PY'
 from pathlib import Path
 import sys
@@ -754,9 +800,17 @@ fi
 
 if ! grep -Fq 'package_id = "examples:counter"' "$NATIVE_CONSUMER_DIR/mog.lock" || \
    ! grep -Fq 'source_type = "registry"' "$NATIVE_CONSUMER_DIR/mog.lock" || \
-   ! grep -Fq 'kind = "native"' "$NATIVE_CONSUMER_DIR/mog.lock"; then
+   ! grep -Fq 'kind = "native"' "$NATIVE_CONSUMER_DIR/mog.lock" || \
+   ! grep -Fq "selected_target = \"$HOST_TARGET\"" "$NATIVE_CONSUMER_DIR/mog.lock"; then
     echo "[FAIL] native registry installs should be recorded in mog.lock"
     cat "$NATIVE_CONSUMER_DIR/mog.lock"
+    exit 1
+fi
+
+if ! grep -Fq "selected_target = \"$HOST_TARGET\"" \
+    "$NATIVE_CONSUMER_DIR/.mog/install/registry.toml"; then
+    echo "[FAIL] install registry should record the selected native target"
+    cat "$NATIVE_CONSUMER_DIR/.mog/install/registry.toml"
     exit 1
 fi
 
@@ -767,14 +821,160 @@ if [[ ! -f "$NATIVE_CONSUMER_DIR/.mog/install/packages/examples/counter/package.
 fi
 
 rm -f "$NATIVE_CONSUMER_DIR/.mog/install/registry.toml"
+if ! (cd "$NATIVE_CONSUMER_DIR" && \
+      "$MOG" install --prefer-prebuilt --target "$HOST_TARGET" >/dev/null); then
+    echo "[FAIL] install should accept explicit native target selection flags"
+    exit 1
+fi
+
+rm -f "$NATIVE_CONSUMER_DIR/.mog/install/registry.toml"
 if ! (cd "$NATIVE_CONSUMER_DIR" && "$MOG" install --offline >/dev/null); then
     echo "[FAIL] install --offline should succeed for cached native registry packages"
     exit 1
 fi
 
-printf 'not a valid native package\n' > "$REGISTRY_DIR/packages/examples/counter/0.1.0/package.so"
+mkdir -p "$REGISTRY_DIR/packages/examples/counter/0.1.0/$ALT_TARGET"
+cp "$REGISTRY_DIR/packages/examples/counter/0.1.0/$HOST_TARGET/package.toml" \
+   "$REGISTRY_DIR/packages/examples/counter/0.1.0/$ALT_TARGET/package.toml"
+cp "$REGISTRY_DIR/packages/examples/counter/0.1.0/$HOST_TARGET/package.api.mog" \
+   "$REGISTRY_DIR/packages/examples/counter/0.1.0/$ALT_TARGET/package.api.mog"
+cp "$REGISTRY_DIR/packages/examples/counter/0.1.0/$HOST_TARGET/package.so" \
+   "$REGISTRY_DIR/packages/examples/counter/0.1.0/$ALT_TARGET/package.so"
+
+python3 - "$REGISTRY_DIR" "$HOST_TARGET" "$ALT_TARGET" <<'PY'
+from pathlib import Path
+import sys
+import tomllib
+
+registry_dir = Path(sys.argv[1])
+host_target = sys.argv[2]
+alt_target = sys.argv[3]
+index_path = registry_dir / "index.toml"
+data = tomllib.loads(index_path.read_text(encoding="utf-8"))
+
+def digest_directory(root: Path) -> str:
+    files = sorted(path for path in root.rglob("*") if path.is_file())
+    seed = bytearray()
+    for path in files:
+        seed.extend(path.relative_to(root).as_posix().encode("utf-8"))
+        seed.extend(b"\n")
+        seed.extend(path.read_bytes())
+        seed.extend(b"\n")
+    value = 1469598103934665603
+    for byte in seed:
+        value ^= byte
+        value = (value * 1099511628211) & 0xFFFFFFFFFFFFFFFF
+    return f"{value:016x}"
+
+packages = data.get("package", [])
+for package in packages:
+    if package.get("package_id") == "examples:counter" and package.get("version") == "0.1.0":
+        host_dir = registry_dir / "packages" / "examples" / "counter" / "0.1.0" / host_target
+        alt_dir = registry_dir / "packages" / "examples" / "counter" / "0.1.0" / alt_target
+        package["native_targets"] = [host_target, alt_target]
+        package["native_artifact_paths"] = [
+            host_dir.relative_to(registry_dir).as_posix(),
+            alt_dir.relative_to(registry_dir).as_posix(),
+        ]
+        package["native_artifact_digests"] = [
+            digest_directory(host_dir),
+            digest_directory(alt_dir),
+        ]
+        package.pop("artifact_path", None)
+        package.pop("artifact_digest", None)
+        break
+else:
+    raise SystemExit("missing examples:counter@0.1.0 in registry index")
+
+parts = ['schema_version = "registry.v1"']
+for package in packages:
+    parts.append("")
+    parts.append("[[package]]")
+    parts.append(f'package_id = "{package["package_id"]}"')
+    parts.append(f'version = "{package["version"]}"')
+    if "artifact_path" in package:
+        parts.append(f'artifact_path = "{package["artifact_path"]}"')
+    if "artifact_digest" in package:
+        parts.append(f'artifact_digest = "{package["artifact_digest"]}"')
+    if "native_targets" in package:
+        targets = ", ".join(f'"{value}"' for value in package["native_targets"])
+        paths = ", ".join(f'"{value}"' for value in package["native_artifact_paths"])
+        digests = ", ".join(f'"{value}"' for value in package["native_artifact_digests"])
+        parts.append(f"native_targets = [{targets}]")
+        parts.append(f"native_artifact_paths = [{paths}]")
+        parts.append(f"native_artifact_digests = [{digests}]")
+    deps = ", ".join(f'"{value}"' for value in package.get("dependencies", []))
+    parts.append(f"dependencies = [{deps}]")
+
+index_path.write_text("\n".join(parts) + "\n", encoding="utf-8")
+PY
+
+NATIVE_TARGET_DIR="$(mktemp -d)"
+cat > "$NATIVE_TARGET_DIR/mog.toml" <<EOF_NATIVE_TARGET
+kind = "project"
+name = "native-target-consumer"
+version = "0.1.0"
+description = "native target consumer"
+
+[registries.default]
+index = "$REGISTRY_DIR"
+
+[dependencies]
+counter = { package = "examples:counter", version = "0.1.0" }
+EOF_NATIVE_TARGET
+
+cp "$NATIVE_CONSUMER_DIR/app.mog" "$NATIVE_TARGET_DIR/app.mog"
+
+if ! (cd "$NATIVE_TARGET_DIR" && \
+      "$MOG" install --target "$ALT_TARGET" --prefer-prebuilt >/dev/null); then
+    echo "[FAIL] install should select a non-host native artifact when --target is provided"
+    exit 1
+fi
+
+if ! grep -Fq "selected_target = \"$ALT_TARGET\"" "$NATIVE_TARGET_DIR/mog.lock"; then
+    echo "[FAIL] lockfile should pin the explicitly selected native target"
+    cat "$NATIVE_TARGET_DIR/mog.lock"
+    exit 1
+fi
+
+ALT_TARGET_OUTPUT="$("$MOG" run --locked --target "$ALT_TARGET" "$NATIVE_TARGET_DIR/app.mog")"
+if [[ "$ALT_TARGET_OUTPUT" != *"examples:counter"* || "$ALT_TARGET_OUTPUT" != *"15"* ]]; then
+    echo "[FAIL] run --locked should use the explicitly selected native target artifact"
+    echo "$ALT_TARGET_OUTPUT"
+    exit 1
+fi
+
+NATIVE_TARGET_FAIL_DIR="$(mktemp -d)"
+cat > "$NATIVE_TARGET_FAIL_DIR/mog.toml" <<EOF_NATIVE_TARGET_FAIL
+kind = "project"
+name = "native-target-fail"
+version = "0.1.0"
+description = "native target fail"
+
+[registries.default]
+index = "$REGISTRY_DIR"
+
+[dependencies]
+counter = { package = "examples:counter", version = "0.1.0" }
+EOF_NATIVE_TARGET_FAIL
+
+if (cd "$NATIVE_TARGET_FAIL_DIR" && \
+    "$MOG" install --target "unsupported-target" >/tmp/mog_native_target_failure.txt 2>&1); then
+    echo "[FAIL] install should reject unsupported native target selections"
+    cat /tmp/mog_native_target_failure.txt
+    exit 1
+fi
+
+if ! grep -Fq "does not publish a native artifact for target" /tmp/mog_native_target_failure.txt; then
+    echo "[FAIL] install should explain unsupported native target selections"
+    cat /tmp/mog_native_target_failure.txt
+    exit 1
+fi
+
+printf 'not a valid native package\n' > \
+    "$REGISTRY_DIR/packages/examples/counter/0.1.0/$HOST_TARGET/package.so"
 rm -f "$NATIVE_CONSUMER_DIR/.mog/install/registry.toml"
-LOCKED_NATIVE_OUTPUT="$("$MOG" run --locked "$NATIVE_CONSUMER_DIR/app.mog")"
+LOCKED_NATIVE_OUTPUT="$("$MOG" run --locked --target "$HOST_TARGET" "$NATIVE_CONSUMER_DIR/app.mog")"
 if [[ "$LOCKED_NATIVE_OUTPUT" != *"examples:counter"* || "$LOCKED_NATIVE_OUTPUT" != *"15"* ]]; then
     echo "[FAIL] run --locked should continue to use the pinned native artifact"
     echo "$LOCKED_NATIVE_OUTPUT"

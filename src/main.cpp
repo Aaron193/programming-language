@@ -34,7 +34,8 @@ static void printUsage(const char* executable) {
         << "  run [flags] <file>     Install dependencies if needed, then run a program\n"
         << "  validate-package <dir> Validate a package directory\n"
         << "Flags for install/update/run:\n"
-        << "  --locked --offline\n"
+        << "  --locked --offline --prefer-prebuilt --no-native-build\n"
+        << "  --target <triple> | --target=<triple>\n"
         << "Additional flags for run:\n"
         << "  --trace --show-return --disassemble --frontend-timings --frontend-timings-json\n"
         << "  --package-path <dir> | --package-path=<dir>\n"
@@ -62,6 +63,18 @@ static bool parseRuntimeArgs(int argc, char** argv, int startIndex,
             options.installOptions.locked = true;
         } else if (arg == "--offline") {
             options.installOptions.offline = true;
+        } else if (arg == "--prefer-prebuilt") {
+            options.installOptions.preferPrebuilt = true;
+        } else if (arg == "--no-native-build") {
+            options.installOptions.noNativeBuild = true;
+        } else if (arg == "--target") {
+            if (index + 1 >= argc) {
+                outError = "Missing value for --target.";
+                return false;
+            }
+            options.installOptions.target = argv[++index];
+        } else if (arg.rfind("--target=", 0) == 0) {
+            options.installOptions.target = arg.substr(9);
         } else if (arg == "--package-path") {
             if (index + 1 >= argc) {
                 outError = "Missing value for --package-path.";
@@ -103,6 +116,18 @@ static bool parseInstallArgs(int argc, char** argv, int startIndex,
             options.locked = true;
         } else if (arg == "--offline") {
             options.offline = true;
+        } else if (arg == "--prefer-prebuilt") {
+            options.preferPrebuilt = true;
+        } else if (arg == "--no-native-build") {
+            options.noNativeBuild = true;
+        } else if (arg == "--target") {
+            if (index + 1 >= argc) {
+                outError = "Missing value for --target.";
+                return false;
+            }
+            options.target = argv[++index];
+        } else if (arg.rfind("--target=", 0) == 0) {
+            options.target = arg.substr(9);
         } else if (arg == "--help" || arg == "-h") {
             outError = "help";
             return false;

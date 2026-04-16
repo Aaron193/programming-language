@@ -29,6 +29,7 @@ struct PackageRegistryEntry {
     std::string registry;
     std::string artifactPath;
     std::string artifactDigest;
+    std::string selectedTarget;
     std::string manifestDigest;
     std::string apiDigest;
 };

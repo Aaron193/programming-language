@@ -25,8 +25,11 @@ struct ProjectManifestData {
 struct InstallOptions {
     bool locked = false;
     bool offline = false;
+    bool preferPrebuilt = true;
+    bool noNativeBuild = false;
     bool includeDevDependencies = true;
     bool update = false;
+    std::string target;
 };
 
 bool loadProjectManifestData(const std::string& projectRoot,
