@@ -38,6 +38,7 @@ add_library(mog_window_package MODULE
 )
 target_include_directories(mog_window_package
     PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}"
         "${PROJECT_SOURCE_DIR}/src"
         ${EXPR_MOG_WINDOW_INCLUDE_DIRS}
 )

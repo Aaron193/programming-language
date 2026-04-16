@@ -4,7 +4,7 @@
 
 In progress.
 
-Last updated: 2026-04-15.
+Last updated: 2026-04-16.
 
 Phase snapshot:
 
@@ -59,6 +59,9 @@ repository. The current codebase supports:
 - target-keyed native-package publish/install through the current static
   file-registry format, including `--target`, `--prefer-prebuilt`, and pinned
   selected-target metadata in `mog.lock` / `.mog/install/registry.toml`
+- published native-package source artifacts and host-target source-build
+  fallback through the current static file-registry format, including cached
+  `--offline` reinstalls and `build_from_source` metadata
 - package-manifest dependency parsing aligned with project manifests via
   `[dependencies]` inline tables, while retaining legacy compatibility for
   `dependencies = []`
@@ -69,8 +72,8 @@ Not implemented yet:
 - git dependency fetch/install
 - alternate or networked registry transports beyond the current static
   file-registry format
-- source-build fallback for published native packages
 - native system dependency diagnostics / build-toolchain diagnostics
+- non-host source-build fallback for published native packages
 - signed metadata or artifact verification
 - enterprise policy workflows beyond the current local `--locked` / `--offline`
   support
@@ -286,8 +289,11 @@ Current implementation status:
   semver constraints
 - generated metadata now records registry identity, artifact path, and
   artifact digest in addition to existing manifest/API digests
-- does not yet fetch from git/network API registries or select among
-  platform-keyed native artifacts
+- published native-package installs now select among platform-keyed native
+  artifacts and fall back to local source builds when a matching prebuilt is
+  unavailable on the current host target
+- does not yet fetch from git/network API registries or perform non-host
+  source-build fallback
 
 ### Update dependencies
 
@@ -346,8 +352,10 @@ Current implementation status:
 - implemented for source packages and current-host native packages published to
   configured static file registries
 - rejects conflicting re-publishes of an existing `package_id@version`
-- does not yet support authentication, hosted registries, or platform-keyed
-  native artifact sets
+- published native packages now emit both a generic source artifact and a
+  host-target prebuilt artifact in the current registry format
+- does not yet support authentication, hosted registries, or multi-host
+  prebuilt release automation
 
 ## Package Layout
 
@@ -950,17 +958,20 @@ Current status:
   - published native-package install through the current static file-registry
     format
   - published native-package `mog publish` using staged manifest/API/library
-    artifacts
+    artifacts plus a source artifact for local rebuilds
   - target-keyed native registry artifacts using normalized platform strings
   - native artifact selection for the host platform or explicit `--target`
     requests
   - `--prefer-prebuilt` and `--no-native-build` CLI surface
   - lockfile/install-metadata pinning of the selected native target
+  - host-target source-build fallback when a matching prebuilt is unavailable
+  - `build_from_source` lock/install/cache metadata for published native
+    packages
   - cached `--offline` reinstalls for previously fetched registry native
     packages
   - lockfile-first `mog run --locked` reuse of cached native registry artifacts
 - not yet complete inside Phase 3:
-  - source-build fallback for published native packages
+  - non-host source-build fallback and broader native toolchain policy
   - system dependency diagnostics
   - official package release automation for packages like `mog:window`
 

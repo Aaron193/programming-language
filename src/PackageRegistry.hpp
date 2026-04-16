@@ -30,6 +30,7 @@ struct PackageRegistryEntry {
     std::string artifactPath;
     std::string artifactDigest;
     std::string selectedTarget;
+    bool buildFromSource = false;
     std::string manifestDigest;
     std::string apiDigest;
 };

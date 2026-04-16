@@ -98,6 +98,19 @@ bool parseQuotedString(const std::string& value, std::string& out,
     return true;
 }
 
+bool parseBoolValue(const std::string& value, bool& out, std::string& outError) {
+    if (value == "true") {
+        out = true;
+        return true;
+    }
+    if (value == "false") {
+        out = false;
+        return true;
+    }
+    outError = "Expected boolean value.";
+    return false;
+}
+
 bool parseQuotedStringArray(const std::string& value,
                             std::vector<std::string>& outValues,
                             std::string& outError) {
@@ -338,13 +351,13 @@ bool resolveEntryPaths(const std::string& projectRoot,
                                                  entry.entryPath);
         }
     } else {
-        if (entry.libraryPath.empty()) {
+        if (entry.libraryPath.empty() && !entry.buildFromSource) {
             entry.libraryPath =
                 (std::filesystem::path(projectRoot) / "build" / "packages" /
                  entry.packageNamespace / entry.packageName /
                  kPackageLibraryFileName)
                     .string();
-        } else {
+        } else if (!entry.libraryPath.empty()) {
             entry.libraryPath =
                 canonicalOrLexical(std::filesystem::path(projectRoot) /
                                    entry.libraryPath);
@@ -455,6 +468,14 @@ bool loadLockfileEntries(const std::filesystem::path& lockfilePath,
         if (key == "dependency_groups") {
             if (!parseQuotedStringArray(value, current.dependencyGroups,
                                         outError)) {
+                outError = "Invalid lockfile line " + std::to_string(lineNumber) +
+                           ": " + outError;
+                return false;
+            }
+            continue;
+        }
+        if (key == "build_from_source") {
+            if (!parseBoolValue(value, current.buildFromSource, outError)) {
                 outError = "Invalid lockfile line " + std::to_string(lineNumber) +
                            ": " + outError;
                 return false;

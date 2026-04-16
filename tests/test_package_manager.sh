@@ -23,9 +23,12 @@ DIGEST_DIR=""
 NATIVE_PUBLISH_WORKSPACE=""
 NATIVE_CONSUMER_DIR=""
 NATIVE_BAD_DIR=""
+NATIVE_SOURCE_DIR=""
+NATIVE_NO_CMAKE_DIR=""
+NATIVE_BUILD_FAIL_DIR=""
 NATIVE_TARGET_DIR=""
 NATIVE_TARGET_FAIL_DIR=""
-trap 'rm -rf "${TEMP_DIR:-}" "${REMOTE_DIR:-}" "${WORKSPACE_DIR:-}" "${RANGE_DIR:-}" "${ADD_DIR:-}" "${ADD_RANGE_DIR:-}" "${PUBLISH_WORKSPACE:-}" "${PUBLISHED_GREETER_DIR:-}" "${DIGEST_DIR:-}" "${NATIVE_PUBLISH_WORKSPACE:-}" "${NATIVE_CONSUMER_DIR:-}" "${NATIVE_BAD_DIR:-}" "${NATIVE_TARGET_DIR:-}" "${NATIVE_TARGET_FAIL_DIR:-}"' EXIT
+trap 'rm -rf "${TEMP_DIR:-}" "${REMOTE_DIR:-}" "${WORKSPACE_DIR:-}" "${RANGE_DIR:-}" "${ADD_DIR:-}" "${ADD_RANGE_DIR:-}" "${PUBLISH_WORKSPACE:-}" "${PUBLISHED_GREETER_DIR:-}" "${DIGEST_DIR:-}" "${NATIVE_PUBLISH_WORKSPACE:-}" "${NATIVE_CONSUMER_DIR:-}" "${NATIVE_BAD_DIR:-}" "${NATIVE_SOURCE_DIR:-}" "${NATIVE_NO_CMAKE_DIR:-}" "${NATIVE_BUILD_FAIL_DIR:-}" "${NATIVE_TARGET_DIR:-}" "${NATIVE_TARGET_FAIL_DIR:-}"' EXIT
 
 detect_host_target() {
     local os
@@ -691,6 +694,9 @@ write_registry_index "$REGISTRY_DIR"
 NATIVE_PUBLISH_WORKSPACE="$(mktemp -d)"
 NATIVE_CONSUMER_DIR="$(mktemp -d)"
 NATIVE_BAD_DIR="$(mktemp -d)"
+NATIVE_SOURCE_DIR="$(mktemp -d)"
+NATIVE_NO_CMAKE_DIR="$(mktemp -d)"
+NATIVE_BUILD_FAIL_DIR="$(mktemp -d)"
 mkdir -p "$NATIVE_PUBLISH_WORKSPACE/packages/examples/counter" \
          "$NATIVE_PUBLISH_WORKSPACE/build/packages/examples/counter"
 cp "$PROJECT_ROOT/packages/examples/counter/package.toml" \
@@ -728,11 +734,20 @@ if ! grep -Fq 'package_id = "examples:counter"' "$REGISTRY_DIR/index.toml"; then
     exit 1
 fi
 
-if ! grep -Fq "native_targets = [\"$HOST_TARGET\"]" "$REGISTRY_DIR/index.toml" || \
+if ! grep -Fq 'artifact_path = "packages/examples/counter/0.1.0/source"' \
+      "$REGISTRY_DIR/index.toml" || \
+   ! grep -Fq "native_targets = [\"$HOST_TARGET\"]" "$REGISTRY_DIR/index.toml" || \
    ! grep -Fq "native_artifact_paths = [\"packages/examples/counter/0.1.0/$HOST_TARGET\"]" \
       "$REGISTRY_DIR/index.toml"; then
-    echo "[FAIL] publish should record target-keyed native artifact metadata"
+    echo "[FAIL] publish should record source and target-keyed native artifact metadata"
     cat "$REGISTRY_DIR/index.toml"
+    exit 1
+fi
+
+if [[ ! -f "$REGISTRY_DIR/packages/examples/counter/0.1.0/source/package.cpp" || \
+      ! -f "$REGISTRY_DIR/packages/examples/counter/0.1.0/source/NativePackageAPI.hpp" ]]; then
+    echo "[FAIL] publish should create a self-contained native source artifact"
+    find "$REGISTRY_DIR/packages/examples/counter/0.1.0" -maxdepth 3 -print
     exit 1
 fi
 
@@ -833,6 +848,244 @@ if ! (cd "$NATIVE_CONSUMER_DIR" && "$MOG" install --offline >/dev/null); then
     exit 1
 fi
 
+python3 - "$REGISTRY_DIR" <<'PY'
+from pathlib import Path
+import sys
+import tomllib
+
+registry_dir = Path(sys.argv[1])
+index_path = registry_dir / "index.toml"
+data = tomllib.loads(index_path.read_text(encoding="utf-8"))
+
+for package in data.get("package", []):
+    if package.get("package_id") == "examples:counter" and package.get("version") == "0.1.0":
+        package.pop("native_targets", None)
+        package.pop("native_artifact_paths", None)
+        package.pop("native_artifact_digests", None)
+        break
+else:
+    raise SystemExit("missing examples:counter@0.1.0 in registry index")
+
+parts = ['schema_version = "registry.v1"']
+for package in data.get("package", []):
+    parts.append("")
+    parts.append("[[package]]")
+    parts.append(f'package_id = "{package["package_id"]}"')
+    parts.append(f'version = "{package["version"]}"')
+    if "artifact_path" in package:
+        parts.append(f'artifact_path = "{package["artifact_path"]}"')
+    if "artifact_digest" in package:
+        parts.append(f'artifact_digest = "{package["artifact_digest"]}"')
+    if "native_targets" in package:
+        targets = ", ".join(f'"{value}"' for value in package["native_targets"])
+        paths = ", ".join(f'"{value}"' for value in package["native_artifact_paths"])
+        digests = ", ".join(f'"{value}"' for value in package["native_artifact_digests"])
+        parts.append(f"native_targets = [{targets}]")
+        parts.append(f"native_artifact_paths = [{paths}]")
+        parts.append(f"native_artifact_digests = [{digests}]")
+    deps = ", ".join(f'"{value}"' for value in package.get("dependencies", []))
+    parts.append(f"dependencies = [{deps}]")
+
+index_path.write_text("\n".join(parts) + "\n", encoding="utf-8")
+PY
+
+cat > "$NATIVE_SOURCE_DIR/mog.toml" <<EOF_NATIVE_SOURCE
+kind = "project"
+name = "native-source-consumer"
+version = "0.1.0"
+description = "native source consumer"
+
+[registries.default]
+index = "$REGISTRY_DIR"
+
+[dependencies]
+counter = { package = "examples:counter", version = "0.1.0" }
+EOF_NATIVE_SOURCE
+
+cp "$NATIVE_CONSUMER_DIR/app.mog" "$NATIVE_SOURCE_DIR/app.mog"
+
+if ! (cd "$NATIVE_SOURCE_DIR" && "$MOG" install >/dev/null); then
+    echo "[FAIL] install should source-build a native package when the registry only publishes a source artifact"
+    exit 1
+fi
+
+if ! grep -Fq 'build_from_source = true' "$NATIVE_SOURCE_DIR/mog.lock"; then
+    echo "[FAIL] lockfile should record native source-build installs"
+    cat "$NATIVE_SOURCE_DIR/mog.lock"
+    exit 1
+fi
+
+NATIVE_SOURCE_OUTPUT="$("$MOG" run "$NATIVE_SOURCE_DIR/app.mog")"
+if [[ "$NATIVE_SOURCE_OUTPUT" != *"examples:counter"* || "$NATIVE_SOURCE_OUTPUT" != *"15"* ]]; then
+    echo "[FAIL] run should execute source-built native registry packages"
+    echo "$NATIVE_SOURCE_OUTPUT"
+    exit 1
+fi
+
+rm -f "$NATIVE_SOURCE_DIR/.mog/install/registry.toml"
+if ! (cd "$NATIVE_SOURCE_DIR" && "$MOG" install --offline >/dev/null); then
+    echo "[FAIL] install --offline should succeed for cached source-built native packages"
+    exit 1
+fi
+
+cat > "$NATIVE_NO_CMAKE_DIR/mog.toml" <<EOF_NATIVE_NO_CMAKE
+kind = "project"
+name = "native-no-cmake"
+version = "0.1.0"
+description = "native no cmake"
+
+[registries.default]
+index = "$REGISTRY_DIR"
+
+[dependencies]
+counter = { package = "examples:counter", version = "0.1.0" }
+EOF_NATIVE_NO_CMAKE
+
+cp "$NATIVE_CONSUMER_DIR/app.mog" "$NATIVE_NO_CMAKE_DIR/app.mog"
+
+if (cd "$NATIVE_NO_CMAKE_DIR" && MOG_CACHE_DIR="$TEMP_DIR/no-native-build-cache" \
+    "$MOG" install --no-native-build >/tmp/mog_native_no_build_failure.txt 2>&1); then
+    echo "[FAIL] install --no-native-build should reject source-only native registry packages"
+    cat /tmp/mog_native_no_build_failure.txt
+    exit 1
+fi
+
+if ! grep -Fq -- "--no-native-build forbids using it" /tmp/mog_native_no_build_failure.txt; then
+    echo "[FAIL] install --no-native-build should explain source-fallback rejection"
+    cat /tmp/mog_native_no_build_failure.txt
+    exit 1
+fi
+
+if (cd "$NATIVE_NO_CMAKE_DIR" && MOG_CACHE_DIR="$TEMP_DIR/source-offline-cache" \
+    "$MOG" install --offline >/tmp/mog_native_source_offline_failure.txt 2>&1); then
+    echo "[FAIL] install --offline should reject uncached source-built native packages"
+    cat /tmp/mog_native_source_offline_failure.txt
+    exit 1
+fi
+
+if ! grep -Eq "offline|cached locally" /tmp/mog_native_source_offline_failure.txt; then
+    echo "[FAIL] install --offline should explain missing cached source-built native packages"
+    cat /tmp/mog_native_source_offline_failure.txt
+    exit 1
+fi
+
+if (cd "$NATIVE_NO_CMAKE_DIR" && PATH="" MOG_CACHE_DIR="$TEMP_DIR/missing-cmake-cache" \
+    "$MOG" install >/tmp/mog_native_missing_cmake_failure.txt 2>&1); then
+    echo "[FAIL] install should report missing cmake for native source fallback"
+    cat /tmp/mog_native_missing_cmake_failure.txt
+    exit 1
+fi
+
+if ! grep -Fq "requires CMake" /tmp/mog_native_missing_cmake_failure.txt; then
+    echo "[FAIL] install should explain missing cmake for native source fallback"
+    cat /tmp/mog_native_missing_cmake_failure.txt
+    exit 1
+fi
+
+cat > "$NATIVE_BUILD_FAIL_DIR/mog.toml" <<EOF_NATIVE_BUILD_FAIL
+kind = "project"
+name = "native-build-fail"
+version = "0.1.0"
+description = "native build fail"
+
+[registries.default]
+index = "$REGISTRY_DIR"
+
+[dependencies]
+counter = { package = "examples:counter", version = "0.1.2" }
+EOF_NATIVE_BUILD_FAIL
+
+cp "$NATIVE_CONSUMER_DIR/app.mog" "$NATIVE_BUILD_FAIL_DIR/app.mog"
+
+mkdir -p "$REGISTRY_DIR/packages/examples/counter/0.1.2/source"
+cp "$REGISTRY_DIR/packages/examples/counter/0.1.0/source/package.toml" \
+   "$REGISTRY_DIR/packages/examples/counter/0.1.0/source/package.api.mog" \
+   "$REGISTRY_DIR/packages/examples/counter/0.1.0/source/NativePackageAPI.hpp" \
+   "$REGISTRY_DIR/packages/examples/counter/0.1.2/source/"
+python3 - "$REGISTRY_DIR/packages/examples/counter/0.1.2/source/package.toml" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+updated = text.replace('version = "0.1.0"', 'version = "0.1.2"', 1)
+if updated == text:
+    raise SystemExit("failed to update source-build failure test manifest version")
+path.write_text(updated, encoding="utf-8")
+PY
+cat > "$REGISTRY_DIR/packages/examples/counter/0.1.2/source/package.cpp" <<'EOF_BAD_BUILD_CPP'
+#include "NativePackageAPI.hpp"
+this is not valid c++
+EOF_BAD_BUILD_CPP
+
+python3 - "$REGISTRY_DIR" <<'PY'
+from pathlib import Path
+import sys
+import tomllib
+
+registry_dir = Path(sys.argv[1])
+index_path = registry_dir / "index.toml"
+data = tomllib.loads(index_path.read_text(encoding="utf-8"))
+
+def digest_directory(root: Path) -> str:
+    files = sorted(path for path in root.rglob("*") if path.is_file())
+    seed = bytearray()
+    for path in files:
+        seed.extend(path.relative_to(root).as_posix().encode("utf-8"))
+        seed.extend(b"\n")
+        seed.extend(path.read_bytes())
+        seed.extend(b"\n")
+    value = 1469598103934665603
+    for byte in seed:
+        value ^= byte
+        value = (value * 1099511628211) & 0xFFFFFFFFFFFFFFFF
+    return f"{value:016x}"
+
+packages = data.get("package", [])
+packages.append({
+    "package_id": "examples:counter",
+    "version": "0.1.2",
+    "artifact_path": "packages/examples/counter/0.1.2/source",
+    "artifact_digest": digest_directory(registry_dir / "packages" / "examples" / "counter" / "0.1.2" / "source"),
+    "dependencies": [],
+})
+
+parts = ['schema_version = "registry.v1"']
+for package in packages:
+    parts.append("")
+    parts.append("[[package]]")
+    parts.append(f'package_id = "{package["package_id"]}"')
+    parts.append(f'version = "{package["version"]}"')
+    if "artifact_path" in package:
+        parts.append(f'artifact_path = "{package["artifact_path"]}"')
+    if "artifact_digest" in package:
+        parts.append(f'artifact_digest = "{package["artifact_digest"]}"')
+    if "native_targets" in package:
+        targets = ", ".join(f'"{value}"' for value in package["native_targets"])
+        paths = ", ".join(f'"{value}"' for value in package["native_artifact_paths"])
+        digests = ", ".join(f'"{value}"' for value in package["native_artifact_digests"])
+        parts.append(f"native_targets = [{targets}]")
+        parts.append(f"native_artifact_paths = [{paths}]")
+        parts.append(f"native_artifact_digests = [{digests}]")
+    deps = ", ".join(f'"{value}"' for value in package.get("dependencies", []))
+    parts.append(f"dependencies = [{deps}]")
+
+index_path.write_text("\n".join(parts) + "\n", encoding="utf-8")
+PY
+
+if (cd "$NATIVE_BUILD_FAIL_DIR" && MOG_CACHE_DIR="$TEMP_DIR/build-fail-cache" \
+    "$MOG" install >/tmp/mog_native_build_failure.txt 2>&1); then
+    echo "[FAIL] install should report native source-build failures"
+    cat /tmp/mog_native_build_failure.txt
+    exit 1
+fi
+
+if ! grep -Fq "source-build failed" /tmp/mog_native_build_failure.txt; then
+    echo "[FAIL] install should explain native source-build failures"
+    cat /tmp/mog_native_build_failure.txt
+    exit 1
+fi
+
 mkdir -p "$REGISTRY_DIR/packages/examples/counter/0.1.0/$ALT_TARGET"
 cp "$REGISTRY_DIR/packages/examples/counter/0.1.0/$HOST_TARGET/package.toml" \
    "$REGISTRY_DIR/packages/examples/counter/0.1.0/$ALT_TARGET/package.toml"
@@ -880,8 +1133,6 @@ for package in packages:
             digest_directory(host_dir),
             digest_directory(alt_dir),
         ]
-        package.pop("artifact_path", None)
-        package.pop("artifact_digest", None)
         break
 else:
     raise SystemExit("missing examples:counter@0.1.0 in registry index")
@@ -965,7 +1216,7 @@ if (cd "$NATIVE_TARGET_FAIL_DIR" && \
     exit 1
 fi
 
-if ! grep -Fq "does not publish a native artifact for target" /tmp/mog_native_target_failure.txt; then
+if ! grep -Eq "does not publish a prebuilt native artifact for target|source-build fallback currently supports only the host target" /tmp/mog_native_target_failure.txt; then
     echo "[FAIL] install should explain unsupported native target selections"
     cat /tmp/mog_native_target_failure.txt
     exit 1
@@ -1018,7 +1269,7 @@ cp "$PROJECT_ROOT/build/packages/examples/counter/package.so" \
 mkdir -p "$REGISTRY_DIR/packages/acme/native-missing/1.0.0"
 cat > "$REGISTRY_DIR/packages/acme/native-missing/1.0.0/mog.toml" <<'EOF_MISSING_NATIVE_MANIFEST'
 kind = "native"
-import_name = "native-missing"
+import_name = "native_missing"
 namespace = "acme"
 name = "native-missing"
 version = "1.0.0"
@@ -1033,7 +1284,70 @@ package native_missing
 const PACKAGE_ID str
 EOF_MISSING_NATIVE_API
 
-write_registry_index "$REGISTRY_DIR"
+python3 - "$REGISTRY_DIR" "$HOST_TARGET" <<'PY'
+from pathlib import Path
+import sys
+import tomllib
+
+registry_dir = Path(sys.argv[1])
+host_target = sys.argv[2]
+index_path = registry_dir / "index.toml"
+data = tomllib.loads(index_path.read_text(encoding="utf-8"))
+
+def digest_directory(root: Path) -> str:
+    files = sorted(path for path in root.rglob("*") if path.is_file())
+    seed = bytearray()
+    for path in files:
+        seed.extend(path.relative_to(root).as_posix().encode("utf-8"))
+        seed.extend(b"\n")
+        seed.extend(path.read_bytes())
+        seed.extend(b"\n")
+    value = 1469598103934665603
+    for byte in seed:
+        value ^= byte
+        value = (value * 1099511628211) & 0xFFFFFFFFFFFFFFFF
+    return f"{value:016x}"
+
+packages = data.get("package", [])
+packages.append({
+    "package_id": "examples:counter",
+    "version": "0.1.1",
+    "native_targets": [host_target],
+    "native_artifact_paths": ["packages/examples/counter/0.1.1"],
+    "native_artifact_digests": [digest_directory(registry_dir / "packages" / "examples" / "counter" / "0.1.1")],
+    "dependencies": [],
+})
+packages.append({
+    "package_id": "acme:native-missing",
+    "version": "1.0.0",
+    "native_targets": [host_target],
+    "native_artifact_paths": ["packages/acme/native-missing/1.0.0"],
+    "native_artifact_digests": [digest_directory(registry_dir / "packages" / "acme" / "native-missing" / "1.0.0")],
+    "dependencies": [],
+})
+
+parts = ['schema_version = "registry.v1"']
+for package in packages:
+    parts.append("")
+    parts.append("[[package]]")
+    parts.append(f'package_id = "{package["package_id"]}"')
+    parts.append(f'version = "{package["version"]}"')
+    if "artifact_path" in package:
+        parts.append(f'artifact_path = "{package["artifact_path"]}"')
+    if "artifact_digest" in package:
+        parts.append(f'artifact_digest = "{package["artifact_digest"]}"')
+    if "native_targets" in package:
+        targets = ", ".join(f'"{value}"' for value in package["native_targets"])
+        paths = ", ".join(f'"{value}"' for value in package["native_artifact_paths"])
+        digests = ", ".join(f'"{value}"' for value in package["native_artifact_digests"])
+        parts.append(f"native_targets = [{targets}]")
+        parts.append(f"native_artifact_paths = [{paths}]")
+        parts.append(f"native_artifact_digests = [{digests}]")
+    deps = ", ".join(f'"{value}"' for value in package.get("dependencies", []))
+    parts.append(f"dependencies = [{deps}]")
+
+index_path.write_text("\n".join(parts) + "\n", encoding="utf-8")
+PY
 
 cat > "$NATIVE_BAD_DIR/mog.toml" <<EOF_BAD_NATIVE_API_CONSUMER
 kind = "project"
