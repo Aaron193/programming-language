@@ -20,7 +20,10 @@ ADD_RANGE_DIR=""
 PUBLISH_WORKSPACE=""
 PUBLISHED_GREETER_DIR=""
 DIGEST_DIR=""
-trap 'rm -rf "${TEMP_DIR:-}" "${REMOTE_DIR:-}" "${WORKSPACE_DIR:-}" "${RANGE_DIR:-}" "${ADD_DIR:-}" "${ADD_RANGE_DIR:-}" "${PUBLISH_WORKSPACE:-}" "${PUBLISHED_GREETER_DIR:-}" "${DIGEST_DIR:-}"' EXIT
+NATIVE_PUBLISH_WORKSPACE=""
+NATIVE_CONSUMER_DIR=""
+NATIVE_BAD_DIR=""
+trap 'rm -rf "${TEMP_DIR:-}" "${REMOTE_DIR:-}" "${WORKSPACE_DIR:-}" "${RANGE_DIR:-}" "${ADD_DIR:-}" "${ADD_RANGE_DIR:-}" "${PUBLISH_WORKSPACE:-}" "${PUBLISHED_GREETER_DIR:-}" "${DIGEST_DIR:-}" "${NATIVE_PUBLISH_WORKSPACE:-}" "${NATIVE_CONSUMER_DIR:-}" "${NATIVE_BAD_DIR:-}"' EXIT
 
 write_registry_index() {
     local registry_dir="$1"
@@ -34,24 +37,24 @@ mode = sys.argv[2]
 
 def digest_directory(root: Path) -> str:
     files = sorted(path for path in root.rglob("*") if path.is_file())
-    seed = []
+    seed = bytearray()
     for path in files:
-        seed.append(path.relative_to(root).as_posix())
-        seed.append("\n")
-        seed.append(path.read_text(encoding="utf-8"))
-        seed.append("\n")
-    text = "".join(seed).encode("utf-8")
+        seed.extend(path.relative_to(root).as_posix().encode("utf-8"))
+        seed.extend(b"\n")
+        seed.extend(path.read_bytes())
+        seed.extend(b"\n")
     value = 1469598103934665603
-    for byte in text:
+    for byte in seed:
         value ^= byte
         value = (value * 1099511628211) & 0xFFFFFFFFFFFFFFFF
     return f"{value:016x}"
 
 records = []
-for package_dir in sorted((registry_dir / "packages" / "acme").glob("*/*")):
+for package_dir in sorted((registry_dir / "packages").glob("*/*/*")):
+    namespace = package_dir.parent.parent.name
     package_name = package_dir.parent.name
     version = package_dir.name
-    package_id = f"acme:{package_name}"
+    package_id = f"{namespace}:{package_name}"
     digest = digest_directory(package_dir)
     if mode == "digest-mismatch" and package_id == "acme:http" and version == "1.0.0":
         digest = "0000000000000000"
@@ -618,31 +621,6 @@ if ! grep -Fq "unknown registry" /tmp/mog_registry_missing_failure.txt; then
     exit 1
 fi
 
-cat > "$REMOTE_DIR/mog.toml" <<EOF_NATIVE_REMOTE
-kind = "project"
-name = "remote-test"
-version = "0.1.0"
-description = "remote source test"
-
-[registries.default]
-index = "$REGISTRY_DIR"
-
-[dependencies]
-native = { package = "acme:native-demo", version = "1.0.0" }
-EOF_NATIVE_REMOTE
-
-if (cd "$REMOTE_DIR" && "$MOG" install >/tmp/mog_registry_native_failure.txt 2>&1); then
-    echo "[FAIL] install should reject published native packages in Phase 2A"
-    cat /tmp/mog_registry_native_failure.txt
-    exit 1
-fi
-
-if ! grep -Eq "Phase 3|Published native packages" /tmp/mog_registry_native_failure.txt; then
-    echo "[FAIL] install should explain published native packages are deferred"
-    cat /tmp/mog_registry_native_failure.txt
-    exit 1
-fi
-
 write_registry_index "$REGISTRY_DIR" digest-mismatch
 DIGEST_DIR="$(mktemp -d)"
 cat > "$DIGEST_DIR/mog.toml" <<EOF_BAD_DIGEST
@@ -667,6 +645,243 @@ fi
 if ! grep -Fq "digest mismatch" /tmp/mog_registry_digest_failure.txt; then
     echo "[FAIL] install should explain registry artifact digest mismatches"
     cat /tmp/mog_registry_digest_failure.txt
+    exit 1
+fi
+
+write_registry_index "$REGISTRY_DIR"
+
+NATIVE_PUBLISH_WORKSPACE="$(mktemp -d)"
+NATIVE_CONSUMER_DIR="$(mktemp -d)"
+NATIVE_BAD_DIR="$(mktemp -d)"
+mkdir -p "$NATIVE_PUBLISH_WORKSPACE/packages/examples/counter" \
+         "$NATIVE_PUBLISH_WORKSPACE/build/packages/examples/counter"
+cp "$PROJECT_ROOT/packages/examples/counter/package.toml" \
+   "$PROJECT_ROOT/packages/examples/counter/package.api.mog" \
+   "$PROJECT_ROOT/packages/examples/counter/package.cpp" \
+   "$NATIVE_PUBLISH_WORKSPACE/packages/examples/counter/"
+cp "$PROJECT_ROOT/build/packages/examples/counter/package.so" \
+   "$NATIVE_PUBLISH_WORKSPACE/build/packages/examples/counter/package.so"
+
+cat > "$NATIVE_PUBLISH_WORKSPACE/mog.toml" <<EOF_NATIVE_PUBLISH_ROOT
+kind = "project"
+name = "native-publish-root"
+version = "0.1.0"
+description = "native publish root"
+
+[registries.default]
+index = "$REGISTRY_DIR"
+EOF_NATIVE_PUBLISH_ROOT
+
+if ! (cd "$NATIVE_PUBLISH_WORKSPACE" && \
+      "$MOG" publish "$NATIVE_PUBLISH_WORKSPACE/packages/examples/counter" >/dev/null); then
+    echo "[FAIL] publish should create a native package registry entry"
+    exit 1
+fi
+
+if ! (cd "$NATIVE_PUBLISH_WORKSPACE" && \
+      "$MOG" publish "$NATIVE_PUBLISH_WORKSPACE/packages/examples/counter" >/dev/null); then
+    echo "[FAIL] publish should allow idempotent native re-publish"
+    exit 1
+fi
+
+if ! grep -Fq 'package_id = "examples:counter"' "$REGISTRY_DIR/index.toml"; then
+    echo "[FAIL] publish should record the native package in the registry index"
+    cat "$REGISTRY_DIR/index.toml"
+    exit 1
+fi
+
+python3 - "$NATIVE_PUBLISH_WORKSPACE/packages/examples/counter/package.toml" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+updated = text.replace(
+    'description = "Reference opaque handle package."',
+    'description = "Conflicting native publish contents."',
+)
+if updated == text:
+    raise SystemExit("failed to update native package description")
+path.write_text(updated, encoding="utf-8")
+PY
+
+if (cd "$NATIVE_PUBLISH_WORKSPACE" && \
+    "$MOG" publish "$NATIVE_PUBLISH_WORKSPACE/packages/examples/counter" \
+    >/tmp/mog_native_publish_conflict.txt 2>&1); then
+    echo "[FAIL] publish should reject conflicting native re-publishes"
+    cat /tmp/mog_native_publish_conflict.txt
+    exit 1
+fi
+
+if ! grep -Fq "different published contents" /tmp/mog_native_publish_conflict.txt; then
+    echo "[FAIL] publish should explain native re-publish conflicts"
+    cat /tmp/mog_native_publish_conflict.txt
+    exit 1
+fi
+
+cat > "$NATIVE_CONSUMER_DIR/mog.toml" <<EOF_NATIVE_CONSUMER
+kind = "project"
+name = "native-consumer"
+version = "0.1.0"
+description = "native consumer"
+
+[registries.default]
+index = "$REGISTRY_DIR"
+
+[dependencies]
+counter = { package = "examples:counter", version = "0.1.0" }
+EOF_NATIVE_CONSUMER
+
+cat > "$NATIVE_CONSUMER_DIR/app.mog" <<'EOF_NATIVE_CONSUMER_APP'
+const counter = @import("counter")
+
+const value = counter.create(10i64)
+print(counter.PACKAGE_ID)
+print(counter.add(value, 5i64))
+EOF_NATIVE_CONSUMER_APP
+
+if ! (cd "$NATIVE_CONSUMER_DIR" && "$MOG" install >/dev/null); then
+    echo "[FAIL] install should resolve published native packages from the registry"
+    exit 1
+fi
+
+NATIVE_RUN_OUTPUT="$("$MOG" run "$NATIVE_CONSUMER_DIR/app.mog")"
+if [[ "$NATIVE_RUN_OUTPUT" != *"examples:counter"* || "$NATIVE_RUN_OUTPUT" != *"15"* ]]; then
+    echo "[FAIL] run should execute registry-installed native packages"
+    echo "$NATIVE_RUN_OUTPUT"
+    exit 1
+fi
+
+if ! grep -Fq 'package_id = "examples:counter"' "$NATIVE_CONSUMER_DIR/mog.lock" || \
+   ! grep -Fq 'source_type = "registry"' "$NATIVE_CONSUMER_DIR/mog.lock" || \
+   ! grep -Fq 'kind = "native"' "$NATIVE_CONSUMER_DIR/mog.lock"; then
+    echo "[FAIL] native registry installs should be recorded in mog.lock"
+    cat "$NATIVE_CONSUMER_DIR/mog.lock"
+    exit 1
+fi
+
+if [[ ! -f "$NATIVE_CONSUMER_DIR/.mog/install/packages/examples/counter/package.so" ]]; then
+    echo "[FAIL] native registry installs should materialize the shared library"
+    find "$NATIVE_CONSUMER_DIR/.mog" -maxdepth 6 -print
+    exit 1
+fi
+
+rm -f "$NATIVE_CONSUMER_DIR/.mog/install/registry.toml"
+if ! (cd "$NATIVE_CONSUMER_DIR" && "$MOG" install --offline >/dev/null); then
+    echo "[FAIL] install --offline should succeed for cached native registry packages"
+    exit 1
+fi
+
+printf 'not a valid native package\n' > "$REGISTRY_DIR/packages/examples/counter/0.1.0/package.so"
+rm -f "$NATIVE_CONSUMER_DIR/.mog/install/registry.toml"
+LOCKED_NATIVE_OUTPUT="$("$MOG" run --locked "$NATIVE_CONSUMER_DIR/app.mog")"
+if [[ "$LOCKED_NATIVE_OUTPUT" != *"examples:counter"* || "$LOCKED_NATIVE_OUTPUT" != *"15"* ]]; then
+    echo "[FAIL] run --locked should continue to use the pinned native artifact"
+    echo "$LOCKED_NATIVE_OUTPUT"
+    exit 1
+fi
+
+mkdir -p "$REGISTRY_DIR/packages/examples/counter/0.1.1"
+cat > "$REGISTRY_DIR/packages/examples/counter/0.1.1/package.toml" <<'EOF_BAD_NATIVE_API_MANIFEST'
+kind = "native"
+import_name = "counter"
+namespace = "examples"
+name = "counter"
+version = "0.1.1"
+abi_version = 3
+author = "Registry test"
+description = "Published native package with a bad API."
+dependencies = []
+EOF_BAD_NATIVE_API_MANIFEST
+cat > "$REGISTRY_DIR/packages/examples/counter/0.1.1/package.api.mog" <<'EOF_BAD_NATIVE_API'
+package counter
+
+@doc("GC-managed opaque counter handle.")
+@native_handle("CounterHandle")
+opaque type Counter
+
+@doc("Canonical namespaced package identifier.")
+const PACKAGE_ID str
+
+@doc("Create a new counter handle.")
+fn create(initial i64) Counter
+
+@doc("Read the current counter value.")
+fn read(counter Counter) i64
+
+@doc("Add to the counter and return the updated value.")
+fn add(counter Counter, delta str) i64
+EOF_BAD_NATIVE_API
+cp "$PROJECT_ROOT/build/packages/examples/counter/package.so" \
+   "$REGISTRY_DIR/packages/examples/counter/0.1.1/package.so"
+
+mkdir -p "$REGISTRY_DIR/packages/acme/native-missing/1.0.0"
+cat > "$REGISTRY_DIR/packages/acme/native-missing/1.0.0/mog.toml" <<'EOF_MISSING_NATIVE_MANIFEST'
+kind = "native"
+import_name = "native-missing"
+namespace = "acme"
+name = "native-missing"
+version = "1.0.0"
+abi_version = 3
+author = "Registry test"
+description = "Published native package missing its library."
+dependencies = []
+EOF_MISSING_NATIVE_MANIFEST
+cat > "$REGISTRY_DIR/packages/acme/native-missing/1.0.0/package.api.mog" <<'EOF_MISSING_NATIVE_API'
+package native_missing
+
+const PACKAGE_ID str
+EOF_MISSING_NATIVE_API
+
+write_registry_index "$REGISTRY_DIR"
+
+cat > "$NATIVE_BAD_DIR/mog.toml" <<EOF_BAD_NATIVE_API_CONSUMER
+kind = "project"
+name = "bad-native-api"
+version = "0.1.0"
+description = "bad native api"
+
+[registries.default]
+index = "$REGISTRY_DIR"
+
+[dependencies]
+counter = { package = "examples:counter", version = "0.1.1" }
+EOF_BAD_NATIVE_API_CONSUMER
+
+if (cd "$NATIVE_BAD_DIR" && "$MOG" install >/tmp/mog_native_bad_api_failure.txt 2>&1); then
+    echo "[FAIL] install should reject published native packages with invalid APIs"
+    cat /tmp/mog_native_bad_api_failure.txt
+    exit 1
+fi
+
+if ! grep -Fq "type mismatch" /tmp/mog_native_bad_api_failure.txt; then
+    echo "[FAIL] install should explain native API validation failures"
+    cat /tmp/mog_native_bad_api_failure.txt
+    exit 1
+fi
+
+cat > "$NATIVE_BAD_DIR/mog.toml" <<EOF_MISSING_NATIVE_CONSUMER
+kind = "project"
+name = "missing-native"
+version = "0.1.0"
+description = "missing native library"
+
+[registries.default]
+index = "$REGISTRY_DIR"
+
+[dependencies]
+missing = { package = "acme:native-missing", version = "1.0.0" }
+EOF_MISSING_NATIVE_CONSUMER
+
+if (cd "$NATIVE_BAD_DIR" && "$MOG" install >/tmp/mog_native_missing_failure.txt 2>&1); then
+    echo "[FAIL] install should reject published native packages without a shared library"
+    cat /tmp/mog_native_missing_failure.txt
+    exit 1
+fi
+
+if ! grep -Eq "built library|shared library" /tmp/mog_native_missing_failure.txt; then
+    echo "[FAIL] install should explain missing native shared libraries"
+    cat /tmp/mog_native_missing_failure.txt
     exit 1
 fi
 

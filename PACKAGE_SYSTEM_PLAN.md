@@ -4,6 +4,16 @@
 
 In progress.
 
+Last updated: 2026-04-15.
+
+Phase snapshot:
+
+- Phase 1 local package-management baseline: mostly complete
+- Phase 2 registry and publishing: partially implemented
+- Phase 3 native artifact distribution: in progress
+- Phase 4 enterprise and security features: not started beyond local
+  `--locked` / `--offline` workflows
+
 Phase 1 local package-management work is now substantially implemented in the
 repository. The current codebase supports:
 
@@ -44,6 +54,8 @@ repository. The current codebase supports:
   `namespace/name@constraint` specs
 - source-package `mog publish` to the current static file-registry format,
   including exact dependency pinning and idempotent re-publish checks
+- native-package `mog publish` / install through the current static
+  file-registry format for the current host platform
 - package-manifest dependency parsing aligned with project manifests via
   `[dependencies]` inline tables, while retaining legacy compatibility for
   `dependencies = []`
@@ -55,7 +67,6 @@ Not implemented yet:
 - alternate or networked registry transports beyond the current static
   file-registry format
 - prebuilt native artifact distribution
-- published native package installation
 - signed metadata or artifact verification
 - enterprise policy workflows beyond the current local `--locked` / `--offline`
   support
@@ -263,16 +274,16 @@ Behavior:
 
 Current implementation status:
 
-- implemented for local path, workspace, and published source packages from
-  configured static file registries
-- supports `--locked` and `--offline` for local graphs and for registry source
+- implemented for local path, workspace, published source packages, and
+  published native packages from configured static file registries
+- supports `--locked` and `--offline` for local graphs and for registry
   packages that are already cached locally
 - published source-package resolution supports exact versions plus `^` and `~`
   semver constraints
 - generated metadata now records registry identity, artifact path, and
   artifact digest in addition to existing manifest/API digests
-- does not yet install published native packages or fetch from git/network API
-  registries
+- does not yet fetch from git/network API registries or select among
+  platform-keyed native artifacts
 
 ### Update dependencies
 
@@ -323,16 +334,16 @@ Behavior:
 
 - validates manifest and API metadata
 - resolves published direct dependencies to exact pins
-- copies source artifacts into the current static file-registry layout
+- copies package artifacts into the current static file-registry layout
 - updates the registry index and records artifact digests
 
 Current implementation status:
 
-- implemented for source packages published to configured static file
-  registries
+- implemented for source packages and current-host native packages published to
+  configured static file registries
 - rejects conflicting re-publishes of an existing `package_id@version`
-- does not yet support authentication, hosted registries, or published native
-  packages
+- does not yet support authentication, hosted registries, or platform-keyed
+  native artifact sets
 
 ## Package Layout
 
@@ -704,14 +715,13 @@ Recommended supporting flags:
 
 Current implementation status:
 
-- implemented commands: `init`, `add`, `install`, `update`, `run`,
+- implemented commands: `init`, `add`, `install`, `update`, `publish`, `run`,
   `validate-package`
 - implemented compatibility path: `mog <file>`
 - implemented legacy flag compatibility: `--validate-package`
 - implemented package-manager flags: `--locked`, `--offline`
-- not implemented yet: `remove`, `test`, `build`, `publish`, `login`,
-  `registry`, `cache`, `audit`, and the remaining recommended package-manager
-  flags
+- not implemented yet: `remove`, `test`, `build`, `login`, `registry`,
+  `cache`, `audit`, and the remaining recommended package-manager flags
 
 ## Tooling Integration
 
@@ -931,7 +941,21 @@ Deliver:
 
 Current status:
 
-- not started
+- Phase 3A in progress
+- shipped in the current Phase 3A native-registry slice:
+  - published native-package install through the current static file-registry
+    format for the current host platform
+  - published native-package `mog publish` using staged manifest/API/library
+    artifacts
+  - cached `--offline` reinstalls for previously fetched registry native
+    packages
+  - lockfile-first `mog run --locked` reuse of cached native registry artifacts
+- not yet complete inside Phase 3:
+  - platform-keyed artifact selection
+  - `--prefer-prebuilt`
+  - source-build fallback for published native packages
+  - system dependency diagnostics
+  - official package release automation for packages like `mog:window`
 
 ### Phase 4: Enterprise and Security Features
 
@@ -945,7 +969,8 @@ Deliver:
 
 Current status:
 
-- not started
+- not started as a distinct feature slice beyond the local `--locked` /
+  `--offline` baseline already shipped in earlier phases
 
 ## Recommended Immediate Decisions
 

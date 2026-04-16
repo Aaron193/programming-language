@@ -732,6 +732,53 @@ std::filesystem::path cacheMetadataPath(const std::filesystem::path& cacheDir) {
     return cacheDir / kCacheMetadataFileName;
 }
 
+struct ScopedPathCleanup {
+    std::filesystem::path path;
+
+    ~ScopedPathCleanup() {
+        if (path.empty()) {
+            return;
+        }
+
+        std::error_code ec;
+        std::filesystem::remove_all(path, ec);
+    }
+};
+
+bool createTemporaryDirectory(std::string_view prefix,
+                              std::filesystem::path& outPath,
+                              std::string& outError) {
+    std::error_code ec;
+    const std::filesystem::path tempRoot =
+        std::filesystem::temp_directory_path(ec);
+    if (ec) {
+        outError = "Could not resolve the system temporary directory.";
+        return false;
+    }
+
+    for (int attempt = 0; attempt < 1024; ++attempt) {
+        const std::string suffix =
+            hashString(std::string(prefix) + "|" + std::to_string(std::rand()) +
+                       "|" + std::to_string(attempt));
+        const std::filesystem::path candidate =
+            tempRoot / (std::string(prefix) + "-" + suffix);
+        std::filesystem::create_directories(candidate, ec);
+        if (!ec) {
+            outPath = candidate;
+            return true;
+        }
+        if (ec != std::errc::file_exists) {
+            outError = "Could not create temporary directory '" +
+                       candidate.string() + "'.";
+            return false;
+        }
+        ec.clear();
+    }
+
+    outError = "Could not allocate a unique temporary directory.";
+    return false;
+}
+
 std::string inferWorkspaceRoot(const std::filesystem::path& packageDir,
                                const PackageRegistryEntry& entry,
                                const std::string& fallbackProjectRoot) {
@@ -785,7 +832,10 @@ bool loadPackageEntryFromDir(const std::filesystem::path& packageDir,
                                               : packageDir / manifest.entry;
         outEntry.entryPath = canonicalOrLexical(entryPath);
     } else if (!manifest.library.empty()) {
-        outEntry.libraryPath = canonicalOrLexical(packageDir / manifest.library);
+        const std::filesystem::path configuredLibrary = packageDir / manifest.library;
+        if (fileExists(configuredLibrary)) {
+            outEntry.libraryPath = canonicalOrLexical(configuredLibrary);
+        }
     } else {
         const std::filesystem::path directLibrary =
             packageDir / kPackageLibraryFileName;
@@ -1628,11 +1678,6 @@ bool resolveRegistryPackageNode(
                    "' but the index expects '" + record.version + "'.";
         return false;
     }
-    if (node.entry.kind != "source") {
-        outError = "Published native packages are not implemented until Phase 3: '" +
-                   packageId + "'.";
-        return false;
-    }
     if (!packageIdsMatchDependencyPins(node.entry.dependencyIds, record.dependencies)) {
         outError = "Registry artifact '" + artifactPath.string() +
                    "' has dependency IDs that do not match the registry index for '" +
@@ -1657,17 +1702,73 @@ bool resolveRegistryPackageNode(
     return true;
 }
 
-void ensureResolvedLibraryPath(PackageNode& node, const std::string& projectRoot) {
-    if (node.entry.kind != "native" || !node.entry.libraryPath.empty()) {
+void ensureResolvedLibraryPath(PackageRegistryEntry& entry,
+                               const std::filesystem::path& packageDir,
+                               const std::string& projectRoot) {
+    if (entry.kind != "native" || !entry.libraryPath.empty()) {
         return;
     }
 
     const std::string workspaceRoot =
-        inferWorkspaceRoot(node.packageDir, node.entry, projectRoot);
-    node.entry.libraryPath = canonicalOrLexical(
+        inferWorkspaceRoot(packageDir, entry, projectRoot);
+    const std::filesystem::path candidate =
         std::filesystem::path(workspaceRoot) / "build" / "packages" /
-        node.entry.packageNamespace / node.entry.packageName /
-        kPackageLibraryFileName);
+        entry.packageNamespace / entry.packageName / kPackageLibraryFileName;
+    if (fileExists(candidate)) {
+        entry.libraryPath = canonicalOrLexical(candidate);
+    }
+}
+
+void ensureResolvedLibraryPath(PackageNode& node, const std::string& projectRoot) {
+    ensureResolvedLibraryPath(node.entry, node.packageDir, projectRoot);
+}
+
+bool stagePublishedNativeArtifact(const std::filesystem::path& packagePath,
+                                  const PackageManifest& manifest,
+                                  const PackageRegistryEntry& packageEntry,
+                                  std::filesystem::path& outStagingDir,
+                                  std::string& outError) {
+    outStagingDir.clear();
+
+    if (packageEntry.libraryPath.empty() ||
+        !fileExists(std::filesystem::path(packageEntry.libraryPath))) {
+        outError = "Native package '" + packageEntry.packageId +
+                   "' does not have a built library to publish.";
+        return false;
+    }
+
+    if (!createTemporaryDirectory("mog-publish-native", outStagingDir, outError)) {
+        return false;
+    }
+
+    const std::filesystem::path manifestPath =
+        fileExists(packagePath / kProjectManifestFileName)
+            ? packagePath / kProjectManifestFileName
+            : packagePath / "package.toml";
+    if (!fileExists(manifestPath)) {
+        outError = "Could not find manifest for native package '" +
+                   packageEntry.packageId + "'.";
+        return false;
+    }
+    if (!copyFileReplacing(manifestPath, outStagingDir / manifestPath.filename(),
+                           outError)) {
+        return false;
+    }
+
+    if (!packageEntry.apiPath.empty() &&
+        !copyFileReplacing(packageEntry.apiPath, outStagingDir / kPackageApiFileName,
+                           outError)) {
+        return false;
+    }
+
+    const std::filesystem::path libraryDestination =
+        manifest.library.empty() ? outStagingDir / kPackageLibraryFileName
+                                 : outStagingDir / manifest.library;
+    if (!copyFileReplacing(packageEntry.libraryPath, libraryDestination, outError)) {
+        return false;
+    }
+
+    return true;
 }
 
 bool resolveDependencyNode(
@@ -1763,6 +1864,41 @@ bool validatePackageEntry(const PackageRegistryEntry& entry,
                           std::string& outError) {
     const std::filesystem::path packageDir(entry.packageDir);
     if (entry.kind == "native") {
+        if (entry.sourceType == "registry") {
+            if (entry.libraryPath.empty() ||
+                !fileExists(std::filesystem::path(entry.libraryPath))) {
+                outError = "Native package '" + entry.packageId +
+                           "' does not have a built library to install.";
+                return false;
+            }
+
+            NativePackageDescriptor descriptor;
+            if (!loadNativePackageDescriptor(entry.libraryPath, descriptor, outError,
+                                             false, nullptr)) {
+                return false;
+            }
+            if (descriptor.packageId != entry.packageId) {
+                outError = "Registry native package '" + entry.packageId +
+                           "' is backed by library '" + descriptor.packageId +
+                           "'.";
+                return false;
+            }
+
+            if (entry.apiPath.empty() ||
+                !fileExists(std::filesystem::path(entry.apiPath))) {
+                outError = "Native package '" + entry.packageId +
+                           "' is missing package.api.mog.";
+                return false;
+            }
+
+            PackageApiMetadata apiMetadata;
+            if (!loadPackageApiMetadata(entry.apiPath, entry.packageId,
+                                        entry.importName, apiMetadata, outError)) {
+                return false;
+            }
+            return validateNativePackageApi(apiMetadata, descriptor, outError);
+        }
+
         const std::string validationRoot =
             inferWorkspaceRoot(packageDir, entry, projectRoot);
         return validatePackageDirectory(packageDir.string(), validationRoot,
@@ -2912,15 +3048,11 @@ bool publishProjectPackage(const std::string& projectRoot,
     if (!loadPackageManifest(packagePath.string(), manifest, outError)) {
         return false;
     }
-    if (manifest.kind != "source") {
-        outError = "Only source packages can be published in this Phase 2 slice.";
-        return false;
-    }
 
     for (const auto& dependency : manifest.dependencies) {
         if (dependency.packageId.empty() || !dependency.path.empty() ||
             dependency.workspace || !dependency.git.empty()) {
-            outError = "Published source packages currently require published dependency specs with package = \"namespace:name\" and optional version constraints.";
+            outError = "Published packages currently require published dependency specs with package = \"namespace:name\" and optional version constraints.";
             return false;
         }
     }
@@ -2929,6 +3061,7 @@ bool publishProjectPackage(const std::string& projectRoot,
     if (!loadPackageEntryFromDir(packagePath, packageEntry, nullptr, outError)) {
         return false;
     }
+    ensureResolvedLibraryPath(packageEntry, packagePath, projectRoot);
     if (!validatePackageEntry(packageEntry, projectRoot, outError)) {
         return false;
     }
@@ -2993,10 +3126,20 @@ bool publishProjectPackage(const std::string& projectRoot,
     const std::string relativeArtifactPath =
         normalizeRelativePath(
             artifactDir.lexically_relative(registryRoot).lexically_normal().string());
-    const std::string artifactDigest = digestDirectory(packagePath);
+    std::filesystem::path artifactSource = packagePath;
+    ScopedPathCleanup stagedArtifactCleanup;
+    if (packageEntry.kind == "native") {
+        if (!stagePublishedNativeArtifact(packagePath, manifest, packageEntry,
+                                          artifactSource, outError)) {
+            return false;
+        }
+        stagedArtifactCleanup.path = artifactSource;
+    }
+
+    const std::string artifactDigest = digestDirectory(artifactSource);
     if (artifactDigest.empty()) {
         outError = "Could not compute publish artifact digest for '" +
-                   packagePath.string() + "'.";
+                   artifactSource.string() + "'.";
         return false;
     }
 
@@ -3035,7 +3178,7 @@ bool publishProjectPackage(const std::string& projectRoot,
             return false;
         }
     } else {
-        if (!copyDirectoryRecursive(packagePath, artifactDir, outError)) {
+        if (!copyDirectoryRecursive(artifactSource, artifactDir, outError)) {
             return false;
         }
     }

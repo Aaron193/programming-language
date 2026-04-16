@@ -378,6 +378,13 @@ bool pathEndsWith(const std::filesystem::path& path,
 std::string findLibraryPath(const std::filesystem::path& packageDir,
                             const PackageManifest& manifest,
                             const std::filesystem::path& repoRoot) {
+    if (!manifest.library.empty()) {
+        const std::filesystem::path configuredLibrary = packageDir / manifest.library;
+        if (std::filesystem::exists(configuredLibrary)) {
+            return joinPath(configuredLibrary);
+        }
+    }
+
     const std::filesystem::path directLibrary =
         packageDir / kPackageLibraryFileName;
     if (std::filesystem::exists(directLibrary)) {

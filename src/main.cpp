@@ -30,7 +30,7 @@ static void printUsage(const char* executable) {
         << "  add <package>          Add a package dependency and install it\n"
         << "  install [flags]        Install dependencies using mog.lock when it is current\n"
         << "  update [flags]         Re-resolve dependencies and rewrite install metadata\n"
-        << "  publish [options] [dir] Publish a source package to a configured file registry\n"
+        << "  publish [options] [dir] Publish a package to a configured file registry\n"
         << "  run [flags] <file>     Install dependencies if needed, then run a program\n"
         << "  validate-package <dir> Validate a package directory\n"
         << "Flags for install/update/run:\n"

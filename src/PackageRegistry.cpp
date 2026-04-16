@@ -547,7 +547,10 @@ bool loadPackageManifestEntry(const std::filesystem::path& packageDir,
         outEntry.entryPath = canonicalOrLexical(packageDir / manifest.entry);
     }
     if (!manifest.library.empty()) {
-        outEntry.libraryPath = canonicalOrLexical(packageDir / manifest.library);
+        const std::filesystem::path configuredLibrary = packageDir / manifest.library;
+        if (fileExists(configuredLibrary.string())) {
+            outEntry.libraryPath = canonicalOrLexical(configuredLibrary);
+        }
     }
 
     const std::filesystem::path apiPath = packageDir / kPackageApiFileName;
