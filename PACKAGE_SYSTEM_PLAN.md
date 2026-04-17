@@ -4,13 +4,14 @@
 
 In progress.
 
-Last updated: 2026-04-16.
+Last updated: 2026-04-17.
 
 Phase snapshot:
 
 - Phase 1 local package-management baseline: mostly complete
 - Phase 2 registry and publishing: partially implemented
-- Phase 3 native artifact distribution: in progress
+- Phase 3 native artifact distribution: in progress (Phase 3C diagnostics /
+  official-package pilot)
 - Phase 4 enterprise and security features: not started beyond local
   `--locked` / `--offline` workflows
 
@@ -65,6 +66,13 @@ repository. The current codebase supports:
 - package-manifest dependency parsing aligned with project manifests via
   `[dependencies]` inline tables, while retaining legacy compatibility for
   `dependencies = []`
+- native package `[system-dependencies]` manifest metadata for install-time
+  diagnostics, including the `mog:window` SDL2 declaration
+- richer native source-build fallback diagnostics that report the selected
+  target, declared system dependencies, and missing-dependency hints from the
+  build log
+- SDL-gated file-registry publish/install smoke coverage for the official
+  `mog:window` package
 
 Not implemented yet:
 
@@ -72,7 +80,6 @@ Not implemented yet:
 - git dependency fetch/install
 - alternate or networked registry transports beyond the current static
   file-registry format
-- native system dependency diagnostics / build-toolchain diagnostics
 - non-host source-build fallback for published native packages
 - signed metadata or artifact verification
 - enterprise policy workflows beyond the current local `--locked` / `--offline`
@@ -731,9 +738,10 @@ Current implementation status:
   `validate-package`
 - implemented compatibility path: `mog <file>`
 - implemented legacy flag compatibility: `--validate-package`
-- implemented package-manager flags: `--locked`, `--offline`
+- implemented package-manager flags: `--locked`, `--offline`,
+  `--no-native-build`, `--prefer-prebuilt`, and `--target`
 - not implemented yet: `remove`, `test`, `build`, `login`, `registry`,
-  `cache`, `audit`, and the remaining recommended package-manager flags
+  `cache`, and `audit`
 
 ## Tooling Integration
 
@@ -953,8 +961,8 @@ Deliver:
 
 Current status:
 
-- Phase 3B in progress
-- shipped in the current Phase 3A/3B native-registry slice:
+- Phase 3C in progress
+- shipped in the current Phase 3A/3C native-registry slice:
   - published native-package install through the current static file-registry
     format
   - published native-package `mog publish` using staged manifest/API/library
@@ -970,9 +978,14 @@ Current status:
   - cached `--offline` reinstalls for previously fetched registry native
     packages
   - lockfile-first `mog run --locked` reuse of cached native registry artifacts
+  - native `[system-dependencies]` metadata parsing for published native
+    packages
+  - install-time native source-build diagnostics that surface selected targets,
+    declared system dependencies, and missing-dependency hints from build logs
+  - SDL-gated publish/install smoke coverage for the official `mog:window`
+    package through the current static file-registry format
 - not yet complete inside Phase 3:
   - non-host source-build fallback and broader native toolchain policy
-  - system dependency diagnostics
   - official package release automation for packages like `mog:window`
 
 ### Phase 4: Enterprise and Security Features

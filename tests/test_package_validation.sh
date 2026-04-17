@@ -89,6 +89,53 @@ run_expect_failure \
     "$INTERPRETER" --validate-package "$TEMP_DIR/mog/fake" ||
     failed=1
 
+mkdir -p "$TEMP_DIR/examples/invalid-system-dep"
+cat <<'EOF_BAD_SYSDEP' > "$TEMP_DIR/examples/invalid-system-dep/package.toml"
+kind = "native"
+namespace = "examples"
+name = "invalid-system-dep"
+version = "0.1.0"
+abi_version = 3
+description = "invalid system dependency"
+dependencies = []
+
+[system-dependencies]
+sdl2 = ">=2.0.0"
+EOF_BAD_SYSDEP
+
+run_expect_failure \
+    "reject malformed system dependency entries" \
+    "Invalid system dependency 'sdl2': System dependency entries must be inline tables." \
+    "$INTERPRETER" --validate-package "$TEMP_DIR/examples/invalid-system-dep" ||
+    failed=1
+
+mkdir -p "$TEMP_DIR/examples/source-system-dep/src"
+cat <<'EOF_SOURCE_SYSDEP' > "$TEMP_DIR/examples/source-system-dep/package.toml"
+kind = "source"
+import_name = "source-system-dep"
+namespace = "examples"
+name = "source-system-dep"
+version = "0.1.0"
+description = "source package with native-only metadata"
+entry = "src/main.mog"
+dependencies = []
+
+[system-dependencies]
+sdl2 = { version = ">=2.0.0", required = true }
+EOF_SOURCE_SYSDEP
+
+cat <<'EOF_SOURCE_SYSDEP_SRC' > "$TEMP_DIR/examples/source-system-dep/src/main.mog"
+fn Name() str {
+    return "source-system-dep"
+}
+EOF_SOURCE_SYSDEP_SRC
+
+run_expect_failure \
+    "reject system dependencies on source packages" \
+    "Only native package manifests may declare [system-dependencies]." \
+    "$INTERPRETER" --validate-package "$TEMP_DIR/examples/source-system-dep" ||
+    failed=1
+
 if [[ $failed -ne 0 ]]; then
     exit 1
 fi

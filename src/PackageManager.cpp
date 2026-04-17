@@ -419,6 +419,77 @@ std::string detectHostTarget() {
     return target;
 }
 
+std::string toLowerAscii(std::string_view text) {
+    std::string out;
+    out.reserve(text.size());
+    for (unsigned char ch : text) {
+        out.push_back(static_cast<char>(std::tolower(ch)));
+    }
+    return out;
+}
+
+std::string effectiveNativeTarget(const PackageRegistryEntry& entry) {
+    return entry.selectedTarget.empty() ? detectHostTarget() : entry.selectedTarget;
+}
+
+std::string formatSystemDependencies(
+    const std::vector<SystemDependencySpec>& systemDependencies) {
+    if (systemDependencies.empty()) {
+        return "";
+    }
+
+    std::ostringstream out;
+    out << " Required system dependencies: ";
+    for (size_t index = 0; index < systemDependencies.size(); ++index) {
+        if (index > 0) {
+            out << ", ";
+        }
+        out << systemDependencies[index].name;
+        if (!systemDependencies[index].version.empty()) {
+            out << " (" << systemDependencies[index].version << ")";
+        }
+        if (!systemDependencies[index].required) {
+            out << " [optional]";
+        }
+    }
+    out << ".";
+    return out.str();
+}
+
+const SystemDependencySpec* detectMissingSystemDependency(
+    const std::vector<SystemDependencySpec>& systemDependencies,
+    std::string_view buildLog) {
+    if (systemDependencies.empty() || buildLog.empty()) {
+        return nullptr;
+    }
+
+    const std::string loweredLog = toLowerAscii(buildLog);
+    const bool hasMissingSignal =
+        loweredLog.find("not found") != std::string::npos ||
+        loweredLog.find("could not find") != std::string::npos ||
+        loweredLog.find("missing") != std::string::npos ||
+        loweredLog.find("skipping") != std::string::npos;
+    if (!hasMissingSignal) {
+        return nullptr;
+    }
+
+    for (const auto& dependency : systemDependencies) {
+        if (loweredLog.find(toLowerAscii(dependency.name)) != std::string::npos) {
+            return &dependency;
+        }
+    }
+
+    return nullptr;
+}
+
+std::string buildNativeSourceFallbackPrefix(const PackageRegistryEntry& entry) {
+    std::ostringstream out;
+    out << "Native package '" << entry.packageId
+        << "' source-build fallback for target '"
+        << effectiveNativeTarget(entry) << "'";
+    return out.str();
+}
+
 std::string effectiveInstallTarget(const InstallOptions* options) {
     if (options != nullptr && !options->target.empty()) {
         return options->target;
@@ -2225,7 +2296,7 @@ bool locateBuiltNativeLibrary(const std::filesystem::path& buildDir,
 bool runLoggedSystemCommand(const std::string& command,
                             const std::filesystem::path& logPath) {
     const std::string fullCommand =
-        command + " > " + shellQuote(logPath.string()) + " 2>&1";
+        command + " >> " + shellQuote(logPath.string()) + " 2>&1";
     return std::system(fullCommand.c_str()) == 0;
 }
 
@@ -2234,6 +2305,15 @@ bool buildNativePackageFromSource(const PackageRegistryEntry& sourceEntry,
                                   std::string& outError) {
     const std::filesystem::path packageCpp = cacheDir / "package.cpp";
     const std::filesystem::path packageCmake = cacheDir / "CMakeLists.txt";
+    PackageManifest manifest;
+    std::string manifestError;
+    const bool hasManifest =
+        loadPackageManifest(cacheDir.string(), manifest, manifestError);
+    const std::string sourceBuildPrefix =
+        buildNativeSourceFallbackPrefix(sourceEntry);
+    const std::string systemDependencyText =
+        hasManifest ? formatSystemDependencies(manifest.systemDependencies) : "";
+
     if (!fileExists(packageCpp) && !fileExists(packageCmake)) {
         outError = "Native package '" + sourceEntry.packageId +
                    "' does not include package.cpp or CMakeLists.txt for source-build fallback.";
@@ -2241,9 +2321,11 @@ bool buildNativePackageFromSource(const PackageRegistryEntry& sourceEntry,
     }
 
     const std::filesystem::path buildLogPath = cacheDir / ".build.log";
+    std::error_code clearLogError;
+    std::filesystem::remove(buildLogPath, clearLogError);
     if (!runLoggedSystemCommand("cmake --version", buildLogPath)) {
-        outError = "Native package '" + sourceEntry.packageId +
-                   "' requires CMake for source-build fallback, but 'cmake' is not available on PATH.";
+        outError = sourceBuildPrefix +
+                   " requires CMake on PATH." + systemDependencyText;
         return false;
     }
 
@@ -2273,23 +2355,59 @@ bool buildNativePackageFromSource(const PackageRegistryEntry& sourceEntry,
         "cmake -S " + shellQuote(sourceDir.string()) + " -B " +
         shellQuote(buildDir.string()) + " -DCMAKE_BUILD_TYPE=Release";
     if (!runLoggedSystemCommand(configureCommand, buildLogPath)) {
-        outError = "Native package '" + sourceEntry.packageId +
-                   "' source-build configure step failed. See '" +
-                   buildLogPath.string() + "'.";
+        const std::string buildLog = readFileText(buildLogPath);
+        const SystemDependencySpec* missingDependency =
+            hasManifest ? detectMissingSystemDependency(manifest.systemDependencies,
+                                                       buildLog)
+                        : nullptr;
+        if (missingDependency != nullptr) {
+            outError = sourceBuildPrefix + " could not find required system dependency '" +
+                       missingDependency->name + "'." + systemDependencyText +
+                       " See '" + buildLogPath.string() + "'.";
+        } else {
+            outError = sourceBuildPrefix + " configure step failed." +
+                       systemDependencyText + " See '" +
+                       buildLogPath.string() + "'.";
+        }
         return false;
     }
 
     const std::string buildCommand =
         "cmake --build " + shellQuote(buildDir.string()) + " --config Release";
     if (!runLoggedSystemCommand(buildCommand, buildLogPath)) {
-        outError = "Native package '" + sourceEntry.packageId +
-                   "' source-build failed. See '" + buildLogPath.string() + "'.";
+        const std::string buildLog = readFileText(buildLogPath);
+        const SystemDependencySpec* missingDependency =
+            hasManifest ? detectMissingSystemDependency(manifest.systemDependencies,
+                                                       buildLog)
+                        : nullptr;
+        if (missingDependency != nullptr) {
+            outError = sourceBuildPrefix + " could not find required system dependency '" +
+                       missingDependency->name + "'." + systemDependencyText +
+                       " See '" + buildLogPath.string() + "'.";
+        } else {
+            outError = sourceBuildPrefix + " failed." + systemDependencyText +
+                       " See '" + buildLogPath.string() + "'.";
+        }
         return false;
     }
 
     std::filesystem::path builtLibrary;
     if (!locateBuiltNativeLibrary(buildDir, builtLibrary, outError)) {
-        outError += " See '" + buildLogPath.string() + "'.";
+        const std::string buildLog = readFileText(buildLogPath);
+        const SystemDependencySpec* missingDependency =
+            hasManifest ? detectMissingSystemDependency(manifest.systemDependencies,
+                                                       buildLog)
+                        : nullptr;
+        if (missingDependency != nullptr) {
+            outError = sourceBuildPrefix + " could not find required system dependency '" +
+                       missingDependency->name + "'." + systemDependencyText +
+                       " See '" + buildLogPath.string() + "'.";
+        } else {
+            outError = sourceBuildPrefix + " did not produce '" +
+                       std::string(kPackageLibraryFileName) + "'." +
+                       systemDependencyText + " See '" +
+                       buildLogPath.string() + "'.";
+        }
         return false;
     }
 
@@ -2395,6 +2513,20 @@ bool validatePackageEntry(const PackageRegistryEntry& entry,
     const std::filesystem::path packageDir(entry.packageDir);
     if (entry.kind == "native") {
         if (entry.sourceType == "registry") {
+            PackageManifest manifest;
+            if (!loadPackageManifest(packageDir.string(), manifest, outError)) {
+                return false;
+            }
+            if (makePackageId(manifest.packageNamespace, manifest.packageName) !=
+                entry.packageId) {
+                outError = "Registry native package '" + entry.packageId +
+                           "' is backed by manifest '" +
+                           makePackageId(manifest.packageNamespace,
+                                         manifest.packageName) +
+                           "'.";
+                return false;
+            }
+
             if (entry.apiPath.empty() ||
                 !fileExists(std::filesystem::path(entry.apiPath))) {
                 outError = "Native package '" + entry.packageId +

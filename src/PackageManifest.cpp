@@ -6,6 +6,7 @@
 #include <fstream>
 #include <sstream>
 #include <string_view>
+#include <unordered_set>
 
 #include "NativePackage.hpp"
 #include "PackageRegistry.hpp"
@@ -285,6 +286,78 @@ bool parseDependencyInlineTable(const std::string& value,
     return true;
 }
 
+bool parseSystemDependencyInlineTable(const std::string& value,
+                                      SystemDependencySpec& outDependency,
+                                      std::string& outError) {
+    if (value.size() < 2 || value.front() != '{' || value.back() != '}') {
+        outError = "System dependency entries must be inline tables.";
+        return false;
+    }
+
+    std::string body = trim(std::string_view(value).substr(1, value.size() - 2));
+    while (!body.empty()) {
+        const size_t equals = body.find('=');
+        if (equals == std::string::npos) {
+            outError = "System dependency table must use key = value entries.";
+            return false;
+        }
+
+        const std::string key = trim(std::string_view(body).substr(0, equals));
+        body = trim(std::string_view(body).substr(equals + 1));
+        if (body.empty()) {
+            outError = "System dependency table entry is missing a value.";
+            return false;
+        }
+
+        size_t valueLength = 0;
+        bool inString = false;
+        bool escaped = false;
+        for (; valueLength < body.size(); ++valueLength) {
+            const char ch = body[valueLength];
+            if (inString) {
+                if (escaped) {
+                    escaped = false;
+                } else if (ch == '\\') {
+                    escaped = true;
+                } else if (ch == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+
+            if (ch == '"') {
+                inString = true;
+                continue;
+            }
+            if (ch == ',') {
+                break;
+            }
+        }
+
+        const std::string rawValue = trim(body.substr(0, valueLength));
+        if (key == "version") {
+            if (!parseQuotedString(rawValue, outDependency.version, outError)) {
+                return false;
+            }
+        } else if (key == "required") {
+            if (!parseBoolValue(rawValue, outDependency.required, outError)) {
+                return false;
+            }
+        } else {
+            outError = "Unsupported system dependency field '" + key + "'.";
+            return false;
+        }
+
+        if (valueLength >= body.size()) {
+            body.clear();
+        } else {
+            body = trim(std::string_view(body).substr(valueLength + 1));
+        }
+    }
+
+    return true;
+}
+
 bool parseLegacyDependencies(const std::string& value,
                              std::vector<DependencySpec>& outDependencies,
                              std::string& outError) {
@@ -308,6 +381,14 @@ void sortDependencies(std::vector<DependencySpec>& dependencies) {
     std::sort(dependencies.begin(), dependencies.end(),
               [](const DependencySpec& lhs, const DependencySpec& rhs) {
                   return lhs.alias < rhs.alias;
+              });
+}
+
+void sortSystemDependencies(std::vector<SystemDependencySpec>& systemDependencies) {
+    std::sort(systemDependencies.begin(), systemDependencies.end(),
+              [](const SystemDependencySpec& lhs,
+                 const SystemDependencySpec& rhs) {
+                  return lhs.name < rhs.name;
               });
 }
 
@@ -340,6 +421,24 @@ bool validateDependencySpecs(const std::vector<DependencySpec>& dependencies,
             !isValidPackageIdPart(packageName)) {
             outError = "Dependency '" + packageId +
                        "' must use lowercase package IDs.";
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool validateSystemDependencySpecs(
+    const std::vector<SystemDependencySpec>& systemDependencies,
+    std::string& outError) {
+    std::unordered_set<std::string> seenNames;
+    for (const auto& dependency : systemDependencies) {
+        if (dependency.name.empty() || !isValidPackageIdPart(dependency.name)) {
+            outError = "System dependency names must use lowercase letters, digits, '_', or '-'.";
+            return false;
+        }
+        if (!seenNames.insert(dependency.name).second) {
+            outError = "Duplicate system dependency '" + dependency.name + "'.";
             return false;
         }
     }
@@ -422,6 +521,7 @@ bool loadPackageManifest(const std::string& packageDir,
 
     enum class Section {
         ROOT,
+        SYSTEM_DEPENDENCIES,
         DEPENDENCIES,
         DEV_DEPENDENCIES,
     };
@@ -442,6 +542,10 @@ bool loadPackageManifest(const std::string& packageDir,
         }
         if (content == "[dev-dependencies]") {
             section = Section::DEV_DEPENDENCIES;
+            continue;
+        }
+        if (content == "[system-dependencies]") {
+            section = Section::SYSTEM_DEPENDENCIES;
             continue;
         }
         if (content.front() == '[' && content.back() == ']') {
@@ -472,6 +576,17 @@ bool loadPackageManifest(const std::string& packageDir,
             auto& output = section == Section::DEPENDENCIES ? outManifest.dependencies
                                                             : outManifest.devDependencies;
             output.push_back(std::move(dependency));
+            continue;
+        }
+        if (section == Section::SYSTEM_DEPENDENCIES) {
+            SystemDependencySpec dependency;
+            dependency.name = key;
+            if (!parseSystemDependencyInlineTable(value, dependency, parseError)) {
+                outError = "Invalid system dependency '" + key + "': " +
+                           parseError;
+                return false;
+            }
+            outManifest.systemDependencies.push_back(std::move(dependency));
             continue;
         }
 
@@ -570,10 +685,19 @@ bool loadPackageManifest(const std::string& packageDir,
         outError = "Source package manifest must define entry.";
         return false;
     }
+    if (outManifest.kind != "native" && !outManifest.systemDependencies.empty()) {
+        outError =
+            "Only native package manifests may declare [system-dependencies].";
+        return false;
+    }
 
+    sortSystemDependencies(outManifest.systemDependencies);
     sortDependencies(outManifest.dependencies);
     sortDependencies(outManifest.devDependencies);
 
+    if (!validateSystemDependencySpecs(outManifest.systemDependencies, outError)) {
+        return false;
+    }
     if (!validateDependencySpecs(outManifest.dependencies, outError)) {
         return false;
     }

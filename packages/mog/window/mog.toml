@@ -7,3 +7,6 @@ abi_version = 3
 author = "Mog runtime"
 description = "Official SDL2-backed windowing package."
 dependencies = []
+
+[system-dependencies]
+sdl2 = { version = ">=2.0.0", required = true }

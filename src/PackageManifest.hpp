@@ -6,6 +6,12 @@
 
 #include "DependencySpec.hpp"
 
+struct SystemDependencySpec {
+    std::string name;
+    std::string version;
+    bool required = true;
+};
+
 struct PackageManifest {
     std::string kind = "native";
     std::string importName;
@@ -17,6 +23,7 @@ struct PackageManifest {
     std::string description;
     std::string entry;
     std::string library;
+    std::vector<SystemDependencySpec> systemDependencies;
     std::vector<DependencySpec> dependencies;
     std::vector<DependencySpec> devDependencies;
 };

@@ -26,9 +26,11 @@ NATIVE_BAD_DIR=""
 NATIVE_SOURCE_DIR=""
 NATIVE_NO_CMAKE_DIR=""
 NATIVE_BUILD_FAIL_DIR=""
+NATIVE_SYSDEP_FAIL_DIR=""
 NATIVE_TARGET_DIR=""
 NATIVE_TARGET_FAIL_DIR=""
-trap 'rm -rf "${TEMP_DIR:-}" "${REMOTE_DIR:-}" "${WORKSPACE_DIR:-}" "${RANGE_DIR:-}" "${ADD_DIR:-}" "${ADD_RANGE_DIR:-}" "${PUBLISH_WORKSPACE:-}" "${PUBLISHED_GREETER_DIR:-}" "${DIGEST_DIR:-}" "${NATIVE_PUBLISH_WORKSPACE:-}" "${NATIVE_CONSUMER_DIR:-}" "${NATIVE_BAD_DIR:-}" "${NATIVE_SOURCE_DIR:-}" "${NATIVE_NO_CMAKE_DIR:-}" "${NATIVE_BUILD_FAIL_DIR:-}" "${NATIVE_TARGET_DIR:-}" "${NATIVE_TARGET_FAIL_DIR:-}"' EXIT
+WINDOW_PUBLISH_DIR=""
+trap 'rm -rf "${TEMP_DIR:-}" "${REMOTE_DIR:-}" "${WORKSPACE_DIR:-}" "${RANGE_DIR:-}" "${ADD_DIR:-}" "${ADD_RANGE_DIR:-}" "${PUBLISH_WORKSPACE:-}" "${PUBLISHED_GREETER_DIR:-}" "${DIGEST_DIR:-}" "${NATIVE_PUBLISH_WORKSPACE:-}" "${NATIVE_CONSUMER_DIR:-}" "${NATIVE_BAD_DIR:-}" "${NATIVE_SOURCE_DIR:-}" "${NATIVE_NO_CMAKE_DIR:-}" "${NATIVE_BUILD_FAIL_DIR:-}" "${NATIVE_SYSDEP_FAIL_DIR:-}" "${NATIVE_TARGET_DIR:-}" "${NATIVE_TARGET_FAIL_DIR:-}" "${WINDOW_PUBLISH_DIR:-}"' EXIT
 
 detect_host_target() {
     local os
@@ -65,6 +67,9 @@ ALT_TARGET="linux-arm64-gnu"
 if [[ "$ALT_TARGET" == "$HOST_TARGET" ]]; then
     ALT_TARGET="macos-arm64"
 fi
+
+WINDOW_PACKAGE_SO="$PROJECT_ROOT/build/packages/mog/window/package.so"
+WINDOW_PACKAGE_DYLIB="$PROJECT_ROOT/build/packages/mog/window/package.dylib"
 
 write_registry_index() {
     local registry_dir="$1"
@@ -780,6 +785,54 @@ if ! grep -Fq "different published contents" /tmp/mog_native_publish_conflict.tx
     exit 1
 fi
 
+if [[ -f "$WINDOW_PACKAGE_SO" || -f "$WINDOW_PACKAGE_DYLIB" ]]; then
+    WINDOW_PUBLISH_DIR="$(mktemp -d)"
+    cat > "$WINDOW_PUBLISH_DIR/mog.toml" <<EOF_WINDOW_PUBLISH
+kind = "project"
+name = "window-publish-root"
+version = "0.1.0"
+description = "window publish root"
+
+[registries.default]
+index = "$REGISTRY_DIR"
+EOF_WINDOW_PUBLISH
+
+    if ! (cd "$WINDOW_PUBLISH_DIR" && \
+          "$MOG" publish "$PROJECT_ROOT/packages/mog/window" >/dev/null); then
+        echo "[FAIL] publish should accept the official mog:window package"
+        exit 1
+    fi
+
+    mkdir -p "$WINDOW_PUBLISH_DIR/app"
+    cat > "$WINDOW_PUBLISH_DIR/app/mog.toml" <<EOF_WINDOW_CONSUMER
+kind = "project"
+name = "window-consumer"
+version = "0.1.0"
+description = "window consumer"
+
+[registries.default]
+index = "$REGISTRY_DIR"
+
+[dependencies]
+window = { package = "mog:window", version = "0.1.0" }
+EOF_WINDOW_CONSUMER
+    cp "$PROJECT_ROOT/tests/sample_mog_window.mog" \
+       "$WINDOW_PUBLISH_DIR/app/app.mog"
+
+    if ! (cd "$WINDOW_PUBLISH_DIR/app" && "$MOG" install >/dev/null); then
+        echo "[FAIL] install should resolve a published mog:window package"
+        exit 1
+    fi
+
+    WINDOW_RUN_OUTPUT="$(SDL_VIDEODRIVER=dummy "$MOG" run "$WINDOW_PUBLISH_DIR/app/app.mog")"
+    if [[ "$WINDOW_RUN_OUTPUT" != *"true"* || \
+          "$WINDOW_RUN_OUTPUT" != *"false"* ]]; then
+        echo "[FAIL] run should execute a published mog:window package"
+        echo "$WINDOW_RUN_OUTPUT"
+        exit 1
+    fi
+fi
+
 cat > "$NATIVE_CONSUMER_DIR/mog.toml" <<EOF_NATIVE_CONSUMER
 kind = "project"
 name = "native-consumer"
@@ -1080,9 +1133,129 @@ if (cd "$NATIVE_BUILD_FAIL_DIR" && MOG_CACHE_DIR="$TEMP_DIR/build-fail-cache" \
     exit 1
 fi
 
-if ! grep -Fq "source-build failed" /tmp/mog_native_build_failure.txt; then
+if ! grep -Fq "source-build fallback for target '$HOST_TARGET' failed." \
+    /tmp/mog_native_build_failure.txt; then
     echo "[FAIL] install should explain native source-build failures"
     cat /tmp/mog_native_build_failure.txt
+    exit 1
+fi
+
+NATIVE_SYSDEP_FAIL_DIR="$(mktemp -d)"
+cat > "$NATIVE_SYSDEP_FAIL_DIR/mog.toml" <<EOF_NATIVE_SYSDEP_FAIL
+kind = "project"
+name = "native-sysdep-fail"
+version = "0.1.0"
+description = "native sysdep fail"
+
+[registries.default]
+index = "$REGISTRY_DIR"
+
+[dependencies]
+sysdep = { package = "acme:sysdep-demo", version = "1.0.0" }
+EOF_NATIVE_SYSDEP_FAIL
+
+cat > "$NATIVE_SYSDEP_FAIL_DIR/app.mog" <<'EOF_NATIVE_SYSDEP_FAIL_APP'
+const sysdep = @import("sysdep")
+print(sysdep.PACKAGE_ID)
+EOF_NATIVE_SYSDEP_FAIL_APP
+
+mkdir -p "$REGISTRY_DIR/packages/acme/sysdep-demo/1.0.0/source"
+cat > "$REGISTRY_DIR/packages/acme/sysdep-demo/1.0.0/source/mog.toml" <<'EOF_SYSDEP_MANIFEST'
+kind = "native"
+import_name = "sysdep"
+namespace = "acme"
+name = "sysdep-demo"
+version = "1.0.0"
+abi_version = 3
+author = "Registry test"
+description = "Published native package with system dependency diagnostics."
+dependencies = []
+
+[system-dependencies]
+libmagic = { version = ">=1.0", required = true }
+EOF_SYSDEP_MANIFEST
+
+cat > "$REGISTRY_DIR/packages/acme/sysdep-demo/1.0.0/source/package.api.mog" <<'EOF_SYSDEP_API'
+package sysdep
+
+const PACKAGE_ID str
+EOF_SYSDEP_API
+
+cat > "$REGISTRY_DIR/packages/acme/sysdep-demo/1.0.0/source/CMakeLists.txt" <<'EOF_SYSDEP_CMAKE'
+cmake_minimum_required(VERSION 3.10)
+project(sysdep_demo LANGUAGES CXX)
+message(FATAL_ERROR "libmagic not found for sysdep demo package")
+EOF_SYSDEP_CMAKE
+
+python3 - "$REGISTRY_DIR" <<'PY'
+from pathlib import Path
+import sys
+import tomllib
+
+registry_dir = Path(sys.argv[1])
+index_path = registry_dir / "index.toml"
+data = tomllib.loads(index_path.read_text(encoding="utf-8"))
+
+def digest_directory(root: Path) -> str:
+    files = sorted(path for path in root.rglob("*") if path.is_file())
+    seed = bytearray()
+    for path in files:
+        seed.extend(path.relative_to(root).as_posix().encode("utf-8"))
+        seed.extend(b"\n")
+        seed.extend(path.read_bytes())
+        seed.extend(b"\n")
+    value = 1469598103934665603
+    for byte in seed:
+        value ^= byte
+        value = (value * 1099511628211) & 0xFFFFFFFFFFFFFFFF
+    return f"{value:016x}"
+
+packages = data.get("package", [])
+packages.append({
+    "package_id": "acme:sysdep-demo",
+    "version": "1.0.0",
+    "artifact_path": "packages/acme/sysdep-demo/1.0.0/source",
+    "artifact_digest": digest_directory(registry_dir / "packages" / "acme" / "sysdep-demo" / "1.0.0" / "source"),
+    "dependencies": [],
+})
+
+parts = ['schema_version = "registry.v1"']
+for package in packages:
+    parts.append("")
+    parts.append("[[package]]")
+    parts.append(f'package_id = "{package["package_id"]}"')
+    parts.append(f'version = "{package["version"]}"')
+    if "artifact_path" in package:
+        parts.append(f'artifact_path = "{package["artifact_path"]}"')
+    if "artifact_digest" in package:
+        parts.append(f'artifact_digest = "{package["artifact_digest"]}"')
+    if "native_targets" in package:
+        targets = ", ".join(f'"{value}"' for value in package["native_targets"])
+        paths = ", ".join(f'"{value}"' for value in package["native_artifact_paths"])
+        digests = ", ".join(f'"{value}"' for value in package["native_artifact_digests"])
+        parts.append(f"native_targets = [{targets}]")
+        parts.append(f"native_artifact_paths = [{paths}]")
+        parts.append(f"native_artifact_digests = [{digests}]")
+    deps = ", ".join(f'"{value}"' for value in package.get("dependencies", []))
+    parts.append(f"dependencies = [{deps}]")
+
+index_path.write_text("\n".join(parts) + "\n", encoding="utf-8")
+PY
+
+if (cd "$NATIVE_SYSDEP_FAIL_DIR" && \
+    MOG_CACHE_DIR="$TEMP_DIR/sysdep-fail-cache" "$MOG" install \
+    >/tmp/mog_native_sysdep_failure.txt 2>&1); then
+    echo "[FAIL] install should report missing declared system dependencies"
+    cat /tmp/mog_native_sysdep_failure.txt
+    exit 1
+fi
+
+if ! grep -Fq "could not find required system dependency 'libmagic'" \
+    /tmp/mog_native_sysdep_failure.txt || \
+   ! grep -Fq "Required system dependencies: libmagic (>=1.0)." \
+    /tmp/mog_native_sysdep_failure.txt; then
+    echo "[FAIL] install should surface declared system dependency diagnostics"
+    cat /tmp/mog_native_sysdep_failure.txt
     exit 1
 fi
 
