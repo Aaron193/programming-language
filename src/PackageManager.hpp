@@ -11,6 +11,11 @@ struct ProjectRegistryConfig {
     std::string index;
 };
 
+struct ProjectNativeToolchainConfig {
+    std::string target;
+    std::string cmakeToolchain;
+};
+
 struct ProjectManifestData {
     std::string kind = "project";
     std::string name;
@@ -18,6 +23,7 @@ struct ProjectManifestData {
     std::string description;
     std::vector<std::string> workspaceMembers;
     std::vector<ProjectRegistryConfig> registries;
+    std::vector<ProjectNativeToolchainConfig> nativeToolchains;
     std::vector<DependencySpec> dependencies;
     std::vector<DependencySpec> devDependencies;
 };

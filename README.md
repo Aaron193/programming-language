@@ -505,6 +505,37 @@ Projects mark their root with `mog.toml` and pin package resolution in
 for editor navigation, readable package API docs, and public opaque type
 declarations.
 
+Projects can also declare published registries and target-specific native
+toolchains in `mog.toml`:
+
+```toml
+kind = "project"
+name = "demo"
+version = "0.1.0"
+description = "demo project"
+
+[registries.default]
+index = "./registry"
+
+[native.toolchains."linux-arm64-gnu"]
+cmake_toolchain = "./toolchains/linux-arm64.cmake"
+
+[dependencies]
+window = { package = "mog:window", version = "0.1.0" }
+```
+
+For native source-build fallback, Mog uses `--cmake-toolchain` first. If that
+flag is not provided for a non-host target, it then checks
+`[native.toolchains."<target>"].cmake_toolchain` in the project manifest.
+
+The official `mog:window` publish helper can run locally with flags or in CI
+with environment variables:
+
+```bash
+./scripts/publish_official_window.sh --registry-path ./dist/registry
+MOG_PUBLISH_REGISTRY_PATH=./dist/registry ./scripts/publish_official_window.sh
+```
+
 Validate a package directory against its manifest and compiled shared library:
 
 ```bash

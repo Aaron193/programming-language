@@ -18,12 +18,17 @@ Options:
   --registry-path <dir>  Publish using a temporary workspace rooted at <dir>.
   --registry <alias>     Publish through an existing workspace registry alias.
   --workspace <dir>      Workspace directory to use with --registry. Defaults to $PWD.
+
+Environment:
+  MOG_PUBLISH_REGISTRY_PATH  Like --registry-path <dir>.
+  MOG_PUBLISH_REGISTRY       Like --registry <alias>.
+  MOG_PUBLISH_WORKSPACE      Like --workspace <dir>.
 EOF
 }
 
-registry_path=""
-registry_alias=""
-workspace_dir="$PWD"
+registry_path="${MOG_PUBLISH_REGISTRY_PATH:-}"
+registry_alias="${MOG_PUBLISH_REGISTRY:-}"
+workspace_dir="${MOG_PUBLISH_WORKSPACE:-$PWD}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in

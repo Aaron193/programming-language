@@ -375,6 +375,14 @@ struct LoadedRegistryIndex {
 
 const ProjectRegistryConfig* findRegistryConfig(
     const ProjectManifestData& manifest, std::string_view alias);
+const ProjectNativeToolchainConfig* findNativeToolchainConfig(
+    const ProjectManifestData& manifest, std::string_view target);
+
+struct NativeToolchainSelection {
+    std::string target;
+    std::string cmakeToolchainFile;
+    std::string sourceDescription;
+};
 
 std::string registryRecordKey(std::string_view packageId,
                               std::string_view version) {
@@ -495,6 +503,57 @@ std::string effectiveInstallTarget(const InstallOptions* options) {
         return options->target;
     }
     return detectHostTarget();
+}
+
+std::string nativeToolchainSettingLabel(std::string_view target) {
+    return "[native.toolchains." + quoteTomlString(std::string(target)) +
+           "].cmake_toolchain";
+}
+
+bool resolveNativeToolchainSelection(const std::string& projectRoot,
+                                     const ProjectManifestData* manifest,
+                                     const PackageRegistryEntry& entry,
+                                     const InstallOptions* options,
+                                     NativeToolchainSelection& outSelection,
+                                     std::string& outError) {
+    outSelection = NativeToolchainSelection{};
+    outSelection.target =
+        entry.selectedTarget.empty() ? effectiveInstallTarget(options)
+                                     : entry.selectedTarget;
+    if (outSelection.target.empty()) {
+        outSelection.target = detectHostTarget();
+    }
+
+    std::filesystem::path toolchainPath;
+    if (options != nullptr && !options->cmakeToolchainFile.empty()) {
+        toolchainPath = std::filesystem::path(options->cmakeToolchainFile);
+        outSelection.sourceDescription = "--cmake-toolchain";
+    } else if (manifest != nullptr && outSelection.target != detectHostTarget()) {
+        const ProjectNativeToolchainConfig* config =
+            findNativeToolchainConfig(*manifest, outSelection.target);
+        if (config != nullptr && !config->cmakeToolchain.empty()) {
+            toolchainPath = std::filesystem::path(projectRoot) /
+                            std::filesystem::path(config->cmakeToolchain);
+            outSelection.sourceDescription =
+                nativeToolchainSettingLabel(outSelection.target);
+        }
+    }
+
+    if (toolchainPath.empty()) {
+        return true;
+    }
+
+    const std::string resolvedToolchain = canonicalOrLexical(toolchainPath);
+    if (!fileExists(resolvedToolchain)) {
+        outError = buildNativeSourceFallbackPrefix(entry) +
+                   " could not find CMake toolchain file '" +
+                   resolvedToolchain + "' configured via " +
+                   outSelection.sourceDescription + ".";
+        return false;
+    }
+
+    outSelection.cmakeToolchainFile = resolvedToolchain;
+    return true;
 }
 
 bool isExactPublishedVersion(std::string_view version) {
@@ -1866,6 +1925,16 @@ const ProjectRegistryConfig* findRegistryConfig(
     return nullptr;
 }
 
+const ProjectNativeToolchainConfig* findNativeToolchainConfig(
+    const ProjectManifestData& manifest, std::string_view target) {
+    for (const auto& toolchain : manifest.nativeToolchains) {
+        if (toolchain.target == target) {
+            return &toolchain;
+        }
+    }
+    return nullptr;
+}
+
 bool packageIdsMatchDependencyPins(const std::vector<std::string>& manifestDeps,
                                    const std::vector<RegistryDependencyPin>& pins) {
     std::vector<std::string> pinnedIds;
@@ -1992,8 +2061,7 @@ bool selectRegistryArtifact(const RegistryIndexRecord& record,
     return false;
 }
 
-std::string formatNativeToolchainRequirement(const PackageRegistryEntry& entry,
-                                             const InstallOptions* options);
+std::string formatNativeToolchainRequirement(std::string_view target);
 
 bool resolveRegistryPackageNode(
     const std::string& projectRoot, const ProjectManifestData& manifest,
@@ -2124,13 +2192,22 @@ bool resolveRegistryPackageNode(
                            "'. Source fallback is available in the registry entry, but --no-native-build forbids using it.";
                 return false;
             }
+
+            PackageRegistryEntry sourceEntryForToolchain = node.entry;
+            sourceEntryForToolchain.selectedTarget = desiredTarget;
+            NativeToolchainSelection toolchainSelection;
+            if (!resolveNativeToolchainSelection(projectRoot, &manifest,
+                                                 sourceEntryForToolchain, options,
+                                                 toolchainSelection, outError)) {
+                return false;
+            }
+
             if (desiredTarget != detectHostTarget() &&
-                (options == nullptr ||
-                 options->cmakeToolchainFile.empty())) {
+                toolchainSelection.cmakeToolchainFile.empty()) {
                 outError = "Registry package '" + std::string(packageId) +
                            "' does not publish a prebuilt native artifact for target '" +
                            desiredTarget + "'." +
-                           formatNativeToolchainRequirement(node.entry, options);
+                           formatNativeToolchainRequirement(desiredTarget);
                 return false;
             }
             node.entry.selectedTarget = desiredTarget;
@@ -2304,23 +2381,19 @@ bool runLoggedSystemCommand(const std::string& command,
     return std::system(fullCommand.c_str()) == 0;
 }
 
-std::string formatNativeToolchainRequirement(const PackageRegistryEntry& entry,
-                                             const InstallOptions* options) {
-    if (options == nullptr) {
+std::string formatNativeToolchainRequirement(std::string_view target) {
+    if (target.empty() || target == detectHostTarget()) {
         return "";
     }
 
-    const std::string desiredTarget =
-        entry.selectedTarget.empty() ? effectiveInstallTarget(options)
-                                     : entry.selectedTarget;
-    if (desiredTarget.empty() || desiredTarget == detectHostTarget()) {
-        return "";
-    }
-
-    return " Pass --cmake-toolchain <path> to enable non-host source-build fallback.";
+    return " Pass --cmake-toolchain <path> or set " +
+           nativeToolchainSettingLabel(target) +
+           " in mog.toml to enable non-host source-build fallback.";
 }
 
-bool buildNativePackageFromSource(const PackageRegistryEntry& sourceEntry,
+bool buildNativePackageFromSource(const std::string& projectRoot,
+                                  const ProjectManifestData& projectManifest,
+                                  const PackageRegistryEntry& sourceEntry,
                                   const InstallOptions& options,
                                   const std::filesystem::path& cacheDir,
                                   std::string& outError) {
@@ -2334,9 +2407,19 @@ bool buildNativePackageFromSource(const PackageRegistryEntry& sourceEntry,
         buildNativeSourceFallbackPrefix(sourceEntry);
     const std::string systemDependencyText =
         hasManifest ? formatSystemDependencies(manifest.systemDependencies) : "";
-    const std::string desiredTarget =
-        sourceEntry.selectedTarget.empty() ? effectiveInstallTarget(&options)
-                                           : sourceEntry.selectedTarget;
+    NativeToolchainSelection toolchainSelection;
+    if (!resolveNativeToolchainSelection(projectRoot, &projectManifest,
+                                         sourceEntry, &options,
+                                         toolchainSelection, outError)) {
+        return false;
+    }
+    const std::string desiredTarget = toolchainSelection.target;
+    const std::string toolchainContext =
+        toolchainSelection.cmakeToolchainFile.empty()
+            ? ""
+            : " Using CMake toolchain '" +
+                  toolchainSelection.cmakeToolchainFile + "' from " +
+                  toolchainSelection.sourceDescription + ".";
 
     if (!fileExists(packageCpp) && !fileExists(packageCmake)) {
         outError = "Native package '" + sourceEntry.packageId +
@@ -2345,17 +2428,11 @@ bool buildNativePackageFromSource(const PackageRegistryEntry& sourceEntry,
     }
 
     if (desiredTarget != detectHostTarget() &&
-        options.cmakeToolchainFile.empty()) {
+        toolchainSelection.cmakeToolchainFile.empty()) {
         outError = sourceBuildPrefix +
-                   " requires --cmake-toolchain <path> for non-host target '" +
-                   desiredTarget + "'.";
-        return false;
-    }
-
-    if (!options.cmakeToolchainFile.empty() &&
-        !fileExists(options.cmakeToolchainFile)) {
-        outError = sourceBuildPrefix + " could not find CMake toolchain file '" +
-                   options.cmakeToolchainFile + "'.";
+                   " requires a configured CMake toolchain for non-host target '" +
+                   desiredTarget + "'." +
+                   formatNativeToolchainRequirement(desiredTarget);
         return false;
     }
 
@@ -2393,9 +2470,9 @@ bool buildNativePackageFromSource(const PackageRegistryEntry& sourceEntry,
     std::string configureCommand =
         "cmake -S " + shellQuote(sourceDir.string()) + " -B " +
         shellQuote(buildDir.string()) + " -DCMAKE_BUILD_TYPE=Release";
-    if (!options.cmakeToolchainFile.empty()) {
+    if (!toolchainSelection.cmakeToolchainFile.empty()) {
         configureCommand += " -DCMAKE_TOOLCHAIN_FILE=" +
-                            shellQuote(options.cmakeToolchainFile);
+                            shellQuote(toolchainSelection.cmakeToolchainFile);
     }
     if (!runLoggedSystemCommand(configureCommand, buildLogPath)) {
         const std::string buildLog = readFileText(buildLogPath);
@@ -2405,10 +2482,12 @@ bool buildNativePackageFromSource(const PackageRegistryEntry& sourceEntry,
                         : nullptr;
         if (missingDependency != nullptr) {
             outError = sourceBuildPrefix + " could not find required system dependency '" +
-                       missingDependency->name + "'." + systemDependencyText +
+                       missingDependency->name + "'." + toolchainContext +
+                       systemDependencyText +
                        " See '" + buildLogPath.string() + "'.";
         } else {
             outError = sourceBuildPrefix + " configure step failed." +
+                       toolchainContext +
                        systemDependencyText + " See '" +
                        buildLogPath.string() + "'.";
         }
@@ -2425,10 +2504,12 @@ bool buildNativePackageFromSource(const PackageRegistryEntry& sourceEntry,
                         : nullptr;
         if (missingDependency != nullptr) {
             outError = sourceBuildPrefix + " could not find required system dependency '" +
-                       missingDependency->name + "'." + systemDependencyText +
+                       missingDependency->name + "'." + toolchainContext +
+                       systemDependencyText +
                        " See '" + buildLogPath.string() + "'.";
         } else {
-            outError = sourceBuildPrefix + " failed." + systemDependencyText +
+            outError = sourceBuildPrefix + " failed." + toolchainContext +
+                       systemDependencyText +
                        " See '" + buildLogPath.string() + "'.";
         }
         return false;
@@ -2443,11 +2524,13 @@ bool buildNativePackageFromSource(const PackageRegistryEntry& sourceEntry,
                         : nullptr;
         if (missingDependency != nullptr) {
             outError = sourceBuildPrefix + " could not find required system dependency '" +
-                       missingDependency->name + "'." + systemDependencyText +
+                       missingDependency->name + "'." + toolchainContext +
+                       systemDependencyText +
                        " See '" + buildLogPath.string() + "'.";
         } else {
             outError = sourceBuildPrefix + " did not produce '" +
                        std::string(kPackageLibraryFileName) + "'." +
+                       toolchainContext +
                        systemDependencyText + " See '" +
                        buildLogPath.string() + "'.";
         }
@@ -2638,6 +2721,8 @@ bool validatePackageEntry(const PackageRegistryEntry& entry,
 }
 
 bool materializeCacheEntry(const PackageRegistryEntry& sourceEntry,
+                           const std::string& projectRoot,
+                           const ProjectManifestData& manifest,
                            const InstallOptions& options,
                            const std::filesystem::path& cacheDir,
                            std::string& outError) {
@@ -2665,7 +2750,8 @@ bool materializeCacheEntry(const PackageRegistryEntry& sourceEntry,
         if (!copyDirectoryRecursive(sourceDir, cacheDir, outError)) {
             return false;
         }
-        if (!buildNativePackageFromSource(sourceEntry, options, cacheDir, outError)) {
+        if (!buildNativePackageFromSource(projectRoot, manifest, sourceEntry,
+                                          options, cacheDir, outError)) {
             return false;
         }
         return writeCacheMetadataFile(cacheMetadataPath(cacheDir), sourceEntry,
@@ -2697,7 +2783,9 @@ bool materializeCacheEntry(const PackageRegistryEntry& sourceEntry,
                 outError = "Native package '" + sourceEntry.importName +
                            "' does not publish a prebuilt library for target '" +
                            sourceEntry.selectedTarget +
-                           "'. Source-build fallback is not implemented yet for this runtime installation.";
+                           "'." +
+                           formatNativeToolchainRequirement(
+                               sourceEntry.selectedTarget);
             }
             return false;
         }
@@ -2716,6 +2804,7 @@ bool materializeCacheEntry(const PackageRegistryEntry& sourceEntry,
 
 bool materializeProjectInstall(const PackageRegistryEntry& sourceEntry,
                                const std::filesystem::path& projectRoot,
+                               const ProjectManifestData& manifest,
                                const InstallOptions& options,
                                PackageRegistryEntry& outInstalled,
                                std::string& outError) {
@@ -2753,7 +2842,8 @@ bool materializeProjectInstall(const PackageRegistryEntry& sourceEntry,
                        "' cannot be installed with --offline because its registry artifact is not cached locally.";
             return false;
         }
-        if (!materializeCacheEntry(sourceEntry, options, cacheDir, outError)) {
+        if (!materializeCacheEntry(sourceEntry, projectRoot.string(), manifest,
+                                   options, cacheDir, outError)) {
             return false;
         }
     }
@@ -3350,6 +3440,7 @@ bool validateLockedGraph(const std::vector<PackageRegistryEntry>& resolvedEntrie
 }
 
 bool materializeInstalledPackages(const std::string& projectRoot,
+                                  const ProjectManifestData& manifest,
                                   const std::vector<PackageRegistryEntry>& resolved,
                                   const InstallOptions& options,
                                   std::vector<PackageRegistryEntry>& outEntries,
@@ -3359,7 +3450,7 @@ bool materializeInstalledPackages(const std::string& projectRoot,
     for (const auto& entry : resolved) {
         PackageRegistryEntry installedEntry;
         if (!materializeProjectInstall(entry, std::filesystem::path(projectRoot),
-                                       options, installedEntry,
+                                       manifest, options, installedEntry,
                                        outError)) {
             return false;
         }
@@ -3381,6 +3472,15 @@ void sortRegistries(std::vector<ProjectRegistryConfig>& registries) {
               [](const ProjectRegistryConfig& lhs,
                  const ProjectRegistryConfig& rhs) {
                   return lhs.alias < rhs.alias;
+              });
+}
+
+void sortNativeToolchains(
+    std::vector<ProjectNativeToolchainConfig>& nativeToolchains) {
+    std::sort(nativeToolchains.begin(), nativeToolchains.end(),
+              [](const ProjectNativeToolchainConfig& lhs,
+                 const ProjectNativeToolchainConfig& rhs) {
+                  return lhs.target < rhs.target;
               });
 }
 
@@ -3448,6 +3548,22 @@ void writeRegistryTables(std::ofstream& out,
     }
 }
 
+void writeNativeToolchainTables(
+    std::ofstream& out,
+    const std::vector<ProjectNativeToolchainConfig>& nativeToolchains) {
+    if (nativeToolchains.empty()) {
+        return;
+    }
+
+    for (const auto& toolchain : nativeToolchains) {
+        out << "\n[native.toolchains."
+            << quoteTomlString(toolchain.target) << "]\n";
+        out << "cmake_toolchain = "
+            << quoteTomlString(normalizeRelativePath(toolchain.cmakeToolchain))
+            << "\n";
+    }
+}
+
 }  // namespace
 
 bool loadProjectManifestData(const std::string& projectRoot,
@@ -3470,12 +3586,14 @@ bool loadProjectManifestData(const std::string& projectRoot,
         ROOT,
         WORKSPACE,
         REGISTRY,
+        NATIVE_TOOLCHAIN,
         DEPENDENCIES,
         DEV_DEPENDENCIES,
     };
 
     Section section = Section::ROOT;
     std::string currentRegistryAlias;
+    std::string currentNativeToolchainTarget;
     std::string line;
     size_t lineNumber = 0;
     while (std::getline(file, line)) {
@@ -3506,6 +3624,38 @@ bool loadProjectManifestData(const std::string& projectRoot,
                 return false;
             }
             section = Section::REGISTRY;
+            continue;
+        }
+        if (content.rfind("[native.toolchains.", 0) == 0 &&
+            content.back() == ']') {
+            const size_t prefixLength =
+                std::string("[native.toolchains.").size();
+            std::string targetKey =
+                content.substr(prefixLength, content.size() - prefixLength - 1);
+            if (targetKey.empty()) {
+                outError =
+                    "Native toolchain sections must be named like [native.toolchains.\"linux-arm64-gnu\"].";
+                return false;
+            }
+
+            std::string parseError;
+            if (targetKey.front() == '"' && targetKey.back() == '"') {
+                if (!parseQuotedString(targetKey, currentNativeToolchainTarget,
+                                       parseError)) {
+                    outError =
+                        "Invalid native toolchain section target: " + parseError;
+                    return false;
+                }
+            } else {
+                currentNativeToolchainTarget = targetKey;
+            }
+            if (currentNativeToolchainTarget.empty()) {
+                outError =
+                    "Native toolchain sections must include a target name.";
+                return false;
+            }
+
+            section = Section::NATIVE_TOOLCHAIN;
             continue;
         }
 
@@ -3597,6 +3747,36 @@ bool loadProjectManifestData(const std::string& projectRoot,
             continue;
         }
 
+        if (section == Section::NATIVE_TOOLCHAIN) {
+            if (key != "cmake_toolchain") {
+                outError = "Unsupported native toolchain field '" + key + "'.";
+                return false;
+            }
+
+            ProjectNativeToolchainConfig toolchain;
+            toolchain.target = currentNativeToolchainTarget;
+            if (!parseQuotedString(value, toolchain.cmakeToolchain, parseError)) {
+                outError = "Invalid native toolchain field '" + key + "': " +
+                           parseError;
+                return false;
+            }
+            toolchain.cmakeToolchain =
+                normalizeRelativePath(toolchain.cmakeToolchain);
+
+            auto existing = std::find_if(
+                outManifest.nativeToolchains.begin(),
+                outManifest.nativeToolchains.end(),
+                [&](const ProjectNativeToolchainConfig& candidate) {
+                    return candidate.target == toolchain.target;
+                });
+            if (existing != outManifest.nativeToolchains.end()) {
+                *existing = std::move(toolchain);
+            } else {
+                outManifest.nativeToolchains.push_back(std::move(toolchain));
+            }
+            continue;
+        }
+
         DependencySpec dependency;
         dependency.alias = key;
         if (!parseDependencyInlineTable(value, dependency, parseError)) {
@@ -3619,6 +3799,7 @@ bool loadProjectManifestData(const std::string& projectRoot,
     }
 
     sortRegistries(outManifest.registries);
+    sortNativeToolchains(outManifest.nativeToolchains);
     sortDependencies(outManifest.dependencies);
     sortDependencies(outManifest.devDependencies);
     return true;
@@ -3649,13 +3830,17 @@ bool writeProjectManifestData(const std::string& projectRoot,
     }
 
     std::vector<ProjectRegistryConfig> registries = manifest.registries;
+    std::vector<ProjectNativeToolchainConfig> nativeToolchains =
+        manifest.nativeToolchains;
     std::vector<DependencySpec> dependencies = manifest.dependencies;
     std::vector<DependencySpec> devDependencies = manifest.devDependencies;
     sortRegistries(registries);
+    sortNativeToolchains(nativeToolchains);
     sortDependencies(dependencies);
     sortDependencies(devDependencies);
 
     writeRegistryTables(out, registries);
+    writeNativeToolchainTables(out, nativeToolchains);
     writeDependencyTable(out, "dependencies", dependencies);
     writeDependencyTable(out, "dev-dependencies", devDependencies);
     return true;
@@ -4106,7 +4291,8 @@ bool installProjectPackages(const std::string& projectRoot,
         }
     }
 
-    if (!materializeInstalledPackages(projectRoot, resolvedEntries, options,
+    if (!materializeInstalledPackages(projectRoot, manifest, resolvedEntries,
+                                      options,
                                       outEntries, outError)) {
         return false;
     }

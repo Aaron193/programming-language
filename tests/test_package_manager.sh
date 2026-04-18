@@ -25,6 +25,9 @@ NATIVE_CONSUMER_DIR=""
 NATIVE_BAD_DIR=""
 NATIVE_SOURCE_DIR=""
 NATIVE_CROSS_TARGET_DIR=""
+NATIVE_CROSS_TARGET_MANIFEST_DIR=""
+NATIVE_CROSS_TARGET_OVERRIDE_DIR=""
+NATIVE_CROSS_TARGET_BAD_TOOLCHAIN_DIR=""
 NATIVE_CROSS_TARGET_NO_BUILD_DIR=""
 NATIVE_NO_CMAKE_DIR=""
 NATIVE_BUILD_FAIL_DIR=""
@@ -32,7 +35,7 @@ NATIVE_SYSDEP_FAIL_DIR=""
 NATIVE_TARGET_DIR=""
 NATIVE_TARGET_FAIL_DIR=""
 WINDOW_PUBLISH_DIR=""
-trap 'rm -rf "${TEMP_DIR:-}" "${REMOTE_DIR:-}" "${WORKSPACE_DIR:-}" "${RANGE_DIR:-}" "${ADD_DIR:-}" "${ADD_RANGE_DIR:-}" "${PUBLISH_WORKSPACE:-}" "${PUBLISHED_GREETER_DIR:-}" "${DIGEST_DIR:-}" "${NATIVE_PUBLISH_WORKSPACE:-}" "${NATIVE_CONSUMER_DIR:-}" "${NATIVE_BAD_DIR:-}" "${NATIVE_SOURCE_DIR:-}" "${NATIVE_CROSS_TARGET_DIR:-}" "${NATIVE_CROSS_TARGET_NO_BUILD_DIR:-}" "${NATIVE_NO_CMAKE_DIR:-}" "${NATIVE_BUILD_FAIL_DIR:-}" "${NATIVE_SYSDEP_FAIL_DIR:-}" "${NATIVE_TARGET_DIR:-}" "${NATIVE_TARGET_FAIL_DIR:-}" "${WINDOW_PUBLISH_DIR:-}"' EXIT
+trap 'rm -rf "${TEMP_DIR:-}" "${REMOTE_DIR:-}" "${WORKSPACE_DIR:-}" "${RANGE_DIR:-}" "${ADD_DIR:-}" "${ADD_RANGE_DIR:-}" "${PUBLISH_WORKSPACE:-}" "${PUBLISHED_GREETER_DIR:-}" "${DIGEST_DIR:-}" "${NATIVE_PUBLISH_WORKSPACE:-}" "${NATIVE_CONSUMER_DIR:-}" "${NATIVE_BAD_DIR:-}" "${NATIVE_SOURCE_DIR:-}" "${NATIVE_CROSS_TARGET_DIR:-}" "${NATIVE_CROSS_TARGET_MANIFEST_DIR:-}" "${NATIVE_CROSS_TARGET_OVERRIDE_DIR:-}" "${NATIVE_CROSS_TARGET_BAD_TOOLCHAIN_DIR:-}" "${NATIVE_CROSS_TARGET_NO_BUILD_DIR:-}" "${NATIVE_NO_CMAKE_DIR:-}" "${NATIVE_BUILD_FAIL_DIR:-}" "${NATIVE_SYSDEP_FAIL_DIR:-}" "${NATIVE_TARGET_DIR:-}" "${NATIVE_TARGET_FAIL_DIR:-}" "${WINDOW_PUBLISH_DIR:-}"' EXIT
 
 detect_host_target() {
     local os
@@ -822,6 +825,12 @@ if [[ -n "$WINDOW_PACKAGE_LIBRARY" ]]; then
         exit 1
     fi
 
+    if ! MOG_PUBLISH_REGISTRY_PATH="$REGISTRY_DIR" \
+        "$WINDOW_PUBLISH_SCRIPT" >/dev/null; then
+        echo "[FAIL] publish script should support CI-style registry-path configuration via environment"
+        exit 1
+    fi
+
     WINDOW_PUBLISH_DIR="$(mktemp -d)"
     mkdir -p "$WINDOW_PUBLISH_DIR/app"
     cat > "$WINDOW_PUBLISH_DIR/app/mog.toml" <<EOF_WINDOW_CONSUMER
@@ -1070,6 +1079,126 @@ if [[ "$CROSS_TARGET_OUTPUT" != *"examples:counter"* || \
       "$CROSS_TARGET_OUTPUT" != *"15"* ]]; then
     echo "[FAIL] run --locked should reuse cached non-host source-built native packages"
     echo "$CROSS_TARGET_OUTPUT"
+    exit 1
+fi
+
+NATIVE_CROSS_TARGET_MANIFEST_DIR="$(mktemp -d)"
+cat > "$NATIVE_CROSS_TARGET_MANIFEST_DIR/mog.toml" <<EOF_NATIVE_CROSS_TARGET_MANIFEST
+kind = "project"
+name = "native-cross-target-manifest"
+version = "0.1.0"
+description = "native cross target manifest"
+
+[registries.default]
+index = "$REGISTRY_DIR"
+
+[native.toolchains."$ALT_TARGET"]
+cmake_toolchain = "$TEMP_DIR/cross-target-toolchain.cmake"
+
+[dependencies]
+counter = { package = "examples:counter", version = "0.1.0" }
+EOF_NATIVE_CROSS_TARGET_MANIFEST
+
+cp "$NATIVE_CONSUMER_DIR/app.mog" "$NATIVE_CROSS_TARGET_MANIFEST_DIR/app.mog"
+
+if ! (cd "$NATIVE_CROSS_TARGET_MANIFEST_DIR" && \
+      MOG_CACHE_DIR="$TEMP_DIR/manifest-target-cache" \
+      "$MOG" install --target "$ALT_TARGET" >/dev/null); then
+    echo "[FAIL] install should allow non-host native source fallback from manifest-configured toolchains"
+    exit 1
+fi
+
+if ! grep -Fq 'build_from_source = true' \
+    "$NATIVE_CROSS_TARGET_MANIFEST_DIR/mog.lock" || \
+   ! grep -Fq "selected_target = \"$ALT_TARGET\"" \
+    "$NATIVE_CROSS_TARGET_MANIFEST_DIR/mog.lock"; then
+    echo "[FAIL] lockfile should pin manifest-configured non-host native installs"
+    cat "$NATIVE_CROSS_TARGET_MANIFEST_DIR/mog.lock"
+    exit 1
+fi
+
+rm -f "$NATIVE_CROSS_TARGET_MANIFEST_DIR/.mog/install/registry.toml"
+MANIFEST_CROSS_TARGET_OUTPUT="$("$MOG" run --locked --target "$ALT_TARGET" \
+    "$NATIVE_CROSS_TARGET_MANIFEST_DIR/app.mog")"
+if [[ "$MANIFEST_CROSS_TARGET_OUTPUT" != *"examples:counter"* || \
+      "$MANIFEST_CROSS_TARGET_OUTPUT" != *"15"* ]]; then
+    echo "[FAIL] run --locked should reuse manifest-configured non-host native installs"
+    echo "$MANIFEST_CROSS_TARGET_OUTPUT"
+    exit 1
+fi
+
+printf '# host toolchain override for package-manager tests\n' \
+    > "$TEMP_DIR/cross-target-override-toolchain.cmake"
+
+NATIVE_CROSS_TARGET_OVERRIDE_DIR="$(mktemp -d)"
+cat > "$NATIVE_CROSS_TARGET_OVERRIDE_DIR/mog.toml" <<EOF_NATIVE_CROSS_TARGET_OVERRIDE
+kind = "project"
+name = "native-cross-target-override"
+version = "0.1.0"
+description = "native cross target override"
+
+[registries.default]
+index = "$REGISTRY_DIR"
+
+[native.toolchains."$ALT_TARGET"]
+cmake_toolchain = "missing-manifest-toolchain.cmake"
+
+[dependencies]
+counter = { package = "examples:counter", version = "0.1.0" }
+EOF_NATIVE_CROSS_TARGET_OVERRIDE
+
+cp "$NATIVE_CONSUMER_DIR/app.mog" "$NATIVE_CROSS_TARGET_OVERRIDE_DIR/app.mog"
+
+if ! (cd "$NATIVE_CROSS_TARGET_OVERRIDE_DIR" && \
+      MOG_CACHE_DIR="$TEMP_DIR/override-target-cache" \
+      "$MOG" install --target "$ALT_TARGET" \
+      --cmake-toolchain "$TEMP_DIR/cross-target-override-toolchain.cmake" \
+      >/dev/null); then
+    echo "[FAIL] install should let --cmake-toolchain override manifest native toolchain configuration"
+    exit 1
+fi
+
+NATIVE_CROSS_TARGET_BAD_TOOLCHAIN_DIR="$(mktemp -d)"
+cat > "$NATIVE_CROSS_TARGET_BAD_TOOLCHAIN_DIR/mog.toml" <<EOF_NATIVE_CROSS_TARGET_BAD
+kind = "project"
+name = "native-cross-target-bad-toolchain"
+version = "0.1.0"
+description = "native cross target bad toolchain"
+
+[registries.default]
+index = "$REGISTRY_DIR"
+
+[native.toolchains."$ALT_TARGET"]
+cmake_toolchain = "missing-manifest-toolchain.cmake"
+
+[dependencies]
+counter = { package = "examples:counter", version = "0.1.0" }
+EOF_NATIVE_CROSS_TARGET_BAD
+
+cp "$NATIVE_CONSUMER_DIR/app.mog" "$NATIVE_CROSS_TARGET_BAD_TOOLCHAIN_DIR/app.mog"
+
+if (cd "$NATIVE_CROSS_TARGET_BAD_TOOLCHAIN_DIR" && \
+    MOG_CACHE_DIR="$TEMP_DIR/bad-manifest-toolchain-cache" \
+    "$MOG" install --target "$ALT_TARGET" \
+    >/tmp/mog_native_bad_manifest_toolchain_failure.txt 2>&1); then
+    echo "[FAIL] install should reject missing manifest-configured native toolchains"
+    cat /tmp/mog_native_bad_manifest_toolchain_failure.txt
+    exit 1
+fi
+
+if ! grep -Fq "missing-manifest-toolchain.cmake" \
+    /tmp/mog_native_bad_manifest_toolchain_failure.txt || \
+   ! grep -Fq '[native.toolchains."'$ALT_TARGET'"].cmake_toolchain' \
+    /tmp/mog_native_bad_manifest_toolchain_failure.txt; then
+    echo "[FAIL] install should identify missing manifest-configured native toolchains"
+    cat /tmp/mog_native_bad_manifest_toolchain_failure.txt
+    exit 1
+fi
+
+if ! (cd "$NATIVE_CROSS_TARGET_BAD_TOOLCHAIN_DIR" && \
+      MOG_CACHE_DIR="$TEMP_DIR/bad-manifest-host-cache" \
+      "$MOG" install >/dev/null); then
+    echo "[FAIL] host-target installs should ignore unrelated manifest native toolchain entries"
     exit 1
 fi
 

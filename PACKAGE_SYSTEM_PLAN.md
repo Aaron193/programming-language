@@ -4,14 +4,14 @@
 
 In progress.
 
-Last updated: 2026-04-17.
+Last updated: 2026-04-18.
 
 Phase snapshot:
 
 - Phase 1 local package-management baseline: mostly complete
 - Phase 2 registry and publishing: partially implemented
-- Phase 3 native artifact distribution: in progress (cross-target toolchain
-  workflow / official-package scripted release path)
+- Phase 3 native artifact distribution: in progress (broader toolchain
+  auto-discovery and hosted release delivery remain)
 - Phase 4 enterprise and security features: not started beyond local
   `--locked` / `--offline` workflows
 
@@ -65,6 +65,9 @@ repository. The current codebase supports:
   `--offline` reinstalls and `build_from_source` metadata
 - non-host published native-package source-build fallback when
   `--cmake-toolchain <path>` is provided
+- root-manifest native toolchain configuration via
+  `[native.toolchains."<target>"] cmake_toolchain = "..."`, with
+  `--cmake-toolchain` taking precedence
 - package-manifest dependency parsing aligned with project manifests via
   `[dependencies]` inline tables, while retaining legacy compatibility for
   `dependencies = []`
@@ -77,6 +80,9 @@ repository. The current codebase supports:
   `mog:window` package
 - repo-local `scripts/publish_official_window.sh` workflow for publishing the
   official `mog:window` package to the current static file-registry format
+- GitHub Actions workflow that builds, validates, and publishes a static
+  file-registry artifact for the official `mog:window` package on supported
+  host runners
 
 Not implemented yet:
 
@@ -987,14 +993,20 @@ Current status:
   declared system dependencies, and missing-dependency hints from build logs
 - non-host native source-build fallback when `--cmake-toolchain <path>` is
   provided
+- root-manifest native toolchain configuration via
+  `[native.toolchains."<target>"] cmake_toolchain = "..."`, with
+  `--cmake-toolchain` taking precedence
 - SDL-gated publish/install smoke coverage for the official `mog:window`
   package through the current static file-registry format
 - scripted repo-local publish workflow for the official `mog:window` package
+- GitHub Actions workflow that builds, validates, and publishes a static
+  file-registry artifact for the official `mog:window` package on supported
+  host runners
 - not yet complete inside Phase 3:
-  - broader native toolchain policy and toolchain discovery beyond the current
-    explicit `--cmake-toolchain` workflow
-  - hosted or CI-driven official package release automation beyond the current
-    repo-local scripted publish workflow
+  - broader native toolchain policy and auto-discovery beyond the current
+    CMake toolchain contract
+  - hosted registry deployment and credentialed release delivery beyond the
+    current static-registry artifact workflow
 
 ### Phase 4: Enterprise and Security Features
 

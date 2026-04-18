@@ -1,0 +1,47 @@
+name: Official Packages
+
+on:
+  workflow_dispatch:
+
+jobs:
+  publish-window:
+    name: Publish mog:window (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SDL2 (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev
+
+      - name: Install SDL2 (macOS)
+        if: matrix.os == 'macos-latest'
+        run: brew install sdl2
+
+      - name: Build
+        run: ./build.sh --release
+
+      - name: Validate mog:window
+        run: ./build/interpreter validate-package packages/mog/window
+
+      - name: Publish static registry layout
+        env:
+          MOG_PUBLISH_REGISTRY_PATH: ${{ github.workspace }}/dist/registry
+        run: ./scripts/publish_official_window.sh
+
+      - name: Upload registry artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: official-packages-${{ matrix.os }}
+          path: dist/registry
