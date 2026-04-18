@@ -85,6 +85,24 @@ Headless test coverage:
 If SDL2 is not installed, the main interpreter still builds normally and simply
 skips the optional `window` package target.
 
+## Publishing the official package
+
+The repo now carries a scripted publish path for the official package:
+
+```bash
+./scripts/publish_official_window.sh --registry-path /tmp/mog-registry
+```
+
+The script:
+
+- checks that `build/packages/mog/window/package.so` or `package.dylib` exists
+- uses the existing `mog publish` flow under the hood
+- can also publish through an existing registry alias with
+  `--registry <alias> --workspace <dir>`
+
+If SDL2 was not available when the repo was built, the script fails early with
+an explicit missing-artifact message instead of publishing a partial package.
+
 ## Related pages
 
 - [Using Native Packages](/docs/packages/using-native-packages/)

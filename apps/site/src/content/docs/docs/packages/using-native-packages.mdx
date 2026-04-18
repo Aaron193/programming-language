@@ -61,6 +61,24 @@ Native packages can ship `package.api.mog` for:
 The reference packages under `packages/examples/` are the best examples in this
 repo.
 
+## Installing published native packages
+
+Published native packages use the same dependency workflow as source packages,
+but installs may need to choose between a prebuilt artifact and a local source
+build.
+
+Useful flags:
+
+- `mog install --target <triple>` to select a specific native target
+- `mog install --prefer-prebuilt` to stay on registry-published binaries when available
+- `mog install --no-native-build` to reject source fallback
+- `mog install --cmake-toolchain <path>` to allow non-host source-build fallback
+
+When a registry entry only publishes source for the requested target, Mog
+records `build_from_source = true` and the selected target in `mog.lock`.
+Subsequent `mog run --locked --target <triple>` executions can reuse the cached
+install without rebuilding.
+
 ## Validating a package
 
 Validate a package directory against its manifest and compiled shared library:
@@ -78,4 +96,5 @@ signature parsing.
 
 - [Authoring Native Packages](/docs/packages/authoring-native-packages/)
 - [Window Package](/docs/packages/window-package/)
+- [CLI and Debug Flags](/docs/tooling/cli-and-debug-flags/)
 - [Modules and Imports](/docs/language/modules-and-imports/)

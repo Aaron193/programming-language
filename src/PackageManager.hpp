@@ -30,6 +30,7 @@ struct InstallOptions {
     bool includeDevDependencies = true;
     bool update = false;
     std::string target;
+    std::string cmakeToolchainFile;
 };
 
 bool loadProjectManifestData(const std::string& projectRoot,

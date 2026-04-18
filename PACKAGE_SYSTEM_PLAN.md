@@ -10,8 +10,8 @@ Phase snapshot:
 
 - Phase 1 local package-management baseline: mostly complete
 - Phase 2 registry and publishing: partially implemented
-- Phase 3 native artifact distribution: in progress (Phase 3C diagnostics /
-  official-package pilot)
+- Phase 3 native artifact distribution: in progress (cross-target toolchain
+  workflow / official-package scripted release path)
 - Phase 4 enterprise and security features: not started beyond local
   `--locked` / `--offline` workflows
 
@@ -63,6 +63,8 @@ repository. The current codebase supports:
 - published native-package source artifacts and host-target source-build
   fallback through the current static file-registry format, including cached
   `--offline` reinstalls and `build_from_source` metadata
+- non-host published native-package source-build fallback when
+  `--cmake-toolchain <path>` is provided
 - package-manifest dependency parsing aligned with project manifests via
   `[dependencies]` inline tables, while retaining legacy compatibility for
   `dependencies = []`
@@ -73,6 +75,8 @@ repository. The current codebase supports:
   build log
 - SDL-gated file-registry publish/install smoke coverage for the official
   `mog:window` package
+- repo-local `scripts/publish_official_window.sh` workflow for publishing the
+  official `mog:window` package to the current static file-registry format
 
 Not implemented yet:
 
@@ -80,7 +84,6 @@ Not implemented yet:
 - git dependency fetch/install
 - alternate or networked registry transports beyond the current static
   file-registry format
-- non-host source-build fallback for published native packages
 - signed metadata or artifact verification
 - enterprise policy workflows beyond the current local `--locked` / `--offline`
   support
@@ -978,15 +981,20 @@ Current status:
   - cached `--offline` reinstalls for previously fetched registry native
     packages
   - lockfile-first `mog run --locked` reuse of cached native registry artifacts
-  - native `[system-dependencies]` metadata parsing for published native
-    packages
-  - install-time native source-build diagnostics that surface selected targets,
-    declared system dependencies, and missing-dependency hints from build logs
-  - SDL-gated publish/install smoke coverage for the official `mog:window`
-    package through the current static file-registry format
+- native `[system-dependencies]` metadata parsing for published native
+  packages
+- install-time native source-build diagnostics that surface selected targets,
+  declared system dependencies, and missing-dependency hints from build logs
+- non-host native source-build fallback when `--cmake-toolchain <path>` is
+  provided
+- SDL-gated publish/install smoke coverage for the official `mog:window`
+  package through the current static file-registry format
+- scripted repo-local publish workflow for the official `mog:window` package
 - not yet complete inside Phase 3:
-  - non-host source-build fallback and broader native toolchain policy
-  - official package release automation for packages like `mog:window`
+  - broader native toolchain policy and toolchain discovery beyond the current
+    explicit `--cmake-toolchain` workflow
+  - hosted or CI-driven official package release automation beyond the current
+    repo-local scripted publish workflow
 
 ### Phase 4: Enterprise and Security Features
 

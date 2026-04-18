@@ -36,6 +36,7 @@ static void printUsage(const char* executable) {
         << "Flags for install/update/run:\n"
         << "  --locked --offline --prefer-prebuilt --no-native-build\n"
         << "  --target <triple> | --target=<triple>\n"
+        << "  --cmake-toolchain <path> | --cmake-toolchain=<path>\n"
         << "Additional flags for run:\n"
         << "  --trace --show-return --disassemble --frontend-timings --frontend-timings-json\n"
         << "  --package-path <dir> | --package-path=<dir>\n"
@@ -75,6 +76,14 @@ static bool parseRuntimeArgs(int argc, char** argv, int startIndex,
             options.installOptions.target = argv[++index];
         } else if (arg.rfind("--target=", 0) == 0) {
             options.installOptions.target = arg.substr(9);
+        } else if (arg == "--cmake-toolchain") {
+            if (index + 1 >= argc) {
+                outError = "Missing value for --cmake-toolchain.";
+                return false;
+            }
+            options.installOptions.cmakeToolchainFile = argv[++index];
+        } else if (arg.rfind("--cmake-toolchain=", 0) == 0) {
+            options.installOptions.cmakeToolchainFile = arg.substr(19);
         } else if (arg == "--package-path") {
             if (index + 1 >= argc) {
                 outError = "Missing value for --package-path.";
@@ -128,6 +137,14 @@ static bool parseInstallArgs(int argc, char** argv, int startIndex,
             options.target = argv[++index];
         } else if (arg.rfind("--target=", 0) == 0) {
             options.target = arg.substr(9);
+        } else if (arg == "--cmake-toolchain") {
+            if (index + 1 >= argc) {
+                outError = "Missing value for --cmake-toolchain.";
+                return false;
+            }
+            options.cmakeToolchainFile = argv[++index];
+        } else if (arg.rfind("--cmake-toolchain=", 0) == 0) {
+            options.cmakeToolchainFile = arg.substr(19);
         } else if (arg == "--help" || arg == "-h") {
             outError = "help";
             return false;

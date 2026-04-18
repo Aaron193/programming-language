@@ -1992,6 +1992,9 @@ bool selectRegistryArtifact(const RegistryIndexRecord& record,
     return false;
 }
 
+std::string formatNativeToolchainRequirement(const PackageRegistryEntry& entry,
+                                             const InstallOptions* options);
+
 bool resolveRegistryPackageNode(
     const std::string& projectRoot, const ProjectManifestData& manifest,
     const std::string& registryAlias, const std::string& packageId,
@@ -2121,12 +2124,13 @@ bool resolveRegistryPackageNode(
                            "'. Source fallback is available in the registry entry, but --no-native-build forbids using it.";
                 return false;
             }
-            if (desiredTarget != detectHostTarget()) {
+            if (desiredTarget != detectHostTarget() &&
+                (options == nullptr ||
+                 options->cmakeToolchainFile.empty())) {
                 outError = "Registry package '" + std::string(packageId) +
                            "' does not publish a prebuilt native artifact for target '" +
-                           desiredTarget +
-                           "', and source-build fallback currently supports only the host target '" +
-                           detectHostTarget() + "'.";
+                           desiredTarget + "'." +
+                           formatNativeToolchainRequirement(node.entry, options);
                 return false;
             }
             node.entry.selectedTarget = desiredTarget;
@@ -2300,7 +2304,24 @@ bool runLoggedSystemCommand(const std::string& command,
     return std::system(fullCommand.c_str()) == 0;
 }
 
+std::string formatNativeToolchainRequirement(const PackageRegistryEntry& entry,
+                                             const InstallOptions* options) {
+    if (options == nullptr) {
+        return "";
+    }
+
+    const std::string desiredTarget =
+        entry.selectedTarget.empty() ? effectiveInstallTarget(options)
+                                     : entry.selectedTarget;
+    if (desiredTarget.empty() || desiredTarget == detectHostTarget()) {
+        return "";
+    }
+
+    return " Pass --cmake-toolchain <path> to enable non-host source-build fallback.";
+}
+
 bool buildNativePackageFromSource(const PackageRegistryEntry& sourceEntry,
+                                  const InstallOptions& options,
                                   const std::filesystem::path& cacheDir,
                                   std::string& outError) {
     const std::filesystem::path packageCpp = cacheDir / "package.cpp";
@@ -2313,10 +2334,28 @@ bool buildNativePackageFromSource(const PackageRegistryEntry& sourceEntry,
         buildNativeSourceFallbackPrefix(sourceEntry);
     const std::string systemDependencyText =
         hasManifest ? formatSystemDependencies(manifest.systemDependencies) : "";
+    const std::string desiredTarget =
+        sourceEntry.selectedTarget.empty() ? effectiveInstallTarget(&options)
+                                           : sourceEntry.selectedTarget;
 
     if (!fileExists(packageCpp) && !fileExists(packageCmake)) {
         outError = "Native package '" + sourceEntry.packageId +
                    "' does not include package.cpp or CMakeLists.txt for source-build fallback.";
+        return false;
+    }
+
+    if (desiredTarget != detectHostTarget() &&
+        options.cmakeToolchainFile.empty()) {
+        outError = sourceBuildPrefix +
+                   " requires --cmake-toolchain <path> for non-host target '" +
+                   desiredTarget + "'.";
+        return false;
+    }
+
+    if (!options.cmakeToolchainFile.empty() &&
+        !fileExists(options.cmakeToolchainFile)) {
+        outError = sourceBuildPrefix + " could not find CMake toolchain file '" +
+                   options.cmakeToolchainFile + "'.";
         return false;
     }
 
@@ -2351,9 +2390,13 @@ bool buildNativePackageFromSource(const PackageRegistryEntry& sourceEntry,
         sourceDir = generatedSourceDir;
     }
 
-    const std::string configureCommand =
+    std::string configureCommand =
         "cmake -S " + shellQuote(sourceDir.string()) + " -B " +
         shellQuote(buildDir.string()) + " -DCMAKE_BUILD_TYPE=Release";
+    if (!options.cmakeToolchainFile.empty()) {
+        configureCommand += " -DCMAKE_TOOLCHAIN_FILE=" +
+                            shellQuote(options.cmakeToolchainFile);
+    }
     if (!runLoggedSystemCommand(configureCommand, buildLogPath)) {
         const std::string buildLog = readFileText(buildLogPath);
         const SystemDependencySpec* missingDependency =
@@ -2622,7 +2665,7 @@ bool materializeCacheEntry(const PackageRegistryEntry& sourceEntry,
         if (!copyDirectoryRecursive(sourceDir, cacheDir, outError)) {
             return false;
         }
-        if (!buildNativePackageFromSource(sourceEntry, cacheDir, outError)) {
+        if (!buildNativePackageFromSource(sourceEntry, options, cacheDir, outError)) {
             return false;
         }
         return writeCacheMetadataFile(cacheMetadataPath(cacheDir), sourceEntry,

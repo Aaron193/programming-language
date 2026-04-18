@@ -46,6 +46,10 @@ The current interpreter exposes these runtime/debugging switches:
 - `--disassemble`
 - `--frontend-timings`
 - `--frontend-timings-json`
+- `--target <triple>`
+- `--prefer-prebuilt`
+- `--no-native-build`
+- `--cmake-toolchain <path>`
 
 Examples:
 
@@ -55,10 +59,19 @@ Examples:
 ./build/interpreter --disassemble tests/sample_var.mog
 ./build/interpreter --frontend-timings tests/sample_var.mog
 ./build/interpreter --frontend-timings-json tests/sample_var.mog
+./build/interpreter run --target linux-arm64-gnu --cmake-toolchain ./toolchains/linux-arm64.cmake app.mog
 ```
 
 The shell test suite verifies that these flags still execute the target program
 while emitting their extra diagnostics.
+
+For package-managed native dependencies, `mog install`, `mog update`, and
+`mog run` also accept:
+
+- `--target <triple>` to pin the selected native artifact target
+- `--prefer-prebuilt` to prefer registry-published prebuilt artifacts
+- `--no-native-build` to reject source-build fallback
+- `--cmake-toolchain <path>` to enable non-host native source-build fallback
 
 ## Frontend timings
 

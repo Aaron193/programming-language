@@ -24,13 +24,15 @@ NATIVE_PUBLISH_WORKSPACE=""
 NATIVE_CONSUMER_DIR=""
 NATIVE_BAD_DIR=""
 NATIVE_SOURCE_DIR=""
+NATIVE_CROSS_TARGET_DIR=""
+NATIVE_CROSS_TARGET_NO_BUILD_DIR=""
 NATIVE_NO_CMAKE_DIR=""
 NATIVE_BUILD_FAIL_DIR=""
 NATIVE_SYSDEP_FAIL_DIR=""
 NATIVE_TARGET_DIR=""
 NATIVE_TARGET_FAIL_DIR=""
 WINDOW_PUBLISH_DIR=""
-trap 'rm -rf "${TEMP_DIR:-}" "${REMOTE_DIR:-}" "${WORKSPACE_DIR:-}" "${RANGE_DIR:-}" "${ADD_DIR:-}" "${ADD_RANGE_DIR:-}" "${PUBLISH_WORKSPACE:-}" "${PUBLISHED_GREETER_DIR:-}" "${DIGEST_DIR:-}" "${NATIVE_PUBLISH_WORKSPACE:-}" "${NATIVE_CONSUMER_DIR:-}" "${NATIVE_BAD_DIR:-}" "${NATIVE_SOURCE_DIR:-}" "${NATIVE_NO_CMAKE_DIR:-}" "${NATIVE_BUILD_FAIL_DIR:-}" "${NATIVE_SYSDEP_FAIL_DIR:-}" "${NATIVE_TARGET_DIR:-}" "${NATIVE_TARGET_FAIL_DIR:-}" "${WINDOW_PUBLISH_DIR:-}"' EXIT
+trap 'rm -rf "${TEMP_DIR:-}" "${REMOTE_DIR:-}" "${WORKSPACE_DIR:-}" "${RANGE_DIR:-}" "${ADD_DIR:-}" "${ADD_RANGE_DIR:-}" "${PUBLISH_WORKSPACE:-}" "${PUBLISHED_GREETER_DIR:-}" "${DIGEST_DIR:-}" "${NATIVE_PUBLISH_WORKSPACE:-}" "${NATIVE_CONSUMER_DIR:-}" "${NATIVE_BAD_DIR:-}" "${NATIVE_SOURCE_DIR:-}" "${NATIVE_CROSS_TARGET_DIR:-}" "${NATIVE_CROSS_TARGET_NO_BUILD_DIR:-}" "${NATIVE_NO_CMAKE_DIR:-}" "${NATIVE_BUILD_FAIL_DIR:-}" "${NATIVE_SYSDEP_FAIL_DIR:-}" "${NATIVE_TARGET_DIR:-}" "${NATIVE_TARGET_FAIL_DIR:-}" "${WINDOW_PUBLISH_DIR:-}"' EXIT
 
 detect_host_target() {
     local os
@@ -70,6 +72,13 @@ fi
 
 WINDOW_PACKAGE_SO="$PROJECT_ROOT/build/packages/mog/window/package.so"
 WINDOW_PACKAGE_DYLIB="$PROJECT_ROOT/build/packages/mog/window/package.dylib"
+WINDOW_PACKAGE_LIBRARY=""
+WINDOW_PUBLISH_SCRIPT="$PROJECT_ROOT/scripts/publish_official_window.sh"
+if [[ -f "$WINDOW_PACKAGE_SO" ]]; then
+    WINDOW_PACKAGE_LIBRARY="$WINDOW_PACKAGE_SO"
+elif [[ -f "$WINDOW_PACKAGE_DYLIB" ]]; then
+    WINDOW_PACKAGE_LIBRARY="$WINDOW_PACKAGE_DYLIB"
+fi
 
 write_registry_index() {
     local registry_dir="$1"
@@ -785,24 +794,35 @@ if ! grep -Fq "different published contents" /tmp/mog_native_publish_conflict.tx
     exit 1
 fi
 
-if [[ -f "$WINDOW_PACKAGE_SO" || -f "$WINDOW_PACKAGE_DYLIB" ]]; then
-    WINDOW_PUBLISH_DIR="$(mktemp -d)"
-    cat > "$WINDOW_PUBLISH_DIR/mog.toml" <<EOF_WINDOW_PUBLISH
-kind = "project"
-name = "window-publish-root"
-version = "0.1.0"
-description = "window publish root"
+if [[ ! -x "$WINDOW_PUBLISH_SCRIPT" ]]; then
+    echo "[FAIL] official window publish script should be executable"
+    exit 1
+fi
 
-[registries.default]
-index = "$REGISTRY_DIR"
-EOF_WINDOW_PUBLISH
+if [[ -n "$WINDOW_PACKAGE_LIBRARY" ]]; then
+    mv "$WINDOW_PACKAGE_LIBRARY" "$WINDOW_PACKAGE_LIBRARY.bak"
+    if "$WINDOW_PUBLISH_SCRIPT" --registry-path "$REGISTRY_DIR" \
+        >/tmp/mog_window_publish_missing_artifact.txt 2>&1; then
+        echo "[FAIL] official window publish script should reject a missing build artifact"
+        cat /tmp/mog_window_publish_missing_artifact.txt
+        mv "$WINDOW_PACKAGE_LIBRARY.bak" "$WINDOW_PACKAGE_LIBRARY"
+        exit 1
+    fi
+    mv "$WINDOW_PACKAGE_LIBRARY.bak" "$WINDOW_PACKAGE_LIBRARY"
 
-    if ! (cd "$WINDOW_PUBLISH_DIR" && \
-          "$MOG" publish "$PROJECT_ROOT/packages/mog/window" >/dev/null); then
-        echo "[FAIL] publish should accept the official mog:window package"
+    if ! grep -Fq "Built mog:window library not found" \
+        /tmp/mog_window_publish_missing_artifact.txt; then
+        echo "[FAIL] official window publish script should explain missing build artifacts"
+        cat /tmp/mog_window_publish_missing_artifact.txt
         exit 1
     fi
 
+    if ! "$WINDOW_PUBLISH_SCRIPT" --registry-path "$REGISTRY_DIR" >/dev/null; then
+        echo "[FAIL] publish script should accept the official mog:window package"
+        exit 1
+    fi
+
+    WINDOW_PUBLISH_DIR="$(mktemp -d)"
     mkdir -p "$WINDOW_PUBLISH_DIR/app"
     cat > "$WINDOW_PUBLISH_DIR/app/mog.toml" <<EOF_WINDOW_CONSUMER
 kind = "project"
@@ -829,6 +849,19 @@ EOF_WINDOW_CONSUMER
           "$WINDOW_RUN_OUTPUT" != *"false"* ]]; then
         echo "[FAIL] run should execute a published mog:window package"
         echo "$WINDOW_RUN_OUTPUT"
+        exit 1
+    fi
+else
+    if "$WINDOW_PUBLISH_SCRIPT" --registry-path "$REGISTRY_DIR" \
+        >/tmp/mog_window_publish_missing_artifact.txt 2>&1; then
+        echo "[FAIL] official window publish script should fail when mog:window is not built"
+        exit 1
+    fi
+
+    if ! grep -Fq "Built mog:window library not found" \
+        /tmp/mog_window_publish_missing_artifact.txt; then
+        echo "[FAIL] official window publish script should explain missing build artifacts"
+        cat /tmp/mog_window_publish_missing_artifact.txt
         exit 1
     fi
 fi
@@ -978,6 +1011,98 @@ fi
 rm -f "$NATIVE_SOURCE_DIR/.mog/install/registry.toml"
 if ! (cd "$NATIVE_SOURCE_DIR" && "$MOG" install --offline >/dev/null); then
     echo "[FAIL] install --offline should succeed for cached source-built native packages"
+    exit 1
+fi
+
+NATIVE_CROSS_TARGET_DIR="$(mktemp -d)"
+cat > "$NATIVE_CROSS_TARGET_DIR/mog.toml" <<EOF_NATIVE_CROSS_TARGET
+kind = "project"
+name = "native-cross-target"
+version = "0.1.0"
+description = "native cross target"
+
+[registries.default]
+index = "$REGISTRY_DIR"
+
+[dependencies]
+counter = { package = "examples:counter", version = "0.1.0" }
+EOF_NATIVE_CROSS_TARGET
+
+cp "$NATIVE_CONSUMER_DIR/app.mog" "$NATIVE_CROSS_TARGET_DIR/app.mog"
+
+if (cd "$NATIVE_CROSS_TARGET_DIR" && \
+    MOG_CACHE_DIR="$TEMP_DIR/cross-target-missing-toolchain-cache" \
+    "$MOG" install --target "$ALT_TARGET" \
+    >/tmp/mog_native_cross_target_toolchain_failure.txt 2>&1); then
+    echo "[FAIL] install should require --cmake-toolchain for non-host source fallback"
+    cat /tmp/mog_native_cross_target_toolchain_failure.txt
+    exit 1
+fi
+
+if ! grep -Fq -- "--cmake-toolchain" \
+    /tmp/mog_native_cross_target_toolchain_failure.txt; then
+    echo "[FAIL] install should explain how to enable non-host source fallback"
+    cat /tmp/mog_native_cross_target_toolchain_failure.txt
+    exit 1
+fi
+
+printf '# host toolchain passthrough for package-manager tests\n' \
+    > "$TEMP_DIR/cross-target-toolchain.cmake"
+
+if ! (cd "$NATIVE_CROSS_TARGET_DIR" && \
+      "$MOG" install --target "$ALT_TARGET" \
+      --cmake-toolchain "$TEMP_DIR/cross-target-toolchain.cmake" >/dev/null); then
+    echo "[FAIL] install should allow non-host native source fallback with --cmake-toolchain"
+    exit 1
+fi
+
+if ! grep -Fq 'build_from_source = true' "$NATIVE_CROSS_TARGET_DIR/mog.lock" || \
+   ! grep -Fq "selected_target = \"$ALT_TARGET\"" "$NATIVE_CROSS_TARGET_DIR/mog.lock"; then
+    echo "[FAIL] lockfile should pin non-host source-built native installs"
+    cat "$NATIVE_CROSS_TARGET_DIR/mog.lock"
+    exit 1
+fi
+
+rm -f "$NATIVE_CROSS_TARGET_DIR/.mog/install/registry.toml"
+CROSS_TARGET_OUTPUT="$("$MOG" run --locked --target "$ALT_TARGET" \
+    "$NATIVE_CROSS_TARGET_DIR/app.mog")"
+if [[ "$CROSS_TARGET_OUTPUT" != *"examples:counter"* || \
+      "$CROSS_TARGET_OUTPUT" != *"15"* ]]; then
+    echo "[FAIL] run --locked should reuse cached non-host source-built native packages"
+    echo "$CROSS_TARGET_OUTPUT"
+    exit 1
+fi
+
+NATIVE_CROSS_TARGET_NO_BUILD_DIR="$(mktemp -d)"
+cat > "$NATIVE_CROSS_TARGET_NO_BUILD_DIR/mog.toml" <<EOF_NATIVE_CROSS_TARGET_NO_BUILD
+kind = "project"
+name = "native-cross-target-no-build"
+version = "0.1.0"
+description = "native cross target no build"
+
+[registries.default]
+index = "$REGISTRY_DIR"
+
+[dependencies]
+counter = { package = "examples:counter", version = "0.1.0" }
+EOF_NATIVE_CROSS_TARGET_NO_BUILD
+
+cp "$NATIVE_CONSUMER_DIR/app.mog" "$NATIVE_CROSS_TARGET_NO_BUILD_DIR/app.mog"
+
+if (cd "$NATIVE_CROSS_TARGET_NO_BUILD_DIR" && \
+    MOG_CACHE_DIR="$TEMP_DIR/cross-target-no-build-cache" "$MOG" install \
+    --target "$ALT_TARGET" --no-native-build \
+    --cmake-toolchain "$TEMP_DIR/cross-target-toolchain.cmake" \
+    >/tmp/mog_native_cross_target_no_build_failure.txt 2>&1); then
+    echo "[FAIL] install --no-native-build should still reject non-host source-only native packages"
+    cat /tmp/mog_native_cross_target_no_build_failure.txt
+    exit 1
+fi
+
+if ! grep -Fq -- "--no-native-build forbids using it" \
+    /tmp/mog_native_cross_target_no_build_failure.txt; then
+    echo "[FAIL] install --no-native-build should still explain non-host source-fallback rejection"
+    cat /tmp/mog_native_cross_target_no_build_failure.txt
     exit 1
 fi
 
